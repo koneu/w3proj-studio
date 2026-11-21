@@ -5974,6 +5974,94 @@ async function resizeUnreadable(page, found) {
   }
 }
 
+/** A project whose terrain is split into subterrains (map/terrain/, Split Terrain into Subterrains…) opens, edits,
+ *  saves and reloads as a flat one: the terrain editor works on map/war3map.w3e.txt, which the backend assembles from
+ *  the subterrains and slices back into them (crates/backend flatview.rs); a paint in the north-east writes only that
+ *  subterrain's terrain.txt. The split command refuses a split it can't keep and says why (nothing written); Merge
+ *  Subterrains puts the flat files back as the subterrains held them. */
+async function subterrains(page, found) {
+  const fail = (what) => found.push(`subterrains: ${what}`);
+  // The AI tool's new map asks first: answered yes.
+  await page.evaluate(`(() => { window.__subKept = w3.window.confirm; w3.window.confirm = async () => true; })()`);
+  try {
+    const tool = mcpTool(page);
+    const folder = join(work, "subterrains");
+    rmSync(folder, { recursive: true, force: true });
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "Subterrains", width: 64, height: 64, folder });
+    const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await editorUp();
+    await tool("save_project");
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    const map = join(root, "map");
+    // What a save writes besides the terrain (pathing, shadows, minimap, script) isn't the point here.
+    const derived = /^(war3map\.(wpm|shd|mmp|mmp\.json|j|lua)|war3mapMap\.blp)$/;
+    const differ = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((k) => a.get(k) !== b.get(k) && !derived.test(k)).sort();
+    const run = (id, arg) => page.evaluate(`w3.commands.execute(${lit(id)}, ${lit(arg)}).then(() => null, (e) => String(e?.message ?? e))`);
+    const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+
+    // A split that leaves corners outside every rectangle that aren't all alike (the border): refused, said, nothing written.
+    let before = snapshot(map);
+    const refused = await run("w3.terrainLayout.split", { layout: ["west:0,0,10,10"], quiet: true });
+    if (!refused || !/would be lost/.test(refused) || !/Nothing was changed/.test(refused)) fail(`the split leaving the border out was refused with ${lit(refused)}`);
+    await until("the refusal's message", async () => /would be lost/.test(await toasts()), 10000).catch(async () => fail(`no message said why the split was refused: ${(await toasts()).slice(0, 300)}`));
+    if (differ(before, snapshot(map)).length) fail(`the refused split changed ${differ(before, snapshot(map)).join(", ")}`);
+
+    // Split 2×2 by the command.
+    const split = await run("w3.terrainLayout.split", { layout: "2x2", quiet: true });
+    if (split) fail(`Split Terrain into Subterrains (2×2) failed: ${split}`);
+    await settled(page);
+    for (const f of ["terrain/terrain.json", "terrain/ne/terrain.txt", "terrain/sw/units.json", "terrain/nw/doodads.json", "terrain/se/regions.json"]) {
+      if (!existsSync(join(map, f))) fail(`the split wrote no map/${f}`);
+    }
+    for (const f of ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"]) if (existsSync(join(map, f))) fail(`map/${f} is still on disk after the split`);
+
+    // The split project opened again: the terrain editor, a paint in the north-east subterrain, saved.
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); await w3.editors.open("map/war3map.w3e.txt"); })()`);
+    await editorUp();
+    await settled(page);
+    const layout = JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
+    const ne = layout.subterrains.find((s) => s.name === "ne");
+    const at = (c, i) => layout.offset[i] + 128 * c;
+    // A tile the map has already: terrain.json (the palette) stays as it is.
+    const tile = layout.ground[layout.ground.length > 1 ? 1 : 0];
+    before = snapshot(map);
+    const assembledBefore = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
+    await tool("paint_terrain", { tile, left: at(ne.x + 4, 0), bottom: at(ne.y + 4, 1), right: at(ne.x + 12, 0), top: at(ne.y + 12, 1) });
+    await tool("save_project");
+    await settled(page);
+    const written = differ(before, snapshot(map));
+    if (lit(written) !== lit(["terrain/ne/terrain.txt"])) fail(`the paint in the north-east saved ${written.join(", ") || "nothing"}, not map/terrain/ne/terrain.txt alone`);
+    if (existsSync(join(map, "war3map.w3e.txt"))) fail("the save wrote a flat map/war3map.w3e.txt next to the subterrains");
+    const assembled = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
+    if (assembled === assembledBefore) fail("the assembled terrain didn't change with the paint");
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the terrain editor is still unsaved after the save");
+
+    // Reloaded: the editor opens on what was saved, with nothing changed by the reload.
+    before = snapshot(map);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); await w3.editors.open("map/war3map.w3e.txt"); })()`);
+    await editorUp();
+    await settled(page);
+    if (await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`) !== assembled) fail("after the reload the terrain isn't the one saved");
+    if (differ(before, snapshot(map)).length) fail(`the reload changed ${differ(before, snapshot(map)).join(", ")}`);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the reloaded terrain editor has unsaved changes it didn't make");
+
+    // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.
+    const merged = await run("w3.terrainLayout.merge", { quiet: true });
+    if (merged) fail(`Merge Subterrains failed: ${merged}`);
+    await settled(page);
+    if (existsSync(join(map, "terrain"))) fail("map/terrain/ is still there after the merge");
+    const flat = existsSync(join(map, "war3map.w3e.txt")) ? readFileSync(join(map, "war3map.w3e.txt"), "utf8") : null;
+    if (flat !== assembled) fail("the merged map/war3map.w3e.txt isn't the terrain the subterrains held");
+    for (const f of ["war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"]) if (!existsSync(join(map, f))) fail(`the merge wrote no map/${f}`);
+    await editorUp().catch(() => fail("the terrain editor isn't open after the merge"));
+  } finally {
+    await page.evaluate(`(() => { if (window.__subKept) w3.window.confirm = window.__subKept; delete window.__subKept; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** The shadow update a save makes says how many doodads it left out when only some models can't be read ("N doodads left
  *  out, their models couldn't be read"; none at all unreadable is the refusal resizeRefusedShadows checks). The control:
  *  the same save without the doodad whose model isn't there says nothing of the kind, and the stored file is written. */
@@ -16234,6 +16322,7 @@ async function run() {
         startGoldPalette,
         startPreviewFollow,
         stringsBeforeListing,
+        subterrains,
         syncSafety,
         tabsBeforeListing,
         techtreeRandomLevels,
@@ -16503,6 +16592,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeRefusedShadows", found);
   await resizeUnreadable(page, found).catch((e) => found.push(`resize unreadable: ${e.message}`));
   await leftOpen(page, "resizeUnreadable", found);
+  await subterrains(page, found).catch((e) => found.push(`subterrains: ${e.message}`));
+  await leftOpen(page, "subterrains", found);
   await shadowLeftOut(page, found).catch((e) => found.push(`shadow left out: ${e.message}`));
   await leftOpen(page, "shadowLeftOut", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
