@@ -864,4 +864,41 @@ mod classic_tests {
             assert!(got.get(absent).is_none(), "{absent}");
         }
     }
+
+    #[test]
+    fn empty_v8_doodads_and_units_default_to_no_skin_ids() {
+        let empty_doo = [b"W3do".to_vec(), u(8), u(11), u(0), u(0), u(0)].concat();
+        let got_doo = exact("doodads", &empty_doo);
+        assert_eq!(got_doo["skinIds"], false);
+        assert_eq!(got_doo["doodads"], serde_json::json!([]));
+
+        let empty_units = [b"W3do".to_vec(), u(8), u(11), u(0)].concat();
+        let got_units = exact("units", &empty_units);
+        assert_eq!(got_units["skinIds"], false);
+        assert_eq!(got_units["units"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn non_empty_v8_doodads_and_units_roundtrip_with_and_without_skin_ids() {
+        for skin in [false, true] {
+            let skin_bytes = if skin { b"ATtr".to_vec() } else { vec![] };
+            let one_doo = [
+                b"ATtr".to_vec(), u(2), f(7), skin_bytes, vec![2, 100], u(u32::MAX), u(0), u(9),
+            ].concat();
+            let got_doo = exact("doodads", &[b"W3do".to_vec(), u(8), u(11), u(1), one_doo, u(0), u(0)].concat());
+            assert_eq!(got_doo["skinIds"], skin);
+            assert_eq!(got_doo["doodads"][0].get("skinId").and_then(Value::as_str), skin.then_some("ATtr"));
+
+            let u_skin = if skin { b"sloc".to_vec() } else { vec![] };
+            let one_unit = [
+                b"sloc".to_vec(), u(0), f(7), u_skin,
+                vec![2], u(0), vec![0, 0], u(u32::MAX), u(u32::MAX), u(u32::MAX), u(0), u(0),
+                (-1f32).to_le_bytes().to_vec(), u(0), u(0), u(0), u(0), u(0), u(0),
+                u(0), vec![1, 0, 0, 0], u(u32::MAX), u(u32::MAX), u(13),
+            ].concat();
+            let got_unit = exact("units", &[b"W3do".to_vec(), u(8), u(11), u(1), one_unit].concat());
+            assert_eq!(got_unit["skinIds"], skin);
+            assert_eq!(got_unit["units"][0].get("skinId").and_then(Value::as_str), skin.then_some("sloc"));
+        }
+    }
 }

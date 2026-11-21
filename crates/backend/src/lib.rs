@@ -312,7 +312,14 @@ pub fn codec_canonicalize(root: &str, path: &str, text: &str, formats: &[PathBuf
         .ok_or_else(|| format!("{path} is not a codec-backed file"))?;
     let name = w3proj::paths::to_archive_name(&stem);
     let bin = codec.encode(&name, text.as_bytes()).map_err(err)?;
-    let canonical = codec.decode(&name, &bin).map_err(err)?;
+    let mut canonical = codec.decode(&name, &bin).map_err(err)?;
+    let full = Path::new(root).join(path);
+    w3proj::project::resolve_empty_v8_skin_ids(
+        &name,
+        &mut canonical,
+        || w3proj::project::w3i_skin_status_in_dir(full.parent().unwrap_or_else(|| Path::new(root)), &registry),
+        &registry,
+    );
     String::from_utf8(canonical).map_err(err)
 }
 
@@ -322,13 +329,22 @@ pub fn codec_decode(root: &str, path: &str, formats: &[PathBuf]) -> CmdResult<St
     let rel = path.strip_prefix("map/").unwrap_or(path);
     // The file first: callers try this for files that may not be there (the raw form of a document
     // whose JSON form is missing), and loading the format definitions for nothing is slow.
-    let bytes = std::fs::read(Path::new(root).join(path)).map_err(err)?;
+    let full = Path::new(root).join(path);
+    let bytes = std::fs::read(&full).map_err(err)?;
     let registry = Registry::for_project(Path::new(root), formats).map_err(err)?;
     let name = w3proj::paths::to_archive_name(rel);
     let mut last = format!("no format definition reads {name}");
     for codec in registry.for_archive_name(&name) {
         match codec.decode(&name, &bytes) {
-            Ok(json) => return String::from_utf8(json).map_err(err),
+            Ok(mut json) => {
+                w3proj::project::resolve_empty_v8_skin_ids(
+                    &name,
+                    &mut json,
+                    || w3proj::project::w3i_skin_status_in_dir(full.parent().unwrap_or_else(|| Path::new(root)), &registry),
+                    &registry,
+                );
+                return String::from_utf8(json).map_err(err);
+            }
             Err(e) => last = e.to_string(),
         }
     }
@@ -449,5 +465,57 @@ mod codec_tests {
             codec_canonicalize(root, &format!("{file}.json"), &good, &[]).unwrap();
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn codec_decode_and_canonicalize_resolve_empty_v8_skin_ids_from_w3i() {
+        let dir = std::env::temp_dir().join(format!("w3proj-backend-v8skin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("map")).unwrap();
+        let root = dir.to_str().unwrap();
+
+        let empty_units = [b"W3do".to_vec(), 8u32.to_le_bytes().to_vec(), 11u32.to_le_bytes().to_vec(), 0u32.to_le_bytes().to_vec()].concat();
+        let empty_doo = [empty_units.clone(), 0u32.to_le_bytes().to_vec(), 0u32.to_le_bytes().to_vec()].concat();
+        std::fs::write(dir.join("map/war3mapUnits.doo"), &empty_units).unwrap();
+        std::fs::write(dir.join("map/war3map.doo"), &empty_doo).unwrap();
+
+        let units_with_true = r#"{"format":"w3proj.units/1","magic":"W3do","version":8,"subversion":11,"skinIds":true,"units":[]}"#;
+        let units_with_false = r#"{"format":"w3proj.units/1","magic":"W3do","version":8,"subversion":11,"skinIds":false,"units":[]}"#;
+        let doo_with_true = r#"{"format":"w3proj.doodads/1","magic":"W3do","version":8,"subversion":11,"skinIds":true,"doodads":[],"specialVersion":0,"specials":[]}"#;
+
+        // Pre-Reforged war3map.w3i.json -> false.
+        std::fs::write(dir.join("map/war3map.w3i.json"), r#"{"version":25,"editorVersion":6059}"#).unwrap();
+        let dec_u: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
+        let dec_d: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3map.doo", &[]).unwrap()).unwrap();
+        assert_eq!(dec_u["skinIds"], false);
+        assert_eq!(dec_d["skinIds"], false);
+        let can_u: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3mapUnits.doo.json", units_with_true, &[]).unwrap()).unwrap();
+        let can_d: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3map.doo.json", doo_with_true, &[]).unwrap()).unwrap();
+        assert_eq!(can_u["skinIds"], false);
+        assert_eq!(can_d["skinIds"], false);
+
+        // Reforged war3map.w3i.json -> true.
+        std::fs::write(dir.join("map/war3map.w3i.json"), r#"{"version":33,"editorVersion":6117}"#).unwrap();
+        let dec_u: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
+        let can_u: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3mapUnits.doo.json", units_with_false, &[]).unwrap()).unwrap();
+        assert_eq!(dec_u["skinIds"], true);
+        assert_eq!(can_u["skinIds"], true);
+
+        // Raw war3map.w3i (no .json) with Reforged editorVersion -> true too.
+        std::fs::remove_file(dir.join("map/war3map.w3i.json")).unwrap();
+        let min_w3i = r#"{"format":"w3proj.mapinfo/1","version":25,"saves":1,"editorVersion":6114,"name":"M","author":"A","description":"D","suggestedPlayers":"1","cameraBounds":[-1,-1,1,1,-1,1,1,-1],"cameraComplements":[1,1,1,1],"playableWidth":2,"playableHeight":2,"flags":0,"tileset":"L","loadingScreen":{"number":-1,"model":"","text":"","title":"","subtitle":""},"gameDataSet":0,"prologue":{"path":"","text":"","title":"","subtitle":""},"fog":{"style":0,"start":0,"end":0,"density":0,"color":[0,0,0,0]},"weather":"0x00000000","soundEnvironment":"","lightEnvironment":"","waterTint":[0,0,0,0],"players":[],"forces":[],"upgrades":[],"techs":[],"unitTables":[],"itemTables":[]}"#;
+        codec_write(root, "map/war3map.w3i", min_w3i, &[]).unwrap();
+        let dec_raw_w3i: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
+        assert_eq!(dec_raw_w3i["skinIds"], true);
+        std::fs::remove_file(dir.join("map/war3map.w3i")).unwrap();
+
+        // Absent or unreadable war3map.w3i -> safe false without failing raw decode.
+        let dec_absent: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
+        assert_eq!(dec_absent["skinIds"], false);
+        std::fs::write(dir.join("map/war3map.w3i.json"), b"{corrupt").unwrap();
+        let dec_corrupt: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
+        assert_eq!(dec_corrupt["skinIds"], false);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

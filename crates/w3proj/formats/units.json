@@ -13,8 +13,8 @@
     { "name": "magic", "type": "id", "doc": "\"W3do\"" },
     { "name": "version", "type": "u32" },
     { "name": "subversion", "type": "u32" },
-    // Some v8 files (older Reforged editor builds) have no skin ids; both readings are tried.
-    { "name": "skinIds", "type": "variant", "if": "version == 8", "prefer": "true" },
+    // Version 8 exists without skin ids (pre-Reforged, editorVersion < 6089) and with them (Reforged); empty lists fit both, so standalone decodes default to false and map unpack checks war3map.w3i.
+    { "name": "skinIds", "type": "variant", "if": "version == 8", "prefer": "false" },
     { "name": "units", "type": "struct", "count": "u32", "fields": [
       { "name": "id", "type": "id" },
       { "name": "variation", "type": "u32" },

@@ -34,6 +34,139 @@ pub const MAPS_DIR: &str = "maps";
 pub const HEADER_FILE: &str = "header.bin";
 pub const FORMAT_VERSION: u32 = 1;
 
+/// First World Editor version whose version-8 placement files (`war3map.doo`, `war3mapUnits.doo`)
+/// carry `skinId` (Reforged 1.32; measured in World Editor: 6088 crashes with `skinId`, 6089 opens).
+pub const REFORGED_SKIN_ID_EDITOR_VERSION: u32 = 6089;
+
+/// What `war3map.w3i` says about whether empty version-8 `.doo` files carry `skinId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum W3iSkinStatus {
+    Known(bool),
+    Absent,
+    Unreadable,
+}
+
+fn w3i_skin_status_from_json(bytes: &[u8]) -> W3iSkinStatus {
+    let Ok(doc) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return W3iSkinStatus::Unreadable;
+    };
+    let Some(ed) = doc
+        .get("editorVersion")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|&v| v <= u32::MAX as u64)
+    else {
+        return W3iSkinStatus::Unreadable;
+    };
+    W3iSkinStatus::Known(ed >= REFORGED_SKIN_ID_EDITOR_VERSION as u64)
+}
+
+fn w3i_skin_status_from_raw(bytes: &[u8], codecs: &Registry) -> W3iSkinStatus {
+    for codec in codecs.for_archive_name("war3map.w3i") {
+        if let Ok(json) = codec.decode("war3map.w3i", bytes) {
+            return w3i_skin_status_from_json(&json);
+        }
+    }
+    W3iSkinStatus::Unreadable
+}
+
+fn w3i_skin_status_in_map(files: &BTreeMap<String, Vec<u8>>, errors: &[(String, String)], codecs: &Registry) -> W3iSkinStatus {
+    if let Some((_, bytes)) = files.iter().find(|(k, _)| k.eq_ignore_ascii_case("war3map.w3i.json")) {
+        return w3i_skin_status_from_json(bytes);
+    }
+    if let Some((_, bytes)) = files.iter().find(|(k, _)| k.eq_ignore_ascii_case("war3map.w3i")) {
+        return w3i_skin_status_from_raw(bytes, codecs);
+    }
+    if errors.iter().any(|(name, _)| name.eq_ignore_ascii_case("war3map.w3i")) {
+        return W3iSkinStatus::Unreadable;
+    }
+    W3iSkinStatus::Absent
+}
+
+/// Checks `map_dir` for `war3map.w3i.json` or raw `war3map.w3i` (case-insensitively) and returns
+/// whether its `editorVersion` indicates Reforged `skinId` layout.
+pub fn w3i_skin_status_in_dir(map_dir: &Path, codecs: &Registry) -> W3iSkinStatus {
+    let Ok(entries) = fs::read_dir(map_dir) else {
+        return W3iSkinStatus::Unreadable;
+    };
+    let mut json_path = None;
+    let mut raw_path = None;
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.eq_ignore_ascii_case("war3map.w3i.json") {
+            json_path = Some(entry.path());
+            break;
+        } else if name.eq_ignore_ascii_case("war3map.w3i") {
+            raw_path = Some(entry.path());
+        }
+    }
+    if let Some(p) = json_path {
+        return fs::read(&p).map_or(W3iSkinStatus::Unreadable, |b| w3i_skin_status_from_json(&b));
+    }
+    if let Some(p) = raw_path {
+        return fs::read(&p).map_or(W3iSkinStatus::Unreadable, |b| w3i_skin_status_from_raw(&b, codecs));
+    }
+    W3iSkinStatus::Absent
+}
+
+fn placed_list_key(archive_name: &str) -> Option<&'static str> {
+    if archive_name.eq_ignore_ascii_case("war3map.doo") {
+        Some("doodads")
+    } else if archive_name.eq_ignore_ascii_case("war3mapUnits.doo") {
+        Some("units")
+    } else {
+        None
+    }
+}
+
+/// Resolves `skinIds` on decoded empty version-8 `war3map.doo` / `war3mapUnits.doo` JSON from
+/// `war3map.w3i` status, returning a diagnostic note if the file is an empty version-8 placement file.
+pub fn resolve_empty_v8_skin_ids(
+    archive_name: &str,
+    json_bytes: &mut Vec<u8>,
+    status: impl FnOnce() -> W3iSkinStatus,
+    codecs: &Registry,
+) -> Option<String> {
+    let list_key = placed_list_key(archive_name)?;
+    let mut doc: serde_json::Value = serde_json::from_slice(json_bytes).ok()?;
+    if doc.get("version").and_then(serde_json::Value::as_u64) != Some(8) {
+        return None;
+    }
+    if !doc
+        .get(list_key)
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
+        return None;
+    }
+    let w3i = status();
+    let target = matches!(w3i, W3iSkinStatus::Known(true));
+    let note = match w3i {
+        W3iSkinStatus::Known(v) => format!("skinIds={v} from war3map.w3i (empty v8 list fits both)"),
+        W3iSkinStatus::Absent => "skinIds=false (war3map.w3i absent; empty v8 list fits both)".into(),
+        W3iSkinStatus::Unreadable => "skinIds=false (war3map.w3i unreadable; empty v8 list fits both)".into(),
+    };
+    if doc.get("skinIds").and_then(serde_json::Value::as_bool) != Some(target) {
+        if let Some(obj) = doc.as_object_mut() {
+            obj.insert("skinIds".into(), serde_json::Value::Bool(target));
+        }
+        if let Ok(mut out) = serde_json::to_vec_pretty(&doc) {
+            out.push(b'\n');
+            let verified = codecs.for_archive_name(archive_name).any(|c| {
+                matches!(
+                    (c.encode(archive_name, json_bytes), c.encode(archive_name, &out)),
+                    (Ok(a), Ok(b)) if a == b
+                )
+            });
+            if verified {
+                *json_bytes = out;
+            }
+        }
+    }
+    Some(note)
+}
+
 /// Whether something is at `path`. A path that can't be checked (a folder above it may not be looked
 /// into) is an error, never "not there": what is taken for absent gets created or written over.
 fn there(path: &Path) -> Result<bool> {
@@ -354,6 +487,23 @@ fn finish(
     codecs: &Registry,
     extra: &[String],
 ) -> Extracted {
+    // Empty v8 placement files fit both skinIds=false and skinIds=true; resolve from war3map.w3i.
+    let mut w3i = None;
+    for entry in &mut report.files {
+        if entry.codec.is_none() || placed_list_key(&entry.archive_name).is_none() {
+            continue;
+        }
+        let Some(mut bytes) = files.get(&entry.project_path).cloned() else {
+            continue;
+        };
+        let status = *w3i.get_or_insert_with(|| w3i_skin_status_in_map(&files, &report.errors, codecs));
+        if let Some(note) = resolve_empty_v8_skin_ids(&entry.archive_name, &mut bytes, || status, codecs) {
+            files.insert(entry.project_path.clone(), bytes);
+            entry.info.retain(|n| !n.starts_with("variants skinIds="));
+            entry.info.push(note);
+        }
+    }
+
     // Custom script sections get their triggers' names (comments; only when the wtg was decoded).
     let names = files.get("war3map.wtg.json").and_then(|j| crate::wtg::text_trigger_names(j));
     if let (Some(names), Some(text)) = (names, files.get("war3map.wct.txt")) {
@@ -1467,4 +1617,185 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
         unresolved_strings: unresolved,
         strings_unchecked,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::{decode, encode, load_definitions};
+
+    fn w3i_bytes(version: u32, editor_version: u32) -> Vec<u8> {
+        let def = load_definitions(&[]).unwrap().into_iter().find(|d| d.name == "w3i").unwrap();
+        let mut doc = serde_json::json!({
+            "format": "w3proj.mapinfo/1",
+            "version": version,
+            "saves": 1,
+            "editorVersion": editor_version,
+            "name": "Map",
+            "author": "A",
+            "description": "D",
+            "suggestedPlayers": "1",
+            "cameraBounds": [-128.0, -128.0, 128.0, 128.0, -128.0, 128.0, 128.0, -128.0],
+            "cameraComplements": [1, 1, 1, 1],
+            "playableWidth": 2,
+            "playableHeight": 2,
+            "flags": 0,
+            "tileset": "L",
+            "loadingScreen": { "number": -1, "model": "", "text": "", "title": "", "subtitle": "" },
+            "gameDataSet": 0,
+            "prologue": { "path": "", "text": "", "title": "", "subtitle": "" },
+            "fog": { "style": 0, "start": 3000.0, "end": 5000.0, "density": 0.5, "color": [255, 255, 255, 255] },
+            "weather": "0x00000000",
+            "soundEnvironment": "",
+            "lightEnvironment": "",
+            "waterTint": [255, 255, 255, 255],
+            "players": [{ "id": 0, "controller": 1, "race": 1, "fixedStart": 0, "name": "P1", "start": [0.0, 0.0], "allyLow": 0, "allyHigh": 0 }],
+            "forces": [{ "flags": 0, "players": 1, "name": "F1" }],
+            "upgrades": [],
+            "techs": [],
+            "unitTables": [],
+            "itemTables": [],
+        });
+        let o = doc.as_object_mut().unwrap();
+        if version >= 27 {
+            o.insert("gameVersion".into(), serde_json::json!([1, 32, 0, 0]));
+        }
+        if version >= 28 {
+            o.insert("scriptType".into(), serde_json::json!(0));
+        }
+        if version >= 31 {
+            o.insert("supportedModes".into(), serde_json::json!(3));
+            o.insert("gameDataVersion".into(), serde_json::json!(1));
+            let p = o.get_mut("players").unwrap().as_array_mut().unwrap()[0].as_object_mut().unwrap();
+            p.insert("enemyLow".into(), serde_json::json!(0));
+            p.insert("enemyHigh".into(), serde_json::json!(0));
+        }
+        encode(&def, &doc).unwrap()
+    }
+
+    fn empty_v8_doo(with_specials: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"W3do");
+        out.extend_from_slice(&8u32.to_le_bytes());
+        out.extend_from_slice(&11u32.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        if with_specials {
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+        }
+        out
+    }
+
+    fn non_empty_v8_skin_unit() -> Vec<u8> {
+        let def = load_definitions(&[]).unwrap().into_iter().find(|d| d.name == "units").unwrap();
+        let doc = serde_json::json!({
+            "format": "w3proj.units/1",
+            "magic": "W3do",
+            "version": 8,
+            "subversion": 11,
+            "skinIds": true,
+            "units": [{
+                "id": "sloc",
+                "variation": 0,
+                "position": [0.0, 0.0, 0.0],
+                "angle": 4.712389,
+                "scale": [1.0, 1.0, 1.0],
+                "skinId": "sloc",
+                "flags": 2,
+                "player": 0,
+                "unknown1": 0,
+                "unknown2": 0,
+                "hp": -1,
+                "mana": -1,
+                "itemTable": -1,
+                "itemSets": [],
+                "gold": 0,
+                "targetAcquisition": 0.0,
+                "level": 0,
+                "strength": 0,
+                "agility": 0,
+                "intelligence": 0,
+                "inventory": [],
+                "abilities": [],
+                "randomType": 0,
+                "randomLevel": "010000",
+                "randomClass": 0,
+                "color": -1,
+                "waygate": -1,
+                "editorId": 0
+            }]
+        });
+        encode(&def, &doc).unwrap()
+    }
+
+    fn skin_ids_field(ex: &Extracted, path: &str) -> bool {
+        let v: serde_json::Value = serde_json::from_slice(&ex.files[path]).unwrap();
+        v["skinIds"].as_bool().unwrap()
+    }
+
+    fn make_archive(w3i: Option<&[u8]>, units: &[u8], doodads: &[u8]) -> Archive {
+        let mut b = ArchiveBuilder::new(WriteOptions::default());
+        if let Some(w3i) = w3i {
+            b.add("war3map.w3i", w3i.to_vec());
+        }
+        b.add("war3map.doo", doodads.to_vec());
+        b.add("war3mapUnits.doo", units.to_vec());
+        b.add("war3map.j", b"function main takes nothing returns nothing\nendfunction\n".to_vec());
+        let bytes = b.write(b"HM3W\0\0\0\0").unwrap();
+        Archive::from_bytes(bytes).unwrap()
+    }
+
+    #[test]
+    fn empty_v8_placements_follow_war3map_w3i_editor_version() {
+        let codecs = Registry::with_formats(&[]).unwrap();
+        let doo = empty_v8_doo(true);
+        let units = empty_v8_doo(false);
+
+        for (ver, ed, want) in [(25, 6059, false), (28, 6088, false), (28, 6089, true), (31, 6114, true)] {
+            let w3i = w3i_bytes(ver, ed);
+            let ar = make_archive(Some(&w3i), &units, &doo);
+            let ex = extract_with(&ar, &codecs, &[]);
+            assert_eq!(skin_ids_field(&ex, "war3map.doo.json"), want, "archive doo v{ver} ed{ed}");
+            assert_eq!(skin_ids_field(&ex, "war3mapUnits.doo.json"), want, "archive units v{ver} ed{ed}");
+            let packed = pack_extracted(&ex, &codecs).unwrap();
+            let repacked = Archive::from_bytes(packed).unwrap();
+            assert_eq!(repacked.read("war3map.doo").unwrap(), doo);
+            assert_eq!(repacked.read("war3mapUnits.doo").unwrap(), units);
+
+            // Folder unpack produces the same resolution.
+            let dir = std::env::temp_dir().join(format!("w3proj-v8-dir-{ver}-{ed}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("war3map.w3i"), &w3i).unwrap();
+            fs::write(dir.join("war3map.doo"), &doo).unwrap();
+            fs::write(dir.join("war3mapUnits.doo"), &units).unwrap();
+            let ex_dir = extract_dir(&dir, &codecs).unwrap();
+            let _ = fs::remove_dir_all(&dir);
+            assert_eq!(skin_ids_field(&ex_dir, "war3map.doo.json"), want, "dir doo v{ver} ed{ed}");
+            assert_eq!(skin_ids_field(&ex_dir, "war3mapUnits.doo.json"), want, "dir units v{ver} ed{ed}");
+        }
+
+        // Absent war3map.w3i defaults conservatively to false.
+        let ar_absent = make_archive(None, &units, &doo);
+        let ex_absent = extract_with(&ar_absent, &codecs, &[]);
+        assert!(!skin_ids_field(&ex_absent, "war3map.doo.json"));
+        assert!(!skin_ids_field(&ex_absent, "war3mapUnits.doo.json"));
+        let u_info = &ex_absent.report.files.iter().find(|f| f.archive_name == "war3mapUnits.doo").unwrap().info;
+        assert!(u_info.iter().any(|s| s.contains("absent")), "{u_info:?}");
+
+        // Unreadable war3map.w3i keeps false and reports unreadable rather than absent.
+        let ar_bad = make_archive(Some(b"truncated"), &units, &doo);
+        let ex_bad = extract_with(&ar_bad, &codecs, &[]);
+        assert!(!skin_ids_field(&ex_bad, "war3map.doo.json"));
+        assert!(!skin_ids_field(&ex_bad, "war3mapUnits.doo.json"));
+        let u_info = &ex_bad.report.files.iter().find(|f| f.archive_name == "war3mapUnits.doo").unwrap().info;
+        assert!(u_info.iter().any(|s| s.contains("unreadable")), "{u_info:?}");
+
+        // Non-empty Reforged v8 file preserves skinIds: true byte-exact even when decoded standalone.
+        let non_empty = non_empty_v8_skin_unit();
+        let def_units = load_definitions(&[]).unwrap().into_iter().find(|d| d.name == "units").unwrap();
+        let dec = decode(&def_units, &non_empty).unwrap();
+        assert_eq!(dec.value["skinIds"], true);
+        assert_eq!(encode(&def_units, &dec.value).unwrap(), non_empty);
+    }
 }
