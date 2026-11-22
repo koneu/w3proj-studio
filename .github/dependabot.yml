@@ -1,0 +1,35 @@
+# Dependency updates. One pull request per ecosystem and week for minor and patch updates (grouped, so the CI
+# runs once); a major update comes as its own pull request. Feature work branches from `dev`, so updates target it.
+version: 2
+updates:
+  # Rust: the one workspace at the root covers every crate and app/src-tauri.
+  - package-ecosystem: cargo
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  # TypeScript: the app (Vite, Tauri API, test tools).
+  - package-ecosystem: npm
+    directory: "/app"
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # The workflows' actions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
