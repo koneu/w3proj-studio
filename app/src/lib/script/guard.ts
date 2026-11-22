@@ -44,11 +44,20 @@ const GENERATED = new RegExp("^(?:main|config|InitGlobals|InitSounds|InitCustomT
   "|CreateRegions|CreateCameras|CreateAllDestructables|CreateAllItems|CreateAllUnits|CreatePlayerBuildings|CreatePlayerUnits" +
   "|CreateNeutral\\w*|CreateBuildingsForPlayer\\d+|CreateUnitsForPlayer\\d+|Trig_\\w+|InitTrig_\\w+|\\w+_DropItems)$");
 
+/** A function's name as JassHelper's runs agree on it: JassHelper isn't deterministic, and two runs on the same input
+ *  name a library's private function `Ascii__i` once and `Ascii___i` the next (trigger-folders stage 0), so runs of
+ *  underscores count as two. */
+const jassHelperName = (name: string) => name.replace(/_{3,}/g, "__");
+/** Functions JassHelper writes with a suffix that changes from run to run (`jasshelper__initstructs1234`): never code
+ *  of the map's own. */
+const JASSHELPER_RUN = /^jasshelper__initstructs/;
+
 /** Functions of `current` that `generated` doesn't have and that the generator didn't write:
- *  code that would be lost by replacing the one with the other. */
+ *  code that would be lost by replacing the one with the other. JassHelper's run-to-run naming is no difference
+ *  (`jassHelperName`, `JASSHELPER_RUN`). */
 export function lostFunctions(current: string, generated: string): string[] {
-  const kept = functionsOf(generated);
-  return [...functionsOf(current)].filter((f) => !kept.has(f) && !GENERATED.test(f));
+  const kept = new Set([...functionsOf(generated)].map(jassHelperName));
+  return [...functionsOf(current)].filter((f) => !JASSHELPER_RUN.test(f) && !kept.has(jassHelperName(f)) && !GENERATED.test(f));
 }
 
 /** Functions that create the placed objects one after another: in which order the objects come doesn't matter to
@@ -117,6 +126,32 @@ export function scriptDecision(current: string | null | undefined, generated: st
   if (current !== undefined && stamp?.trim() === scriptHash(current)) return { action: "write" };
   if (current !== undefined && sameButPlacingOrder(current, generated)) return { action: "write" };
   return { action: "keep", lost: current === undefined ? [] : lostFunctions(current, generated) };
+}
+
+/** The backend's script_state (crates/backend/src/script.rs): "generated" (in .w3proj/derived/, out of git, with a
+ *  record of its sources), "kept" (a tracked map/war3map.j|lua), null (no map/triggers/: tracked as in "kept").
+ *  `freshness` only for a generated one. */
+export interface ScriptState {
+  mode: "generated" | "kept" | null;
+  freshness?: "fresh" | "stale" | "unknown" | "unreadable" | "partial" | null;
+  changed?: string[];
+  why?: string;
+  stored?: boolean;
+}
+
+/** Why a generated script can't go into a build as it is, or null when it can (or the script is tracked). */
+export function staleScriptReason(state: ScriptState | null): string | null {
+  if (state?.mode !== "generated") return null;
+  if (!state.stored) return "the generated map script is missing (.w3proj/derived/ has none)";
+  switch (state.freshness) {
+    case "fresh": return null;
+    case "stale": {
+      const changed = state.changed ?? [];
+      return `the generated map script doesn't follow ${changed.slice(0, 3).map((c) => `map/${c}`).join(", ")}${changed.length > 3 ? ", …" : ""} any more`;
+    }
+    case "unknown": return "there is no record of what the generated map script was made from";
+    default: return state.why ?? "the record of what the generated map script was made from can't be read";
+  }
 }
 
 /** A short hash (FNV-1a), to recognise a script this app wrote. */

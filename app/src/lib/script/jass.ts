@@ -7,6 +7,7 @@
 
 import { parseSlk } from "../formats/text";
 import { jassToLua, LF_BREAK, RAW } from "./lua";
+import { betterTriggersHelpers } from "./bthelpers";
 import { ident } from "./names";
 import { nameDepthOfField } from "../terrain/cameras";
 import type { TriggerData } from "../triggers/triggerdata";
@@ -89,6 +90,8 @@ export interface ScriptInput {
   soundLabel?: (label: string) => SoundLabel | undefined;
   /** Generate for war3map.lua (set by generateScript for Lua maps). */
   lua?: boolean;
+  /** A Lua map whose script has the Better Triggers helpers (bthelpers.ts): they're written after InitGlobals again. */
+  betterTriggers?: boolean;
 }
 
 // ---- helpers ---------------------------------------------------------------------------
@@ -434,7 +437,7 @@ export function generateSections(i: ScriptInput): Map<string, string> {
   const techs = techSections(i);
   const sections = new Map([
     ["", header(i)],
-    ["Global Variables", banner("Global Variables") + globals(i) + initGlobals(i)],
+    ["Global Variables", banner("Global Variables") + globals(i) + initGlobals(i) + (i.lua && i.betterTriggers ? betterTriggersHelpers().map((l) => RAW + l + EOL).join("") : "")],
     ["Custom Script Code", customScript(i)],
     ["Random Groups", groups],
     ["Map Item Tables", mapItemTables(i)],

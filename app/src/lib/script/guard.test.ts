@@ -24,6 +24,18 @@ test("what the generator writes may come and go", () => {
   assert.deepEqual(lostFunctions(current, "function main()\nend"), []);
 });
 
+test("JassHelper's run-to-run naming isn't lost code: three underscores are two, its initstructs suffix is ignored", () => {
+  // Two JassHelper runs on the same input (trigger-folders stage 0, WoWR): Ascii___i once, Ascii__i the next, and a new
+  // jasshelper__initstructs suffix each time.
+  const theirs = ["Ascii___i", "Table___GetK", "jasshelper__initstructs41718562", "s__Table_create"].map((f) => `function ${f} takes nothing returns nothing\nendfunction`).join("\n");
+  const ours = ["Ascii__i", "Table__GetK", "jasshelper__initstructs99", "s__Table_create"].map((f) => `function ${f} takes nothing returns nothing\nendfunction`).join("\n");
+  assert.deepEqual(lostFunctions(theirs, ours), []);
+  assert.deepEqual(lostFunctions(ours, theirs), []);
+  // Control: a private function that is really gone, and two underscores against one, still count.
+  assert.deepEqual(lostFunctions(`${theirs}\nfunction Ascii___j takes nothing returns nothing\nendfunction`, ours), ["Ascii___j"]);
+  assert.deepEqual(lostFunctions("function A__b takes nothing returns nothing\nendfunction", "function A_b takes nothing returns nothing\nendfunction"), ["A__b"]);
+});
+
 test("the same names in both, and nested functions, aren't lost", () => {
   assert.deepEqual(lostFunctions("function Helper()\nend", "function Helper()\n  print(1)\nend"), []);
   assert.deepEqual(lostFunctions("function main()\n  function inner()\n  end\nend", "function main()\nend"), []);
