@@ -733,8 +733,10 @@ mod tests {
         fs::write(dir.join("map/war3map.lua"), "-- by hand").unwrap();
         let e = read_bytes(&dir.join("map/war3map.lua")).unwrap_err();
         let store = dir.join(".w3proj/derived/war3map.lua");
-        assert!(e.starts_with(&format!("{}:", store.display())), "{e}");
-        assert!(e.contains(".w3proj/derived/"), "{e}");
+        // Windows prints the joined path with backslashes: compare with one separator.
+        let slashed = e.replace('\\', "/");
+        assert!(slashed.starts_with(&format!("{}:", store.display().to_string().replace('\\', "/"))), "{e}");
+        assert!(slashed.contains(".w3proj/derived/"), "{e}");
         // Control: with the file in the store it reads that one.
         fs::create_dir_all(store.parent().unwrap()).unwrap();
         fs::write(&store, "-- stored").unwrap();
