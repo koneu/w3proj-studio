@@ -468,7 +468,7 @@ fn add_file(name: &str, bytes: Vec<u8>, codecs: &Registry, files: &mut BTreeMap<
         info: Vec::new(),
     };
     let mut stored = None;
-    for codec in codecs.for_archive_name(name) {
+    for codec in codecs.for_archive_name(name).filter(|c| c.unpacks()) {
         match codec.decode_with_notes(name, &bytes) {
             Ok((decoded, info)) => match codec.encode(name, &decoded) {
                 Ok(re) if re == bytes => {
@@ -489,8 +489,52 @@ fn add_file(name: &str, bytes: Vec<u8>, codecs: &Registry, files: &mut BTreeMap<
     report.files.push(entry);
 }
 
-/// What follows reading a map's files: trigger names in the custom script, chapter maps as
-/// projects, raw marks, the header and the manifest. `prefix`: the bytes before the archive.
+/// The map's war3map.wtg and war3map.wct (raw among `files`) as the folders of `map/triggers/`
+/// (`crate::trigger_layout::split_map`, which checks that they come back byte for byte), read with the game's
+/// TriggerData. When they can't be (no TriggerData, a function it doesn't know, only one of the two files, a file of the
+/// map's own under `triggers\`, something the layout can't hold), both stay raw and their report entries say why.
+fn split_triggers(files: &mut BTreeMap<String, Vec<u8>>, report: &mut UnpackReport, codecs: &Registry) {
+    use crate::trigger_layout as tl;
+    let key = |name: &str| files.keys().find(|k| k.eq_ignore_ascii_case(name)).cloned();
+    let (wtg_key, wct_key) = (key(tl::WTG), key(tl::WCT));
+    let split = match (&wtg_key, &wct_key) {
+        (None, None) => return,
+        (Some(_), None) => Err(format!("the map has no {}", tl::WCT)),
+        (None, Some(_)) => Err(format!("the map has no {}", tl::WTG)),
+        (Some(wtg), Some(wct)) => {
+            if let Some(own) = files.keys().find(|k| k.to_ascii_lowercase().starts_with(&format!("{}/", tl::DIR))) {
+                Err(format!("the map has a file of its own under {}\\ ({own})", tl::DIR))
+            } else {
+                match codecs.trigger_data() {
+                    None => Err("the game's TriggerData.txt isn't available".into()),
+                    Some(data) => tl::split_map(&files[wtg], &files[wct], &data, tl::language(files, codecs)).map_err(|e| e.to_string()),
+                }
+            }
+        }
+    };
+    let ours = |e: &FileEntry| [&wtg_key, &wct_key].iter().any(|k| k.as_deref() == Some(e.project_path.as_str()));
+    match split {
+        Ok(layout) => {
+            for e in report.files.iter_mut().filter(|e| ours(e)) {
+                e.codec = Some(tl::CODEC_ID.to_string());
+                e.project_path = tl::ROOT_FILE.to_string();
+                e.note = None;
+            }
+            for k in [&wtg_key, &wct_key].into_iter().flatten() {
+                files.remove(k);
+            }
+            files.extend(layout);
+        }
+        Err(why) => {
+            for e in report.files.iter_mut().filter(|e| ours(e)) {
+                e.note = Some(format!("{}: {why}", tl::CODEC_ID));
+            }
+        }
+    }
+}
+
+/// What follows reading a map's files: the trigger folders, chapter maps as projects, raw marks,
+/// the header and the manifest. `prefix`: the bytes before the archive.
 fn finish(
     mut files: BTreeMap<String, Vec<u8>>,
     unnamed: BTreeMap<String, Vec<u8>>,
@@ -517,13 +561,7 @@ fn finish(
         }
     }
 
-    // Custom script sections get their triggers' names (comments; only when the wtg was decoded).
-    let names = files.get("war3map.wtg.json").and_then(|j| crate::wtg::text_trigger_names(j));
-    if let (Some(names), Some(text)) = (names, files.get("war3map.wct.txt")) {
-        if let Ok(named) = crate::wct::with_names(text, &names) {
-            files.insert("war3map.wct.txt".into(), named);
-        }
-    }
+    split_triggers(&mut files, &mut report, codecs);
 
     // Chapter maps of a campaign become projects of their own (if they unpack completely).
     let mut nested = BTreeMap::new();
@@ -544,10 +582,11 @@ fn finish(
         }
     }
 
-    // A raw file whose path looks like a codec output must be marked raw.
+    // A raw file whose path looks like a codec output must be marked raw (and the map's own file named like the trigger
+    // layout's root file, which is the layout's only when it isn't raw).
     let mut raw = Vec::new();
     for e in &report.files {
-        if e.codec.is_none() && codecs.for_project_path(&e.project_path).is_some() {
+        if e.codec.is_none() && (codecs.for_project_path(&e.project_path).is_some() || e.project_path == crate::trigger_layout::ROOT_FILE) {
             raw.push(e.project_path.clone());
         }
     }
@@ -734,8 +773,12 @@ fn extra_files(dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<(Vec<Str
     Ok((gone, strays))
 }
 
-/// The archive file a project path packs into, lowercased (as `encode_files` names it).
-fn archive_key(path: &str, raw: &[String], codecs: &Registry) -> String {
+/// The archive file a project path packs into, lowercased (as `encode_files` names it). `triggers`: the files hold
+/// the trigger layout, whose files pack into war3map.wtg (and .wct).
+fn archive_key(path: &str, raw: &[String], codecs: &Registry, triggers: bool) -> String {
+    if triggers && crate::trigger_layout::is_layout_path(path) && !raw.iter().any(|r| r == path) {
+        return crate::trigger_layout::WTG.to_string();
+    }
     let name = match codecs.for_project_path(path) {
         Some((stem, _)) if !raw.iter().any(|r| r == path) => paths::to_archive_name(&stem),
         _ => paths::to_archive_name(path),
@@ -750,9 +793,11 @@ fn archive_key(path: &str, raw: &[String], codecs: &Registry) -> String {
 /// never deleted.
 pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result<Vec<String>> {
     let mut out = Vec::new();
-    let kept: BTreeSet<String> = ex.files.keys().map(|p| archive_key(p, &ex.manifest.pack.raw, codecs)).collect();
+    let incoming = crate::trigger_layout::is_layout(&ex.files, &ex.manifest.pack.raw);
+    let kept: BTreeSet<String> = ex.files.keys().map(|p| archive_key(p, &ex.manifest.pack.raw, codecs, incoming)).collect();
     // Raw files as the project on disk has them; a manifest that can't be read stops the sync anyway.
     let old_raw = Manifest::load(project).map(|m| m.pack.raw).unwrap_or_default();
+    let on_disk = there(&project.join(MAP_DIR).join(crate::trigger_layout::ROOT_FILE))? && !old_raw.iter().any(|r| r == crate::trigger_layout::ROOT_FILE);
     // The files as the sync writes them (a split terrain layout kept: `terrain_layout::prepare_sync`).
     let mut files = ex.files.clone();
     // A split project's derived files go into the store, not map/.
@@ -760,7 +805,7 @@ pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result
     let (gone, _) = extra_files(&project.join(MAP_DIR), &files)?;
     out.extend(
         gone.into_iter()
-            .filter(|p| !kept.contains(&archive_key(p, &old_raw, codecs)))
+            .filter(|p| !kept.contains(&archive_key(p, &old_raw, codecs, on_disk)))
             .map(|p| format!("{MAP_DIR}/{p}")),
     );
     let maps_dir = project.join(MAPS_DIR);
@@ -815,12 +860,15 @@ const GITATTRIBUTES: &str = "\
 # Keep every map file byte-exact; text files still diff normally.
 * -text
 *.j diff
+*.vjass diff
 *.lua diff
 *.json diff
 *.txt diff
 *.wts diff
 *.fdf diff
 *.toc diff
+# Trigger texts keep their own line endings, CRLF in one and LF in the next.
+map/triggers/** -text
 # Imported assets (models, textures, sounds, videos, fonts) go to Git LFS where it is
 # installed; without it git stores them as usual.
 *.mdx filter=lfs diff=lfs merge=lfs -text
@@ -844,8 +892,17 @@ const GITATTRIBUTES: &str = "\
 /map/war3map*.tga !filter !diff !merge
 ";
 
-/// The default `.gitattributes` before the LFS rules: replaced by the current one on the next
-/// sync (a changed file is left alone).
+/// The lines `GITATTRIBUTES` got with the trigger folders (`crate::trigger_layout`).
+const GITATTRIBUTES_TRIGGERS: [&str; 2] = ["*.vjass diff\n", "# Trigger texts keep their own line endings, CRLF in one and LF in the next.\nmap/triggers/** -text\n"];
+
+/// Whether a project's `.gitattributes` is an earlier default (before the LFS rules, before the trigger folders'
+/// lines): replaced by the current one on the next sync (a changed file is left alone).
+fn outdated_gitattributes(old: &[u8]) -> bool {
+    let v2 = GITATTRIBUTES_TRIGGERS.iter().fold(GITATTRIBUTES.to_string(), |s, l| s.replace(l, ""));
+    old == GITATTRIBUTES_V1.as_bytes() || old == v2.as_bytes()
+}
+
+/// The default `.gitattributes` before the LFS rules.
 const GITATTRIBUTES_V1: &str = "\
 # Keep every map file byte-exact; text files still diff normally.
 * -text
@@ -991,6 +1048,9 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     // into the store (`crate::derived`; ones in map/ from before the store existed go, the map's replace them).
     let split = crate::terrain_layout::is_split_on_disk(&map_dir)?;
     let derived = crate::terrain_layout::prepare_sync(&map_dir, &mut ex.files)?;
+    // The trigger folders keep the names they have on disk; a script Studio generated goes into the store
+    // (`crate::trigger_layout::prepare_sync`).
+    let script = crate::trigger_layout::prepare_sync(project, &mut ex.files)?;
     fs::create_dir_all(project)?;
     if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
@@ -1016,7 +1076,7 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
         if !top {
             continue;
         }
-        let outdated = name == ".gitattributes" && fs::read(&p).is_ok_and(|old| old == GITATTRIBUTES_V1.as_bytes());
+        let outdated = name == ".gitattributes" && fs::read(&p).is_ok_and(|old| outdated_gitattributes(&old));
         if !there(&p)? || outdated {
             write_atomic(&p, text.as_bytes())?;
         }
@@ -1033,6 +1093,17 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     }
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
     crate::derived::record_now(project)?;
+    // A generated script lives in the store, not in git, and follows the map's files as Studio wrote it; a kept one is
+    // in map/ (a generated one the project had goes).
+    crate::derived::sync_script_store(project, script.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())))?;
+    if script.is_some() {
+        if top {
+            crate::derived::ensure_ignored(project)?;
+        }
+        crate::derived::record_script_now(project)?;
+    } else {
+        crate::derived::clear_script_record(project)?;
+    }
     // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
     // in one: then it stays as it is).
     let maps_dir = project.join(MAPS_DIR);
@@ -1204,9 +1275,34 @@ pub fn encode_files(
     raw: &[String],
     codecs: &Registry,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
+    encode_files_noting(files, raw, codecs, &mut Vec::new())
+}
+
+/// `encode_files`, with what is worth a warning into `warnings` (the trigger folders' order.txt entries that aren't
+/// there, a variable defined twice alike, …). The trigger folders (`map/triggers/`) pack into war3map.wtg and
+/// war3map.wct (`crate::trigger_layout::assemble`, in the map's script language).
+pub fn encode_files_noting(
+    files: &BTreeMap<String, Vec<u8>>,
+    raw: &[String],
+    codecs: &Registry,
+    warnings: &mut Vec<String>,
+) -> Result<BTreeMap<String, Vec<u8>>> {
+    use crate::trigger_layout as tl;
     let mut out: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    let triggers = tl::is_layout(files, raw);
+    if triggers {
+        let (wtg, wct, notes) = tl::assemble(files, tl::language(files, codecs), codecs.trigger_data().as_deref()).map_err(|e| Error::Project(e.to_string()))?;
+        warnings.extend(notes);
+        for (name, data) in [(tl::WTG, wtg), (tl::WCT, wct)] {
+            seen.insert(name.to_ascii_uppercase(), format!("{}/", tl::DIR));
+            out.insert(name.to_string(), data);
+        }
+    }
     for (path, bytes) in files {
+        if triggers && tl::is_layout_path(path) && !raw.iter().any(|r| r == path) {
+            continue;
+        }
         let (name, data) = match codecs.for_project_path(path) {
             Some((stem, codec)) if !raw.iter().any(|r| r == path) => {
                 let name = paths::to_archive_name(&stem);
@@ -1269,6 +1365,22 @@ pub fn read_project(project: &Path) -> Result<ProjectContents> {
                 return Err(Error::Project(format!(
                     "{MAP_DIR}/{k} and {}/{name} are both there: a split project keeps its derived files in the store; delete the one in {MAP_DIR}/",
                     crate::derived::STORE_DIR.join("/")
+                )));
+            }
+            files.insert(name, bytes);
+        }
+    }
+    // A generated map script (map/triggers/triggers.json "script": "generated") isn't in git: it comes from the store.
+    // Whether it may go into a map is the caller's to decide (`w3proj pack` checks the record); one also in map/ is an
+    // error. None there: the map has no script (`missing_map_files`).
+    if crate::trigger_layout::script_mode(&files)? == Some(crate::trigger_layout::ScriptMode::Generated) {
+        for (name, bytes) in crate::derived::read_script_store(project)? {
+            if let Some(k) = files.keys().find(|k| crate::derived::SCRIPT_FILES.iter().any(|s| k.eq_ignore_ascii_case(s))) {
+                return Err(Error::Project(format!(
+                    "{MAP_DIR}/{k} and {}/{name} are both there: the project's map script is generated ({MAP_DIR}/{} \"script\": \"generated\"), \
+                     so it lives in the store; delete {MAP_DIR}/{k}, or make the script a tracked file (\"script\": \"kept\") and delete the store's",
+                    crate::derived::STORE_DIR.join("/"),
+                    crate::trigger_layout::ROOT_FILE
                 )));
             }
             files.insert(name, bytes);
@@ -1490,7 +1602,7 @@ fn pack_bytes_with(
     if let Some(outcome) = prune {
         *outcome = wts::prune_files(&mut files, read_pruned_record(project), codecs);
     }
-    let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
+    let mut encoded = encode_files_noting(&files, &manifest.pack.raw, codecs, warnings)?;
     warnings.extend(missing_map_files(&encoded));
     warnings.extend(imports_under_other_extension(&encoded));
     // The ally priorities the World Editor's save works out (`allies`); a map whose masks already

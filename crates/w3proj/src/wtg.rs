@@ -1,5 +1,6 @@
-//! `war3map.wtg` (GUI triggers, variables, categories) as JSON, in the shape the app's trigger
-//! editor uses (`app/src/lib/triggers/wtg.ts`, `TriggerFile`).
+//! `war3map.wtg` (GUI triggers, variables, categories), in the shape the app's trigger editor uses
+//! (`app/src/lib/triggers/wtg.ts`, `TriggerFile`). A project keeps it as the folders of
+//! `map/triggers/` (`crate::trigger_layout`).
 //!
 //! Reading needs the game's TriggerData.txt: parameters are stored without a count. Writing
 //! doesn't, so a project packs without the game. Layouts:
@@ -15,7 +16,7 @@ use crate::{Error, Result};
 
 const MARKER: u32 = 0x8000_0004;
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TriggerFile {
     pub reforged: bool,
     pub version: u32,
@@ -25,13 +26,13 @@ pub struct TriggerFile {
     pub items: Vec<Item>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Count {
     pub count: u32,
     pub deleted: Vec<u32>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Variable {
     pub name: String,
@@ -46,7 +47,7 @@ pub struct Variable {
     pub parent: i32,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum Item {
     Trigger(Trigger),
@@ -55,7 +56,7 @@ pub enum Item {
 }
 
 /// Types 1 (map), 2 (library), 4 (category).
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Category {
     #[serde(rename = "type")]
@@ -68,7 +69,7 @@ pub struct Category {
 }
 
 /// Types 8 (trigger), 16 (comment), 32 (script).
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Trigger {
     #[serde(rename = "type")]
@@ -86,7 +87,7 @@ pub struct Trigger {
 }
 
 /// Type 64 (a variable in the tree).
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Element {
     #[serde(rename = "type")]
@@ -96,7 +97,7 @@ pub struct Element {
     pub parent: i32,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Eca {
     pub kind: u32,
@@ -108,7 +109,7 @@ pub struct Eca {
     pub children: Vec<Eca>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Param {
     #[serde(rename = "type")]
@@ -120,7 +121,7 @@ pub struct Param {
     pub index: Option<Box<Param>>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Call {
     pub kind: u32,
@@ -494,50 +495,8 @@ pub fn write(f: &TriggerFile) -> Vec<u8> {
     w.out
 }
 
-/// The file's layout (the app writes the same): the file, triggers and ECAs (objects with
-/// `items`, `ecas` or `children`) one key per line, two-space indent; arrays of objects one
-/// element per line; everything else (parameters, variables, categories, counts) on one line.
-fn layout(v: &serde_json::Value, indent: &str, out: &mut String) {
-    use serde_json::Value;
-    let inner = format!("{indent}  ");
-    match v {
-        Value::Object(m) if ["items", "ecas", "children"].iter().any(|k| m.contains_key(*k)) => {
-            out.push_str("{\n");
-            for (i, (k, x)) in m.iter().enumerate() {
-                out.push_str(&inner);
-                out.push_str(&Value::String(k.clone()).to_string());
-                out.push_str(": ");
-                layout(x, &inner, out);
-                out.push_str(if i + 1 < m.len() { ",\n" } else { "\n" });
-            }
-            out.push_str(indent);
-            out.push('}');
-        }
-        Value::Array(a) if a.iter().any(Value::is_object) => {
-            out.push_str("[\n");
-            for (i, x) in a.iter().enumerate() {
-                out.push_str(&inner);
-                layout(x, &inner, out);
-                out.push_str(if i + 1 < a.len() { ",\n" } else { "\n" });
-            }
-            out.push_str(indent);
-            out.push(']');
-        }
-        _ => out.push_str(&v.to_string()),
-    }
-}
-
-/// Binary → JSON (see `layout`; trailing line break).
-pub fn to_json(b: &[u8], data: &TriggerData) -> Result<Vec<u8>> {
-    let f = parse(b, data)?;
-    let v = serde_json::to_value(&f).map_err(|e| err(e.to_string()))?;
-    let mut out = String::new();
-    layout(&v, "", &mut out);
-    out.push('\n');
-    Ok(out.into_bytes())
-}
-
-/// JSON → binary.
+/// The one-file JSON form (`war3map.wtg.json`, the layout before `map/triggers/`) → binary: only for
+/// packing projects that still have it (`codec::TriggersJson`).
 pub fn from_json(json: &[u8]) -> Result<Vec<u8>> {
     let f: TriggerFile = serde_json::from_slice(json).map_err(|e| err(e.to_string()))?;
     for it in &f.items {
@@ -551,21 +510,6 @@ pub fn from_json(json: &[u8]) -> Result<Vec<u8>> {
         }
     }
     Ok(write(&f))
-}
-
-/// Names of the triggers with a custom text slot (types 8 and 32), in war3map.wct's order, from
-/// the JSON form.
-pub fn text_trigger_names(json: &[u8]) -> Option<Vec<String>> {
-    let f: TriggerFile = serde_json::from_slice(json).ok()?;
-    Some(
-        f.items
-            .into_iter()
-            .filter_map(|i| match i {
-                Item::Trigger(t) if t.ty == 8 || t.ty == 32 => Some(t.name),
-                _ => None,
-            })
-            .collect(),
-    )
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
-use w3proj::derived::{self, Freshness};
+use w3proj::derived::{self, script_hash, Freshness, SCRIPT_STAMP};
 
 /// The parts, in the order they run and are reported.
 pub const PARTS: [&str; 4] = ["wpm", "shd", "minimap", "script"];
@@ -145,19 +145,8 @@ pub fn run(o: Options) -> Result<ExitCode> {
 
 // ---------------------------------------------------------------- the script, for pack
 
-/// The record of the script Studio wrote last (app/src/lib/script/guard.ts SCRIPT_STAMP): its hash.
-const SCRIPT_STAMP: &str = ".w3proj/generated-script";
 /// The map script's files, as the generator writes them (guard.ts SCRIPT_FILES).
 const SCRIPT_FILES: [&str; 2] = ["map/war3map.j", "map/war3map.lua"];
-
-/// guard.ts scriptHash: FNV-1a over the text's UTF-16 code units, as 8 hex digits.
-fn script_hash(text: &str) -> String {
-    let mut h: u32 = 0x811c_9dc5;
-    for unit in text.encode_utf16() {
-        h = (h ^ u32::from(unit)).wrapping_mul(0x0100_0193);
-    }
-    format!("{h:08x}")
-}
 
 /// Whether the project's map script is the one Studio wrote last (its hash is the record's), so making it again
 /// from the project's files replaces nothing but what the generator made. Err: why it isn't, to be told (a record
@@ -636,14 +625,6 @@ mod tests {
         assert!(s.answer("fs_write_text", &json!({ "path": inside.to_string_lossy(), "text": "x" }), None).is_ok());
         assert_eq!(std::fs::read_to_string(&inside).unwrap(), "x");
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The hash is guard.ts scriptHash's (the same values there: guard.test.ts), over UTF-16 code units.
-    #[test]
-    fn the_script_hash_is_the_apps() {
-        assert_eq!(script_hash(""), "811c9dc5");
-        assert_eq!(script_hash("abc"), "1a47e90b");
-        assert_eq!(script_hash("\u{e4}\u{20ac}\u{1F600}"), "3702d130");
     }
 
     /// Only a script whose hash is the record's counts as Studio's; none, another, or no record: not.

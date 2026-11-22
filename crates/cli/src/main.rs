@@ -399,6 +399,42 @@ fn check_split_derived(at: &str, dir: &std::path::Path, force_stale: bool, terra
     Ok(())
 }
 
+/// A generated map script (map/triggers/triggers.json "script": "generated", `w3proj::trigger_layout`) isn't in git: it is in
+/// .w3proj/derived/, made by W3Proj Studio's generator (this program can't make it), and goes into the map only when the
+/// record says it follows its sources (the triggers, objects, regions, … `w3proj::derived::check_script`). Missing: the pack
+/// stops, whatever the flags (a map without a script is never packed). Not known to follow (changed sources, no record, a
+/// record that can't be read): it stops unless `allow_stale` (`--allow-stale-script`), which packs it as it is and says so.
+fn check_script(project: &std::path::Path, allow_stale: bool) -> Result<()> {
+    use w3proj::derived::{check_script, read_script_store, Freshness, STAMP_FILE};
+    let fix = "open the project in W3Proj Studio and save, or make it again headless (`w3proj rebuild --only script`), then pack again";
+    for (at, dir) in packed_projects(project) {
+        let mode = w3proj::trigger_layout::script_mode_on_disk(&dir.join(w3proj::project::MAP_DIR)).with_context(|| format!("checking {}", dir.display()))?;
+        if mode != Some(w3proj::trigger_layout::ScriptMode::Generated) {
+            continue;
+        }
+        let store = format!("{at}.w3proj/derived/");
+        if read_script_store(&dir)?.is_empty() {
+            anyhow::bail!(
+                "the map script is missing in {store} ({at}map/{} says it is generated, so it isn't in git): {fix}. A map without a script is never packed",
+                w3proj::trigger_layout::ROOT_FILE
+            );
+        }
+        let stale = match check_script(&dir).with_context(|| format!("checking {}", dir.display()))? {
+            Freshness::Fresh => continue,
+            Freshness::Stale(files) => format!("{} changed since it was made", files.iter().map(|f| format!("{at}map/{f}")).collect::<Vec<_>>().join(", ")),
+            Freshness::Unknown => format!("there is no record in {at}{STAMP_FILE} of what it was made from"),
+            Freshness::Unreadable(why) => format!("{at}{why}"),
+            Freshness::Partial(n) => Freshness::partial_text(n),
+        };
+        if allow_stale {
+            eprintln!("warning: --allow-stale-script: the map script in {store} goes into the map as it is, though {stale}");
+        } else {
+            anyhow::bail!("the map script in {store} may not follow the map: {stale}. {fix}; --allow-stale-script packs it as it is (not for a release)");
+        }
+    }
+    Ok(())
+}
+
 /// `file`: a TriggerData.txt to use instead of the game's (the tests bring a made-up one).
 fn with_trigger_data(mut codecs: Registry, game: &Option<LazyGame>, file: &Option<PathBuf>) -> Registry {
     if let Some(file) = file.clone() {
@@ -435,9 +471,10 @@ enum Cmd {
         /// there). Without it such a sync writes nothing and lists them.
         #[arg(long)]
         allow_deletes: bool,
-        /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
-        /// file names are tried when a map's names are missing (protected maps, files replacing
-        /// the game's). "none" to skip both.
+        /// Game install folder: its TriggerData.txt reads the triggers (war3map.wtg and war3map.wct
+        /// go into map/triggers/, one file per trigger; without it they stay raw), its file names
+        /// are tried when a map's names are missing (protected maps, files replacing the game's).
+        /// "none" to skip both.
         #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         game: String,
         /// Read GUI triggers with this TriggerData.txt instead of the game's.
@@ -476,6 +513,11 @@ enum Cmd {
         /// warnings.
         #[arg(long)]
         allow_seam_issues: bool,
+        /// A project whose map script is generated (map/triggers/triggers.json "script": "generated") keeps it out of
+        /// git, in .w3proj/derived/, and packs only when it follows the triggers and the other files it is made from. This
+        /// packs it as it is even when it doesn't (a missing script still stops the pack). Not for a release.
+        #[arg(long)]
+        allow_stale_script: bool,
         /// Pack the map script as the project has it. Without it, a script that is the one W3Proj
         /// Studio wrote last is made again from the project's files first, as `w3proj rebuild
         /// --only script` makes it (so it follows changed players, start locations and ally
@@ -483,9 +525,13 @@ enum Cmd {
         #[arg(long)]
         keep_script: bool,
         /// Game install folder: its tables go into a map script made again ("none": the script
-        /// isn't made again).
+        /// isn't made again), its TriggerData.txt checks the GUI functions of map/triggers/ (one
+        /// it doesn't know, or given another number of parameters, would make war3map.wtg unreadable).
         #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         game: String,
+        /// Check the GUI functions with this TriggerData.txt instead of the game's.
+        #[arg(long, hide = true)]
+        trigger_data: Option<PathBuf>,
     },
     /// Make a project's derived files again from its files, as W3Proj Studio makes them: pathing
     /// (war3map.wpm), shadows (war3map.shd), the minimap (war3mapMap.blp, war3map.mmp) and the map
@@ -565,9 +611,9 @@ enum Cmd {
         /// Fail (exit 1) on warnings too (unresolved TRIGSTR references, references that can't be told).
         #[arg(long)]
         warnings_fail: bool,
-        /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
-        /// file names are tried when a map's names are missing (protected maps, files replacing
-        /// the game's). "none" to skip both.
+        /// Game install folder: its TriggerData.txt reads the triggers (map/triggers/), its file
+        /// names are tried when a map's names are missing (protected maps, files replacing the
+        /// game's). "none" to skip both.
         #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         game: String,
         /// Read GUI triggers with this TriggerData.txt instead of the game's.
@@ -788,7 +834,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept the project's {s}: only its export header changed");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, allow_seam_issues, keep_script, game } => {
+        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, game, trigger_data } => {
+            check_trigger_data(&trigger_data)?;
             check_derived(&project, force_stale, allow_terrain_only_derived)?;
             seams::check_for_pack(&packed_projects(&project), allow_seam_issues, &extra)?;
             // The script Studio wrote last, made again from the files now there (the pack works out war3map.w3i's ally
@@ -804,7 +851,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     }
                 }
             }
-            let codecs = Registry::for_project(&project, &extra)?;
+            check_script(&project, allow_stale_script)?;
+            // The game's TriggerData (read only for a project with map/triggers/) checks the GUI functions.
+            let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &lazy_game(&game), &trigger_data);
             let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };
             let r = pack(&project, output.as_deref(), &codecs)
                 .with_context(|| format!("packing {}", project.display()))?;

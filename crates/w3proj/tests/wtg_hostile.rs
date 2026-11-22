@@ -66,7 +66,11 @@ fn nested_parameters(depth: usize) -> Vec<u8> {
 fn parse(bytes: Vec<u8>) -> Result<(), String> {
     std::thread::Builder::new()
         .stack_size(2 << 20)
-        .spawn(move || wtg::to_json(&bytes, &TriggerData::parse(DATA)).map(drop).map_err(|e| e.to_string()))
+        // Read, then made into JSON as the trigger folders' files hold the ECAs (both recurse).
+        .spawn(move || {
+            let f = wtg::parse(&bytes, &TriggerData::parse(DATA)).map_err(|e| e.to_string())?;
+            serde_json::to_value(&f.items).map(drop).map_err(|e| e.to_string())
+        })
         .unwrap()
         .join()
         .unwrap()

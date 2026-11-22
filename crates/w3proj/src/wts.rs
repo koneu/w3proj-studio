@@ -362,7 +362,7 @@ fn sound_keys_in(doc: &Value, into: &mut BTreeSet<StringNum>) {
     }
 }
 
-const TEXT_EXTENSIONS: [&str; 9] = [".json", ".j", ".lua", ".txt", ".fdf", ".toc", ".ai", ".slk", ".ini"];
+const TEXT_EXTENSIONS: [&str; 10] = [".json", ".j", ".vjass", ".lua", ".txt", ".fdf", ".toc", ".ai", ".slk", ".ini"];
 
 /// Every string number the map's files refer to (`files`: paths relative to `map/`, `/` between
 /// folders). Errs when the sounds' keys can't be read.

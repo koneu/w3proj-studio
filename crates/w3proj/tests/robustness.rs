@@ -162,7 +162,7 @@ fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
         .map(|l| String::from_utf8_lossy(&l).lines().map(str::to_string).collect::<Vec<_>>())
         .unwrap()
         .into_iter()
-        .filter(|name| codecs.for_archive_name(name).next().is_some())
+        .filter(|name| codecs.for_archive_name(name).any(|c| c.unpacks()))
         .map(|name| {
             let bytes = archive.read(&name).unwrap();
             (name, bytes)
@@ -337,7 +337,7 @@ fn codecs_survive_damaged_files() {
             let mut found = Found::default();
             for seed in chunk.seeds() {
                 let bad = damage(&bytes, &mut Rng::new(seed + 1));
-                for codec in codecs.for_archive_name(&name) {
+                for codec in codecs.for_archive_name(&name).filter(|c| c.unpacks()) {
                     let what = || format!("decode {name} with {}, seed {seed}", codec.id());
                     guarded(&mut found.failures, what, || {
                         // The promise that keeps unpacking safe: a codec is only used if encode
@@ -371,8 +371,87 @@ fn codecs_survive_damaged_files() {
     println!("per codec (accepted, rejected): {per_codec:?}");
     if !single_seed() {
         assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
-        let wtg = per_codec.get("wtg-json").copied().unwrap_or_default();
-        assert!(wtg.0 > 0 && wtg.1 > 0, "wtg-json must see both damaged files it accepts and rejects: {per_codec:?}");
+    }
+}
+
+/// war3map.wtg and war3map.wct go into map/triggers/ (`trigger_layout::split_map`): damaged, they never make it panic,
+/// and what it accepts packs back (as `encode_files` assembles it) to the very bytes it got.
+#[test]
+fn damaged_trigger_files_split_or_are_refused() {
+    use w3proj::trigger_layout as tl;
+    let text = fs::read_to_string(fixture().join("../TriggerData.txt")).unwrap();
+    let data = w3proj::triggerdata::TriggerData::parse(&text);
+    let mut total = Found::default();
+    for classic in [false, true] {
+        let (wtg, wct) = tl::sample_map(classic);
+        tl::split_map(&wtg, &wct, &data, tl::Lang::Jass).expect("the undamaged sample splits: else refusing means nothing");
+        for target in ["war3map.wtg", "war3map.wct"] {
+            let runs = par_seeds(&format!("trigger split {target} classic={classic}"), seeds(rounds()), |chunk| {
+                let mut found = Found::default();
+                for seed in chunk.seeds() {
+                    let mut rng = Rng::new(seed + 1);
+                    let (w, c) = if target == "war3map.wtg" { (damage(&wtg, &mut rng), wct.clone()) } else { (wtg.clone(), damage(&wct, &mut rng)) };
+                    guarded(&mut found.failures, || format!("{target} classic={classic}, seed {seed}"), || match tl::split_map(&w, &c, &data, tl::Lang::Jass) {
+                        Ok(files) => {
+                            found.accepted += 1;
+                            let (a, b, _) = tl::assemble(&files, tl::Lang::Jass, Some(&data)).expect("accepted, then assembled");
+                            assert!(a == w && b == c, "{target} classic={classic}, seed {seed}: accepted but not the same bytes");
+                        }
+                        Err(_) => found.rejected += 1,
+                    });
+                }
+                found
+            });
+            total.merge(Found::all(runs));
+        }
+    }
+    let Found { failures, accepted, rejected, .. } = total;
+    report(failures);
+    println!("trigger split: {accepted} damaged files accepted, {rejected} refused");
+    if !single_seed() {
+        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+    }
+}
+
+/// The files of map/triggers/ come from git merges and hand edits: a damaged one is an error (naming the file), never a
+/// panic, and what pack accepts is a whole tree: every trigger file of the layout is in war3map.wtg.
+#[test]
+fn damaged_trigger_folder_files_are_errors() {
+    use w3proj::trigger_layout as tl;
+    let text = fs::read_to_string(fixture().join("../TriggerData.txt")).unwrap();
+    let data = w3proj::triggerdata::TriggerData::parse(&text);
+    let (wtg, wct) = tl::sample_map(false);
+    let files = tl::split_map(&wtg, &wct, &data, tl::Lang::Jass).unwrap();
+    let mut total = Found::default();
+    for name in files.keys().cloned().collect::<Vec<_>>() {
+        let runs = par_seeds(&format!("trigger folders {name}"), seeds(rounds()), |chunk| {
+            let mut found = Found::default();
+            for seed in chunk.seeds() {
+                let mut f = files.clone();
+                let bad = damage(&files[&name], &mut Rng::new(seed + 1));
+                f.insert(name.clone(), bad);
+                guarded(&mut found.failures, || format!("{name} damaged, seed {seed}"), || match tl::assemble(&f, tl::Lang::Jass, Some(&data)) {
+                    Ok((w, _, _)) => {
+                        found.accepted += 1;
+                        let back = w3proj::wtg::parse(&w, &data).expect("what pack wrote reads back");
+                        let triggers = back.items.iter().filter(|i| matches!(i, w3proj::wtg::Item::Trigger(_))).count();
+                        let trigger_files = f.keys().filter(|k| *k != "triggers/header.j" && (k.ends_with(".gui.json") || k.ends_with(".comment.json") || k.ends_with(".j"))).count();
+                        assert_eq!(triggers, trigger_files, "{name}, seed {seed}: a trigger file went missing");
+                    }
+                    Err(e) => {
+                        found.rejected += 1;
+                        assert!(e.to_string().contains("map/triggers/"), "the error names the file: {e}");
+                    }
+                });
+            }
+            found
+        });
+        total.merge(Found::all(runs));
+    }
+    let Found { failures, accepted, rejected, .. } = total;
+    report(failures);
+    if !single_seed() {
+        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
     }
 }
 
@@ -381,7 +460,7 @@ fn damaged_project_files_are_errors() {
     let codecs = registry();
     let mut total = Found::default();
     for (name, bytes) in codec_files("project-files") {
-        let codec = codecs.for_archive_name(&name).next().unwrap();
+        let codec = codecs.for_archive_name(&name).find(|c| c.unpacks()).unwrap();
         let project = codec.decode(&name, &bytes).unwrap();
         let runs = par_seeds(&format!("project files {name}"), seeds(rounds()), |chunk| {
             let mut found = Found::default();

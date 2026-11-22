@@ -99,16 +99,56 @@ fn fingerprint(bytes: &[u8]) -> String {
 }
 
 /// Records that the derived files follow `sources` (taken before they were made: a source written
-/// meanwhile then shows as changed). A project with no source files gets no record.
+/// meanwhile then shows as changed). A project with no source files gets no record. The map script's
+/// group in the record (`record_script`) stays as it is.
 pub fn record(project: &Path, sources: &Sources) -> Result<()> {
     if sources.is_empty() {
         return Ok(());
     }
-    let doc = serde_json::json!({ "format": FORMAT, "files": sources });
-    let mut text = serde_json::to_string_pretty(&doc).map_err(|e| Error::Format(e.to_string()))?;
-    text.push('\n');
+    write_group(project, "files", Some(sources))
+}
+
+/// Sets one group of the record (`files`: pathing, shadows and the minimap; `script`: the map script), or removes it
+/// (None); the other stays. A record that can't be read is written anew by `record` (it says what pathing, shadows and
+/// the minimap follow, all a record said before the script had a group), and is an error for the script's group: written
+/// over, a record whose terrain group refused a pack would let it through.
+fn write_group(project: &Path, key: &str, sources: Option<&Sources>) -> Result<()> {
     let path = project.join(STAMP_FILE);
-    if fs::read(&path).ok().as_deref() == Some(text.as_bytes()) {
+    let old = match fs::read(&path) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) if key == "files" => None,
+        Err(e) => return Err(Error::Project(format!("{STAMP_FILE} is there but can't be read ({e}): the map script's record isn't written"))),
+    };
+    let parsed = old
+        .as_deref()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+        .filter(|d| d.get("format").and_then(serde_json::Value::as_str) == Some(FORMAT))
+        .and_then(|d| d.as_object().cloned());
+    if parsed.is_none() && old.is_some() && key != "files" {
+        return Err(Error::Project(format!("{STAMP_FILE} isn't a record of the derived files' sources: the map script's record isn't written (W3Proj Studio's save or `w3proj rebuild` writes it anew)")));
+    }
+    let mut doc = parsed.unwrap_or_default();
+    doc.insert("format".into(), FORMAT.into());
+    match sources {
+        Some(s) => {
+            let value = serde_json::to_value(s).map_err(|e| Error::Format(e.to_string()))?;
+            doc.insert(key.into(), if key == "files" { value } else { serde_json::json!({ "files": value }) });
+        }
+        None => {
+            doc.remove(key);
+        }
+    }
+    if doc.len() == 1 {
+        // Only the format is left: no record.
+        if old.is_some() {
+            fs::remove_file(&path)?;
+        }
+        return Ok(());
+    }
+    let mut text = serde_json::to_string_pretty(&serde_json::Value::Object(doc)).map_err(|e| Error::Format(e.to_string()))?;
+    text.push('\n');
+    if old.as_deref() == Some(text.as_bytes()) {
         return Ok(());
     }
     write_atomic(&path, text.as_bytes())
@@ -145,20 +185,26 @@ impl Freshness {
 }
 
 pub fn check(project: &Path) -> Result<Freshness> {
+    check_group(project, false, &sources)
+}
+
+/// `check` of one group of the record: pathing, shadows and the minimap, or (`script`) the map script.
+fn check_group(project: &Path, script: bool, now: &dyn Fn(&Path) -> Result<Sources>) -> Result<Freshness> {
     let path = project.join(STAMP_FILE);
     let bytes = match fs::read(&path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Freshness::Unknown),
         Err(e) => return Ok(Freshness::Unreadable(format!("{STAMP_FILE} is there but can't be read ({e})"))),
     };
-    let recorded = match parse(&bytes) {
-        Some(r) => r,
+    let recorded = match parse(&bytes, script) {
+        Some(Some(r)) => r,
+        Some(None) => return Ok(Freshness::Unknown),
         None => return Ok(Freshness::Unreadable(format!("{STAMP_FILE} isn't a record of the derived files' sources"))),
     };
     if let Some(n) = recorded.get(CLOSED_KEY) {
         return Ok(Freshness::Partial(n.parse().unwrap_or(1)));
     }
-    let now = sources(project)?;
+    let now = now(project)?;
     let lower = |m: &Sources| m.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect::<BTreeMap<_, _>>();
     let (was, is) = (lower(&recorded), lower(&now));
     let mut changed: Vec<String> = is
@@ -172,16 +218,155 @@ pub fn check(project: &Path) -> Result<Freshness> {
     Ok(if changed.is_empty() { Freshness::Fresh } else { Freshness::Stale(changed) })
 }
 
-fn parse(bytes: &[u8]) -> Option<Sources> {
+/// A group of the record: None when the record isn't one (another format, a group that isn't a list of fingerprints),
+/// Some(None) when it hasn't the group.
+fn parse(bytes: &[u8], script: bool) -> Option<Option<Sources>> {
     let doc: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     if doc.get("format")?.as_str()? != FORMAT {
         return None;
     }
-    doc.get("files")?
-        .as_object()?
-        .iter()
-        .map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
-        .collect()
+    let group = if script {
+        match doc.get("script") {
+            None => return Some(None),
+            Some(s) => s.get("files")?,
+        }
+    } else {
+        match doc.get("files") {
+            None => return Some(None),
+            Some(f) => f,
+        }
+    };
+    group.as_object()?.iter().map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect::<Option<Sources>>().map(Some)
+}
+
+// ---- the map script (`crate::trigger_layout` "script": "generated") ----
+//
+// A generated script isn't tracked in git: it lives in the store `.w3proj/derived/` (war3map.j or war3map.lua), and the
+// record's `script` group says what it was made from (`script_sources`). Studio's generator writes it (it needs the
+// game's data); a pack outside the app takes it only when the record says it follows its sources.
+
+/// The map script's names (`.w3proj/derived/` or `map/`).
+pub const SCRIPT_FILES: [&str; 2] = ["war3map.j", "war3map.lua"];
+
+/// The record of the script Studio wrote last (app/src/lib/script/guard.ts SCRIPT_STAMP): its hash (`script_hash`).
+pub const SCRIPT_STAMP: &str = ".w3proj/generated-script";
+
+/// guard.ts scriptHash: FNV-1a over the text's UTF-16 code units, as 8 hex digits.
+pub fn script_hash(text: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for unit in text.encode_utf16() {
+        h = (h ^ u32::from(unit)).wrapping_mul(0x0100_0193);
+    }
+    format!("{h:08x}")
+}
+
+/// The hash `SCRIPT_STAMP` holds; None when it isn't there or can't be read (nothing then is taken for Studio's).
+pub fn script_stamp(project: &Path) -> Option<String> {
+    fs::read(project.join(SCRIPT_STAMP)).ok().map(|b| String::from_utf8_lossy(&b).trim().to_string())
+}
+
+/// The map script files in the project's store: name → bytes. One that is there and can't be read is an error.
+pub fn read_script_store(project: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let dir = store_dir(project);
+    let mut out = BTreeMap::new();
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(Error::Project(format!("{} can't be read: {e}", STORE_DIR.join("/")))),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !SCRIPT_FILES.iter().any(|s| s.eq_ignore_ascii_case(&name)) || !entry.file_type()?.is_file() {
+            continue;
+        }
+        let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{}/{name} can't be read: {e}", STORE_DIR.join("/"))))?;
+        out.insert(name, bytes);
+    }
+    Ok(out)
+}
+
+/// Makes the store hold `script` (name, bytes) as the map script and no other; None removes the one there.
+pub fn sync_script_store(project: &Path, script: Option<(&str, &[u8])>) -> Result<()> {
+    let dir = store_dir(project);
+    for (name, _) in read_script_store(project)? {
+        if script.is_none_or(|(n, _)| n != name) {
+            fs::remove_file(dir.join(&name))?;
+        }
+    }
+    if let Some((name, bytes)) = script {
+        fs::create_dir_all(&dir)?;
+        crate::project::write_if_changed(&dir.join(name), bytes)?;
+    }
+    let _ = fs::remove_dir(&dir);
+    Ok(())
+}
+
+/// Whether a file name under `map/` is one the map script is made from (guard.ts SCRIPT_INPUTS: the map's info, object
+/// data, placed objects, regions, cameras, sounds, strings, raw or as JSON; any case).
+fn is_script_input(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    let l = l.strip_suffix(".json").unwrap_or(&l);
+    const EXT: [&str; 14] = ["wtg", "wct", "wts", "w3i", "w3r", "w3c", "w3s", "w3l", "doo", "w3e", "w3u", "w3t", "w3a", "w3b"];
+    match l.split_once('.') {
+        Some(("war3map", ext)) => EXT.contains(&ext),
+        Some(("war3mapunits", "doo")) => true,
+        Some(("war3mapskin", ext)) => ["w3u", "w3a", "w3b"].contains(&ext),
+        _ => false,
+    }
+}
+
+/// The map script's sources as they are now: `SCRIPT_INPUTS` under `map/` and every file under `map/triggers/` and
+/// `map/terrain/` (name under `map/` → fingerprint). One that is there but can't be read is an error.
+pub fn script_sources(project: &Path) -> Result<Sources> {
+    let map = project.join(MAP_DIR);
+    let mut out = Sources::new();
+    let entries = match fs::read_dir(&map) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(Error::Project(format!("{} can't be read: {e}", map.display()))),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_script_input(&name) || !entry.file_type()?.is_file() {
+            continue;
+        }
+        let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{MAP_DIR}/{name} can't be read: {e}")))?;
+        out.insert(name, fingerprint(&bytes));
+    }
+    for dir in [crate::trigger_layout::DIR, crate::terrain_layout::DIR] {
+        for rel in crate::project::walk(&map.join(dir))? {
+            let path = format!("{dir}/{rel}");
+            let bytes = fs::read(crate::paths::join_rel(&map, &path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+            out.insert(path, fingerprint(&bytes));
+        }
+    }
+    Ok(out)
+}
+
+/// Records that the generated map script in the store follows `sources` (`script_sources`, taken before it was made);
+/// the record's other group stays.
+pub fn record_script(project: &Path, sources: &Sources) -> Result<()> {
+    write_group(project, "script", Some(sources))
+}
+
+/// Records the script's sources as they are now.
+pub fn record_script_now(project: &Path) -> Result<()> {
+    record_script(project, &script_sources(project)?)
+}
+
+/// Removes the script's group from the record (the script is a tracked file again).
+pub fn clear_script_record(project: &Path) -> Result<()> {
+    match fs::read(project.join(STAMP_FILE)) {
+        Ok(b) if parse(&b, true).is_some_and(|g| g.is_some()) => write_group(project, "script", None),
+        _ => Ok(()),
+    }
+}
+
+/// Whether the generated map script follows its sources (`check`, for the record's `script` group).
+pub fn check_script(project: &Path) -> Result<Freshness> {
+    check_group(project, true, &script_sources)
 }
 
 // ---- where the derived files are: map/ (flat layout) or the local store (split layout) ----
@@ -435,6 +620,47 @@ mod tests {
             fs::write(dir.join(STAMP_FILE), bad).unwrap();
             assert!(matches!(check(&dir).unwrap(), Freshness::Unreadable(_)), "{bad:?}");
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The hash is guard.ts scriptHash's (the same values there: guard.test.ts), over UTF-16 code units.
+    #[test]
+    fn the_script_hash_is_the_apps() {
+        assert_eq!(script_hash(""), "811c9dc5");
+        assert_eq!(script_hash("abc"), "1a47e90b");
+        assert_eq!(script_hash("\u{e4}\u{20ac}\u{1F600}"), "3702d130");
+    }
+
+    /// The map script's group and the terrain's share the record: writing one keeps the other, each is checked on its
+    /// own, and a record that can't be read isn't written over for the script (its terrain group would pass then).
+    #[test]
+    fn the_scripts_group_and_the_terrains_are_kept_apart() {
+        let dir = project("script");
+        fs::create_dir_all(dir.join("map/triggers")).unwrap();
+        fs::write(dir.join("map/triggers/triggers.json"), "{}").unwrap();
+        fs::write(dir.join("map/war3map.w3i.json"), "{}").unwrap();
+        assert_eq!(check_script(&dir).unwrap(), Freshness::Unknown);
+        record_script_now(&dir).unwrap();
+        assert_eq!(check_script(&dir).unwrap(), Freshness::Fresh);
+        assert_eq!(check(&dir).unwrap(), Freshness::Unknown, "the script's record says nothing of the terrain's files");
+        record_now(&dir).unwrap();
+        assert_eq!((check(&dir).unwrap(), check_script(&dir).unwrap()), (Freshness::Fresh, Freshness::Fresh));
+        // A trigger file: only the script is stale; the terrain's doodads: both.
+        fs::write(dir.join("map/triggers/triggers.json"), "{ }").unwrap();
+        assert_eq!((check(&dir).unwrap(), check_script(&dir).unwrap()), (Freshness::Fresh, Freshness::Stale(vec!["triggers/triggers.json".into()])));
+        record_script_now(&dir).unwrap();
+        fs::write(dir.join("map/war3map.doo.json"), "{\"doodads\":[]}").unwrap();
+        assert_eq!(check(&dir).unwrap(), Freshness::Stale(vec!["war3map.doo.json".into()]));
+        assert_eq!(check_script(&dir).unwrap(), Freshness::Stale(vec!["war3map.doo.json".into()]));
+        // Cleared: the terrain's group stays.
+        clear_script_record(&dir).unwrap();
+        assert_eq!(check_script(&dir).unwrap(), Freshness::Unknown);
+        assert_eq!(check(&dir).unwrap(), Freshness::Stale(vec!["war3map.doo.json".into()]));
+        // An unreadable record: an error for the script, never written over.
+        fs::write(dir.join(STAMP_FILE), "{ not json").unwrap();
+        assert!(record_script_now(&dir).is_err());
+        assert_eq!(fs::read(dir.join(STAMP_FILE)).unwrap(), b"{ not json");
+        assert!(matches!(check_script(&dir).unwrap(), Freshness::Unreadable(_)));
         let _ = fs::remove_dir_all(&dir);
     }
 

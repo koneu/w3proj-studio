@@ -1,0 +1,25 @@
+{
+  "type": 8,
+  "id": 50331648,
+  "name": "Melee Initialization",
+  "description": "About Melee Initialization.\nSecond line.",
+  "isComment": 0,
+  "enabled": true,
+  "initiallyOff": false,
+  "runOnInit": false,
+  "ecas": [
+    {"kind":0,"name":"MapFooStart","enabled":true,"params":[],"children":[]},
+    {"kind":1,"name":"IsFooReady","enabled":true,"params":[{"type":0,"value":"1"},{"type":2,"value":"GetFooValue","call":{"kind":3,"name":"GetFooValue","hasParams":true,"params":[{"type":0,"value":"2"}],"trailer":0}}],"children":[]},
+    {
+      "kind": 2,
+      "name": "IfThenElseMultiple",
+      "enabled": true,
+      "params": [],
+      "children": [
+        {"kind":1,"group":0,"name":"IsFooReady","enabled":true,"params":[{"type":0,"value":"1"},{"type":0,"value":"3"}],"children":[]},
+        {"kind":2,"group":1,"name":"LogFoo","enabled":true,"params":[{"type":3,"value":"\"then\""}],"children":[]}
+      ]
+    },
+    {"kind":2,"name":"DoFooThing","enabled":true,"params":[{"type":3,"value":"\"x\""},{"type":0,"value":"1.5"}],"children":[]}
+  ]
+}

@@ -1,5 +1,7 @@
-//! `war3map.wct` (custom script texts) as one text file: the map's custom script header and
-//! each trigger's text, separated by marker lines, so git diffs show the code itself.
+//! `war3map.wct` (custom script texts): the map's custom script header and each trigger's text,
+//! `parse`d and `write`n for the folders of `map/triggers/` (`crate::trigger_layout`, a file per
+//! text). The one-file text form below (`war3map.wct.txt`) is the layout before them, read only to
+//! pack projects that still have it (`codec::CustomTextCodec`):
 //!
 //! ```text
 //! //== war3map.wct: version 1, reforged, comment "" ==
@@ -11,22 +13,28 @@
 //! ```
 //!
 //! Lines end with the texts' own line break (CRLF when any text uses it). A text whose
-//! stored length is 0 is "(no text)"; an empty text is stored as a lone zero byte. Layouts:
+//! stored length is 0 is "(no text)"; an empty text is stored as a lone zero byte. A text is
+//! taken by its stored length, so zero bytes inside it (padding, as the Frostwolf Clan map has)
+//! stay; only the last byte must be the terminating zero. Layouts:
 //! Reforged: marker, version, comment, header, texts until the end (no count). Classic:
-//! version (0/1), [comment, header,] count, texts. The trigger names come from war3map.wtg
-//! (`with_names`, when it could be read); they are comments, ignored when packing.
+//! version (0/1), [comment, header,] count, texts. Trigger names after a section's number are
+//! comments, ignored when packing.
 
 use crate::{Error, Result};
 
 const MARKER: u32 = 0x8000_0004;
 
-struct Wct {
-    reforged: bool,
-    version: u32,
-    comment: String,
-    /// Absent in classic version 0.
-    header: Option<Option<String>>,
-    texts: Vec<Option<String>>,
+/// A decoded `war3map.wct`. Strings are `crate::lossless` text: `lossless::encode` gives the
+/// stored bytes back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wct {
+    pub reforged: bool,
+    pub version: u32,
+    pub comment: String,
+    /// Absent in classic version 0; `Some(None)`: the slot is there, with no text.
+    pub header: Option<Option<String>>,
+    /// One per trigger with a text slot (types 8 and 32 in war3map.wtg's order); `None`: no text.
+    pub texts: Vec<Option<String>>,
 }
 
 fn err(m: impl Into<String>) -> Error {
@@ -50,15 +58,16 @@ impl<'a> Reader<'a> {
         self.o += n + 1;
         Ok(crate::lossless::decode(&rest[..n]))
     }
-    /// Length-prefixed text; the length counts the terminating zero, which must be there.
+    /// Length-prefixed text; the length counts the terminating zero, which must be there. Zero
+    /// bytes before it belong to the text.
     fn text(&mut self) -> Result<Option<String>> {
         let n = self.u32()? as usize;
         if n == 0 {
             return Ok(None);
         }
-        let s = self.b.get(self.o..self.o + n).ok_or_else(|| err("truncated text"))?;
+        let s = self.b.get(self.o..self.o.saturating_add(n)).ok_or_else(|| err("truncated text"))?;
         self.o += n;
-        if s[n - 1] != 0 || s[..n - 1].contains(&0) {
+        if s[n - 1] != 0 {
             return Err(err("text without its terminating zero"));
         }
         Ok(Some(crate::lossless::decode(&s[..n - 1])))
@@ -68,7 +77,8 @@ impl<'a> Reader<'a> {
     }
 }
 
-fn parse(b: &[u8]) -> Result<Wct> {
+/// Binary → structure.
+pub fn parse(b: &[u8]) -> Result<Wct> {
     let mut r = Reader { b, o: 0 };
     let first = r.u32()?;
     let mut w = Wct { reforged: first == MARKER, version: first, comment: String::new(), header: None, texts: Vec::new() };
@@ -98,7 +108,8 @@ fn parse(b: &[u8]) -> Result<Wct> {
     Ok(w)
 }
 
-fn write(w: &Wct) -> Vec<u8> {
+/// Structure → binary.
+pub fn write(w: &Wct) -> Vec<u8> {
     let mut out = Vec::new();
     let text = |out: &mut Vec<u8>, t: &Option<String>| match t {
         None => out.extend_from_slice(&0u32.to_le_bytes()),
@@ -134,12 +145,8 @@ pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
     render(&parse(bytes)?, &[])
 }
 
-/// The text form with each trigger section named (`names`: the wtg's triggers with a text slot,
-/// in order; line breaks in names become spaces).
-pub fn with_names(text: &[u8], names: &[String]) -> Result<Vec<u8>> {
-    render(&parse_text(text)?, names)
-}
-
+/// The text form; `names` (the wtg's triggers with a text slot, in order; line breaks become spaces)
+/// after each section's number, as older unpacks wrote it.
 fn render(w: &Wct, names: &[String]) -> Result<Vec<u8>> {
     let mut all = w.header.iter().flatten().chain(w.texts.iter().flatten());
     let eol = if all.any(|t| t.contains("\r\n")) { "\r\n" } else { "\n" };
@@ -296,7 +303,7 @@ mod tests {
     #[test]
     fn names_are_comments() {
         let b = bin(true, 1, Some(Some("h")), &[Some("a"), None]);
-        let named = with_names(&to_text(&b).unwrap(), &["Melee Init".into(), "Two\nLines".into()]).unwrap();
+        let named = render(&parse(&b).unwrap(), &["Melee Init".into(), "Two\nLines".into()]).unwrap();
         let t = String::from_utf8(named.clone()).unwrap();
         assert!(t.contains("//== trigger 0: Melee Init ==\n") && t.contains("//== trigger 1 (no text): Two Lines ==\n"), "{t}");
         assert_eq!(from_text(&named).unwrap(), b);
@@ -307,6 +314,27 @@ mod tests {
         // A text containing a marker line can't be told apart: the codec check then keeps the file raw.
         let b = bin(true, 1, Some(Some("")), &[Some("a\n//== trigger 1 ==\nb")]);
         assert!(from_text(&to_text(&b).unwrap()).map_or(true, |x| x != b));
+    }
+
+    /// Frostwolf Clan's texts end in padding zeros before the terminating one: the stored length
+    /// says where a text ends, so they belong to it and come back.
+    #[test]
+    fn zero_bytes_inside_a_text_are_kept() {
+        let mut b = Vec::new();
+        b.extend_from_slice(&0x8000_0004u32.to_le_bytes());
+        b.extend_from_slice(&1u32.to_le_bytes());
+        b.push(0); // comment
+        b.extend_from_slice(&0u32.to_le_bytes()); // header: no text
+        let text = b"endlibrary\0\0\0";
+        b.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        b.extend_from_slice(text);
+        let w = parse(&b).unwrap();
+        assert_eq!(w.texts, vec![Some("endlibrary\0\0".to_string())]);
+        assert_eq!(write(&w), b);
+        // Control: the terminating zero itself is still required.
+        let mut cut = b.clone();
+        *cut.last_mut().unwrap() = b'x';
+        assert!(parse(&cut).is_err());
     }
 
     #[test]

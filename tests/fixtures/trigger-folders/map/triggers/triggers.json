@@ -1,0 +1,24 @@
+{
+  "format": "w3proj.triggers/1",
+  "reforged": true,
+  "version": 7,
+  "unknown": 2,
+  "wctVersion": 1,
+  "wctComment": "",
+  "root": {"id":0,"name":"Sample.w3x","isComment":0,"expanded":1},
+  "script": "kept",
+  "counts": [
+    {"count":1,"deleted":[]},
+    {"count":1,"deleted":[]},
+    {"count":3,"deleted":[2]},
+    {"count":17,"deleted":[3,16]},
+    {"count":1,"deleted":[]},
+    {"count":2,"deleted":[]},
+    {"count":2,"deleted":[]},
+    {"count":0,"deleted":[]}
+  ],
+  "variableOrder": [
+    "Counter",
+    "BossHP"
+  ]
+}
