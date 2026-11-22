@@ -5835,10 +5835,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           minimapPanel.setPicture(rgba, MINIMAP_SIZE);
           showMinimapOutline();
         };
+        /** The panel's refresh that is due (a timer waiting) or running; settleView waits for it, so the view isn't at rest with a black panel. */
+        let minimapDue = false, minimapRunning: Promise<void> = Promise.resolve();
+        const runMinimapRefresh = () => {
+          minimapDue = false;
+          clearTimeout(minimapTimer);
+          const run = refreshMinimapPanel().catch((e) => void w3.window.showError(`The minimap panel couldn't be drawn: ${(e as Error).message ?? e}`));
+          minimapRunning = run;
+          return run;
+        };
         const refreshMinimapPanelSoon = (ms = 1200) => {
           if (!minimapPanel.shown) return;
           clearTimeout(minimapTimer);
-          minimapTimer = setTimeout(() => void refreshMinimapPanel().catch((e) => w3.window.showError(`The minimap panel couldn't be drawn: ${(e as Error).message ?? e}`)), ms);
+          minimapDue = true;
+          minimapTimer = setTimeout(() => void runMinimapRefresh(), ms);
+        };
+        const settleMinimapPanel = async () => {
+          if (minimapDue && minimapPanel.shown && !disposed) await runMinimapRefresh();
+          await minimapRunning;
         };
         minimapPanelSoon = refreshMinimapPanelSoon;
         /** The view's outline on the panel, after the camera moved (each frame drawn). */
@@ -6318,6 +6332,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await settleLayers();
           await loader.settled();
           await artSettled();
+          await settleMinimapPanel();
           // A frame, or a tenth of a second where the browser holds frames back.
           const frame = () => new Promise<void>((done) => {
             const timer = setTimeout(done, 100);

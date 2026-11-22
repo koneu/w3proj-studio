@@ -245,7 +245,7 @@ pub fn view_of(path: &Path) -> CmdResult<Option<View>> {
 pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
     match view_of(path)? {
         Some(View::Flat(f)) => layout::read_flat(&f.map_dir, f.name).map_err(err),
-        Some(View::Derived(real) | View::Script(real)) => std::fs::read(&real).map_err(|e| format!("{}: {e}", path.display())),
+        Some(View::Derived(real) | View::Script(real)) => std::fs::read(&real).map_err(|e| stored_err(path, &real, &e)),
         Some(View::Pathing(project)) => read_pathing(&project),
         None => std::fs::read(path).map_err(err),
     }
@@ -299,7 +299,7 @@ pub fn exists_view(path: &Path) -> CmdResult<Option<bool>> {
 pub fn delete_view(path: &Path) -> CmdResult<bool> {
     match view_of(path)? {
         Some(View::Flat(_)) => refuse_moving(path).map(|_| true),
-        Some(View::Derived(real) | View::Script(real)) => std::fs::remove_file(&real).map(|_| true).map_err(|e| format!("{}: {e}", path.display())),
+        Some(View::Derived(real) | View::Script(real)) => std::fs::remove_file(&real).map(|_| true).map_err(|e| stored_err(path, &real, &e)),
         Some(View::Pathing(project)) => {
             if layout::delete_pathing(&project).map_err(err)?.is_empty() {
                 // Only the file itself (in the way): it goes as any file.
@@ -392,6 +392,13 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
         }
     }
     files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+}
+
+/// The error of a file kept elsewhere (a derived file or generated script in the store): names the file looked at, not
+/// only the `map/` name the caller asked for (which may well be on disk, where this isn't looked for).
+fn stored_err(path: &Path, real: &Path, e: &std::io::Error) -> String {
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    format!("{}: {e} ({name} is read from the project's store .w3proj/derived/, not from map/)", real.display())
 }
 
 /// Adds the generated map script of every `map/` folder below `root` whose script is generated (`script_of`) to a
@@ -710,6 +717,29 @@ mod tests {
         assert!(fs::read_to_string(flat.join("map/war3map.w3e.txt")).unwrap().contains("\ncorners 5 3\n"));
         layout::split_project(&split, &layout::grid_2x2(5, 3)).unwrap();
         (flat, split)
+    }
+
+    /// A generated script's file that isn't in the store (map/triggers/triggers.json says generated, the script is still
+    /// in map/): the read's error names the store file looked at, and the file isn't taken from map/.
+    #[test]
+    fn a_generated_script_missing_from_the_store_names_the_store_file() {
+        let dir = std::env::temp_dir().join(format!("w3proj-backend-flat-genscript-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        copy_dir(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map"), &dir);
+        let triggers = dir.join("map/triggers/triggers.json");
+        let text = fs::read_to_string(&triggers).unwrap();
+        assert!(text.contains("\"script\": \"kept\""));
+        fs::write(&triggers, text.replace("\"script\": \"kept\"", "\"script\": \"generated\"")).unwrap();
+        fs::write(dir.join("map/war3map.lua"), "-- by hand").unwrap();
+        let e = read_bytes(&dir.join("map/war3map.lua")).unwrap_err();
+        let store = dir.join(".w3proj/derived/war3map.lua");
+        assert!(e.starts_with(&format!("{}:", store.display())), "{e}");
+        assert!(e.contains(".w3proj/derived/"), "{e}");
+        // Control: with the file in the store it reads that one.
+        fs::create_dir_all(store.parent().unwrap()).unwrap();
+        fs::write(&store, "-- stored").unwrap();
+        assert_eq!(read_bytes(&dir.join("map/war3map.lua")).unwrap(), b"-- stored");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The file commands on a split project: the flat names read as the flat project's files, are listed and stat

@@ -334,6 +334,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The campaign object shown (read-only); the map's selection is empty meanwhile. */
         let campaignShown: Obj | null = null;
+        /** As the World Editor: a campaign object edited in a chapter is saved as a copy in the chapter's own object
+         *  data (same id); the campaign's file stays as it is, and in this map's view the copy replaces it. The
+         *  campaign's text references are written out as text, the chapter has no such strings. */
+        const copyCampaignObject = (o: Obj) => {
+          if (doc.readOnly) return;
+          const copy = structuredClone(o);
+          for (const { mods } of modLists(copy)) {
+            for (const m of mods) if (m.type === "string") m.value = campaignStr(m.value) ?? m.value;
+          }
+          const mine = o.id ? file.custom.find((c) => c.id === o.id) : file.original.find((c) => c.base === o.base);
+          if (!mine) (o.id ? file.custom : file.original).push(copy);
+          select(mine ?? copy);
+          markDirty();
+          renderDetail();
+        };
         /** The object data as it is here now, for other modules (ObjectsService.liveObjects). */
         const liveNow = (): LiveObjectData => ({
           custom: file.custom, original: file.original,
@@ -508,18 +523,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onclick: () => { const going = new Set(unchanged); cleanUpStandard((o) => going.has(o)); },
             }, `Clean up (${unchanged.length})`)
             : undefined;
-          visible = [...custom, ...standard];
-          const out = [head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o)))];
-          // A chapter map's campaign's objects: shown to look at, edited in the campaign. Between the map's own custom
-          // objects and the standard ones, as the World Editor's chapter Object Editor puts its "Campaign Units" between
-          // "Standard Units" and "Custom Units" (we-drive, branch we-compare-2).
+          visible = [...standard, ...custom];
+          const out: HTMLElement[] = [head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => rowOf(o, own(o), false, selection.has(o)))];
+          // A chapter map's campaign's objects: shown to look at, edited in the campaign (or as a copy in this map).
+          // After the standard ones and before the map's own custom ones, as the World Editor's chapter Object Editor
+          // puts its "Campaign Units" after the standard races and before "Custom Units".
           if (campaignError) out.push(head("campaign-error", "Campaign: its object data can't be read", { title: campaignError, cls: ".obj-campaign-error" }));
           else if (campaign) {
             const theirs = named((o) => labelOf(o, campaignName(o), campaignStr)), items = listed(campaignListed(), theirs, named(campaignName));
             out.push(head("campaign", `Campaign (${items.length})`, { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` }),
               ...items.map((o) => rowOf(o, theirs(o), true, campaignShown === o)));
           }
-          out.push(head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => rowOf(o, own(o), false, selection.has(o))));
+          out.push(head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o))));
           putRows(out);
         };
 
@@ -1101,6 +1116,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.obj-detail-header", {},
               h("h2", {}, campaignName(o) || "(unnamed)"),
               h("code", {}, what),
+              h("button.obj-copy-to-map", {
+                title: "Makes a copy of this object in this map's own object data (the campaign's stays as it is) and edits that",
+                disabled: doc.readOnly,
+                onclick: () => copyCampaignObject(o),
+              }, "Edit a Copy in This Map"),
               h("button.obj-edit-in-campaign", {
                 title: "Opens the campaign project (this map closes) and its Object Editor at this object",
                 onclick: () => void w3.commands.execute("w3.objectEditor.openInCampaign", kind, o.id ?? o.base).catch(failed),
