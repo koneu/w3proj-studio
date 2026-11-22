@@ -23,7 +23,7 @@ import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
 import { MCP_EDITS_SERVICE } from "../extensions/services";
-import { checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, resizeTerrain, type PathingOverrides } from "../lib/terrain/resize";
 
@@ -604,6 +604,46 @@ test("New, Resize, Rename and Join Subterrains: the map stays the same, objects 
   assert.equal(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"south_west\", \"north\"]\n}\n");
   await openSubterrains(w3, { all: true });
   await same("rename with some closed");
+});
+
+test("the MCP tool change_subterrains: the commands' changes and refusals, without questions", async () => {
+  const { w3, root } = await bigSplit("tool");
+  const whole = await loaded(w3);
+  const folders = () => readdirSync(join(root, "map", "terrain"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  const renamed = await changeSubterrainsTool(w3, { action: "rename", name: "a0", to: "south_west" });
+  assert.deepEqual(folders(), ["a1", "a2", "b0", "b1", "b2", "south_west"]);
+  assert.ok(renamed.written.some((p) => p.startsWith("map/terrain/south_west/")) && renamed.removed.some((p) => p.startsWith("map/terrain/a0/")), JSON.stringify(renamed));
+  assert.deepEqual(renamed.subterrains.map((s) => s.name).sort(), ["a1", "a2", "b0", "b1", "b2", "south_west"]);
+  await changeSubterrainsTool(w3, { action: "join", names: ["a1", "a2"], to: "south_east" });
+  await changeSubterrainsTool(w3, { action: "resize", name: "b0", rect: "0,8,10,9" });
+  await changeSubterrainsTool(w3, { action: "new", name: "mid", rect: { x: 10, y: 8, w: 2, h: 9 } });
+  assert.deepEqual(folders(), ["b0", "b1", "b2", "mid", "south_east", "south_west"]);
+  assert.deepEqual(await loaded(w3), whole, "the map stayed the same");
+  // The commands' refusals, word for word; arguments a command would ask for are required; nothing written.
+  const before = snapshot(root);
+  const reason = (p: Promise<unknown>) => p.then(() => "done", (e: Error) => e.message);
+  for (const [tool, command] of [
+    [{ action: "resize", name: "b2", rect: "16,8,8,9" }, () => resizeSubterrain(w3, { name: "b2", rect: "16,8,8,9", quiet: true })],
+    [{ action: "rename", name: "b2", to: "MID" }, () => renameSubterrain(w3, { name: "b2", to: "MID", quiet: true })],
+    [{ action: "new", name: "hole", rect: "20,10,2,2" }, () => newSubterrain(w3, { name: "hole", rect: "20,10,2,2", quiet: true })],
+    [{ action: "join", names: ["south_west", "b2"], to: "x" }, () => joinSubterrains(w3, { names: ["south_west", "b2"], to: "x", quiet: true })],
+  ] as const) {
+    const byTool = await reason(changeSubterrainsTool(w3, tool)), byCommand = await reason(command());
+    assert.equal(byTool, byCommand, JSON.stringify(tool));
+    assert.match(byTool, /Nothing was changed\.$/, JSON.stringify(tool));
+  }
+  for (const [args, why] of [
+    [{ action: "rename", name: "b2" }, /rename needs to/],
+    [{ action: "new", name: "x" }, /new needs rect/],
+    [{ action: "join", names: ["b2"], to: "x" }, /join needs names/],
+    [{ action: "split" }, /action must be/],
+  ] as const) await assert.rejects(changeSubterrainsTool(w3, args), why);
+  // Refused while something is unsaved, as the commands.
+  const unsaved = w3.editors.unsavedPaths;
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = () => ["map/war3map.w3i.json"];
+  await assert.rejects(changeSubterrainsTool(w3, { action: "rename", name: "b2", to: "north" }), /save or discard the changes in map\/war3map.w3i.json first/);
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = unsaved;
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */
