@@ -6499,7 +6499,10 @@ async function subterrains(page, found) {
     if (flat !== assembled) fail("the merged map/war3map.w3e.txt isn't the terrain the subterrains held");
     for (const f of ["war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"]) if (!existsSync(join(map, f))) fail(`the merge wrote no map/${f}`);
     for (const f of ["war3map.wpm", "war3map.shd", "war3mapMap.blp"]) if (!existsSync(join(map, f))) fail(`the merge didn't bring map/${f} back from .w3proj/derived/`);
-    if (existsSync(join(root, ".w3proj", "derived"))) fail(".w3proj/derived/ is left after the merge");
+    // Only the generated map script stays in the store (a new map's: it isn't the terrain's, and a merge leaves it).
+    const leftInStore = existsSync(join(root, ".w3proj", "derived")) ? readdirSync(join(root, ".w3proj", "derived")).filter((n) => !/^war3map\.(j|lua)$/i.test(n)) : [];
+    if (leftInStore.length) fail(`.w3proj/derived/ still has ${leftInStore.join(", ")} after the merge`);
+    if (!existsSync(scriptOnDisk(root))) fail("the merge took the generated map script out of .w3proj/derived/ (control)");
     if (!existsSync(join(root, ".w3proj", "pathing.json"))) fail("the merge didn't write the painted overrides back into .w3proj/pathing.json");
     await editorUp().catch(() => fail("the terrain editor isn't open after the merge"));
   } finally {

@@ -67,10 +67,16 @@ export function changedFiles(before: Files, after: Files): { before: Files; afte
   return { before: b, after: a };
 }
 
-/** The paths of `files` whose bytes on disk differ from the ones given. */
+/** Files nobody edits that follow the others on their own: the record of what the derived files and a generated map
+ *  script were made from (w3proj::derived), rewritten whenever they are made again, a while after the resize's own
+ *  writes. Their change since the resize is no change of the person's to ask about; an undo puts them back with the
+ *  files they describe. */
+const BOOKKEEPING = new Set([".w3proj/derived-from.json"]);
+
+/** The paths of `files` whose bytes on disk differ from the ones given (`BOOKKEEPING` aside). */
 export async function drifted(io: FileIO, files: Files): Promise<string[]> {
   const out: string[] = [];
-  for (const [p, bytes] of files) if (!sameBytes(await io.read(p), bytes)) out.push(p);
+  for (const [p, bytes] of files) if (!BOOKKEEPING.has(p.toLowerCase()) && !sameBytes(await io.read(p), bytes)) out.push(p);
   return out;
 }
 

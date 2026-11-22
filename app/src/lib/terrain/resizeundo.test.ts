@@ -85,6 +85,26 @@ test("files changed since the resize are asked about; no leaves everything as it
   assert.equal(text(m.files.get("doo")), "2,2");
 });
 
+test("the derived files' record, rewritten after the resize when a generated script is made again, isn't asked about; undo puts it back", async () => {
+  const m = memory({ w3e: [1], ".w3proj/derived-from.json": [1] });
+  const before: Files = new Map([["w3e", bytes(1)], [".w3proj/derived-from.json", bytes(1)]]);
+  m.files.set("w3e", bytes(2)); m.files.set(".w3proj/derived-from.json", bytes(2));
+  const kept = changedFiles(before, new Map([["w3e", bytes(2)], [".w3proj/derived-from.json", bytes(2)]]));
+  const history = new ResizeHistory();
+  history.record({ root: "P", editor: "w3e", title: "Resize map", before: kept.before, after: kept.after });
+  // The script made again a moment later: the record says so.
+  m.files.set(".w3proj/derived-from.json", bytes(3));
+  assert.ok(await undo(history, m.io, "P", never), "no question about the record");
+  assert.equal(text(m.files.get(".w3proj/derived-from.json")), "1", "the record as before the resize, with the files it describes");
+  assert.equal(text(m.files.get("w3e")), "1");
+  // Control: a file of the map changed since is still asked about.
+  assert.ok(await redo(history, m.io, "P", never));
+  m.files.set("w3e", bytes(9));
+  let asked: string[] = [];
+  assert.equal(await undo(history, m.io, "P", async (c) => { asked = c; return false; }), null);
+  assert.deepEqual(asked, ["w3e"]);
+});
+
 test("a write that fails halfway puts back what was there, and the step stays", async () => {
   const { m, history } = resized();
   const io: FileIO = { ...m.io, write: async (p, b) => { if (p === "doo" && b.length === 2) throw new Error("disk full"); m.files.set(p, b); } };
