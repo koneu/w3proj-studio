@@ -332,8 +332,38 @@ pub fn fix_plan(project: &Path, mode: Option<FixMode>) -> Result<FixPlan> {
     }
     let offset = split.as_ref().map(|l| l.offset()).unwrap_or([0.0, 0.0]);
     let mut subs: Vec<Subterrain> = split.as_ref().map(|l| l.subterrains.clone()).unwrap_or_default();
+    let changed = fix_flats(&flats, mode, split.is_some(), &mut subs, offset, &mut plan)?;
+    if changed.is_empty() {
+        return Ok(plan);
+    }
+    match split {
+        None => {
+            for (kind, bytes) in changed {
+                plan.files.insert(format!("{}/{}", crate::project::MAP_DIR, kind.flat()), bytes);
+            }
+        }
+        Some(mut layout) => {
+            let (_, sliced) = objects::slice(&changed, &subs, offset)?;
+            let disk = |rel: &str| std::fs::read(crate::paths::join_rel(&map_dir, rel)).ok();
+            for (rel, bytes) in sliced {
+                if disk(&rel).as_deref() != Some(bytes.as_slice()) {
+                    plan.files.insert(format!("{}/{rel}", crate::project::MAP_DIR), bytes);
+                }
+            }
+            if subs != layout.subterrains {
+                layout.subterrains = subs;
+                plan.files.insert(format!("{}/{}", crate::project::MAP_DIR, tl::LAYOUT_FILE), layout.to_json()?);
+            }
+        }
+    }
+    Ok(plan)
+}
+
+/// The groups of numbers found twice in `flats` and what `mode` does with them, added to `plan`; the changed flat files.
+/// `split`: a split project's (its subterrains `subs`, whose ranges a renumber may extend, on a canvas at `offset`).
+fn fix_flats(flats: &objects::Flats, mode: Option<FixMode>, split: bool, subs: &mut [Subterrain], offset: [f32; 2], plan: &mut FixPlan) -> Result<objects::Flats> {
     let mut changed: objects::Flats = BTreeMap::new();
-    for (&kind, bytes) in &flats {
+    for (&kind, bytes) in flats {
         let twins = objects::flat_twins(kind, bytes)?;
         if twins.is_empty() {
             continue;
@@ -344,10 +374,10 @@ pub fn fix_plan(project: &Path, mode: Option<FixMode>) -> Result<FixPlan> {
         for t in twins {
             let mut members = Vec::with_capacity(t.members.len());
             for (m, tw) in t.members.into_iter().enumerate() {
-                let sub = tw.x.zip(tw.y).map(|(x, y)| objects::owner(&subs, offset, x, y)).unwrap_or(0);
-                let file = match &split {
-                    Some(_) => format!("{}/{}", crate::project::MAP_DIR, subs[sub].object_path(kind)),
-                    None => format!("{}/{}", crate::project::MAP_DIR, kind.flat()),
+                let sub = tw.x.zip(tw.y).map(|(x, y)| objects::owner(subs, offset, x, y)).unwrap_or(0);
+                let file = match split {
+                    true => format!("{}/{}", crate::project::MAP_DIR, subs[sub].object_path(kind)),
+                    false => format!("{}/{}", crate::project::MAP_DIR, kind.flat()),
                 };
                 let (action, to) = match mode {
                     _ if m == 0 => ("keep", None),
@@ -355,7 +385,7 @@ pub fn fix_plan(project: &Path, mode: Option<FixMode>) -> Result<FixPlan> {
                     Some(FixMode::DeleteCopies) if tw.copy_of.is_some() => ("delete", None),
                     Some(FixMode::DeleteCopies) => ("stays", None),
                     Some(FixMode::Renumber) => {
-                        let n = if split.is_some() { next_in_subterrain(&mut subs, sub, &used)? } else { next_above(kind, &used)? };
+                        let n = if split { next_in_subterrain(subs, sub, &used)? } else { next_above(kind, &used)? };
                         used.insert(n);
                         ("renumber", Some(n))
                     }
@@ -384,30 +414,20 @@ pub fn fix_plan(project: &Path, mode: Option<FixMode>) -> Result<FixPlan> {
             changed.insert(kind, objects::flat_fixed(kind, bytes, &renumber, &delete)?);
         }
     }
-    if changed.is_empty() {
-        return Ok(plan);
+    Ok(changed)
+}
+
+/// Renumber (as `fix_plan` with `FixMode::Renumber` on a flat project) on flat object files in memory (name relative to
+/// `map/`, `Kind::flat`, → bytes; other names are left alone): what `w3proj verify` does to its copy of a map before
+/// splitting it. How many numbers it gave anew and in how many groups.
+pub fn renumber_flat_files(files: &mut BTreeMap<String, Vec<u8>>) -> Result<(usize, usize)> {
+    let flats: objects::Flats = objects::KINDS.into_iter().filter_map(|k| files.get(k.flat()).map(|b| (k, b.clone()))).collect();
+    let mut plan = FixPlan::default();
+    let changed = fix_flats(&flats, Some(FixMode::Renumber), false, &mut Vec::new(), [0.0, 0.0], &mut plan)?;
+    for (kind, bytes) in changed {
+        files.insert(kind.flat().to_string(), bytes);
     }
-    match split {
-        None => {
-            for (kind, bytes) in changed {
-                plan.files.insert(format!("{}/{}", crate::project::MAP_DIR, kind.flat()), bytes);
-            }
-        }
-        Some(mut layout) => {
-            let (_, sliced) = objects::slice(&changed, &subs, offset)?;
-            let disk = |rel: &str| std::fs::read(crate::paths::join_rel(&map_dir, rel)).ok();
-            for (rel, bytes) in sliced {
-                if disk(&rel).as_deref() != Some(bytes.as_slice()) {
-                    plan.files.insert(format!("{}/{rel}", crate::project::MAP_DIR), bytes);
-                }
-            }
-            if subs != layout.subterrains {
-                layout.subterrains = subs;
-                plan.files.insert(format!("{}/{}", crate::project::MAP_DIR, tl::LAYOUT_FILE), layout.to_json()?);
-            }
-        }
-    }
-    Ok(plan)
+    Ok((plan.renumbered, plan.groups.len()))
 }
 
 /// Writes a plan's files (`fix_plan`), relative to the project, as they are (a flat project's object files as JSON:

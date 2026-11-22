@@ -142,6 +142,14 @@ test("the Reforged art of the 14a/14c doodads, converted as Convert to Classic d
   }
 });
 
+/** Corpus models that are damaged in their source (the map as it was given), with the checker's error they must give. */
+const KNOWN_DAMAGED: { path: string; error: RegExp; why: string }[] = [
+  // 36864 bytes, exactly 9 × 4096: the file stops inside its BONE chunk (at 15507 the chunk says 22620 bytes, 21349 are
+  // left). The project's checkpoints (the only other copies, packed from it) hold the same 36864 bytes; no original
+  // archive of the map is in the corpus. Examined 2026-11-22.
+  { path: "build_2/wowr4.6/map/war3mapImported/GoblinFemale_Portrait.mdx", error: /chunk at 15507 runs past the end of the file/, why: "cut off at 36864 bytes (9 × 4096) inside its BONE chunk in the source project" },
+];
+
 test("the Classic models of real maps (MDX 800 files of smoketest_maps, drawn by the game) read without an error", (ctx) => {
   const where = mainCheckout();
   const corpus = process.env.W3PROJ_CORPUS ?? (where ? join(where.main, "smoketest_maps") : "");
@@ -157,6 +165,15 @@ test("the Classic models of real maps (MDX 800 files of smoketest_maps, drawn by
   const classic = files.map((p) => ({ p, bytes: new Uint8Array(readFileSync(p)) })).filter(({ bytes }) => bytes.length >= 16 && new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true) === 800);
   if (!classic.length) return skipOrFail(ctx, "no MDX 800 file in smoketest_maps");
   const check = (p: string, bytes: Uint8Array) => { try { return checkClassicModel(bytes).errors; } catch (e) { throw new Error(`${p}: the checker threw: ${e instanceof Error ? e.message : e}`); } };
-  const bad = classic.map(({ p, bytes }) => ({ p, errors: check(p, bytes) })).filter((x) => x.errors.length);
+  // Files of the corpus that are damaged where they came from, so the checker is right to refuse them. Each is still
+  // checked: it must fail with the error named here (anything else, or no error, fails the test), and it is printed.
+  const damaged = classic.filter(({ p }) => KNOWN_DAMAGED.some((d) => p.replace(/\\/g, "/").endsWith(d.path)));
+  for (const { p, bytes } of damaged) {
+    const d = KNOWN_DAMAGED.find((k) => p.replace(/\\/g, "/").endsWith(k.path))!;
+    const errors = check(p, bytes);
+    assert.ok(errors.some((e) => d.error.test(e)), `${p} is listed as damaged (${d.why}), but the checker says ${JSON.stringify(errors)}`);
+    ctx.diagnostic(`known damaged, not counted: ${p}: ${errors[0]} (${d.why})`);
+  }
+  const bad = classic.filter((m) => !damaged.includes(m)).map(({ p, bytes }) => ({ p, errors: check(p, bytes) })).filter((x) => x.errors.length);
   assert.deepEqual(bad.slice(0, 5).map((x) => `${x.p}: ${x.errors[0]}`), [], `${bad.length} of ${classic.length} real Classic models`);
 });

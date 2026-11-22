@@ -928,6 +928,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     }
                 }
                 if let Ok(r) = report {
+                    for note in &r.notes {
+                        println!("note {} — {note}", map.display());
+                    }
                     warned += usize::from(!r.unresolved_strings.is_empty() || !r.strings_unchecked.is_empty());
                     if !r.unresolved_strings.is_empty() {
                         println!(
