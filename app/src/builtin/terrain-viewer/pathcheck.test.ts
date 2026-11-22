@@ -31,7 +31,7 @@ test("a wall without a gap stops it, and says how far it got", () => {
   const r = checkPath(grid(rows), at(2, 4), at(18, 4), 16);
   assert.equal(r.walkable, false);
   assert.equal(r.problem, "There's no way through.");
-  assert.equal(r.stuckAt?.[0], at(9, 4)[0]);
+  assert.equal(r.stuckAt?.[0], 9 * 32, "a unit of 2 cells stands on cells 8 and 9: its middle is on their border");
   assert.equal(r.largestUnitThatFits, 0);
 });
 
@@ -57,12 +57,12 @@ test("a gap too small for a big unit says what would fit", () => {
 });
 
 test("the way is the shortest this unit fits, and the wider detour is mentioned", () => {
-  // Between the walls: a gap of 1 at the direct line, a gap of 7 far off.
+  // Between the walls: a gap of 2 at the direct line, a gap of 7 far off.
   const h = 41;
-  const rows = open(31, h).map((row, y) => (y === 8 || (y >= 30 && y <= 36) ? row : `${row.slice(0, 15)}#${row.slice(16)}`));
+  const rows = open(31, h).map((row, y) => (y === 8 || y === 9 || (y >= 30 && y <= 36) ? row : `${row.slice(0, 15)}#${row.slice(16)}`));
   const small = checkPath(grid(rows), at(4, 8), at(26, 8), 16);
   assert.equal(small.length, 22 * 32);
-  assert.equal(small.narrowest?.width, 32);
+  assert.equal(small.narrowest?.width, 64);
   assert.equal(small.widestWay, 7 * 32);
   const big = checkPath(grid(rows), at(4, 8), at(26, 8), 48);
   assert.ok((big.length ?? 0) > 40 * 32, "too big for the gap: the detour");
@@ -101,7 +101,7 @@ test("a fenced-in field is a pocket; open ground isn't", () => {
   });
   const got = findPockets(grid(rows), 16, null);
   assert.equal(got.pockets.length, 1);
-  assert.equal(got.pockets[0].cells, 81);
+  assert.equal(got.pockets[0].cells, 64, "lower left corners of a 2-cell square in 9 x 9");
   assert.deepEqual(got.pockets[0].box, { left: 11 * 32, right: 20 * 32, bottom: 11 * 32, top: 20 * 32 });
   assert.equal(findPockets(grid(open(30, 30)), 16, null).pockets.length, 0);
 });
@@ -115,20 +115,20 @@ test("a gate only big units can't use makes a pocket for them alone", () => {
 test("tiny gaps and pockets elsewhere stay out", () => {
   const rows = open(40, 40).map((row, y) => (y >= 5 && y <= 8 ? `${row.slice(0, 5)}#..#${row.slice(9)}` : y === 4 || y === 9 ? `${row.slice(0, 5)}####${row.slice(9)}` : row));
   assert.equal(findPockets(grid(rows), 16, null, 16).pockets.length, 0);
-  assert.equal(findPockets(grid(rows), 16, null, 4).pockets.length, 1);
-  assert.equal(findPockets(grid(rows), 16, { left: 800, bottom: 800, right: 1000, top: 1000 }, 4).pockets.length, 0);
+  assert.equal(findPockets(grid(rows), 16, null, 3).pockets.length, 1);
+  assert.equal(findPockets(grid(rows), 16, { left: 800, bottom: 800, right: 1000, top: 1000 }, 3).pockets.length, 0);
 });
 
 test("a route stays in its corridor, and fails where it would have to leave", () => {
-  const rows = open(41, 21).map((row, y) => (y === 15 ? row : `${row.slice(0, 20)}#${row.slice(21)}`));
+  const rows = open(41, 21).map((row, y) => (y === 15 || y === 16 ? row : `${row.slice(0, 20)}#${row.slice(21)}`));
   const line: [number, number][] = [at(2, 10), at(38, 10)];
   const narrow = checkRoute(grid(rows), line, 16, 200);
   assert.equal(narrow.walkable, false);
   assert.equal(narrow.failedLeg, 0);
-  assert.equal(narrow.stuckAt?.[0], at(19, 10)[0]);
+  assert.equal(narrow.stuckAt?.[0], 19 * 32);
   const wide = checkRoute(grid(rows), line, 16, 500);
   assert.equal(wide.walkable, true);
-  assert.equal(wide.narrowest?.width, 32);
+  assert.equal(wide.narrowest?.width, 64);
 });
 
 test("a road's narrowest place doesn't depend on the unit, or the side a way hugs", () => {
@@ -169,16 +169,19 @@ const wallWithGap = (cells: number) => {
   return open(21, 21).map((row, y) => (y >= mid - Math.floor(cells / 2) && y < mid - Math.floor(cells / 2) + cells ? row : `${row.slice(0, 10)}#${row.slice(11)}`));
 };
 
-test("the default unit is a Footman (collision 31): a gap 96 wide passes, a solid line blocks, a narrower gap blocks", () => {
+test("the game's answer (map 30, played 2026-11-22): a Footman (31) gets through 64, a Peasant (16) not through 32; 96 and up pass", () => {
   assert.equal(DEFAULT_UNIT_SIZE, 31, "UnitBalance.slk: hfoo collision 31");
   const way = (rows: string[], size = DEFAULT_UNIT_SIZE) => checkPath(grid(rows), at(2, 10), at(18, 10), size);
-  const three = way(wallWithGap(3));
-  assert.equal(three.walkable, true, "3 cells = 96");
-  assert.equal(three.narrowest?.width, 96);
-  assert.equal(way(open(21, 21).map((row) => `${row.slice(0, 10)}#${row.slice(11)}`)).walkable, false, "a solid line");
   const two = way(wallWithGap(2));
-  assert.equal(two.walkable, false, "64 is narrower than the Footman needs");
-  assert.equal(two.largestUnitThatFits, 16, "what would fit instead: a Peasant");
-  assert.equal(way(wallWithGap(1)).walkable, false);
-  assert.equal(way(wallWithGap(1), 16).walkable, true, "control: a Peasant (16) takes one cell");
+  assert.equal(two.walkable, true, "2 cells = 64: the Footman came out");
+  assert.equal(two.narrowest?.width, 64);
+  assert.equal(way(wallWithGap(3)).narrowest?.width, 96);
+  assert.equal(way(open(21, 21).map((row) => `${row.slice(0, 10)}#${row.slice(11)}`)).walkable, false, "a solid line");
+  const one = way(wallWithGap(1));
+  assert.equal(one.walkable, false, "32 is too narrow for a Footman");
+  assert.equal(one.largestUnitThatFits, 0, "no unit fits one cell");
+  assert.equal(way(wallWithGap(1), 16).walkable, false, "a Peasant (16) does not get through 32 either");
+  assert.equal(way(wallWithGap(2), 16).walkable, true, "a Peasant takes 64");
+  assert.equal(way(wallWithGap(2), 48).walkable, false, "a ship (48) needs 96");
+  assert.equal(way(wallWithGap(3), 48).walkable, true);
 });
