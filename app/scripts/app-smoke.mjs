@@ -6007,6 +6007,7 @@ async function resizeUnreadable(page, found) {
   await page.evaluate(`(() => { window.__unreadKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; w3.window.showWarning = async () => "Apply"; })()`);
   try {
     const tool = mcpTool(page), hands = new Hands(page);
+    const run = (id) => page.evaluate(`w3.commands.execute(${lit(id)}).then(() => null, (e) => String(e))`);
     const folder = join(work, "resize-unreadable");
     mkdirSync(folder, { recursive: true });
     await tool("new_map", { name: "ResizeUnreadable", width: 64, height: 64, folder });
@@ -6039,7 +6040,8 @@ async function resizeUnreadable(page, found) {
       await settled(page);
       const tabMoved = differ(before, state());
       if (tabMoved.length) fail(`${label}: the resize refused by the Map Size tab changed ${tabMoved.join(", ")}`);
-      if (await page.evaluate(`w3.editors.activePath()`) !== "map/war3map.w3e.txt") fail(`${label}: the terrain editor isn't open after the refusal`);
+      // The Map Size tab is the active one now; the terrain editor stays open behind it.
+      if (!["map/war3map.w3e.txt", "w3:terrain-mapsize"].includes(await page.evaluate(`w3.editors.activePath()`)) || !(await page.evaluate(`!!document.querySelector(".terrain-tab")`))) fail(`${label}: the terrain editor isn't open after the refusal`);
     };
 
     // war3map.shd: a folder in its place (unreadable on every system; not a file the project lists).
