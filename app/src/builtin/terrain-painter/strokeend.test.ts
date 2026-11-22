@@ -52,6 +52,9 @@ async function painter(terrain: Terrain) {
     workspace: { project: () => null, readText: async () => { throw new Error("no file"); }, filesReady: async () => {}, files: () => [], onDidSave: () => none },
     game: { readText: async () => "" },
     window: { showWarning: async () => undefined },
+    // The Terrain Settings tab and its command (not used here).
+    editors: { registerProvider: () => none, open: async () => {} },
+    commands: { register: () => none, execute: async () => {} },
   } as unknown as W3Api;
   activate(w3, { extensionId: "w3.terrainPainter", extensionPath: null, subscriptions: [] } as ExtensionContext);
   await new Promise((r) => setTimeout(r, 0));

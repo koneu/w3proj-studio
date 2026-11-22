@@ -2,7 +2,13 @@
   "id": "w3.terrainPainter",
   "name": "Terrain Painter",
   "version": "0.1.0",
-  "description": "Terrain tools in the terrain editor: raise, lower, plateau, smooth, ground textures, cliffs, water, blight and ramps.",
-  "activationEvents": ["onEditor:w3.terrainViewer"],
-  "extensionDependencies": ["w3.terrainViewer"]
+  "description": "Terrain tools in the terrain editor: raise, lower, plateau, smooth, ground textures, cliffs, water, blight and ramps. Edit Tileset / Terrain Settings: the tileset, the map's ground tiles and cliff types (order, adding, removing) and the terrain's facts, in a tab of their own.",
+  "activationEvents": ["onEditor:w3.terrainViewer", "onCommand:w3.terrain.settings", "onEditor:w3.terrainSettings"],
+  "extensionDependencies": ["w3.terrainViewer"],
+  "contributes": {
+    "editors": [{ "id": "w3.terrainSettings", "title": "Terrain Settings", "patterns": ["w3:terrain-settings"] }],
+    "commands": [
+      { "id": "w3.terrain.settings", "when": "project", "title": "Edit Tileset / Terrain Settings", "category": "Terrain" }
+    ]
+  }
 }

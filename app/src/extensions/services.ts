@@ -172,6 +172,14 @@ export interface TerrainEditorHandle {
   /** The terrain being edited (live; see lib/terrain/w3e). */
   readonly terrain: import("../lib/terrain/w3e").Terrain;
   readonly editable: boolean;
+  /** The editor's document (the project's terrain: "map/war3map.w3e.txt"). */
+  readonly path: string;
+  /** Only some subterrains are open (Open Subterrains…): the ground tile and cliff lists, which are the whole map's,
+   *  can only be appended to; reordering, removing and another tileset are refused. */
+  readonly partial: boolean;
+  /** The editor's own Undo and Redo (the Terrain Settings tab's, whose changes are this editor's edits). */
+  undo(): void;
+  redo(): void;
   /** The editor element (for overlays such as pickers). */
   readonly host: HTMLElement;
   redraw(): void;

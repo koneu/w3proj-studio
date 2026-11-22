@@ -1145,3 +1145,12 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .layout-actions { display: flex; gap: 6px; margin-top: 8px; }
 .layout-actions button.primary { display: inline-block; width: auto; margin: 0; }
 .layout-status { padding: 2px 8px; font-size: 11px; }
+
+/* The Terrain Settings tab (terrain-painter/settings.ts). */
+.terrain-settings { height: 100%; overflow: auto; padding: 8px 16px; box-sizing: border-box; outline: none; }
+.terrain-settings h3 { margin: 10px 0 2px; font-size: 12px; }
+.terrain-settings .terrain-tilemgr { margin-bottom: 12px; }
+.terrain-settings-facts { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; max-width: 640px; }
+.terrain-settings-fact { display: flex; gap: 8px; }
+.terrain-settings-key { width: 130px; flex-shrink: 0; color: var(--fg-muted); }
+.terrain-settings-locked { margin-bottom: 10px; padding: 4px 6px; border-radius: 3px; background: rgba(229, 192, 123, 0.14); max-width: 640px; }

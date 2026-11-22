@@ -818,8 +818,10 @@ async function objectsWhileOpening(page, found) {
   }
 }
 
-/** The terrain painter's tile templates (Tiles…, Template, Use its tiles): another tileset's tiles make the w3e's
- *  list custom, and the tileset's own tiles again clear the flag, as the World Editor writes it. */
+/** Tile templates in Edit Tileset / Terrain Settings (Template, Use its tiles): another tileset's tiles make the w3e's
+ *  list custom, and the tileset's own tiles again clear the flag, as the World Editor writes it. The terrain viewer has
+ *  no Tiles… or Cliffs… any more; its Paint tool's tiles follow the list set in the tab, and Undo there is the terrain
+ *  editor's. */
 async function tileTemplate(page, found) {
   try {
   const fail = (what) => found.push(`tile template: ${what}`);
@@ -834,9 +836,10 @@ async function tileTemplate(page, found) {
   const own = header("tileset");
   if (header("custom-tilesets") !== "0") fail(`a new map's tile list is custom (control): ${header("custom-tilesets")}`);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
-  await until("the Tiles… button", () => page.evaluate(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Tiles…")`), 10000);
-  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
-  const template = `document.querySelectorAll(".terrain-tilemgr-row")[1]?.querySelector("select")`;
+  // The palette is set up in the Terrain Settings tab: the terrain viewer's Paint tool has no Tiles… of its own.
+  if (await page.evaluate(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Tiles…" || b.textContent === "Cliffs…")`)) fail("the terrain viewer still has Tiles… or Cliffs…");
+  await openTerrainSettings(page);
+  const template = `document.querySelectorAll(".terrain-settings .terrain-tilemgr-row")[1]?.querySelector("select")`;
   await until("the tile templates", () => page.evaluate(`(${template})?.options.length > 1`), 20000);
   const use = async (id) => {
     const ok = await page.evaluate(`(() => {
@@ -851,14 +854,43 @@ async function tileTemplate(page, found) {
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
   };
-  await use(own === "A" ? "B" : "A");
+  const other = own === "A" ? "B" : "A";
+  const ground = () => /^ground (.*)$/m.exec(readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"))?.[1].trim().split(" ") ?? [];
+  const ownTiles = ground();
+  await use(other);
   if (header("custom-tilesets") !== "1") fail(`another tileset's tiles didn't make the list custom (control): ${header("custom-tilesets")}`);
+  const otherTiles = ground();
+  if (lit(otherTiles) === lit(ownTiles)) fail(`${other}'s template left the map's list as it was: ${otherTiles.join(" ")}`);
+  // The terrain viewer's Paint tool picks from the palette the settings set: its thumbnails are the new list's tiles.
+  const picker = () => page.evaluate(`[...document.querySelectorAll(".terrain-tex-thumb img")].map((i) => i.alt)`);
+  await until("the picker on the template's tiles", async () => lit(await picker()) === lit(otherTiles), 10000)
+    .catch(async () => fail(`the Paint tool's tiles are ${lit(await picker())}, the map's list ${lit(otherTiles)}`));
   await use(own);
   if (header("custom-tilesets") !== "0") fail(`the tileset's own tiles again left the custom tiles flag at ${header("custom-tilesets")}`);
   if (header("tileset") !== own) fail(`a template changed the tileset to ${header("tileset")}`);
+  // Undo in the settings tab is the terrain editor's: the other tileset's tiles come back.
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled(page);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await settled(page);
+  if (lit(ground()) !== lit(otherTiles)) fail(`Undo in the Terrain Settings tab didn't bring ${other}'s tiles back: ${ground().join(" ")}`);
   } finally {
+    await page.evaluate(`w3.editors.close("w3:terrain-settings")`).catch(() => {});
     await restoreWindow(page);
   }
+}
+
+/** Edit Tileset / Terrain Settings (terrain-painter/settings.ts): its tab opened by the command, its lists drawn. */
+async function openTerrainSettings(page) {
+  const err = await page.evaluate(`w3.commands.execute("w3.terrain.settings").then(() => null, (e) => String(e?.message ?? e))`);
+  if (err) throw new Error(`Edit Tileset / Terrain Settings: ${err}`);
+  await until("the Terrain Settings tab", () => page.evaluate(`w3.editors.activePath() === "w3:terrain-settings" && !!document.querySelector(".terrain-settings .terrain-tilemgr-row")`), 20000);
+}
+
+/** Closes the Terrain Settings tab and brings the terrain editor to the front again. */
+async function closeTerrainSettings(page) {
+  await page.evaluate(`(async () => { await w3.editors.close("w3:terrain-settings"); await w3.editors.open("map/war3map.w3e.txt"); })()`);
+  await until("the terrain editor in front", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 10000);
 }
 
 /** A new map for a terrain check, with its terrain editor open on the Terrain tab, and a tool group of the check's own that
@@ -894,7 +926,7 @@ async function terrainMap(page, name) {
     },
     done: () => page.evaluate(`window.__countEditors?.dispose(); window.__countEditors = null;`),
   };
-  // The cliff types are read: what uses a tile is known (Tiles… waits for it).
+  // The cliff types are read: what uses a tile is known (the Terrain Settings tab waits for it).
   await until("the game's cliff types", () => page.evaluate(`typeof window.__smokeEd.groundTileUse !== "function" || !!window.__smokeEd.groundTileUse()`), 30000);
   return kit;
 }
@@ -945,7 +977,7 @@ async function tilesInPlace(page, found) {
   }
 }
 
-/** Tiles…: Remove unused takes out the tiles no corner or cliff uses, Clean up removes a used one too with the tile chosen
+/** The Terrain Settings tab's ground tiles: Remove unused takes out the tiles no corner or cliff uses, Clean up removes a used one too with the tile chosen
  *  in its place, and Remove Unused Tiles on Save does it on save (off unless chosen). One undo step each. */
 async function tileCleanup(page, found) {
   try {
@@ -966,7 +998,7 @@ async function tileCleanup(page, found) {
     if (k.ground().join(" ") !== full.join(" ")) fail(`saving with Remove Unused Tiles on Save off changed the list: ${k.ground().join(" ")}`);
 
     await k.tab("Terrain");
-    await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
+    await openTerrainSettings(page);
     const button = (text) => `[...document.querySelectorAll(".terrain-tilemgr button")].find((b) => b.textContent.startsWith(${lit(text)}))`;
     await until("Remove unused", () => page.evaluate(`!!${button("Remove unused")} && !${button("Remove unused")}.disabled`), 10000);
     const label = await page.evaluate(`${button("Remove unused")}.textContent`);
@@ -1024,8 +1056,8 @@ async function tileCleanup(page, found) {
     if (err) fail(`Remove Unused Ground Tiles: ${err}`);
     await k.save();
     if (k.ground().join(" ") !== used.join(" ")) fail(`the command left ${k.ground().join(" ")}`);
-    await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…")?.click()`);
   } finally {
+    await page.evaluate(`w3.editors.close("w3:terrain-settings")`).catch(() => {});
     await k.done();
   }
   } finally {
@@ -5136,10 +5168,9 @@ async function heightsLimits(page, found) {
   await hands.key("c", "KeyC", 67, 2);
   await hands.key("Escape", "Escape", 27);
   // The paste needs a ground tile the map no longer has: the most used one (the mound's) is taken out of the list now
-  // (Tiles…, ✕, Remove). When the paste is refused that tile goes again, and the side list says so at once.
-  await k.tab("Terrain");
-  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
-  const tileRows = `[...document.querySelectorAll(".terrain-tilemgr-row")].filter((r) => r.querySelector("img"))`;
+  // (Terrain Settings, ✕, Remove). When the paste is refused that tile goes again, and the side list says so at once.
+  await openTerrainSettings(page);
+  const tileRows = `[...document.querySelectorAll(".terrain-settings .terrain-tilemgr-row")].filter((r) => r.querySelector("img"))`;
   await until("the map's tile list", () => page.evaluate(`${tileRows}.length > 1`), 10000);
   const gone = await page.evaluate(`(() => {
     const rows = ${tileRows}, share = (r) => parseFloat(r.querySelector(".muted")?.textContent ?? "0");
@@ -5150,7 +5181,7 @@ async function heightsLimits(page, found) {
   await until("the removal's question", () => page.evaluate(`!!document.querySelector(".terrain-tilemgr-row.removing")`), 5000);
   await page.evaluate(`[...document.querySelectorAll(".terrain-tilemgr-row.removing button")].find((b) => b.textContent === "Remove").click()`);
   await settled(page);
-  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
+  await closeTerrainSettings(page);
   await k.save();
   const groundLine = () => /^ground (.*)$/m.exec(readFileSync(w3e, "utf8"))?.[1].trim().split(" ") ?? [];
   const goneId = /\((\w{4})\)$/.exec(gone)?.[1];
@@ -6140,6 +6171,20 @@ async function subterrains(page, found) {
       if (!/1 of 4 subterrains open/.test(badge ?? "")) fail(`the partial terrain editor's badge says ${lit(badge)}`);
       const closedLabels = await page.evaluate(`[...document.querySelectorAll(".terrain-label.subterrain-closed")].map((e) => e.textContent).sort()`);
       if (lit(closedLabels) !== lit(["nw (closed)", "se (closed)", "sw (closed)"])) fail(`the closed subterrains' names over the map: ${lit(closedLabels)}`);
+      // The palettes are the whole map's: with ne alone open the Terrain Settings tab only adds to them (↑ ↓ ✕ off,
+      // saying why), and the editor refuses a reorder outright, changing nothing.
+      {
+        await openTerrainSettings(page);
+        const locked = await page.evaluate(`document.querySelector(".terrain-settings-locked")?.textContent ?? null`);
+        if (!/can only be added to/.test(locked ?? "")) fail(`the Terrain Settings tab of a partial open says ${lit(locked)}`);
+        const off = await page.evaluate(`document.querySelectorAll('.terrain-settings button[title^="Only some subterrains"]:disabled').length`);
+        if (!off) fail("the Terrain Settings tab of a partial open offers ↑ ↓ ✕");
+        const tiles = await page.evaluate(`window.__subEd.terrain.groundTiles.join(" ")`);
+        const refused = await page.evaluate(`(() => { try { window.__subEd.moveGroundTile(0, 1); return null; } catch (e) { return String(e.message ?? e); } })()`);
+        if (!/Only some subterrains are open/.test(refused ?? "")) fail(`a reorder in a partial open gave ${lit(refused)}`);
+        if ((await page.evaluate(`window.__subEd.terrain.groundTiles.join(" ")`)) !== tiles || (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the refused reorder changed the tile list or left the terrain unsaved");
+        await closeTerrainSettings(page);
+      }
       // Stage 5: Toggle Subterrain Overlay (the palette command; the toolbar box is the same switch): every subterrain's
       // outline, closed ones too, and the open one's name besides the closed ones' labels; off again, none.
       {
@@ -11439,7 +11484,7 @@ async function turtleCliffSave(page, found) {
   }
 }
 
-/** Cliffs… (the cliff tools' list of the map's cliff types): on a new map (CLdi CLgr) CAdi is added from the game's
+/** The map's cliff types (the Terrain Settings tab's list, the cliff tools' Cliff type box): on a new map (CLdi CLgr) CAdi is added from the game's
  *  list, a Cliff +1 by mouse with it chosen writes number 2 on the corners, removing it while in use asks for another
  *  entry and its corners get that one's number, one undo brings list and corners back, and a removal refused (in use,
  *  no replacement) leaves no change and no undo step. Read from the saved war3map.w3e.txt each time. */
@@ -11454,9 +11499,8 @@ async function cliffTypeList(page, found) {
     if (cliffsLine() !== "cliffs CLdi CLgr") return fail(`a new Lordaeron map's cliff list should be CLdi CLgr (control): ${cliffsLine()}`);
     await k.tab("Terrain");
     await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
-    const button = (text) => `[...document.querySelectorAll(".terrain-tool-opt button")].find((b) => b.textContent === ${lit(text)})`;
-    await until("Cliffs…", () => page.evaluate(`!!${button("Cliffs…")} && !${button("Cliffs…")}.closest("[hidden]")`), 10000);
-    await page.evaluate(`${button("Cliffs…")}.click()`);
+    // The cliff list is set up in the Terrain Settings tab; the cliff tools keep their Cliff type box.
+    await openTerrainSettings(page);
     const addSel = `[...document.querySelectorAll(".terrain-cliffmgr select")].find((s) => s.options[0]?.textContent.startsWith("Add cliff type"))`;
     await until("the cliff list", () => page.evaluate(`!!${addSel}`), 20000);
     const addLabel = await page.evaluate(`${addSel}.options[0].textContent`);
@@ -11464,6 +11508,7 @@ async function cliffTypeList(page, found) {
     await page.evaluate(`(() => { const s = ${addSel}; s.value = "CAdi"; s.dispatchEvent(new Event("change")); })()`);
     await k.save();
     if (cliffsLine() !== "cliffs CLdi CLgr CAdi") return fail(`after adding CAdi the saved list is "${cliffsLine()}"`);
+    await closeTerrainSettings(page);
     // The cliff type box offers it as number 2.
     const cliffSel = `[...document.querySelectorAll("label.terrain-tool-opt")].find((l) => l.textContent.startsWith("Cliff type"))?.querySelector("select")`;
     await until("CAdi in the cliff type box", () => page.evaluate(`!!${cliffSel} && [...${cliffSel}.options].some((o) => o.value === "2" && o.textContent.endsWith("(CAdi)"))`), 10000)
@@ -11486,6 +11531,8 @@ async function cliffTypeList(page, found) {
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused removal left the terrain unsaved");
 
     // Removed by hand: the ✕ asks which entry its corners get; CLgr (1).
+    await openTerrainSettings(page);
+    await until("CAdi's row", () => page.evaluate(`[...document.querySelectorAll(".terrain-cliffmgr .terrain-tilemgr-row")].some((r) => r.textContent.includes("(CAdi)"))`), 20000);
     await page.evaluate(`[...document.querySelectorAll(".terrain-cliffmgr .terrain-tilemgr-row")].find((r) => r.textContent.includes("(CAdi)")).querySelector("button").click()`);
     await until("the removal's question", () => page.evaluate(`!!document.querySelector(".terrain-cliffmgr-replace")`), 5000);
     await page.evaluate(`(() => { const s = document.querySelector(".terrain-cliffmgr-replace"); s.value = "1"; s.dispatchEvent(new Event("change")); })()`);
@@ -11502,7 +11549,7 @@ async function cliffTypeList(page, found) {
     await k.save();
     if (readFileSync(k.w3e, "utf8") !== withCliff) fail(`one undo didn't bring CAdi and its corners back: ${cliffsLine()}, ${typed(2)} corners on 2`);
   } finally {
-    await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt button")].find((b) => b.textContent === "Cliffs…" && b.classList.contains("active"))?.click()`).catch(() => {});
+    await page.evaluate(`w3.editors.close("w3:terrain-settings")`).catch(() => {});
     await k.done();
     await restoreWindow(page);
   }
