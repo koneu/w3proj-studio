@@ -72,7 +72,7 @@ for (const m of maps) {
   let triggers, custom;
   try {
     triggers = W.parseWtg(new Uint8Array(readFileSync(`${d}/war3map.wtg`)), data);
-    custom = existsSync(`${d}/war3map.wct.txt`) ? W.parseWctText(read(`${d}/war3map.wct.txt`)) : existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
+    custom = existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
   } catch { continue; }
   // The trigger files read and written again, byte for byte.
   const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -81,10 +81,7 @@ for (const m of maps) {
   if (custom && existsSync(`${d}/war3map.wct`)) {
     const wctBytes = new Uint8Array(readFileSync(`${d}/war3map.wct`));
     const rc = (stats["(wct byte-exact)"] ??= [0, 0]); rc[1]++; if (same(W.writeWct(custom), wctBytes)) rc[0]++;
-    const rx = (stats["(wct via text)"] ??= [0, 0]); rx[1]++;
-    try { if (same(W.writeWct(W.parseWctText(W.writeWctText(custom))), wctBytes)) rx[0]++; } catch { /* counted as different */ }
   }
-  const wj = (stats["(wtg via JSON)"] ??= [0, 0]); wj[1]++; if (same(W.writeWtg(W.parseWtgJson(W.writeWtgJson(triggers))), wtgBytes)) wj[0]++;
   const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e.txt`) ? T.parseW3e(w3eFromText(read(`${d}/war3map.w3e.txt`))) : existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg); as the app reads them.

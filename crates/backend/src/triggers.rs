@@ -238,11 +238,14 @@ fn in_memory(tree: &Tree, lang: Lang, warnings: Vec<String>) -> CmdResult<Read> 
             stored.insert(key('v', v.id), *d);
         }
     }
+    // A zero byte of a text is U+10FF00 in its file (trigger_layout): the app holds it as the zero it stands for, as
+    // its own reader of war3map.wct does (a real U+10FF00 is never in a file as it is, `crate::lossless`).
+    let zero = |t: Option<String>| t.map(|t| t.replace('\u{10FF00}', "\0"));
     Ok(Read {
         files: item_files(tree),
         header_file: tree.header_file.as_ref().map(|h| format!("{PREFIX}triggers/{h}")),
         file,
-        custom: Custom { reforged: w.reforged, version: w.version, comment: w.comment, header: w.header.flatten(), texts: w.texts },
+        custom: Custom { reforged: w.reforged, version: w.version, comment: w.comment, header: zero(w.header.flatten()), texts: w.texts.into_iter().map(zero).collect() },
         stored,
         language: lang_name(lang),
         script: tree.script.as_str(),
@@ -592,6 +595,8 @@ mod tests {
         let root = p.path().to_string_lossy().to_string();
         let r = read(&root, &[]).unwrap().unwrap();
         assert_eq!(r.files.len(), r.file.items.len());
+        // Padded's padding zeros (U+10FF00 in its file) come as the zeros they stand for, as war3map.wct has them.
+        assert!(r.custom.texts.iter().flatten().any(|t| t.ends_with("endlibrary\0\0")), "{:?}", r.custom.texts);
         let plan = plan(&root, &[], &save_of(&r), false).unwrap();
         assert!(plan.write.is_empty() && plan.delete.is_empty(), "{:?} {:?}", plan.write.keys(), plan.delete);
     }

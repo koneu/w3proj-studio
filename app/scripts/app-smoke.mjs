@@ -128,6 +128,14 @@ const editTriggerTree = (page, js) => page.evaluate(`(async () => {
   // The backend's refusal is a string: as an Error, WebDriver passes its message on.
   await w3.workspace.writeTriggers({ file, custom, stored: read__.stored }).catch((e) => { throw new Error(String(e?.message ?? e)); });
 })()`);
+/** `w3proj pack` arguments for a project (or campaign) whose trigger folders are the mini map's: their GUI functions
+ *  are made up (tests/fixtures/TriggerData.txt), and a pack with the game's TriggerData.txt (W3PROJ_GAME) refuses
+ *  functions it doesn't know. Nothing for any other project. */
+function fixtureTriggerData(root) {
+  const mini = (p) => existsSync(join(p, "map", "triggers", "Foo_Setup", "Foo_Init.gui.json"));
+  const chapters = existsSync(join(root, "maps")) ? readdirSync(join(root, "maps")).map((n) => join(root, "maps", n)) : [];
+  return mini(root) || chapters.some(mini) ? ["--trigger-data", join(repo, "tests", "fixtures", "TriggerData.txt")] : [];
+}
 /** The map/ files of the project at `root` by hash (snapshot), with its triggers as the map holds them: map/triggers/ or
  *  a raw war3map.wtg and war3map.wct give way to the war3map.wtg and war3map.wct the CLI packs from the project. So a
  *  project that keeps them in either form (an import is an import: its trigger files store ids, the fixture's don't)
@@ -136,7 +144,7 @@ function triggersAsPacked(root) {
   const files = snapshot(join(root, "map"));
   for (const f of [...files.keys()]) if (f.startsWith("triggers/") || f === "war3map.wtg" || f === "war3map.wct") files.delete(f);
   const out = join(work, `triggers-as-packed-${createHash("sha256").update(root).digest("hex").slice(0, 8)}.w3x`);
-  const packed = spawnSync(cli, ["pack", root, "-o", out, "--game", "none"], { encoding: "utf8" });
+  const packed = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",out, "--game", "none"], { encoding: "utf8" });
   if (packed.status !== 0) throw new Error(`the CLI can't pack ${root}: ${packed.stderr}`);
   for (const f of ["war3map.wtg", "war3map.wct"]) {
     const r = spawnSync(cli, ["cat", out, f]);
@@ -294,7 +302,7 @@ async function newMaps(page, found) {
       // It reads back as a project and comes out the same.
       const back = join(folder, `back-${scripts.length}`), again = join(folder, `again-${scripts.length}.w3x`);
       const unpack = spawnSync(cli, ["unpack", map, back, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
-      const repack = spawnSync(cli, ["pack", back, "-o", again], { encoding: "utf8" });
+      const repack = spawnSync(cli, ["pack", back, ...fixtureTriggerData(back), "-o", again], { encoding: "utf8" });
       if (unpack.status !== 0 || repack.status !== 0) fail(`round trip: ${unpack.stderr}${repack.stderr}`);
       else if (hash(map) !== hash(again)) fail("pack, unpack and pack changed the map");
 
@@ -837,7 +845,7 @@ async function waterPathing(page, found) {
   await tool("save_project");
   await settled(page);
   const external = join(work, "water-external.w3x");
-  const packedBy = spawnSync(cli, ["pack", root, "-o", external], { encoding: "utf8" });
+  const packedBy = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",external], { encoding: "utf8" });
   if (packedBy.status !== 0) return fail(`w3proj pack: ${(packedBy.stdout + packedBy.stderr).slice(-200)}`);
   const catted = spawnSync(cli, ["cat", external, "war3map.wpm"], { maxBuffer: 1 << 26 });
   if (catted.status !== 0) return fail("the CLI can't read war3map.wpm from the externally packed map");
@@ -1796,7 +1804,7 @@ async function terrainSelectCameras(page, found) {
 
   // Two terrain files: the binary one, from the packed map, next to the text one.
   const map = join(work, "heights", "SelectCameras.w3x");
-  const packed = spawnSync(cli, ["pack", k.root, "-o", map], { encoding: "utf8" });
+  const packed = spawnSync(cli, ["pack", k.root, ...fixtureTriggerData(k.root), "-o", map], { encoding: "utf8" });
   const w3e = packed.status === 0 ? spawnSync(cli, ["cat", map, "war3map.w3e"]) : null;
   if (!w3e || w3e.status !== 0 || !w3e.stdout.length) return fail(`no binary war3map.w3e: ${packed.stderr}${w3e?.stderr ?? ""}`);
   writeFileSync(join(k.root, "map", "war3map.w3e"), w3e.stdout);
@@ -6214,7 +6222,7 @@ async function subterrains(page, found) {
       const packed = await page.evaluate(`w3.backend.invoke("project_pack", { root: ${lit(root)}, output: ${lit(appMap)} }).then(() => null, (e) => String(e?.message ?? e))`);
       if (packed) fail(`the app's pack of the split project failed: ${packed}`);
       const cliMap = join(folder, "subterrains-cli.w3x");
-      const cliPack = spawnSync(cli, ["pack", root, "-o", cliMap, "--keep-script"], { encoding: "utf8" });
+      const cliPack = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",cliMap, "--keep-script"], { encoding: "utf8" });
       if (cliPack.status !== 0) fail(`\`w3proj pack\` of the split project after the app's save refused: ${(cliPack.stdout + cliPack.stderr).trim().slice(-400)}`);
       for (const out of [appMap, cliMap].filter((m) => existsSync(m))) {
         const wpm = spawnSync(cli, ["cat", out, "war3map.wpm"], { maxBuffer: 1 << 26 });
@@ -6361,7 +6369,7 @@ async function subterrains(page, found) {
       if (editorSaveChanged.length) fail(`the partial terrain editor's save changed ${editorSaveChanged.join(", ")}`);
       const partialRecord = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
       if (partialRecord.files?.["?closed-subterrains"] !== "3") fail(`the derived files' record after the partial save: ${lit(partialRecord.files?.["?closed-subterrains"])}`);
-      const cliRefused = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-partial.w3x"), "--keep-script"], { encoding: "utf8" });
+      const cliRefused = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",join(folder, "subterrains-partial.w3x"), "--keep-script"], { encoding: "utf8" });
       if (cliRefused.status === 0 || !/3 subterrains were closed/.test(cliRefused.stdout + cliRefused.stderr)) fail(`\`w3proj pack\` after a partial save: exit ${cliRefused.status}, ${(cliRefused.stdout + cliRefused.stderr).trim().slice(-300)}`);
       const appRefused = await run("w3.project.pack");
       if (!appRefused || !/3 of the 4 subterrains are closed/.test(appRefused)) fail(`the app's Pack with subterrains closed: ${lit(appRefused)}`);
@@ -6377,7 +6385,7 @@ async function subterrains(page, found) {
       await settled(page);
       const fresh = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
       if (fresh.files?.["?closed-subterrains"] !== undefined) fail("opened whole, the editor didn't make the derived files again (the record still counts closed subterrains)");
-      const cliPack = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-whole.w3x"), "--keep-script"], { encoding: "utf8" });
+      const cliPack = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",join(folder, "subterrains-whole.w3x"), "--keep-script"], { encoding: "utf8" });
       if (cliPack.status !== 0) fail(`\`w3proj pack\` after opening all again refused: ${(cliPack.stdout + cliPack.stderr).trim().slice(-400)}`);
       if (await page.evaluate(`!!document.querySelector(".terrain-partial-badge:not([hidden])")`)) fail("the whole terrain editor still shows the partial badge");
       assembled = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
@@ -6399,7 +6407,7 @@ async function subterrains(page, found) {
       const FLATS = ["map/war3map.w3e.txt", "map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json"];
       const flatNow = () => page.evaluate(`Promise.all(${lit(FLATS)}.map((p) => w3.workspace.readText(p)))`);
       const folders = () => readdirSync(join(map, "terrain"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
-      const packTo = (name) => { const out = join(folder, name); const r = spawnSync(cli, ["pack", root, "-o", out, "--keep-script"], { encoding: "utf8" }); return r.status === 0 ? readFileSync(out) : `exit ${r.status}: ${(r.stdout + r.stderr).trim().slice(-300)}`; };
+      const packTo = (name) => { const out = join(folder, name); const r = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",out, "--keep-script"], { encoding: "utf8" }); return r.status === 0 ? readFileSync(out) : `exit ${r.status}: ${(r.stdout + r.stderr).trim().slice(-300)}`; };
       const flatBefore = await flatNow();
       const packedBefore = packTo("subterrains-before-relayout.w3x");
       if (typeof packedBefore === "string") fail(`\`w3proj pack\` before the subterrain changes: ${packedBefore}`);
@@ -6446,7 +6454,7 @@ async function subterrains(page, found) {
         if (lit(now.corners) !== lit([was.corners[0] + 32, was.corners[1] + 32])) fail(`the grown canvas is ${lit(now.corners)}, was ${lit(was.corners)}`);
         const want = was.subterrains.map((s) => ({ ...s, w: s.x + s.w === was.corners[0] ? s.w + 32 : s.w, h: s.y + s.h === was.corners[1] ? s.h + 32 : s.h }));
         if (lit(now.subterrains) !== lit(want)) fail(`the subterrains after the growth: ${lit(now.subterrains)}, not ${lit(want)}`);
-        const r = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-grown.w3x"), "--keep-script"], { encoding: "utf8" });
+        const r = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",join(folder, "subterrains-grown.w3x"), "--keep-script"], { encoding: "utf8" });
         if (r.status !== 0) fail(`\`w3proj pack\` after the growth: ${(r.stdout + r.stderr).trim().slice(-400)}`);
         const undone = await run("w3.terrainMapSize.undo");
         if (undone) fail(`Undo Resize failed: ${undone}`);
@@ -9455,7 +9463,7 @@ async function derivedAfterDeletes(page, found) {
   const wpmFile = () => join(root, "map", "war3map.wpm"), record = () => join(root, ".w3proj", "derived-from.json");
   const pack = (label) => {
     const map = join(dir, `${label}.w3x`);
-    const r = spawnSync(cli, ["pack", root, "-o", map], { encoding: "utf8" });
+    const r = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",map], { encoding: "utf8" });
     if (r.status !== 0) { fail(`${label}: w3proj pack refused: ${((r.stdout ?? "") + (r.stderr ?? "")).trim().slice(-400)}`); return null; }
     return map;
   };
@@ -9640,7 +9648,7 @@ async function rebuildCli(page, found) {
     await settled(page);
     // The CLI's copy: stale for pack until rebuilt.
     const env = { ...process.env, ...(game ? { W3PROJ_GAME: game } : {}) };
-    const pack = (label) => spawnSync(cli, ["pack", copy, "-o", join(dir, `${label}.w3x`)], { encoding: "utf8" });
+    const pack = (label) => spawnSync(cli, ["pack", copy, ...fixtureTriggerData(copy), "-o",join(dir, `${label}.w3x`)], { encoding: "utf8" });
     const stale = pack("before");
     if (stale.status === 0 || !/war3map\.doo\.json/.test(stale.stderr ?? "")) fail(`w3proj pack took the copy before its rebuild: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
     const r = spawnSync(cli, ["rebuild", copy], { encoding: "utf8", env, timeout: 300000 });
@@ -9750,7 +9758,7 @@ async function moduleFunctionsChecks(page, found) {
   mkdirSync(dir, { recursive: true });
   const verify = (root, label) => {
     const map = join(dir, `${label}.w3x`);
-    const packed = spawnSync(cli, ["pack", root, "-o", map], { encoding: "utf8" });
+    const packed = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",map], { encoding: "utf8" });
     const r = packed.status === 0 ? spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" }) : packed;
     if (r.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(r.stdout ?? "")) fail(`${label}: verify: ${((r.stdout ?? "") + (r.stderr ?? "")).trim().slice(-300)}`);
   };
@@ -10301,7 +10309,7 @@ async function moduleFunctionsChecks(page, found) {
         await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
         await page.evaluate(`w3.editors.closeAll()`);
         const packed = join(dir, "dialogue-real.w3x");
-        const p = spawnSync(cli, ["pack", real, "-o", packed], { encoding: "utf8" });
+        const p = spawnSync(cli, ["pack", real, ...fixtureTriggerData(real), "-o", packed], { encoding: "utf8" });
         if (p.status !== 0) fail(`the campaign map's project didn't pack: ${(p.stdout + p.stderr).slice(-300)}`);
         else {
           for (const f of ["war3map.w3s", "war3map.wts"]) {
@@ -10630,7 +10638,7 @@ async function graphicsModes(page, found) {
   };
   const verify = (root, label) => {
     const map = join(dir, `${label}.w3x`);
-    const packed = spawnSync(cli, ["pack", root, "-o", map], { encoding: "utf8" });
+    const packed = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",map], { encoding: "utf8" });
     const r = packed.status === 0 ? spawnSync(cli, ["verify", map, "--game", game], { encoding: "utf8" }) : packed;
     const text = (r.stdout ?? "") + (r.stderr ?? "");
     if (r.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(text)) fail(`${label}: verify: ${text.trim().slice(-400)}`);
@@ -13443,7 +13451,7 @@ async function placerAndCampaign(page, found) {
   if (!readFileSync(join(camp, "map", "war3campaignSkin.txt")).equals(skinBefore)) fail("opening the campaign's Game Interface changed war3campaignSkin.txt");
   // Packed, the campaign keeps both files byte for byte.
   const w3n = join(work, "campaign-settings.w3n");
-  const packed = spawnSync(cli, ["pack", camp, "-o", w3n], { encoding: "utf8" });
+  const packed = spawnSync(cli, ["pack", camp, ...fixtureTriggerData(camp), "-o", w3n], { encoding: "utf8" });
   if (packed.status !== 0) fail(`the campaign doesn't pack: ${packed.stderr}`);
   else {
     for (const [file, want] of [["war3campaignMisc.txt", misc], ["war3campaignSkin.txt", skinBefore.toString("utf8")]]) {
@@ -16044,7 +16052,7 @@ async function editorExtras(page, found) {
     await answer("pickSaveFile", exported);
     const ex = await run("w3.campaign.exportMap", "One.w3x");
     if (ex.e) fail(`Export map: ${ex.e}`);
-    const packedByCli = spawnSync(cli, ["pack", join(camp, "maps", "One.w3x"), "-o", byCli], { encoding: "utf8" });
+    const packedByCli = spawnSync(cli, ["pack", join(camp, "maps", "One.w3x"), ...fixtureTriggerData(join(camp, "maps", "One.w3x")), "-o", byCli], { encoding: "utf8" });
     if (packedByCli.status !== 0) fail(`the CLI can't pack the chapter: ${packedByCli.stderr}`);
     else if (!existsSync(exported) || hash(exported) !== hash(byCli)) fail("the exported chapter map isn't the CLI's pack of it");
     // Replace: the second map in its place; one undo puts the first back, redo the second.
@@ -16124,7 +16132,7 @@ async function editorExtras(page, found) {
     if (!(await savedCampaign("the map back in order", (f) => f.chapters.length === 1 && f.mapOrder.length === 1))) fail(`after undoing Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     // The campaign builds, with its chapter.
     const w3n = join(dir, "campaign-maps.w3n");
-    const packed = spawnSync(cli, ["pack", camp, "-o", w3n], { encoding: "utf8" });
+    const packed = spawnSync(cli, ["pack", camp, ...fixtureTriggerData(camp), "-o", w3n], { encoding: "utf8" });
     if (packed.status !== 0) fail(`the campaign doesn't pack: ${packed.stderr}`);
     else if (!spawnSync(cli, ["ls", w3n], { encoding: "utf8" }).stdout.includes("One.w3x")) fail("the packed campaign has no One.w3x");
   } finally {
@@ -16197,7 +16205,7 @@ async function niceToHaves(page, found) {
   try {
     // ---- Import Map Folder: the fixture's map, its files loose in a folder, becomes the fixture's project -----------------
     const packed = join(dir, "mini.w3x"), folder = join(dir, "Mini Folder.w3x");
-    if (spawnSync(cli, ["pack", FIXTURE, "-o", packed]).status !== 0) throw new Error("the CLI can't pack the fixture");
+    if (spawnSync(cli, ["pack", FIXTURE, ...fixtureTriggerData(FIXTURE), "-o", packed]).status !== 0) throw new Error("the CLI can't pack the fixture");
     const names = spawnSync(cli, ["ls", packed], { encoding: "utf8" }).stdout.split(/\r?\n/).slice(1).filter((l) => l && !l.startsWith("file data")).map((l) => l.trim().split(/\s+/)[3]);
     for (const name of names) {
       const file = join(folder, ...name.split("\\"));
@@ -16731,7 +16739,7 @@ async function run() {
   const project = join(work, "project");
   cpSync(FIXTURE, project, { recursive: true });
   const wanted = join(work, "by-cli.w3x"), packed = join(work, "by-app.w3x");
-  const pack = spawnSync(cli, ["pack", project, "-o", wanted], { encoding: "utf8" });
+  const pack = spawnSync(cli, ["pack", project, ...fixtureTriggerData(project), "-o", wanted], { encoding: "utf8" });
   if (pack.status !== 0) throw new Error(`the CLI can't pack the fixture: ${pack.stderr}`);
   if (process.argv.includes("--break")) writeFileSync(join(project, "map", "war3map.w3r.json"), "{ not json");
   const before = snapshot(project);
