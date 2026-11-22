@@ -11916,6 +11916,63 @@ async function triggerFolders(page, found) {
   }
 }
 
+/** Check Trigger Tree and the per-file diagnostics in the real app, on the mini map with the trigger-folders fixture's
+ *  tree as a merge leaves it: a GUI trigger copied into another folder (its stored id twice, order.txt not listing
+ *  it) and a custom text calling a function nothing defines. The command lists the id as an error at the copy, the
+ *  Map script check lists the text's problem at its own file and line; a click opens the file there; Renumber and Fix
+ *  order.txt (buttons in the Problems view) write only the files they are about, and the next run has them gone. */
+async function triggerTree(page, found) {
+  const fail = (what) => found.push(`check trigger tree: ${what}`);
+  const soon = (check, ms) => until("", check, ms).then(() => true, () => false);
+  const dir = join(work, "trigger-tree"), trig = join(dir, "map", "triggers");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  rmSync(trig, { recursive: true, force: true });
+  cpSync(join(repo, "tests", "fixtures", "trigger-folders", "map", "triggers"), trig, { recursive: true });
+  const original = readFileSync(join(trig, "Initialization", "Melee_Initialization.gui.json"), "utf8");
+  const copy = join(trig, "Systems", "Melee_Copy.gui.json");
+  writeFileSync(copy, original);
+  const setup = join(trig, "Initialization", "Setup_Players.j");
+  const setupText = readFileSync(setup, "utf8");
+  // Line 3 of the file (the frontmatter is line 1).
+  writeFileSync(setup, setupText.replace(/(function Trig_Setup_Players_Actions takes nothing returns nothing)(\r?\n)/, "$1$2    call NoSuchSmokeFunction()$2"));
+  const order = join(trig, "Systems", "order.txt"), orderText = readFileSync(order, "utf8");
+  const row = (text) => `[...document.querySelectorAll(".problem-row")].find((r) => r.textContent.includes(${lit(text)}))`;
+  const fix = (text, label) => page.evaluate(`(() => { const b = [...(${row(text)}?.querySelectorAll("button.problem-fix") ?? [])].find((x) => x.textContent === ${lit(label)}); if (!b) return false; b.click(); return true; })()`);
+  const cursor = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEditor.cursor"]')?.textContent ?? ""`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(dir)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(dir)}`));
+  try {
+    // ---- The command: the trigger folders' group of a Problems run ----
+    const group = await page.evaluate(`w3.commands.execute("w3.problems.checkTriggerTree")`);
+    const listed = (group?.problems ?? []).map((p) => `${p.severity} ${p.location}: ${p.message}`);
+    if (!listed.some((l) => l.startsWith("error map/triggers/Systems/Melee_Copy.gui.json: \"Melee Initialization\" has the id 0x3000000"))) fail(`the id held twice isn't listed at the copy: ${lit(listed)}`);
+    if (!listed.some((l) => l.startsWith("warning map/triggers/Systems/order.txt: Melee_Copy.gui.json isn't listed"))) fail(`the file order.txt doesn't list isn't: ${lit(listed)}`);
+    const all = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.problems().map((p) => ({ message: p.message, location: p.location ?? null })))`);
+    const text = all.find((p) => p.message === "Unknown function NoSuchSmokeFunction");
+    if (text?.location !== "map/triggers/Initialization/Setup_Players.j:3") fail(`the custom text's problem is at ${lit(text?.location ?? all.filter((p) => /NoSuch/.test(p.message)))}, not at its file's line 3`);
+    // ---- Click-through: the file at the line ----
+    await until("the Problems rows", () => page.evaluate(`!!${row("NoSuchSmokeFunction")}`), 20000).catch(() => {});
+    await page.evaluate(`${row("NoSuchSmokeFunction")}?.click()`);
+    if (!(await soon(() => page.evaluate(`w3.editors.activePath() === "map/triggers/Initialization/Setup_Players.j"`), 20000))) fail(`a click on the text's problem opened ${await page.evaluate(`w3.editors.activePath()`)}`);
+    else if (!(await soon(async () => (await cursor()).startsWith("Ln 3,"), 10000))) fail(`the text's file opened at ${lit(await cursor())}, not at line 3`);
+    await page.evaluate(`${row("has the id")}?.click()`);
+    if (!(await soon(() => page.evaluate(`w3.editors.activePath() === "map/triggers/Systems/Melee_Copy.gui.json"`), 20000))) fail(`a click on the id's problem opened ${await page.evaluate(`w3.editors.activePath()`)}`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    // ---- Fixes, on request: only their files change ----
+    if (!(await fix("has the id", "Renumber"))) fail("the id's problem has no Renumber button");
+    else if (!(await soon(() => !readFileSync(copy, "utf8").includes("\"id\""), 20000))) fail("Renumber left the copy's id");
+    if (readFileSync(join(trig, "Initialization", "Melee_Initialization.gui.json"), "utf8") !== original) fail("Renumber changed the first trigger's file");
+    if (!(await soon(() => page.evaluate(`!${row("has the id")} && !!${row("isn't listed")}`), 20000))) fail("after Renumber the Problems view still lists the id (or lost the order.txt warning)");
+    if (!(await fix("isn't listed", "Fix order.txt"))) fail("the order.txt warning has no Fix order.txt button");
+    else if (!(await soon(() => readFileSync(order, "utf8") === `${orderText}Melee_Copy.gui.json\n`, 20000))) fail(`Fix order.txt wrote ${lit(readFileSync(order, "utf8"))}`);
+    if (!(await soon(() => page.evaluate(`!${row("isn't listed")}`), 20000))) fail("after Fix order.txt the Problems view still lists the file");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 async function tabsBeforeListing(page, found) {
   const fail = (what) => found.push(`tabs before the file list: ${what}`);
   const dir = join(work, "tabs-before-listing");
@@ -17094,6 +17151,7 @@ async function run() {
         triggerMultiSelect,
         triggerParamColorTools,
         triggersAndAi,
+        triggerTree,
         truncatedChapter,
         turtleCliffSave,
         typedFieldSave,
@@ -17382,6 +17440,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "triggerMultiSelect", found);
   await triggerFolders(page, found).catch((e) => found.push(`trigger folders: ${e.message}`));
   await leftOpen(page, "triggerFolders", found);
+  await triggerTree(page, found).catch((e) => found.push(`check trigger tree: ${e.message}`));
+  await leftOpen(page, "triggerTree", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));

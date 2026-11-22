@@ -10,9 +10,10 @@ import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { errorText } from "../../lib/oserror";
 import { missingRefs, triggerRefs } from "../../lib/triggers/refs";
 import type { TriggerIssue } from "../../lib/triggers/validate";
-import { TRIGGERS_ROOT, wtgPath } from "../../lib/triggers/project";
+import { isTriggerLayoutPath, TRIGGERS_ROOT, wtgPath } from "../../lib/triggers/project";
 import type { FileKind } from "./lookup";
 import { RunScope } from "./runscope";
+import { fixTriggerTree, treeProblem, type TreeIssue } from "./triggertree";
 
 const GITATTRIBUTES = ".gitattributes";
 /** The rule a project with trigger folders needs (written by a new project, crates/w3proj/src/project.rs GITATTRIBUTES). */
@@ -113,19 +114,17 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
       },
     },
     {
-      // What the trigger folders' read says is worth a look: an order.txt entry with no file, a variable defined twice
-      // alike (one kept). A tree that can't be read is Trigger validation's error.
+      // Check Trigger Tree (crates/w3proj/src/trigger_check.rs, as `w3proj triggers --check` and pack run it): what the
+      // files of map/triggers/ get wrong, mostly after a Git merge. Fixes are listed, never applied unasked.
       id: "triggerFolders",
-      title: "Trigger folders",
+      title: "Check Trigger Tree",
       async run() {
-        if (!w3.workspace.files().some((f) => f.path.toLowerCase() === TRIGGERS_ROOT)) return [];
-        const read = await scope().triggersAndTexts().catch(() => null);
-        return (read?.layout?.warnings ?? []).slice(0, LIMIT).map((w): Problem => {
-          // "map/triggers/<file>:<line>: what": the file and line are the location, a click opens the file.
-          const m = /^(map\/triggers\/[^:]+)(?::(\d+))?:\s*/.exec(w);
-          if (!m) return { severity: "warning", message: w, location: "map/triggers" };
-          return { severity: "warning", message: w.slice(m[0].length), location: m[2] ? `${m[1]}:${m[2]}` : m[1], reveal: { command: "w3.problems.open", args: [m[1]] } };
-        });
+        const root = w3.workspace.project()?.root;
+        if (!root || !w3.workspace.files().some((f) => isTriggerLayoutPath(f.path))) return [];
+        const issues = await w3.backend.invoke<TreeIssue[]>("triggers_check", { root });
+        const out = issues.slice(0, LIMIT).map((i) => treeProblem(i, (fix) => fixTriggerTree(w3, [fix])));
+        if (issues.length > LIMIT) out.push({ severity: "warning", message: `… and ${issues.length - LIMIT} more` });
+        return out;
       },
     },
     {

@@ -277,6 +277,9 @@ function CreateBlightedGoldmineBJ takes nothing returns nothing
 endfunction
 `;
 
+/** The stand-in's texts, for a test that reads "Scripts\common.j" and "Scripts\Blizzard.j" as the app does. */
+export const MINI_COMMON_J = COMMON, MINI_BLIZZARD_J = BLIZZARD;
+
 /** The stand-in for common.j and Blizzard.j, as the app builds its own from the real ones. */
 export function miniGameEnv(): JassEnv {
   return envFrom([BLIZZARD], envFrom([COMMON], emptyEnv()));

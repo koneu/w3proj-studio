@@ -11,8 +11,11 @@ import { parseSlk } from "../../lib/formats/text";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
-import { checkJass } from "../../lib/jass/check";
+import { checkJass, envFrom } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
+import { ident } from "../../lib/script/names";
+import { TRIGGERS_ROOT, type ProjectTriggers } from "../../lib/triggers/project";
+import { lintTexts, placeScriptDiagnostics, type TextDiagnostic, type TriggerText } from "../../lib/triggers/textcheck";
 import { mapScriptJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
@@ -52,6 +55,25 @@ const BATCH_VARIATIONS = 64;
 /** Imported models read at the same time by "Textures of imported models". */
 const MODEL_READS = 6;
 
+const JASS_SCRIPT = "map/war3map.j", LUA_SCRIPT = "map/war3map.lua";
+
+/** The script files of the trigger folders as they are on disk: the header, each custom-text trigger (with its gg_trg_
+ *  global) and script item. A file that isn't there any more is left out. */
+export async function triggerTexts(w3: W3Api, layout: ProjectTriggers): Promise<TriggerText[]> {
+  const wanted: { path: string; global: string | null }[] = [];
+  if (layout.headerFile) wanted.push({ path: layout.headerFile, global: null });
+  layout.file.items.forEach((item, i) => {
+    const path = layout.files[i];
+    if (!path || !/\.(j|vjass|lua)$/i.test(path) || !("ecas" in item)) return;
+    wanted.push({ path, global: item.type === 8 ? `gg_trg_${ident(item.name)}` : null });
+  });
+  const read = await mapLimit(wanted, 8, async (w): Promise<TriggerText | null> => {
+    const text = await w3.workspace.readText(w.path).catch(() => null);
+    return text === null ? null : { ...w, text };
+  });
+  return read.filter((r): r is TriggerText => r !== null);
+}
+
 /** A folder the listing couldn't read: a campaign's chapter (`maps/<chapter>`) is named as such, with its path and why. */
 export function unreadableProblems(list: { path: string; error: string }[]): Problem[] {
   return list.map((u): Problem => {
@@ -78,33 +100,51 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
       },
     },
     {
+      // The map script, and in a project with trigger folders each script file of them with its own file and line
+      // (lib/triggers/textcheck.ts): a finding in a text the script copied as it is is told once, at the file.
       id: "jass",
       title: "Map script",
       async run() {
-        const path = "map/war3map.j";
-        const src = await w3.workspace.readText(path).catch(() => null);
-        if (src === null) {
-          const lua = await w3.workspace.readText("map/war3map.lua").catch(() => null);
-          if (lua === null) return [];
-          const lineAt = (at: number) => lua.slice(0, at).split("\n").length;
-          return capped(checkLua(lua).map((d): Problem => ({
-            severity: "error", message: d.message, location: `war3map.lua:${lineAt(d.from)}`,
-            reveal: { command: "w3.text.revealAt", args: ["map/war3map.lua", lua.slice(0, d.from).replace(/\r\n/g, "\n").length] },
-          })), "script problems");
+        const shared = scope();
+        const layout = w3.workspace.files().some((f) => f.path.toLowerCase() === TRIGGERS_ROOT)
+          // A tree that can't be read is Trigger validation's error.
+          ? (await shared.triggersAndTexts().catch(() => null))?.layout ?? null : null;
+        const texts = layout ? await triggerTexts(w3, layout) : [];
+        const src = await w3.workspace.readText(JASS_SCRIPT).catch(() => null);
+        const luaSrc = src === null ? await w3.workspace.readText(LUA_SCRIPT).catch(() => null) : null;
+        const language = layout?.language ?? (src === null && luaSrc !== null ? "lua" : "jass");
+        const fileProblem = (d: TextDiagnostic): Problem => ({
+          severity: d.severity, message: d.message, location: `${d.path}:${d.line}`, reveal: { command: "w3.text.revealAt", args: [d.path, d.offset] },
+        });
+        /** The script's findings that aren't in a file's text, and those that are (moved to the file). */
+        const told = <D extends { from: number; message: string; severity: "error" | "warning" }>(script: string, path: string, diags: D[], perFile: TextDiagnostic[]): Problem[] => {
+          const { kept, moved } = placeScriptDiagnostics(script, texts, language, diags, perFile);
+          const files = [...perFile, ...moved].sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line).map(fileProblem);
+          // The text editor counts a line break as one character, also in CRLF files.
+          return [...files, ...kept.map((d): Problem => ({
+            severity: d.severity, message: d.message, location: `${path.slice(4)}:${script.slice(0, d.from).split("\n").length}`,
+            reveal: { command: "w3.text.revealAt", args: [path, script.slice(0, d.from).replace(/\r\n/g, "\n").length] },
+          }))];
+        };
+        if (language === "lua") {
+          if (luaSrc === null && !texts.length) return [];
+          const perFile = lintTexts(texts, "lua", null, true);
+          const diags = luaSrc === null ? [] : checkLua(luaSrc).map((d) => ({ ...d, severity: "error" as const }));
+          return capped(told(luaSrc ?? "", LUA_SCRIPT, diags, perFile), "script problems");
         }
+        if (src === null && !texts.length) return [];
         // The map's own Scripts\common.j or Blizzard.j, where it imports one, stands in for the game's.
-        const files = scope().lookup();
+        const files = shared.lookup();
         const env = await mapScriptJassEnv((p) => w3.game.readText(p), async (p) => {
           const bytes = await files.read(p);
           return bytes === null ? null : new TextDecoder().decode(bytes);
         });
-        const lineOf = (at: number) => src.slice(0, at).split("\n").length;
-        // The text editor counts a line break as one character, also in CRLF files.
-        const editorOffset = (at: number) => src.slice(0, at).replace(/\r\n/g, "\n").length;
-        return capped(checkJass(src, env).map((d): Problem => ({
-          severity: d.severity, message: d.message, location: `war3map.j:${lineOf(d.from)}`,
-          reveal: { command: "w3.text.revealAt", args: [path, editorOffset(d.from)] },
-        })), "script problems");
+        // A file's text is checked against the map script's declarations and the other files'. Its udg_ and gg_ names
+        // are the whole script's to judge (a kept script may not follow the triggers): what that check finds in the
+        // file's text is moved to the file's line below.
+        const declared = envFrom([...(src !== null ? [src] : []), ...texts.map((t) => t.text)], env, ["map"]);
+        const perFile = lintTexts(texts, "jass", declared, false);
+        return capped(told(src ?? "", JASS_SCRIPT, src === null ? [] : checkJass(src, env), perFile), "script problems");
       },
     },
     {

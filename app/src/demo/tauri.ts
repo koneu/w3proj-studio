@@ -125,6 +125,9 @@ const handlers: Record<string, Handler> = {
     return { also: [{ path, ...s }], written: ["map/triggers/triggers.json"], deleted: [], files: (file as { items: unknown[] }).items.map(() => null), headerFile: null };
   },
   triggers_plan: ({ save }) => ({ write: [{ path: "map/triggers/triggers.json", text: JSON.stringify(save, null, 2) }], delete: [] }),
+  // Check Trigger Tree reads the folders' own format: the demo's one made-up file has nothing it would find.
+  triggers_check: () => [],
+  triggers_fix: () => ({ write: [], delete: [] }),
   "plugin:event|listen": () => 1,
   "plugin:event|unlisten": () => undefined,
   "plugin:dialog|open": () => null,

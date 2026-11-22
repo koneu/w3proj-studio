@@ -77,14 +77,31 @@ test("a trigger file that can't be read is an error; no trigger file is nothing"
   assert.deepEqual(await run({ "map/triggers/triggers.json": "{ not json" }, "triggerRefs"), []);
 });
 
-test("what the trigger folders' read warns about is listed by file and line", async () => {
-  const w3 = app({ "map/triggers/triggers.json": wtg([]) }) as unknown as { workspace: Record<string, unknown> };
-  const read = w3.workspace.readTriggers as () => Promise<{ warnings: string[] }>;
-  w3.workspace.readTriggers = async () => ({ ...(await read()), warnings: ["map/triggers/Setup/order.txt:3: Gone.j isn't there", "something else"] });
+test("Check Trigger Tree's findings are listed by file and line, with their fix; a check that can't run fails", async () => {
+  const w3 = app({ "map/triggers/triggers.json": wtg([]) }) as unknown as { workspace: Record<string, unknown>; backend: { invoke: (cmd: string, args: unknown) => Promise<unknown> } };
+  const asked: unknown[] = [];
+  w3.backend.invoke = async (cmd, args) => {
+    asked.push([cmd, args]);
+    return [
+      { severity: "warning", code: "orderMissing", file: "map/triggers/Setup/order.txt", line: 3, message: "Gone.j isn't there", fix: "order" },
+      { severity: "error", code: "conflict", file: "map/triggers/Setup/A.j", line: 7, message: "an unresolved merge conflict" },
+    ];
+  };
   const scope = new RunScope(w3 as unknown as W3Api);
-  const found = await mapChecks(w3 as unknown as W3Api, () => scope).find((c) => c.id === "triggerFolders")!.run();
-  assert.deepEqual(found.map((p) => [p.message, p.location]), [["Gone.j isn't there", "map/triggers/Setup/order.txt:3"], ["something else", "map/triggers"]]);
-  assert.deepEqual(found[0].reveal, { command: "w3.problems.open", args: ["map/triggers/Setup/order.txt"] });
+  const tree = () => mapChecks(w3 as unknown as W3Api, () => scope).find((c) => c.id === "triggerFolders")!.run();
+  const found = await tree();
+  assert.deepEqual(asked, [["triggers_check", { root: "/p" }]]);
+  assert.deepEqual(found.map((p) => [p.severity, p.message, p.location, p.fixes?.map((f) => f.label)]), [
+    ["warning", "Gone.j isn't there", "map/triggers/Setup/order.txt:3", ["Fix order.txt"]],
+    ["error", "an unresolved merge conflict", "map/triggers/Setup/A.j:7", undefined],
+  ]);
+  assert.deepEqual(found[0].reveal, { command: "w3.text.revealLine", args: ["map/triggers/Setup/order.txt", 3] });
+  w3.backend.invoke = async () => { throw new Error("map/triggers/ can't be listed"); };
+  await assert.rejects(tree(), /can't be listed/, "a failed check isn't \"no problems\"");
+  // Control: a project without trigger folders asks nothing.
+  asked.length = 0;
+  const plain = app({ "map/war3map.w3i.json": "{}" });
+  assert.deepEqual(await mapChecks(plain, () => new RunScope(plain)).find((c) => c.id === "triggerFolders")!.run(), []);
 });
 
 test("a project with trigger folders and no .gitattributes rule for them is warned about", async () => {

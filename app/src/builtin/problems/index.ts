@@ -198,6 +198,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.problems.run", async () => { await w3.views.show("problems"); await service.run(); }),
     w3.commands.register("w3.problems.show", async () => { await w3.views.show("problems"); if (!ran) await service.run(); }),
+    // Check Trigger Tree: the Problems run (its group is the trigger folders' check), shown; resolves with that group.
+    w3.commands.register("w3.problems.checkTriggerTree", async () => {
+      await w3.views.show("problems");
+      const r = await service.runChecked();
+      folded.delete("triggerFolders");
+      w3.views.refresh("w3.problems.list");
+      return r.checks.find((c) => c.id === "triggerFolders") ?? null;
+    }),
     w3.commands.register("w3.problems.deleteInvalid", async () => {
       if (await deleteInvalid(w3)) await service.run();
     }),

@@ -63,13 +63,21 @@ function basics(lang: Extension, readOnly: boolean): Extension[] {
 /** Open text editors by path, to show a declaration in a file that is already open. */
 const openViews = new Map<string, EditorView>();
 /** Declarations (names) or text offsets to show once their file opens (go to definition, problems). */
-const pendingReveal = new Map<string, string | number>();
+const pendingReveal = new Map<string, Reveal>();
+/** A declaration's name, a text offset, or a line (from 1). */
+type Reveal = string | number | { line: number };
 /** Opens a game script at a declaration (set up in activate). */
 let openGameScript = (_path: string, _name: string) => {};
 
 /** Selects where `name` is declared (native, function, global), or the line at a text offset,
  *  and scrolls there. */
-function reveal(view: EditorView, name: string | number) {
+function reveal(view: EditorView, name: Reveal) {
+  if (typeof name === "object") {
+    const line = view.state.doc.line(Math.max(1, Math.min(Math.floor(name.line) || 1, view.state.doc.lines)));
+    view.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true });
+    view.focus();
+    return;
+  }
   if (typeof name === "number") {
     const line = view.state.doc.lineAt(Math.max(0, Math.min(name, view.state.doc.length)));
     view.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true });
@@ -184,6 +192,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const view = openViews.get(path);
     if (view && pendingReveal.get(path) === at) { pendingReveal.delete(path); reveal(view, at); }
   }));
+  // Opens a file at a line (from 1; e.g. Check Trigger Tree's finding in map/triggers/); selects it.
+  ctx.subscriptions.push(w3.commands.register("w3.text.revealLine", async (path: string, line: number) => {
+    const want = { line };
+    pendingReveal.set(path, want);
+    await w3.editors.open(path, "w3.textEditor");
+    const view = openViews.get(path);
+    if (view && pendingReveal.get(path) === want) { pendingReveal.delete(path); reveal(view, want); }
+  }));
   const status = w3.statusBar.add({ id: "w3.textEditor.cursor", text: "", align: "right", priority: 10 });
   ctx.subscriptions.push(status);
   // The cursor status belongs to the active text editor (each editor fills it when it becomes active).
@@ -247,7 +263,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const activeSub = w3.editors.onDidChangeActive((a) => { if (a?.editor === "w3.textEditor" && a.path === doc.path) updateStatus(view); });
         openViews.set(doc.path, view);
         const want = pendingReveal.get(doc.path);
-        if (want) { pendingReveal.delete(doc.path); requestAnimationFrame(() => reveal(view, want)); }
+        if (want !== undefined) { pendingReveal.delete(doc.path); requestAnimationFrame(() => reveal(view, want)); }
         else restoreTextView(view, doc.viewState);
         // The first line in sight, as last seen while shown: a hidden tab's scroller reads 0.
         let topLine = topLineOf(view);
