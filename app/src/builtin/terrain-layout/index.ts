@@ -619,7 +619,7 @@ function renderView(w3: W3Api, el: HTMLElement) {
     return;
   }
   if (!isSplit(w3)) {
-    el.append(h("div.view-empty", {}, "The terrain isn't split into subterrains. ", h("button.link-inline", { onclick: () => void w3.commands.execute("w3.terrainLayout.split").catch(() => {}) }, "Split Terrain into Subterrains…")));
+    el.append(h("div.view-empty", {}, "The terrain isn't split into subterrains. ", h("button.link-inline", { onclick: () => void w3.commands.execute("w3.terrainLayout.edit").catch(() => {}) }, "Edit Terrain Layout…")));
     return;
   }
   const body = h("div.tree", {}, h("div.muted", {}, "Reading the subterrains…"));
@@ -647,12 +647,8 @@ function renderView(w3: W3Api, el: HTMLElement) {
       h("button.link-inline", { onclick: () => choose(s.subterrains.map((y) => y.name)) }, "Open all"),
       " · ",
       h("button.link-inline", { title: "Toggle Subterrain Overlay: the rectangles and names over the terrain editor's map", onclick: () => void w3.commands.execute("w3.terrain.toggleSubterrains").catch((e) => w3.window.showError(errorText(e))) }, "Show on the map")));
-    const command = (id: string, label: string, title: string) => h("button.link-inline", { title, onclick: () => void w3.commands.execute(id).catch(() => {}) }, label);
     rows.push(h("div.tree-row", {},
-      command("w3.terrainLayout.newSubterrain", "New…", "New Subterrain…: a rectangle taken from the subterrains it covers"), " · ",
-      command("w3.terrainLayout.resizeSubterrain", "Resize…", "Resize Subterrain…"), " · ",
-      command("w3.terrainLayout.renameSubterrain", "Rename…", "Rename Subterrain…: its folder is renamed, its creation numbers stay"), " · ",
-      command("w3.terrainLayout.joinSubterrains", "Join…", "Join Subterrains…: two side by side become one")));
+      h("button.link-inline", { title: "Edit Terrain Layout: draw, resize, rename, join, delete or cut into rows and columns", onclick: () => void w3.commands.execute("w3.terrainLayout.edit").catch((e) => w3.window.showError(errorText(e))) }, "Edit Terrain Layout…")));
     body.replaceChildren(...rows);
   }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
 }

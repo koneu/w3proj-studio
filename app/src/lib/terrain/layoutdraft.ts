@@ -121,6 +121,62 @@ export function describe(d: Draft, subs: readonly SubRect[]): string[] {
   return out;
 }
 
+// ---- a split project: one more or fewer column or row ----
+
+/** The cut lines of the draft across `axis` (strictly inside the canvas), west to east or south to north: every edge
+ *  of a subterrain that isn't the canvas's own. */
+export function draftCuts(d: Draft, axis: "x" | "y"): number[] {
+  const n = d.canvas[axis === "x" ? 0 : 1];
+  const out = new Set<number>();
+  for (const s of d.subs) for (const e of axis === "x" ? [s.x, s.x + s.w] : [s.y, s.y + s.h]) if (e > 0 && e < n) out.add(e);
+  return [...out].sort((a, b) => a - b);
+}
+
+/** One more column (`axis` "x") or row ("y"): a cut through the middle of the widest band between the draft's cuts.
+ *  Every subterrain it crosses is cut in two: the west (south) part keeps the name, the other becomes a new
+ *  subterrain `<name>2` (next free) that gets the next block of creation numbers; the objects follow their place. */
+export function addCut(d: Draft, axis: "x" | "y"): Draft | string {
+  const n = d.canvas[axis === "x" ? 0 : 1];
+  const lines = [0, ...draftCuts(d, axis), n];
+  let a = 0, b = 0;
+  for (let i = 0; i + 1 < lines.length; i++) if (lines[i + 1] - lines[i] > b - a) { a = lines[i]; b = lines[i + 1]; }
+  if (b - a < 2) return `The ${axis === "x" ? "columns" : "rows"} are one corner wide already: there is no room for another.`;
+  const at = a + Math.floor((b - a) / 2);
+  let out = d;
+  for (const s of d.subs) {
+    const lo = axis === "x" ? s.x : s.y, len = axis === "x" ? s.w : s.h;
+    if (!(lo < at && at < lo + len)) continue;
+    const rect = axis === "x" ? { x: at, y: s.y, w: lo + len - at, h: s.h } : { x: s.x, y: at, w: s.w, h: lo + len - at };
+    const next = addSub(out, freeName(out.subs, `${s.name}2`), rect);
+    if (typeof next === "string") return next;
+    out = next;
+  }
+  return out;
+}
+
+/** One column (`axis` "x") or row ("y") fewer: the last cut goes, and the subterrains on its two sides join (the
+ *  west/south one keeps its name and all their creation numbers). Refused when they don't line up across it. */
+export function removeCut(d: Draft, axis: "x" | "y"): Draft | string {
+  const cuts = draftCuts(d, axis);
+  const at = cuts[cuts.length - 1];
+  if (at === undefined) return `There is no cut: the whole map is one ${axis === "x" ? "column" : "row"} already.`;
+  const before = (s: SubRect) => (axis === "x" ? s.x + s.w : s.y + s.h) === at;
+  const after = (s: SubRect) => (axis === "x" ? s.x : s.y) === at;
+  const lows = d.subs.filter(before), highs = d.subs.filter(after);
+  const pairs = lows.map((l) => [l, highs.find((hi) => sideBySide(l, hi) && (axis === "x" ? hi.y === l.y && hi.h === l.h : hi.x === l.x && hi.w === l.w))] as const);
+  // Subterrains that merely touch the line (none this side or that) can't be joined with a partner.
+  if (pairs.some(([, hi]) => !hi) || highs.some((hi) => !pairs.some(([, p]) => p === hi))) {
+    return `The subterrains don't line up across the ${axis === "x" ? "column" : "row"} cut at ${at}: join or resize them first.`;
+  }
+  let out = d;
+  for (const [l, hi] of pairs) {
+    const next = joinSubs(out, [l.name, hi!.name], l.name);
+    if (typeof next === "string") return next;
+    out = next;
+  }
+  return out;
+}
+
 // ---- pointer geometry ----
 
 /** A corner cell under a point in corner units (fractions allowed), kept on the canvas. */

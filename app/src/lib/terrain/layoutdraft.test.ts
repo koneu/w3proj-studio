@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addSub, cellAt, cutAt, deleteSub, describe, dragHandle, dragRect, draftOf, evenCuts, freeName, gridRects, handleAt, joinSubs, moveCut, normalGrid, planOf, renameSub, resizeSub, sideBySide, unchanged, type Draft } from "./layoutdraft";
+import { addCut, addSub, cellAt, cutAt, deleteSub, describe, dragHandle, dragRect, draftCuts, draftOf, evenCuts, freeName, gridRects, handleAt, joinSubs, moveCut, normalGrid, planOf, removeCut, renameSub, resizeSub, sideBySide, unchanged, type Draft } from "./layoutdraft";
 import { planText, type SubRect } from "./subterrainplan";
 
 /** A 2×2 grid over a canvas of 10×8 corners. */
@@ -98,4 +98,25 @@ test("a flat project's split grid: even cuts, names, dragging a cut between its 
   assert.equal(cutAt(g, [5, 1], 0.5), null);
   assert.deepEqual(moveCut(g, "x", 0, 9).xs, [6, 7], "stays west of the next cut");
   assert.deepEqual(moveCut(g, "y", 0, -5).ys, [1]);
+});
+
+test("one more column cuts every subterrain it crosses; one fewer joins them back", () => {
+  const d = ok(addCut(start(), "x"));
+  // The widest band is 5 wide (0–5): cut at 2; sw and nw are cut, their east parts are new.
+  assert.deepEqual(draftCuts(d, "x"), [2, 5]);
+  assert.equal(plan(d), "sw=sw:0,0,2,4 se=se:5,0,5,4 nw=nw:0,4,2,4 ne=ne:5,4,5,4 sw2=:2,0,3,4 nw2=:2,4,3,4");
+  // The last cut (5) goes: se and ne join the subterrains left of it.
+  const back = ok(removeCut(d, "x"));
+  assert.deepEqual(draftCuts(back, "x"), [2]);
+  assert.deepEqual(back.subs.map((s) => s.name).sort(), ["nw", "nw2", "sw", "sw2"].sort());
+  const rows = ok(addCut(start(), "y"));
+  assert.deepEqual(draftCuts(rows, "y"), [2, 4]);
+});
+
+test("column and row steps say why they can't", () => {
+  assert.match(String(removeCut(draftOf([{ name: "main", x: 0, y: 0, w: 10, h: 8 }], [10, 8]), "x")), /one column already/);
+  assert.match(String(addCut(draftOf([{ name: "main", x: 0, y: 0, w: 1, h: 8 }], [1, 8]), "x")), /no room/);
+  // Staggered subterrains don't line up across the cut.
+  const odd = draftOf([{ name: "a", x: 0, y: 0, w: 5, h: 8 }, { name: "b", x: 5, y: 0, w: 5, h: 3 }, { name: "c", x: 5, y: 3, w: 5, h: 5 }], [10, 8]);
+  assert.match(String(removeCut(odd, "x")), /don't line up/);
 });
