@@ -10,6 +10,7 @@ import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "../../lib/terrain/pickmatch";
 import { loadIdLayout } from "../../lib/terrain/creationids";
+import { openAreaTest } from "../../lib/terrain/openarea";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { errorText, isNotFoundError } from "../../lib/oserror";
@@ -97,7 +98,7 @@ import { drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerra
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
-import { DERIVED_CLOSED_KEY, editableAt, loadOpenState, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
+import { cornersOpen, DERIVED_CLOSED_KEY, editableAt, loadOpenState, notOpenText, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
@@ -507,6 +508,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // A project whose map info can't be read is read-only, as its terrain editor (infoLockText).
     const infoProblem = await mapDocProblem(w3, "war3map.w3i");
     if (infoProblem) throw new Error(infoLockText(infoProblem));
+    const open = await openAreaTest(w3);
     let before: Placed[] = [];
     const name = key === "units" ? "war3mapUnits.doo" : "war3map.doo", path = jsonPathOf(w3, name);
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
@@ -525,7 +527,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const startsBefore = key === "units" ? structuredClone(startLocations(list)) : null;
       // New objects' creation numbers: a split terrain's ranges (a terrain.json that can't be read refuses the edit).
       const idLayout = await loadIdLayout(w3);
+      // A partial load (Open Subterrains…): an object placed, moved or removed outside the open subterrains refuses the
+      // whole edit here, saying where, rather than the backend's write refusing it after the tool's work.
+      const was = open ? new Map(list.map((e) => [e, [e.position[0], e.position[1]] as const])) : null;
       await change({ name, key, doc, list, json: true, dirty: false, idLayout });
+      if (open && was) {
+        const now = new Set(list);
+        const moved = list.find((e) => { const p = was.get(e); return (!p || p[0] !== e.position[0] || p[1] !== e.position[1]) && !open(e.position[0], e.position[1]); });
+        if (moved) throw new Error(notOpenText(`Nothing was changed: ${String(moved.id)} at`, moved.position[0], moved.position[1]));
+        const gone = [...was].find(([e, p]) => !now.has(e) && !open(p[0], p[1]));
+        if (gone) throw new Error(notOpenText(`Nothing was changed: ${String(gone[0].id)} at`, gone[1][0], gone[1][1]));
+      }
       // And what it writes is what the editor holds after reading it again (a replaced barrel's life as a doodad's): a
       // save then writes the same, which leaves the edit's undo possible.
       if (editor) await editor.handle.objects.openRules(list);
@@ -1103,6 +1115,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           variation: o.variation, numVar: handle.objects.type(o.id as string)?.numVar ?? 1 }, null);
         if (why) throw new Error(`objects[${i}]: ${why}`);
       }
+      // A partial load (Open Subterrains…): a spot outside the open subterrains refuses the call, nothing placed.
+      const open = await openAreaTest(w3);
+      for (const [i, o] of wanted.entries()) if (open && !open(o.x as number, o.y as number)) throw new Error(notOpenText(`Nothing was placed: objects[${i}] at`, o.x as number, o.y as number));
       // Properties as set_object_properties takes them (the Properties panel's), made on each new object in the same edit:
       // one an object doesn't have, or out of range, refuses the whole call.
       const asked = wanted.some((o) => o.properties !== undefined) ? await propLists() : null;
@@ -1207,6 +1222,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!Array.isArray(ids) || !ids.length || !ids.every((i) => typeof i === "string" && i.length === 4)) throw new Error("ids must list object types of four characters.");
       const area = await readArea(w3, args);
       if (!area) throw new Error("scatter_objects needs a region, or left, bottom, right and top.");
+      // A partial load (Open Subterrains…): an area reaching outside the open subterrains is refused, nothing placed.
+      const open = await openAreaTest(w3);
+      for (const [x, y] of [[area.left, area.bottom], [area.right - 1, area.bottom], [area.left, area.top - 1], [area.right - 1, area.top - 1]]) {
+        if (open && !open(x, y)) throw new Error(notOpenText("Nothing was scattered: the area reaches outside the open subterrains, at", x, y));
+      }
       const density = givenNumber("density", args.density, { min: 0.05, max: 1, fallback: 0.7 });
       const limit = givenNumber("limit", args.limit, { min: 1, max: Infinity, whole: true, fallback: 3000 });
       const range = args.scaleRange;
@@ -3962,9 +3982,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (lost) void w3.window.showWarning(`${lost} pasted corner${lost === 1 ? "" : "s"} use${lost === 1 ? "s" : ""} a cliff type this map lacks (or can't number past ${MAX_CLIFF_TYPES - 1}); the map's first cliff type stands in.`);
           return stampGround(terrain, ground, groundOrigin(terrain, ground, g[0], g[1]), tiles.map((n) => Math.max(0, n)), cliffs);
         };
+        /** A partial load (Open Subterrains…): why a paste at `g` can't go there (its ground or an object outside the
+         *  open subterrains), else null. Nothing of it is placed then, rather than the ground clamped to the open part
+         *  and the objects refused at the save. */
+        const pasteNotOpen = (f: Fragment, g: Vec3): string | null => {
+          if (!partial) return null;
+          if (f.ground) {
+            const [x0, y0] = groundOrigin(terrain, f.ground, g[0], g[1]);
+            if (!cornersOpen(partial, x0, y0, x0 + f.ground.width - 1, y0 + f.ground.height - 1)) {
+              return notOpenText("Not pasted: its ground reaches outside the open subterrains, at", terrain.offsetX + Math.max(0, x0) * 128, terrain.offsetY + Math.max(0, y0) * 128);
+            }
+          }
+          for (const o of f.objects) {
+            const s = pasteSpot(o, g);
+            if (s && !inOpenArea({ position: s })) return notOpenText(`Not pasted: ${String(o.entry.id)} would stand at`, s[0], s[1]);
+          }
+          return null;
+        };
         const placePaste = async (g: Vec3) => {
           const f = pasting;
           if (!f) return;
+          const outside = pasteNotOpen(f, g);
+          if (outside) { void w3.window.showWarning(outside); return; }
           // What the pasted objects are made of, before anything is placed: the user may refuse.
           const root = w3.workspace.project()?.root;
           const renames = await bringTypes(f).catch((e) => { void w3.window.showError(String(e)); return null; });
@@ -3972,6 +4011,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await objectsReady(f.objects.map((o) => ({ list: o.list, id: String(o.entry.id) })));
           // Another project, or the paste ended, while the question was open: nothing is placed.
           if (!renames || pasting !== f || w3.workspace.project()?.root !== root || refuseLost()) return;
+          // The spots once the sizes are read (an object's grid can move it over the edge).
+          const outsideNow = pasteNotOpen(f, g);
+          if (outsideNow) { void w3.window.showWarning(outsideNow); return; }
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           // From here to the end there is no wait: the lists are taken right before the tiles are added, so putting them
           // back can't drop a tile another edit added in between.
@@ -4856,7 +4898,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
               // A partial load: only into the open subterrains (the save would refuse it), said at once.
-              if (!inOpenArea({ position: [at.x, at.y] })) return "Not placed: that spot isn't in an open subterrain (the dimmed strip and the closed area are read-only). Open Subterrains… opens it.";
+              if (!inOpenArea({ position: [at.x, at.y] })) return notOpenText("Not placed: the spot", at.x, at.y);
               // A ship in water on the surface, as the World Editor saves it; anything else on the ground.
               const moveType = kind === "w3u" ? (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.moveType : undefined;
               const entry = newEntry(f, id, [at.x, at.y, savedUnitZ(moveType, kind === "w3d" ? groundFor(id, at.x, at.y) : heightAt(terrain, at.x, at.y), waterSurfaceAt(terrain, at.x, at.y))], at.player, kind, startGold);
@@ -6506,6 +6548,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const want = unitsFile === uf && !disposed ? wantStarts() : [];
               if (want.length) {
                 const places = newStartPlaces(terrain, want, uf.list, around, playableArea(edgeInfo, terrain));
+                // A partial load: a start that would land outside the open subterrains isn't added (the save would be
+                // refused); the save of the whole map adds it.
+                const notOpen = [...places].filter(([, [x, y]]) => !inOpenArea({ position: [x, y] }));
+                for (const [player] of notOpen) places.delete(player);
+                if (notOpen.length) void w3.window.showWarning(`No start location added for ${notOpen.length === 1 ? "player" : "players"} ${notOpen.map(([p]) => p + 1).join(", ")}: the place found is outside the open subterrains. Open them all (Open Subterrains…) and save to add ${notOpen.length === 1 ? "it" : "them"}.`);
                 for (const [player, [x, y]] of places) {
                   // As the editor's save writes the starts it adds (all-starts.json): the player's number as the
                   // variation, level 0. Its hit points and mana 0 Studio's save writes as -1, as the editor's next save

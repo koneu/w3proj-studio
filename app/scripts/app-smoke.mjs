@@ -6164,6 +6164,53 @@ async function subterrains(page, found) {
         if (!picked.some(([id]) => id === "hfoo") || inStrip.length) fail(`Select All with only ne open took ${lit(picked)} (the strip's footman at ${haloAt.x},${haloAt.y} must not be among them, ne's must)`);
         const placedClosed = await page.evaluate(`(() => { const r = window.__subEd.objects.create("w3u", "hfoo", { x: ${at(ne.x - 16, 0)}, y: ${at(ne.y - 16, 1)}, player: 0, angle: 0 }); return typeof r === "string" ? r : "placed"; })()`);
         if (!/isn't in an open subterrain/.test(placedClosed)) fail(`placing a footman in the closed sw gave ${lit(placedClosed)}`);
+        // Stage 6: the AI tools and the paste refuse a spot outside the open subterrains up front, saying so, with
+        // nothing changed (before, the backend's write refused them after the tool's work, and a paste stood in the
+        // editor unsaved until its save was refused). Controls: the same tools into ne work.
+        const swSpot = { x: at(ne.x - 16, 0), y: at(ne.y - 16, 1) };
+        const neSpot = { x: at(ne.x + 20, 0), y: at(ne.y + 20, 1) };
+        const editableIn = (s, p) => p[0] >= at(s.x, 0) && p[0] < at(s.x + s.w, 0) && p[1] >= at(s.y, 1) && p[1] < at(s.y + s.h, 1);
+        const refusedBy = (name, args) => tool(name, args).then(() => null, (e) => String(e.message));
+        const unitsFile = () => readFileSync(join(map, "terrain", ne.folder, "units.json"), "utf8");
+        const neUnits = unitsFile();
+        for (const [what, spot] of [["the closed sw", swSpot], ["the read-only strip", haloAt]]) {
+          const r = await refusedBy("place_objects", { objects: [{ id: "hfoo", ...spot, player: 1 }], ignoreRoom: true });
+          if (!r || !/Nothing was placed: objects\[0\] at .*isn't in an open subterrain/.test(r)) fail(`place_objects into ${what}: ${lit(r)}`);
+        }
+        const scattered = await refusedBy("scatter_objects", { ids: ["LTlt"], left: swSpot.x, bottom: swSpot.y, right: neSpot.x, top: neSpot.y, limit: 3 });
+        if (!scattered || !/Nothing was scattered: .*isn't in an open subterrain/.test(scattered)) fail(`scatter_objects over sw and ne: ${lit(scattered)}`);
+        const region = await refusedBy("add_region", { name: "In sw", left: swSpot.x, bottom: swSpot.y, right: neSpot.x, top: neSpot.y });
+        if (!region || !/Not added: its south-west corner at .*isn't in an open subterrain/.test(region)) fail(`add_region with its corner in sw: ${lit(region)}`);
+        const placedNe = JSON.parse(await tool("list_placed", { kind: "units", id: "hfoo", all: true })).items.find((p) => editableIn(ne, p.position));
+        const moved = placedNe ? await refusedBy("move_object", { kind: "units", index: placedNe.index, id: "hfoo", ...swSpot }) : "no footman in ne";
+        if (!moved || !/Nothing was changed: hfoo at .*isn't in an open subterrain/.test(moved)) fail(`move_object of ne's footman into sw: ${lit(moved)}`);
+        await tool("save_project");
+        await settled(page);
+        if (unitsFile() !== neUnits) fail("a refused AI tool changed ne's units.json");
+        // The control: placing in ne works.
+        const okNe = await refusedBy("place_objects", { objects: [{ id: "hfoo", ...neSpot, player: 1 }], ignoreRoom: true });
+        if (okNe) fail(`place_objects into ne (the control) was refused: ${okNe}`);
+        await tool("save_project");
+        await settled(page);
+        // The paste: ne's objects copied (Select All took them), pasted with the view over sw: refused at the click.
+        await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+        const hands = new Hands(page);
+        await page.evaluate(`w3.commands.execute("w3.terrain.selectAll")`);
+        await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+        await hands.key("c", "KeyC", 67, 2);
+        await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get("map/war3map.w3e.txt")(${swSpot.x}, ${swSpot.y}))()`);
+        await settled(page);
+        await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+        await hands.key("v", "KeyV", 86, 2);
+        const c = await hands.where(".model-stage canvas");
+        await hands.mouse("mouseMoved", c.x, c.y);
+        await hands.click(".model-stage canvas");
+        await until("the paste's refusal", async () => /Not pasted: .*isn't in an open subterrain/.test(await toasts()), 10000)
+          .catch(async () => fail(`a paste over the closed sw said ${lit((await toasts()).slice(0, 300))}`));
+        await hands.key("Escape", "Escape", 27);
+        await settled(page);
+        if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused paste over sw left an edit in the terrain editor");
+        await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
       }
       const before = others.map(folderState);
       await tool("paint_terrain", { tile, left: at(ne.x + 6, 0), bottom: at(ne.y + 6, 1), right: at(ne.x + 14, 0), top: at(ne.y + 14, 1) });
