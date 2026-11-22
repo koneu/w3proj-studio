@@ -131,3 +131,32 @@ lighter shallow colour (renderer.ts HD_WATER). TwistedMeadows' opening view agai
 24.5 deep and only on the shore's −X and −Y sides (shoreline.ts). Still different: the editor shows a swimming
 naga's body through the water (its opacity seems to go by the water in front of what's behind, not by the bed's
 depth), the lake's outline (an oval in the editor), and the trees' lit sides are darker than the editor's.
+
+**Shadows on HD water, by depth** (branch fix-water-shadow-de, 2026-11-22; `app/scripts/water-shadows.mjs`, which makes
+the maps, runs both programs and measures: `make-water-shadows.mjs --depth S --deep D --lake-trees --lake-tree-scale 2
+--no-units` for 8:70, 12:80, 20:100, 30:130, 45:200, 60:300, we-drive HD gpu with game view off, a `--look` at each lake's
+tree and four frames 0.7 s apart with View > Shadows on and four off at the same camera; Studio the same through `we:`
+cameras; `shadow-keep.mjs`: per channel in linear light the sum over the core, the 9 x 9 blurred ratio under 0.8, of the
+mean of the frames). Why the earlier rounds disagreed (45 deep green 0.68 on 2026-11-18, 0.60 in the verify round): one
+frame on against one off, units animating beside the trees and unscaled trees whose shadow in deep water is a few hundred
+pixels; one frame against one scatters the editor's blue by up to 0.25 in shallow water (the waves' reflection), the four
+frames' means by 0.02. Editor, green / blue kept: 8 deep 0.447 / 0.442 (all three channels 0.44, the ground's shadow:
+the editor's water shows nothing of its own there), 12 0.466 / 0.739, 20 0.501 / 0.829, 30 0.557 / 0.798, 45 0.621 /
+0.865, 60 0.625 / 0.880, 70 0.593 / 0.826, 80 0.603 / 0.791, 100 0.635 / 0.787, 130 0.563 / 0.761, 200 0.576 / 0.777 (300:
+no core, the tree's top too small above the water). The fit: Studio rendered with none of the water's own colour and sky
+taken and with all of it taken (WATER_SHADE), over the second's core in both, gives per depth and channel kept = A + B ×
+share; the share the editor's number needs falls from about 1 at 12 deep to green 0.55 to 0.64, blue 0.76 to 0.79 from
+70 deep on. renderer.ts `waterShadowKeep`: nothing taken up to 12 deep, linearly to 0.585 / 0.78 at 70 and deeper (red
+0.9, unreadable). Studio before / after, mean over 12 to 200 deep of |Studio − editor| in green and blue: 0.053 / 0.021
+(before: 0.06 to 0.12 too light from 30 to 70 deep, 0.06 to 0.12 too dark from 100 on); after, 100 deep green is the
+largest (0.573 against 0.635; that core is the smallest, 2778 pixels). Left: 8 deep blue (Studio 0.633: its water shows
+its blue reflection there, the editor's doesn't), and the shadow's shape on deep water: the editor's is longer than
+Studio's (80 deep, scale 1: from the tree's top 148 pixels along against Studio's 120, land shadows alike at 233), as if
+the editor looked the shadow up below the surface.
+
+**Calculate Shadows in DE** (branch fix-water-shadow-de, 2026-11-22; `de-ruins.w3x`, `make-shadow-probes.mjs de-ruins`,
+we-drive `--mode de --save-shadows` against Studio with `game.graphicsMode` de): the editor's DE and HD shadow maps are the
+same bytes; EW00, ET00, LRrk and the plateau match Studio's; EMt0 (ExteriorMainTower, at -3072, -1024, 270°) has 5 cells
+more in Studio: row 95 (16 units south of the tower's centre), cells 24..26 and 38..39, the west and east rims of its
+footprint, which the editor leaves lit. A footprint-edge case of the doodad rule like the boxes' 8 edge cells above:
+not found.

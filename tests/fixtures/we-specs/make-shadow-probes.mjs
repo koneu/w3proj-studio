@@ -27,6 +27,7 @@
 // shadow-cliffvar.w3x (input of tests/we-compare/shadow-terrain.json's shadow-cliffvar): see `cliffvar`
 // shadow-rocks.w3x: doodads on flat ground, see DOODAD_MAPS (not committed).
 // shadow-defscale.w3x (input of tests/we-compare/shadow-defscale.json): doodads with a defScale:hd, see DOODAD_MAPS.
+// de-ruins.w3x (input of tests/we-compare/de-ruins.json): doodads only the 3.0 art layer has, see DOODAD_MAPS.
 // shadow-boxes.w3x: box models imported into the map (war3mapImported\box-<name>.mdx, Classic MDX made with the app's
 //   toClassicMdx), custom doodads D000.. of LRrk using them, see BOXES (not committed: 8 of the editor's 235 cells,
 //   on projected triangles' edges, aren't Studio's).
@@ -104,6 +105,10 @@ const cliffvar = {
   variation: (x) => (x <= 33 ? 3 : 1),
 };
 const cliffvarOnCliff = onCliffOf(cliffvar.level);
+/** de-ruins.w3x's plateau: corners x 44..56, y 4..14 one level up (Grass Cliff), away from its doodads and their shadows,
+ *  so its minimap has a cliff's colour as well as the ground's. */
+const deRuinsLevel = (x, y) => (inBox(x, y, 44, 56, 4, 14) ? 3 : 2);
+const deRuinsOnCliff = onCliffOf(deRuinsLevel);
 
 /** Doodad maps: each spot a doodad type, position (world), angle (degrees), variation, scale. */
 const DOODAD_MAPS = {
@@ -131,6 +136,11 @@ const DOODAD_MAPS = {
   // cells against Studio's 78, YOta 4 against 1, LOce 31 against 30, LOrb 42 against 6; LOca and YOta (off the grid)
   // shade as many cells as Studio's in HD, partly other ones.
   "shadow-defscale-sd": () => ["BRsp", "BOth", "NSct", "LRrk"].map((id, i) => (
+    { id, x: -3072 + (i % 2) * 4096, y: 2048 - Math.floor(i / 2) * 3072, angle: 270, variation: 0 })),
+  // Doodads whose model is stored under _DE.w3mod only, which the editor's DE mode (we-drive --mode de) draws: the ruins'
+  // exterior wall EW00, tower ET00 and main tower EMt0, with LRrk as the control; as shadow-defscale, plus a plateau (deRuinsLevel)
+  // for the minimap's cliff colour (tests/we-compare/de-ruins.json).
+  "de-ruins": () => ["EW00", "ET00", "EMt0", "LRrk"].map((id, i) => (
     { id, x: -3072 + (i % 2) * 4096, y: 2048 - Math.floor(i / 2) * 3072, angle: 270, variation: 0 })),
   // One box each (BOXES, D000..D007 in that order) at angle 0, four a row 2048 apart; then the closed box at 30 and 45.
   "shadow-boxes": () => [
@@ -218,6 +228,10 @@ function patchW3e(dir, terrain) {
       "cliff-texture": rows((x, y) => (cliffvarOnCliff(x, y) ? "1" : "f")),
       "cliff-variation": rows((x) => String(cliffvar.variation(x))),
     }),
+    "de-ruins": () => ({
+      layer: rows((x, y) => String(deRuinsLevel(x, y))),
+      "cliff-texture": rows((x, y) => (deRuinsOnCliff(x, y) ? "1" : "f")),
+    }),
   };
   const sections = byMap[terrain]?.() ?? {};
   const out = [];
@@ -241,7 +255,7 @@ for (const [name, spotsOf] of Object.entries(maps)) {
   try {
     const dir = join(scratch, "map");
     run("unpack", join(here, "flat.w3x"), dir, "--game", game);
-    patchW3e(dir, spotsOf ? null : name);
+    patchW3e(dir, name);
     if (spotsOf) {
       const doo = join(dir, "map", "war3map.doo.json");
       const json = JSON.parse(readFileSync(doo, "utf8"));

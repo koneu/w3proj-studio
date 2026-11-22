@@ -20,24 +20,24 @@ import { decode, encode, HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdDepthExtr
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
 /** How much of HD water's own colour and reflection a model's real shadow on it keeps (linear, by channel) in water
  *  WATER_SHADE_DEPTHS[1] deep or more; up to WATER_SHADE_DEPTHS[0] deep the shadow leaves them alone and shows only on
- *  the bed seen through (with the ground's share, tone.ts GAME_SHADOW_FILL), smoothly between (waterShadowKeep). Measured
- *  (we-drive, HD, branch we-compare-2, 2026-11-18; make-water-shadows.mjs: lakes 12, 30, 45, 100 and 200 deep with
- *  footmen, low gryphons and trees in them, Shadows on over off, linear means over each shadow's core): the editor
- *  keeps green 0.51, 0.55, 0.68 of the light at 12, 30, 45 deep, which the bed's shadow alone gives, and 0.51 to 0.57
- *  at 100 and 200 deep (blue 0.73 to 0.75), darker than the 0.69 taken before from map 03's ships (render-fixes-5), which,
- *  kept at every depth, made shallow water too dark and deep water too light (0.07 off on average in green and blue
- *  over these five depths; 0.03 now). Red can't be read well there: the editor's deep water has half Studio's red
- *  (0.013 against 0.025 linear), keeping 0.81 to 0.87 of it. */
-const WATER_SHADE: readonly [number, number, number] = [0.9, 0.5, 0.72];
-const WATER_SHADE_DEPTHS = [45, 100] as const;
+ *  the bed seen through (with the ground's share, tone.ts GAME_SHADOW_FILL), linearly between (waterShadowKeep).
+ *  Measured with scripts/water-shadows.mjs (we-drive, HD, gpu, game view off, 2026-11-22: lakes 8 to 300 deep with a
+ *  tree scaled 2 in each and no units, four frames with Shadows on and four off, linear means over each shadow's core;
+ *  docs/testing/lighting-and-shadows.md): the share each depth needs, from two Studio renderings (none taken, all
+ *  taken) over the same pixels, falls from about 1 at 12 deep to green 0.55 to 0.64 and blue 0.76 to 0.79 from 70 deep
+ *  on; with this rule Studio's kept green and blue are 0.021 off the editor's on average over 12 to 200 deep (0.062
+ *  at most, 100 deep green), with the one before it (none taken up to 45 deep, 0.5 / 0.72 from 100, smoothly between)
+ *  0.053 (0.122): lighter between 30 and 70 deep, darker from 100 on. Red can't be read well there (little of it in the water); 8 deep isn't fitted: the
+ *  editor keeps 0.44 in every channel there, the ground's shadow, where Studio's water shows its blue. */
+const WATER_SHADE: readonly [number, number, number] = [0.9, 0.585, 0.78];
+const WATER_SHADE_DEPTHS = [12, 70] as const;
 
 /** What a model's real shadow keeps of HD water's own colour and reflection, by channel, at a depth (world units) with
  *  `lit` (0 in full shadow to 1 lit) of the sun: WATER_SHADE from WATER_SHADE_DEPTHS[1] deep on, nothing taken in
- *  shallower water than WATER_SHADE_DEPTHS[0]. The water shader (WATER_FS) does the same. */
+ *  shallower water than WATER_SHADE_DEPTHS[0], linearly between. The water shader (WATER_FS) does the same. */
 export function waterShadowKeep(depth: number, lit: number): [number, number, number] {
   const [a, b] = WATER_SHADE_DEPTHS;
-  const t = Math.min(1, Math.max(0, (depth - a) / (b - a)));
-  const deep = t * t * (3 - 2 * t);
+  const deep = Math.min(1, Math.max(0, (depth - a) / (b - a)));
   const l = Math.min(1, Math.max(0, lit));
   return WATER_SHADE.map((s) => 1 + (s + (1 - s) * l - 1) * deep) as [number, number, number];
 }
@@ -234,7 +234,7 @@ void main() {
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its own colour and reflection in deep
     // water and none of it taken in shallow water (waterShadowKeep); past the playable map those are black (the bed
     // seen through stays the border's dark ground).
-    vec3 shade = mix(vec3(1.0), mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0))), smoothstep(${WATER_SHADE_DEPTHS.map((v) => v.toFixed(1)).join(", ")}, depth));
+    vec3 shade = mix(vec3(1.0), mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0))), clamp((depth - ${WATER_SHADE_DEPTHS[0].toFixed(1)}) / ${(WATER_SHADE_DEPTHS[1] - WATER_SHADE_DEPTHS[0]).toFixed(1)}, 0.0, 1.0));
     highp vec2 inside = min(vWorld.xy - uPlayRect.xy, uPlayRect.zw - vWorld.xy);
     float lit = mix(1.0, ${HD_WATER_EDGE_KEEP.toFixed(5)}, (1.0 - smoothstep(${HD_WATER_EDGE[0].toFixed(1)}, ${HD_WATER_EDGE[1].toFixed(1)}, min(inside.x, inside.y))) * uEdgeDark);
     vec3 through = w.x * bed * (1.0 - w.z * uReflect.y);
