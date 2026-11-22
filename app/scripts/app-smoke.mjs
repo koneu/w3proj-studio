@@ -15903,8 +15903,11 @@ async function niceToHaves(page, found) {
     if (imported.e) fail(`Import Map Folder: ${imported.e}`);
     await until("the folder's project", () => page.evaluate(`w3.workspace.project()?.root?.endsWith("from-folder") ?? false`), 20000).catch(() => fail("Import Map Folder didn't open the project"));
     const fromFolder = snapshot(join(dir, "from-folder", "map"));
-    for (const [f, h] of snapshot(join(FIXTURE, "map"))) if (fromFolder.get(f) !== h) fail(`the folder's project has ${f} ${fromFolder.has(f) ? "different" : "missing"}`);
-    if (fromFolder.size !== snapshot(join(FIXTURE, "map")).size) fail(`the folder's project has ${fromFolder.size} files, the fixture ${snapshot(join(FIXTURE, "map")).size}`);
+    // The fixture's war3map.wtg.json (the layout before map/triggers/, no war3map.wct) comes back as the raw war3map.wtg.
+    const fixtureFiles = snapshot(join(FIXTURE, "map"));
+    if (fixtureFiles.delete("war3map.wtg.json")) fixtureFiles.set("war3map.wtg", createHash("sha256").update(spawnSync(cli, ["cat", packed, "war3map.wtg"]).stdout).digest("hex"));
+    for (const [f, h] of fixtureFiles) if (fromFolder.get(f) !== h) fail(`the folder's project has ${f} ${fromFolder.has(f) ? "different" : "missing"}`);
+    if (fromFolder.size !== fixtureFiles.size) fail(`the folder's project has ${fromFolder.size} files, the fixture ${fixtureFiles.size}`);
     await page.evaluate(`(() => { const k = window.__niceKept; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`);
 
     const k = await heightKit(page, "Nice");
@@ -16767,7 +16770,14 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   const unpacked = join(work, "unpacked");
   await page.evaluate(`w3.backend.invoke("project_unpack", { map: ${lit(wanted)}, dir: ${lit(unpacked)}, allowIncomplete: false, install: "none" })`);
   const again = snapshot(join(unpacked, "map"));
-  for (const [f, h] of snapshot(join(FIXTURE, "map"))) if (again.get(f) !== h) found.push(`unpacking changed ${f}`);
+  // The fixture keeps its triggers in the layout before map/triggers/ (war3map.wtg.json and no war3map.wct): without
+  // war3map.wct an unpack keeps that war3map.wtg raw (crates/w3proj trigger_layout), as the CLI's tests expect too.
+  const expected = snapshot(join(FIXTURE, "map"));
+  if (expected.delete("war3map.wtg.json")) {
+    const raw = spawnSync(cli, ["cat", wanted, "war3map.wtg"]);
+    expected.set("war3map.wtg", raw.status === 0 ? createHash("sha256").update(raw.stdout).digest("hex") : "(not in the map)");
+  }
+  for (const [f, h] of expected) if (again.get(f) !== h) found.push(`unpacking changed ${f}`);
 
   const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
   if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
