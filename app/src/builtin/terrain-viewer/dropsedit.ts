@@ -220,6 +220,7 @@ export function dropsEditor(host: DropsUiHost, entries: readonly Placed[]): HTML
               const input = ev.target as HTMLInputElement, t = dropChance(input.value);
               if ("refused" in t) { host.warn(`Not changed: ${t.refused}`); input.value = String(it.chance); }
               else if (t.value !== it.chance) withSets((x) => { x[k][j] = { ...x[k][j], chance: t.value }; });
+              else input.value = String(it.chance); // typed 101 over 100: the clamp changes nothing, the box shows the kept value
             } }), h("span.muted", {}, "%"),
           bar(it.share),
           h("button.icon-button", { title: "Remove the item", "data-prop": `remove-item-${k}-${j}`, onclick: () => withSets((x) => { x[k].splice(j, 1); }) }, "×"))),

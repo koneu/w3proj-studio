@@ -9772,8 +9772,8 @@ async function cliCheck(page, found) {
     // check_melee and check_path: the MCP tools' answers, the same to the byte.
     if (JSON.stringify(app.melee) !== JSON.stringify(ours.melee)) fail(`check_melee differs: the app ${lit(app.melee.findings).slice(0, 500)}, the CLI ${lit(ours.melee?.findings).slice(0, 500)}`);
     if (JSON.stringify(app.path) !== JSON.stringify(ours.path)) fail(`check_path differs: the app ${lit(app.path)}, the CLI ${lit(ours.path)}`);
-    // The trees are in the way: the way squeezes between them (open ground is 1000s wide).
-    if (!app.path.walkable || app.path.standingNearby?.id !== "LTlt" || !(app.path.narrowest?.width < 200)) fail(`check_path didn't meet the trees (control): ${lit(app.path).slice(0, 300)}`);
+    // The trees are in the way: the way squeezes between them (open ground is 1000s wide; 256 since a unit needs a free square of 2 cells).
+    if (!app.path.walkable || app.path.standingNearby?.id !== "LTlt" || !(app.path.narrowest?.width < 300)) fail(`check_path didn't meet the trees (control): ${lit(app.path).slice(0, 300)}`);
     if (!app.melee.findings?.length) fail("check_melee found nothing to compare (control)");
   } finally {
     await page.evaluate(`(async () => { if (window.__cliCheckKept) w3.window.confirm = window.__cliCheckKept; delete window.__cliCheckKept; await w3.editors.closeAll(); })()`).catch(() => {});
@@ -15109,9 +15109,9 @@ async function lightNumbersRefused(page, found) {
   } catch (e) { found.push(`Lighting Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
-/** The drops editor refuses a chance that isn't a whole percentage from 0 to 100 (dropChance in dropsview.ts): 33.5 and 101
- *  typed into a set's item are refused with why, the box shows the kept chance, the units file stays as it was; 40 is taken
- *  (control). */
+/** The drops editor takes a chance as the World Editor does (dropChance in dropsview.ts): 33.5 isn't a whole number and is
+ *  refused with why, the box shows the kept chance, the units file stays as it was; 101 is pulled to 100 (the kept chance,
+ *  so no edit) and 0 to 1 (an edit, saved as 1); 40 is taken (control). */
 async function dropChancesRefused(page, found) {
   try {
   const fail = (what) => found.push(`drops chances: ${what}`);
@@ -15128,17 +15128,23 @@ async function dropChancesRefused(page, found) {
   const was = await page.evaluate(`${chance}.value`);
   if (was !== "100" || await dirty()) fail(`the chance starts as ${was} (dirty ${await dirty()})`);
   const unitsBefore = JSON.stringify(k.units());
-  for (const bad of ["33.5", "101", "-1"]) {
-    await k.clearToasts();
-    await typeInto(page, chance, bad);
-    await settled(page);
-    const said = await k.toasts();
-    if (!/Not changed: A chance must be a whole number from 0 to 100/.test(said)) fail(`a chance typed as ${bad} said "${said}"`);
-    if (await page.evaluate(`${chance}.value`) !== was) fail(`a chance typed as ${bad} shows ${await page.evaluate(`${chance}.value`)}, not the kept ${was}`);
-    if (await dirty()) fail(`a chance typed as ${bad} changed the terrain`);
-  }
+  await k.clearToasts();
+  await typeInto(page, chance, "33.5");
+  await settled(page);
+  const said = await k.toasts();
+  if (!/Not changed: A chance must be a whole number from 1 to 100/.test(said)) fail(`a chance typed as 33.5 said "${said}"`);
+  if (await page.evaluate(`${chance}.value`) !== was) fail(`a chance typed as 33.5 shows ${await page.evaluate(`${chance}.value`)}, not the kept ${was}`);
+  if (await dirty()) fail("a chance typed as 33.5 changed the terrain");
+  await typeInto(page, chance, "101");
+  await settled(page);
+  if (await page.evaluate(`${chance}.value`) !== "100" || await dirty()) fail(`a chance typed as 101 shows ${await page.evaluate(`${chance}.value`)} (dirty ${await dirty()}), not 100 unchanged`);
   await k.save();
-  if (JSON.stringify(k.units()) !== unitsBefore) fail("the refused chances changed the units file");
+  if (JSON.stringify(k.units()) !== unitsBefore) fail("the refused and unchanged chances changed the units file");
+  await typeInto(page, chance, "0");
+  await settled(page);
+  if (await page.evaluate(`${chance}.value`) !== "1" || !(await dirty())) fail(`a chance typed as 0 shows ${await page.evaluate(`${chance}.value`)} (dirty ${await dirty()}), not 1 taken`);
+  await k.save();
+  if (k.units().find((u) => u.id === "nftt")?.itemSets?.[0]?.[0]?.chance !== 1) fail(`the saved chance for 0 is ${lit(k.units().find((u) => u.id === "nftt")?.itemSets)}`);
   await typeInto(page, chance, "40");
   await settled(page);
   if (!(await dirty())) fail("a chance of 40 wasn't taken (control)");
