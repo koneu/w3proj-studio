@@ -9,7 +9,7 @@
 import type { EditorInstance, W3Api } from "../../extensions/api";
 import { keyOf } from "../../lib/keys";
 import { errorText } from "../../lib/oserror";
-import { addSub, cellAt, cutAt, deleteSub, describe, dragHandle, dragRect, draftOf, evenCuts, freeName, gridRects, handleAt, joinSubs, moveCut, normalGrid, planOf, renameSub, resizeSub, unchanged, type Draft, type Handle, type SplitGrid } from "../../lib/terrain/layoutdraft";
+import { addCut, addSub, cellAt, cutAt, deleteSub, describe, dragHandle, dragRect, draftCuts, draftOf, evenCuts, freeName, gridRects, handleAt, joinSubs, moveCut, normalGrid, planOf, removeCut, renameSub, resizeSub, unchanged, type Draft, type Handle, type SplitGrid } from "../../lib/terrain/layoutdraft";
 import type { PlannedSubterrain, SubRect } from "../../lib/terrain/subterrainplan";
 import { h } from "../../workbench/dom";
 
@@ -594,6 +594,12 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
       button("Rename…", "Rename the selected subterrain (F2, or double-click it)", () => void rename(), { disabled: selected.length !== 1, prop: "rename" }),
       button("Join", "Join the selected subterrains (side by side) into the first one", join, { disabled: selected.length < 2 }),
       button("Delete", "Delete the selected subterrain (Del): it joins a neighbour that lines up with it, else its corners are left uncovered", remove, { disabled: !selected.length }),
+      h("span.layout-sep"),
+      h("span.muted", {}, ` ${draftCuts(draft!, "x").length + 1} × ${draftCuts(draft!, "y").length + 1} `),
+      button("Columns −", "One column fewer: the last cut goes and the subterrains on its two sides join", () => draft && step(removeCut(draft, "x")), { disabled: !draft || !draftCuts(draft, "x").length, prop: "cols-" }),
+      button("Columns +", "One column more: a cut through the widest column; the subterrains it crosses are cut in two", () => draft && step(addCut(draft, "x")), { disabled: !draft, prop: "cols+" }),
+      button("Rows −", "One row fewer: the last cut goes and the subterrains on its two sides join", () => draft && step(removeCut(draft, "y")), { disabled: !draft || !draftCuts(draft, "y").length, prop: "rows-" }),
+      button("Rows +", "One row more: a cut through the widest row; the subterrains it crosses are cut in two", () => draft && step(addCut(draft, "y")), { disabled: !draft, prop: "rows+" }),
       h("span.layout-sep"), ...undoRedoButtons, fitButton,
       h("label.layout-check", { title: "Check Terrain Seams on the saved terrain and mark the corners it reports" },
         h("input", { type: "checkbox", checked: showSeams, onchange: (e: Event) => { showSeams = (e.target as HTMLInputElement).checked; seamMarks = []; if (showSeams) void refreshSeams(); draw(); } }), " Seam hints"));
