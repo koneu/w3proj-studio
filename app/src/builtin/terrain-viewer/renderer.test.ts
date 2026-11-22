@@ -5,7 +5,6 @@ import { BORDER_ALPHA, BORDER_SPREAD, borderShade, hdBorderKeep } from "../../li
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { castsSunShadow, edgeMode, HD_WATER_EDGE, HD_WATER_EDGE_KEEP, hdWaterEdgeLit, inWaterDepth, lightSlotOf, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
-import { decode, HD_WATER_DEFAULTS, hdReflectScale, hdSky, hdWaterAt } from "./hdwater";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -259,33 +258,37 @@ test("classic water is lit by the unit light's intensities alone, as the World E
   assert.ok(Math.abs(waterLight({ dir: [0, 0, 2], diffuse: [0.2, 0.6, 0.4], ambient: [0.1, 0.3, 0.2] }) - 0.9) < 1e-9);
 });
 
-test("a real shadow on HD water darkens its own colour and reflection only in deep water, as the editor's", () => {
+test("a real shadow on HD water darkens its own colour and reflection by depth, as the editor's", () => {
   // Shallow water: nothing taken (the shadow shows on the bed seen through); deep water: the measured share; lit: all.
-  assert.deepEqual(waterShadowKeep(30, 0), [1, 1, 1]);
-  assert.deepEqual(waterShadowKeep(45, 0), [1, 1, 1]);
+  assert.deepEqual(waterShadowKeep(8, 0), [1, 1, 1]);
+  assert.deepEqual(waterShadowKeep(12, 0), [1, 1, 1]);
   assert.deepEqual(waterShadowKeep(200, 1), [1, 1, 1]);
-  const deep = waterShadowKeep(100, 0);
+  const deep = waterShadowKeep(70, 0);
   assert.deepEqual(waterShadowKeep(400, 0), deep);
-  const mid = waterShadowKeep(72.5, 0);
+  const mid = waterShadowKeep(41, 0);
   for (let k = 0; k < 3; k++) assert.ok(Math.abs(mid[k] - (1 + deep[k]) / 2) < 1e-9, "halfway between, half the shadow");
-  // The light kept in green and blue (linear, on over off) of the editor's shadows on Lordaeron Summer's water over its
-  // dirt (we-drive, HD, branch we-compare-2: means over trees' shadows in lakes 12, 45, 100 and 200 deep; the ground keeps
-  // 0.378 under the same light): the bed's shadow seen through plus this share of the water's own colour and sky.
-  const dirt = [0.235, 0.108, 0.0106], ground = 0.378, view = [0, 0.6, -0.8];
-  const sky = hdSky([view[0], view[1], -view[2]]), [k, dim] = hdReflectScale(HD_WATER_DEFAULTS);
-  const deepColour = [0, 48, 69].map(decode);
-  const kept = (depth: number) => {
-    const { through, own, reflect } = hdWaterAt(depth), keep = waterShadowKeep(depth, 0);
-    return [1, 2].map((c) => {
-      const bed = through * dirt[c] * (1 - dim * reflect), water = own * deepColour[c] * (1 - dim * reflect) + reflect * k * sky[c];
-      return (ground * bed + keep[c] * water) / (bed + water);
+  // scripts/water-shadows.mjs (2026-11-22): per depth, Studio's light kept in green and blue over a tree's shadow on
+  // Lordaeron Summer's water is A + B × the share, A and B from two renderings over the same pixels (none of the water's
+  // own colour and sky taken, and all of it at 0.5 / 0.72); against the editor's kept light over its own shadow (four
+  // frames each with Shadows on and off).
+  const measured: [number, [number, number], [number, number], [number, number]][] = [
+    // depth, A (green, blue), B, the editor's kept
+    [12, [0.376, 0.265], [0.098, 0.443], [0.466, 0.739]], [20, [0.35, 0.233], [0.192, 0.589], [0.501, 0.829]],
+    [30, [0.334, 0.239], [0.274, 0.643], [0.557, 0.798]], [45, [0.334, 0.269], [0.364, 0.668], [0.621, 0.865]],
+    [60, [0.35, 0.325], [0.424, 0.632], [0.625, 0.88]], [70, [0.289, 0.235], [0.552, 0.746], [0.593, 0.826]],
+    [80, [0.148, 0.11], [0.772, 0.879], [0.603, 0.791]], [100, [0.014, 0.011], [0.968, 0.982], [0.635, 0.787]],
+    [130, [0.025, 0.027], [0.964, 0.968], [0.563, 0.761]], [200, [0.007, 0.004], [1.002, 1], [0.576, 0.777]],
+  ];
+  let sum = 0;
+  for (const [depth, a, b, editor] of measured) {
+    const keep = waterShadowKeep(depth, 0);
+    [0, 1].forEach((c) => {
+      const off = a[c] + b[c] * keep[c + 1] - editor[c];
+      sum += Math.abs(off);
+      assert.ok(Math.abs(off) < 0.06, `${depth} deep, ${c ? "blue" : "green"}: ${(a[c] + b[c] * keep[c + 1]).toFixed(3)} against the editor's ${editor[c]}`);
     });
-  };
-  const editor: [number, [number, number]][] = [[12, [0.513, 0.761]], [45, [0.677, 0.888]], [100, [0.543, 0.739]], [200, [0.54, 0.739]]];
-  for (const [depth, want] of editor) {
-    const got = kept(depth);
-    got.forEach((v, c) => assert.ok(Math.abs(v - want[c]) < 0.08, `${depth} deep: ${got.map((x) => x.toFixed(3))} against the editor's ${want}`));
   }
+  assert.ok(sum / (measured.length * 2) < 0.03, `${(sum / (measured.length * 2)).toFixed(3)} off on average`);
 });
 
 test("set_sky's waterTint is the colour white shallows take, as \"#rrggbb\" and as [red, green, blue]", () => {
