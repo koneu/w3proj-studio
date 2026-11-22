@@ -8,7 +8,7 @@ import type { W3Api } from "../../extensions/api";
 import { NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { parseW3e } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
-import { ladderLook, pathReport, projectWalkSource, walkGrid, type WalkSource } from "./meleefacts";
+import { pathReport, projectWalkSource, walkGrid, type WalkSource } from "./meleefacts";
 import { readFixture } from "../../lib/testhelpers/testutil";
 
 /** The mini map's map/ folder file `name`. */
@@ -134,14 +134,6 @@ test("the saved project's source lists the units and the doodads", async () => {
   const doodads = JSON.stringify({ doodads: [{ id: "LTlt", position: [64, 0, 0] }] });
   const src = await projectWalkSource(project({ "map/war3map.w3e.txt": terrainText, "map/war3mapUnits.doo.json": units, "map/war3map.doo.json": doodads }), opts);
   assert.deepEqual(src.list().map((e) => e.id), ["sloc", "LTlt"]);
-});
-
-test("a map looks like a ladder map with 2+ starts and a gold mine; fewer of either does not", () => {
-  const u = (...ids: string[]) => ids.map((id) => ({ id }));
-  assert.deepEqual(ladderLook(u("sloc", "sloc", "sloc", "sloc", "ngol", "ngol")), { starts: 4, mines: 2, ladder: true });
-  assert.equal(ladderLook(u("sloc", "ngol")).ladder, false, "one start");
-  assert.equal(ladderLook(u("sloc", "sloc", "hfoo")).ladder, false, "no mine");
-  assert.equal(ladderLook([]).ladder, false);
 });
 
 test("walkGrid uses objects-only blockers even for walk movement so walkable bridges stayed open", async () => {

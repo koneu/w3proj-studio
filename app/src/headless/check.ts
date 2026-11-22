@@ -4,9 +4,8 @@
 //
 //   problems  the Problems view's checks (builtin/problems: the service's runChecked, so the project's
 //             .w3proj/problems-ignore.json is honoured and the ignored are counted as in the view and Build)
-//   melee     check_melee (terrain-viewer/meleefacts.ts meleeReport), on the saved files: by default on maps whose
-//             war3map.w3i has the Melee flag, or that look like ladder maps (2+ start locations and a gold mine; the
-//             section's note says why it ran). w3proj.toml's [checks] disable = [...] switches checks off (builtin/problems/checkconfig.ts)
+//   melee     check_melee (terrain-viewer/meleefacts.ts meleeReport), on the saved files: by default only on maps whose
+//             war3map.w3i has the Melee flag (--only=melee runs it on any map). w3proj.toml's [checks] disable = [...] switches checks off (builtin/problems/checkconfig.ts)
 //   path      check_path between two points (meleefacts.ts pathReport); only when the job gives them
 //
 // Nothing is written: the checks only read, and the CLI's backend refuses writes for this job.
@@ -19,7 +18,7 @@ import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
 import { MANIFEST_FILE, applySeverity, disabledIds, isDisabled, readChecksConfig } from "../builtin/problems/checkconfig";
 import { DEFAULT_UNIT_SIZE } from "../builtin/terrain-viewer/pathcheck";
-import { meleeReport, pathReport, projectLadderLook, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
+import { meleeReport, pathReport, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
 import * as problemsExtension from "../builtin/problems/index";
 import * as pathingExtension from "../builtin/terrain-pathing/index";
@@ -116,15 +115,11 @@ export async function check(job: CheckJob): Promise<CheckReport> {
     let skip: string | null = null;
     let why: string | undefined;
     if (!asked) {
-      // By default a melee map is held to what ladder maps do, and so is one that looks like a ladder map.
+      // By default a melee map (the w3i's Melee flag) is held to what ladder maps do; no other map is.
       try {
         const info = await readMapDocStrict<{ flags?: number }>(w3, "map/war3map.w3i.json");
         const melee = !!info && !!((info.flags ?? 0) & MELEE_MAP);
-        if (!melee) {
-          const look = await projectLadderLook(w3);
-          if (look?.ladder) why = `Melee flag off; ran because the map has ${look.starts} starts and ${look.mines} gold mine${look.mines === 1 ? "" : "s"}`;
-          else skip = !info ? "the project has no war3map.w3i, so it isn't a melee map" : "not a melee map (war3map.w3i's Melee flag is off and it has no ladder layout of 2+ starts and a gold mine; --only=melee checks it anyway)";
-        }
+        if (!melee) skip = !info ? "the project has no war3map.w3i, so it isn't a melee map" : "not a melee map (war3map.w3i's Melee flag is off; --only=melee checks it anyway)";
       } catch (e) {
         skip = `whether it is a melee map can't be told: ${text(e)}`;
         rows.push({ severity: "warning", check: "melee", location: "map/war3map.w3i", message: skip });

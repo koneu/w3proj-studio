@@ -111,7 +111,7 @@ pub fn lines(report: &Value) -> Vec<String> {
     }
     for s in report["sections"].as_array().into_iter().flatten() {
         if let (Some(name), Some(note)) = (s["section"].as_str(), s["note"].as_str()) {
-            // A skipped section says why; one that ran on its own accord (a ladder map without the Melee flag) says why too.
+            // A skipped section says why.
             let what = if s["ran"] == json!(false) { "skipped" } else { "note   " };
             out.push(format!("{what}  {name}: {note}"));
         }
