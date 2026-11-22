@@ -34,16 +34,19 @@ export interface CliffType {
   groundTile: string;
 }
 
+/** What the default cliff type is picked by (tilesetDefaultCliff): CliffTypes.slk's id, model folder and texture. */
+export type CliffLook = Pick<CliffType, "cliffID" | "cliffModelDir" | "texFile">;
+
 /** The cliff type the World Editor's water brush and cliff palette start on for a tileset (its letter, as the cliff
  *  ids' second one): of the tileset's own cliff types (`types`, CliffTypes.slk), the first natural one (cliffModelDir
  *  Cliffs, not CityCliffs) with the second texture (texFile …Cliff1), else the first natural one, else the first with
  *  the second texture. Seen (we-compare, the water brush's cliff type): Grass Cliff CLgr on Lordaeron Summer, CAgr on
  *  Ashenvale, and on Dungeon, Underground and Black Citadel the natural CDdi, CGdi, CKdi, not their …Cliff1 (CDsq,
  *  CGsq, CKdt: CityCliffs; water-dungeon, branch we-compare-14). Null when the tileset has none. */
-export function tilesetDefaultCliff(tileset: string, types: ReadonlyMap<string, CliffType>): string | null {
+export function tilesetDefaultCliff(tileset: string, types: ReadonlyMap<string, CliffLook>): string | null {
   const own = [...types.values()].filter((c) => c.cliffID[1] === tileset);
-  const natural = (c: CliffType) => /^cliffs$/i.test(c.cliffModelDir);
-  const second = (c: CliffType) => /cliff1$/i.test(c.texFile);
+  const natural = (c: CliffLook) => /^cliffs$/i.test(c.cliffModelDir);
+  const second = (c: CliffLook) => /cliff1$/i.test(c.texFile);
   return (own.find((c) => natural(c) && second(c)) ?? own.find(natural) ?? own.find(second))?.cliffID ?? null;
 }
 
@@ -53,7 +56,7 @@ export function tilesetDefaultCliff(tileset: string, types: ReadonlyMap<string, 
  *  CYsq). The editor appends it to a list without it (CAgr CLdi became CAgr CLdi CLgr on Lordaeron Summer: Studio's
  *  strokes do that first, defaultCliffToAdd); without it here (a full list, the game's types not read) the first entry
  *  with the second texture. -1 when the map has neither. */
-export function weDefaultCliffType(list: CliffList, tileset = "", types: ReadonlyMap<string, CliffType> = new Map()): number {
+export function weDefaultCliffType(list: readonly (CliffLook | undefined)[], tileset = "", types: ReadonlyMap<string, CliffLook> = new Map()): number {
   const id = tilesetDefaultCliff(tileset, types);
   const at = id === null ? -1 : list.findIndex((c) => c?.cliffID === id);
   return at >= 0 ? at : list.findIndex((c) => !!c && /_cliff1$/i.test(c.texFile));
@@ -64,7 +67,7 @@ export function weDefaultCliffType(list: CliffList, tileset = "", types: Readonl
  *  can name). The World Editor's water brush on Lordaeron Summer with the list CAgr CLdi saved CAgr CLdi CLgr and typed
  *  the rim with CLgr (2), while an open and save alone kept CAgr CLdi (we-compare water-cliff-append, branch
  *  we-compare-14 and -15). Null when nothing is to be added. */
-export function defaultCliffToAdd(ids: readonly string[], tileset: string, types: ReadonlyMap<string, CliffType>, max: number): string | null {
+export function defaultCliffToAdd(ids: readonly string[], tileset: string, types: ReadonlyMap<string, CliffLook>, max: number): string | null {
   const id = tilesetDefaultCliff(tileset, types);
   return id === null || ids.includes(id) || ids.length >= max ? null : id;
 }

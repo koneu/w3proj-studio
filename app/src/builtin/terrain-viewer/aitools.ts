@@ -6,6 +6,7 @@ import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, MAX_CLIFF_TYPES, toggleRamp } from "../../lib/terrain/cliffs";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
+import { defaultCliffToAdd, weDefaultCliffType, type CliffLook } from "./cliffs";
 import { groundLimitText } from "./limits";
 import { variationText } from "./values";
 import { savedLife } from "./doodadrules";
@@ -128,8 +129,9 @@ function cornersIn(t: Terrain, area: Area, shape: Shape) {
   return out;
 }
 
-/** A cliff type of the game (CliffTypes.slk) and the ground tile it belongs to. */
-export interface CliffKind { cliffID: string; groundTile: string }
+/** A cliff type of the game (CliffTypes.slk) and the ground tile it belongs to; with its model folder and texture,
+ *  the tileset's default cliff type can be told (tilesetDefaultCliff, set_water's). */
+export interface CliffKind { cliffID: string; groundTile: string; cliffModelDir?: string; texFile?: string }
 
 /** Remembers which corners shared terrain code changed. */
 class Touched {
@@ -306,6 +308,7 @@ export function setWater(t: Terrain, place: Area | { points: readonly [number, n
   const all = new Set(inside.map(({ i }) => i));
   const wet = inside.map(({ i }) => i).filter((i) => { const c = t.corners[i]; return !(c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface); });
   changed.push(...flattenWaterRim(t, wet, all, () => {}));
+  const own = new Set<number>();
   for (const { i } of inside) {
     const c = t.corners[i];
     if (c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface) continue;
@@ -313,8 +316,31 @@ export function setWater(t: Terrain, place: Area | { points: readonly [number, n
     dropRamp(t, i, changed);
     setWaterLevel(c, surface, waterOffsetOf(t));
     changed.push(i);
+    own.add(i);
   }
-  return changed.length ? withCliffTypes(t, changed, kinds) : changed;
+  if (!changed.length) return changed;
+  // As the World Editor's Shallow and Deep brushes (tools.ts retypeCliffs): the palette's default cliff type, on the
+  // corners turned into water too, not only on the cliffs round them.
+  const fixed = waterCliffType(t, kinds), log = new Touched();
+  for (const i of changed) log.corners.add(i);
+  matchCliffTypes(t, changed, cliffGrounds(t, kinds), log, fixed, own);
+  return [...log.corners];
+}
+
+/** The cliff type number set_water's shallow and deep water give their cliffs: the one the World Editor's water brush
+ *  takes with its palette left as it opens (weDefaultCliffType), the tileset's default appended to the map's cliff list
+ *  first when the list lacks it and has room (defaultCliffToAdd). we-compare set-water-brush (flat.w3x, cliff list CLdi
+ *  CLgr, all Dirt): the editor's size 3 square typed the 5 × 5 water corners and the ring round them Grass Cliff, 1,
+ *  where Studio's set_water gave the cliff corners Dirt Cliff (their ground tile's), 0. Undefined when it can't be told
+ *  (`kinds` without model folders and textures, or no such entry): each cliff then takes its ground tile's. */
+function waterCliffType(t: Terrain, kinds: readonly CliffKind[]): number | undefined {
+  const looks = new Map<string, CliffLook>();
+  for (const k of kinds) if (k.cliffModelDir !== undefined && k.texFile !== undefined) looks.set(k.cliffID, { cliffID: k.cliffID, cliffModelDir: k.cliffModelDir, texFile: k.texFile });
+  if (!looks.size) return undefined;
+  const add = defaultCliffToAdd(t.cliffTiles, t.tileset, looks, MAX_CLIFF_TYPES);
+  if (add) t.cliffTiles.push(add);
+  const at = weDefaultCliffType(t.cliffTiles.map((id) => looks.get(id)), t.tileset, looks);
+  return at >= 0 && at < MAX_CLIFF_TYPES ? at : undefined;
 }
 
 /** Whether painted Boundary keeps an object of `kind` off a place: units and items can't stand on a tile with a corner

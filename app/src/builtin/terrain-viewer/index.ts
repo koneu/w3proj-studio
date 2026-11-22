@@ -703,7 +703,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   let cliffKindsRead: Promise<CliffKind[]> | null = null;
-  const cliffKinds = () => (cliffKindsRead ??= w3.game.readText("TerrainArt\\CliffTypes.slk").then((slk) => parseSlk(slk).filter((r) => r.cliffID).map((r) => ({ cliffID: r.cliffID, groundTile: r.groundTile }))));
+  const cliffKinds = () => (cliffKindsRead ??= w3.game.readText("TerrainArt\\CliffTypes.slk").then((slk) => parseSlk(slk).filter((r) => r.cliffID).map((r) => ({ cliffID: r.cliffID, groundTile: r.groundTile, cliffModelDir: r.cliffModelDir ?? "", texFile: r.texFile ?? "" }))));
   /** Each tileset's own ground list (what a slot is drawn with under the w3e flag "custom tilesets" 0, see groundSlot);
    *  empty when the game's tilesets can't be read (then the file's list counts, as the view draws it). */
   const ownGroundLists = async () => new Map((await (await liveEditor()).handle.tilesets().catch(() => [])).map((s) => [s.id, s.tiles] as const));

@@ -157,6 +157,44 @@ test("water drops the ground and sets a surface below where it was", () => {
   assert.equal(corner(deep, 12, 12).water, -89.6, "the surface doesn't go down with the ground");
 });
 
+test("shallow and deep water type their cliffs and their own corners with the World Editor brush's default cliff type", () => {
+  // As CliffTypes.slk has them: Grass Cliff is Lordaeron's default (tilesetDefaultCliff), not the Dirt ground's own.
+  const looks: CliffKind[] = [
+    { cliffID: "CLdi", groundTile: "Ldrt", cliffModelDir: "Cliffs", texFile: "Lords_Cliff0" },
+    { cliffID: "CLgr", groundTile: "Lgrs", cliffModelDir: "Cliffs", texFile: "Lords_Cliff1" },
+  ];
+  /** flat.w3x of we-compare set-water-brush: all Dirt, cliff list `cliffs`. */
+  const dirt = (cliffs: string[]) => {
+    const t = flat();
+    t.cliffTiles = cliffs;
+    for (const c of t.corners) c.texture = 0;
+    return t;
+  };
+  /** The corners of x and y 10 to 14: the editor's square brush of size 3 round corner (12, 12). */
+  const square = { left: 10 * 128, bottom: 10 * 128, right: 14 * 128, top: 14 * 128 };
+  for (const mode of ["shallow", "deep"] as const) {
+    const t = dirt(["CLdi", "CLgr"]);
+    setWater(t, square, "box", mode, looks);
+    // we-compare set-water-brush (2026-11-22): the 7 × 7 corners from 9 to 15 typed 1, the middle ones with only water
+    // round them too; nothing else.
+    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+      const inside = x >= 9 && x <= 15 && y >= 9 && y <= 15;
+      assert.equal(corner(t, x, y).cliffTexture, inside ? 1 : 15, `${mode}: corner ${x},${y}`);
+    }
+    assert.deepEqual(t.cliffTiles, ["CLdi", "CLgr"]);
+  }
+  // A list without the default gets it appended first, as the editor's brush does (water-cliff-append).
+  const appended = dirt(["CLdi"]);
+  setWater(appended, square, "box", "shallow", looks);
+  assert.deepEqual(appended.cliffTiles, ["CLdi", "CLgr"]);
+  assert.equal(corner(appended, 12, 12).cliffTexture, 1);
+  // Without the model folders the default can't be told: the ground tile's cliff.
+  const plain = dirt(["CLdi", "CLgr"]);
+  setWater(plain, square, "box", "shallow", kinds);
+  assert.equal(corner(plain, 9, 12).cliffTexture, 0);
+  assert.equal(corner(plain, 12, 12).cliffTexture, 0);
+});
+
 test("widening a lake keeps its surface and doesn't dig deeper", () => {
   const t = flat();
   setWater(t, block, "box", "shallow", kinds);

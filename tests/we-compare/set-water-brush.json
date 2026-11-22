@@ -1,10 +1,10 @@
 [
   {
     "name": "set-water-shallow-brush",
-    "description": "set_water shallow (MCP) against the editor's Shallow Water brush on the same corners: flat.w3x, the editor's square brush of size 3 (Shape 1424,624) at 748,500, Studio's set_water shallow with shape box over the same 9 x 9 corners; the corners (layers, water flags and heights, ground, cliff types, the rim) the same in both (branch we-batch-6). The shape is set back to the circle after the stroke (the editor keeps it for the session)",
+    "description": "set_water shallow (MCP) against the editor's Shallow Water brush on the same corners: flat.w3x, the editor's square brush of size 3 (Shape 1424,624) at 748,500, Studio's set_water shallow with shape box over the same 5 x 5 corners (the brush's square of half side size - 1 round corner 32,30; the spec's 9 x 9 box was wrong, verify 2026-11-22); the corners (layers, water flags and heights, ground, cliff types: the 7 x 7 round the centre take the palette's default Grass Cliff, 1, not the Dirt ground's) the same in both (branch fix-water-brush). The shape is set back to the circle after the stroke (the editor keeps it for the session)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,310"], ["--click", "1424,624"], ["--click", "748,500"], ["--sleep", "1500"], ["--click", "1392,624"]] },
-    "studio": { "settings": { "mcp.writeTools": true }, "steps": [{ "mcp": "set_water", "args": { "mode": "shallow", "shape": "box", "left": -512, "bottom": -768, "right": 512, "top": 256 } }] },
+    "studio": { "settings": { "mcp.writeTools": true }, "steps": [{ "mcp": "set_water", "args": { "mode": "shallow", "shape": "box", "left": -256, "bottom": -512, "right": 256, "top": 0 } }] },
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 30
   },
@@ -13,7 +13,7 @@
     "description": "The same with the Deep Water brush (1441,310) and set_water deep",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1441,310"], ["--click", "1424,624"], ["--click", "748,500"], ["--sleep", "1500"], ["--click", "1392,624"]] },
-    "studio": { "settings": { "mcp.writeTools": true }, "steps": [{ "mcp": "set_water", "args": { "mode": "deep", "shape": "box", "left": -512, "bottom": -768, "right": 512, "top": 256 } }] },
+    "studio": { "settings": { "mcp.writeTools": true }, "steps": [{ "mcp": "set_water", "args": { "mode": "deep", "shape": "box", "left": -256, "bottom": -512, "right": 256, "top": 0 } }] },
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 30
   }
