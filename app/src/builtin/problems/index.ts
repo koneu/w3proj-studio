@@ -31,6 +31,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** What the checks of the running run share; outside a run, nothing is shared. */
   let scope = new RunScope(w3, false);
   const folded = new Set<string>();
+  /** Fixes going on (check, problem, fix label), until the run after them is over: their button reads "Renumber…" and
+   *  takes no second click. A fix can wait a while for work before it (Check Trigger Tree's wait for the map script,
+   *  which JassHelper compiles for a vJASS map: seconds through Proton), and the row stays until the run after it. */
+  const fixing = new Set<string>();
   /** The project's ignore (.w3proj/problems-ignore.json) as the last run read it; `ignoreBad` says why a file that
    *  is there can't be used (then nothing is hidden, and nothing is written over it). */
   let ignore: IgnoreFile = emptyIgnore();
@@ -258,10 +262,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             onclick: p.reveal ? run(() => w3.commands.execute(p.reveal!.command, ...(p.reveal!.args ?? []))) : undefined,
           }, h("span.problem-icon", {}, p.severity === "error" ? "✕" : p.severity === "info" ? "ⓘ" : "⚠"),
             h("span.problem-text", {}, p.message, p.location ? h("small.muted", {}, ` ${p.location}`) : null,
-              ...(p.fixes?.length ? [h("span.problem-fixes", {}, ...p.fixes.map((f) => h("button.problem-fix", {
-                title: f.title ?? "",
-                onclick: (e: MouseEvent) => { e.stopPropagation(); run(async () => { await f.run(); await service.run(); })(); },
-              }, f.label)))] : []),
+              ...(p.fixes?.length ? [h("span.problem-fixes", {}, ...p.fixes.map((f) => {
+                const key = `${g.check.id}\n${aboutOf(p)}\n${f.label}`, busy = fixing.has(key);
+                return h(`button.problem-fix${busy ? ".busy" : ""}`, {
+                  title: f.title ?? "", disabled: busy,
+                  onclick: (e: MouseEvent) => {
+                    e.stopPropagation();
+                    if (fixing.has(key)) return;
+                    fixing.add(key);
+                    w3.views.refresh("w3.problems.list");
+                    run(async () => {
+                      try { await f.run(); await service.run(); } finally { fixing.delete(key); w3.views.refresh("w3.problems.list"); }
+                    })();
+                  },
+                }, busy ? `${f.label}…` : f.label);
+              }))] : []),
               hidden(g, p)
                 ? h("span.problem-fixes", {}, h("button.problem-fix.problem-unignore", {
                   title: "Reports it again",

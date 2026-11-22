@@ -11920,7 +11920,11 @@ async function triggerFolders(page, found) {
  *  tree as a merge leaves it: a GUI trigger copied into another folder (its stored id twice, order.txt not listing
  *  it) and a custom text calling a function nothing defines. The command lists the id as an error at the copy, the
  *  Map script check lists the text's problem at its own file and line; a click opens the file there; Renumber and Fix
- *  order.txt (buttons in the Problems view) write only the files they are about, and the next run has them gone. */
+ *  order.txt (buttons in the Problems view) write only the files they are about, and the next run has them gone.
+ *  A fix waits for the map script due before it and after it (EditLog.settle): with the game folder set, the fixture's
+ *  vJASS text has JassHelper compile it on the open and on each fix's save, seconds through Proton and up to
+ *  "vjass.timeout" when a run hangs. So a fix is waited for by its button ("Renumber…" until the run after it is over),
+ *  not for a set time; a fix that wrote nothing by then failed. */
 async function triggerTree(page, found) {
   const fail = (what) => found.push(`check trigger tree: ${what}`);
   const soon = (check, ms) => until("", check, ms).then(() => true, () => false);
@@ -11938,8 +11942,27 @@ async function triggerTree(page, found) {
   writeFileSync(setup, setupText.replace(/(function Trig_Setup_Players_Actions takes nothing returns nothing)(\r?\n)/, "$1$2    call NoSuchSmokeFunction()$2"));
   const order = join(trig, "Systems", "order.txt"), orderText = readFileSync(order, "utf8");
   const row = (text) => `[...document.querySelectorAll(".problem-row")].find((r) => r.textContent.includes(${lit(text)}))`;
-  const fix = (text, label) => page.evaluate(`(() => { const b = [...(${row(text)}?.querySelectorAll("button.problem-fix") ?? [])].find((x) => x.textContent === ${lit(label)}); if (!b) return false; b.click(); return true; })()`);
-  const cursor = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEditor.cursor"]')?.textContent ?? ""`);
+  // Clicks the fix and answers with its button right after the click (the view is drawn again at once): null if there
+  // was none.
+  const fix = (text, label) => page.evaluate(`(() => {
+    const b = [...(${row(text)}?.querySelectorAll("button.problem-fix") ?? [])].find((x) => x.textContent === ${lit(label)});
+    if (!b) return null;
+    b.click();
+    const now = [...(${row(text)}?.querySelectorAll("button.problem-fix") ?? [])].find((x) => x.textContent.startsWith(${lit(label)}));
+    return { text: now?.textContent ?? null, disabled: !!now?.disabled };
+  })()`);
+  // The fix and the run after it are over (JassHelper runs, each up to "vjass.timeout", 60 s, are waited for in it).
+  const fixed = () => soon(() => page.evaluate(`!document.querySelector("button.problem-fix.busy")`), 180000);
+  const scriptLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(-3).join(" | ")`).catch(() => "");
+  const clicked = async (text, label) => {
+    const b = await fix(text, label);
+    if (!b) { fail(`the ${text} problem has no ${label} button`); return false; }
+    // Busy until the fix and the run after it are over, taking no second click meanwhile.
+    if (b.text !== `${label}…` || !b.disabled) fail(`right after the click ${label}'s button reads ${lit(b.text)} (disabled: ${b.disabled}), not "${label}…" and disabled`);
+    if (!(await fixed())) { fail(`${label} was still going after 180 s (Map Script: ${await scriptLog()})`); return false; }
+    return true;
+  };
+  const cursor =() => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEditor.cursor"]')?.textContent ?? ""`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(dir)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(dir)}`));
   try {
@@ -11960,13 +11983,16 @@ async function triggerTree(page, found) {
     if (!(await soon(() => page.evaluate(`w3.editors.activePath() === "map/triggers/Systems/Melee_Copy.gui.json"`), 20000))) fail(`a click on the id's problem opened ${await page.evaluate(`w3.editors.activePath()`)}`);
     await page.evaluate(`w3.editors.closeAll()`);
     // ---- Fixes, on request: only their files change ----
-    if (!(await fix("has the id", "Renumber"))) fail("the id's problem has no Renumber button");
-    else if (!(await soon(() => !readFileSync(copy, "utf8").includes("\"id\""), 20000))) fail("Renumber left the copy's id");
-    if (readFileSync(join(trig, "Initialization", "Melee_Initialization.gui.json"), "utf8") !== original) fail("Renumber changed the first trigger's file");
-    if (!(await soon(() => page.evaluate(`!${row("has the id")} && !!${row("isn't listed")}`), 20000))) fail("after Renumber the Problems view still lists the id (or lost the order.txt warning)");
-    if (!(await fix("isn't listed", "Fix order.txt"))) fail("the order.txt warning has no Fix order.txt button");
-    else if (!(await soon(() => readFileSync(order, "utf8") === `${orderText}Melee_Copy.gui.json\n`, 20000))) fail(`Fix order.txt wrote ${lit(readFileSync(order, "utf8"))}`);
-    if (!(await soon(() => page.evaluate(`!${row("isn't listed")}`), 20000))) fail("after Fix order.txt the Problems view still lists the file");
+    // Once a fix's button is no longer busy, its file is written and the run after it is drawn: nothing to wait for.
+    if (await clicked("has the id", "Renumber")) {
+      if (readFileSync(copy, "utf8").includes("\"id\"")) fail(`Renumber left the copy's id (Map Script: ${await scriptLog()})`);
+      if (readFileSync(join(trig, "Initialization", "Melee_Initialization.gui.json"), "utf8") !== original) fail("Renumber changed the first trigger's file");
+      if (!(await page.evaluate(`!${row("has the id")} && !!${row("isn't listed")}`))) fail("after Renumber the Problems view still lists the id (or lost the order.txt warning)");
+    }
+    if (await clicked("isn't listed", "Fix order.txt")) {
+      if (readFileSync(order, "utf8") !== `${orderText}Melee_Copy.gui.json\n`) fail(`Fix order.txt wrote ${lit(readFileSync(order, "utf8"))} (Map Script: ${await scriptLog()})`);
+      if (!(await page.evaluate(`!${row("isn't listed")}`))) fail("after Fix order.txt the Problems view still lists the file");
+    }
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     await restoreWindow(page);
