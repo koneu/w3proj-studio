@@ -10,7 +10,7 @@
 import type { Mat4 } from "../../lib/model/renderer";
 import type { ModelRequest } from "./objects";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { rampSides } from "../../lib/terrain/cliffs";
+import { cliffSlot, rampSides } from "../../lib/terrain/cliffs";
 
 /** A Reforged cliff model's texture as drawn: its placeholders for the cliff type's HD set become that set
  *  (TerrainArt\CityScape\City_Cliff1_Diffuse.blp). The Cliffs models name Doodads\Terrain\#ignore_Cliffs\Cliff1_…,
@@ -129,7 +129,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
   // The blocks (rampSides) a model of the cliff type's ramp folder exists for; the others are ordinary cliffs.
   rampSides(t, ({ x: bx, y: by, w: bw, outer, base, tiles }) => {
     const name = outer.map((c) => (c.ramp ? "LHX" : "ABC")[c.layer - base]).join("");
-    const type = list[outer[0].cliffTexture] ?? list[0];
+    const type = list[cliffSlot(outer[0].cliffTexture)] ?? list[0];
     if (!type?.rampModelDir) return false;
     const path = `Doodads\\Terrain\\${type.rampModelDir}\\${type.rampModelDir}${name}0.mdx`;
     if (!exists(path)) return false;
@@ -152,7 +152,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
       if (cs.some((c) => c.layer - base > 2)) continue;
       const name = cs.map((c) => String.fromCharCode(65 + c.layer - base)).join("");
       // The bottom-left corner decides; 15 is reserved and taken as the first type.
-      const type = list[bl.cliffTexture] ?? list[0];
+      const type = list[cliffSlot(bl.cliffTexture)] ?? list[0];
       if (!type) continue;
       const dir = `Doodads\\Terrain\\${type.cliffModelDir}\\${type.cliffModelDir}${name}`;
       // Missing variations fall back to the highest one that exists.

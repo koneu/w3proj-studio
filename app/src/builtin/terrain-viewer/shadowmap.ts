@@ -13,7 +13,7 @@ import type { SpecialDoodad } from "./pathmap";
 import { SPECIAL_FACING, specialBase, specialFootprints, specialTiles, type Footprint, type TileRect } from "./specials";
 import type { W3Api } from "../../extensions/api";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { rampSides } from "../../lib/terrain/cliffs";
+import { cliffSlot, rampSides } from "../../lib/terrain/cliffs";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
 
@@ -143,7 +143,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   // the cliff type's ramp folder (its bottom-left corner's type, as drawn; variation 0), where it can be read; the
   // others, and the side's flat tile, as any other tile.
   for (const side of rampSides(t)) {
-    const dir = (list[side.outer[0].cliffTexture] ?? list[0])?.ramp;
+    const dir = (list[cliffSlot(side.outer[0].cliffTexture)] ?? list[0])?.ramp;
     if (!dir) continue;
     const path = `Doodads\\Terrain\\${dir}\\${dir}${shadowRampName(side.outer, side.base)}0.mdx`;
     const mesh = await rampMeshes.get(artMode, path.toLowerCase(), async () => {
@@ -175,7 +175,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   for (const i of tiles) {
     if (byTile.has(i) || special.has(i)) continue;
     const tx = i % tw, ty = (i - tx) / tw, bl = t.corners[ty * t.width + tx];
-    const dir = (list[bl.cliffTexture] ?? list[0])?.cliff;
+    const dir = (list[cliffSlot(bl.cliffTexture)] ?? list[0])?.cliff;
     if (!dir) continue;
     const stem = `Doodads\\Terrain\\${dir}\\${dir}${shadowCliffName(t, tx, ty)}`;
     const n = await variations(stem);

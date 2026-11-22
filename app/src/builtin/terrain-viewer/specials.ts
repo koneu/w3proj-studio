@@ -4,6 +4,7 @@
 import type { W3Api } from "../../extensions/api";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { cliffRetexture, type CliffList, type CliffType } from "./cliffs";
+import { cliffSlot } from "../../lib/terrain/cliffs";
 import type { Placed, PlacedTextures, Skin } from "./objects";
 import { loadPathingData, type SpecialDoodad } from "./pathmap";
 
@@ -71,7 +72,7 @@ export function specialCliffTiles(t: Terrain, rects: readonly TileRect[]): Set<n
 export function specialCliffType(t: Terrain, list: CliffList, x: number, y: number): CliffType | undefined {
   const cx = Math.min(t.width - 1, Math.max(0, Math.floor((x - t.offsetX) / 128)));
   const cy = Math.min(t.height - 1, Math.max(0, Math.floor((y - t.offsetY) / 128)));
-  return list[t.corners[cy * t.width + cx]?.cliffTexture ?? 0] ?? list[0];
+  return list[cliffSlot(t.corners[cy * t.width + cx]?.cliffTexture ?? 0)] ?? list[0];
 }
 
 /** The cliff type a special doodad takes, by the tile it is placed by (the bottom left of its footprint), not the tile

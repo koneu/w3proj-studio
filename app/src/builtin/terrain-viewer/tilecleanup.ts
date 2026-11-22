@@ -3,7 +3,7 @@
 // cliff is drawn with its cliff type: a cliff type (the w3e's cliff list, see cliffList) belongs to a ground tile, so
 // a tile no corner shows can still be what a cliff is made of.
 
-import { MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
+import { MAX_CLIFF_TYPES, cliffSlot } from "../../lib/terrain/cliffs";
 import { customTilesFlag } from "../../lib/terrain/tilesets";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { cliffList, type CliffType } from "./cliffs";
@@ -35,7 +35,7 @@ export function cliffTypeUse(t: Terrain, types: ReadonlyMap<string, CliffType>):
     for (let x = 0; x < t.width - 1; x++) {
       const bl = at(x, y), cs = [bl, at(x, y + 1), at(x + 1, y + 1), at(x + 1, y)];
       if (cs.every((c) => c.layer === bl.layer) || cs.every((c) => c.ramp)) continue;
-      const type = list[bl.cliffTexture] ? bl.cliffTexture : 0;
+      const type = list[cliffSlot(bl.cliffTexture)] ? cliffSlot(bl.cliffTexture) : 0;
       if (list[type]) use[type]++;
     }
   }
@@ -57,7 +57,7 @@ export function cliffGroundInUse(t: Terrain, types: ReadonlyMap<string, Pick<Cli
     for (let x = 0; x < t.width - 1; x++) {
       const bl = at(x, y), cs = [bl, at(x, y + 1), at(x + 1, y + 1), at(x + 1, y)];
       if (cs.every((c) => c.layer === bl.layer) || cs.every((c) => c.ramp)) continue;
-      const ground = (list[bl.cliffTexture] ?? list[0])?.groundTile;
+      const ground = (list[cliffSlot(bl.cliffTexture)] ?? list[0])?.groundTile;
       if (ground && !out.includes(ground)) out.push(ground);
     }
   }

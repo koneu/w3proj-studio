@@ -73,6 +73,16 @@ test("cliffTypeUse counts cliff tiles by cliff type number, whatever the ground 
   assert.deepEqual(cliffTypeUse(u, new Map()), [0, 0, 0]);
 });
 
+test("cliffTypeUse: corners holding 15 draw with entry 0 even when the list has a 16th entry (map 32a in the game)", () => {
+  const t = flat();
+  t.cliffTiles = Array.from({ length: 16 }, (_, i) => ["CLdi", "CLgr", "CLro"][i] ?? "CLro");
+  mesa(t, 15);
+  const use = cliffTypeUse(t, TYPES);
+  assert.equal(use.length, 16);
+  assert.equal(use[0], 4);
+  assert.ok(use.slice(1).every((n) => n === 0), "entry 15 draws nothing");
+});
+
 test("removing used tiles needs a replacement that stays", () => {
   const t = flat();
   mesa(t, 0);

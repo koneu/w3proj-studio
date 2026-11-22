@@ -72,7 +72,7 @@ import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField, TOP_LEVEL } from "../../lib/terrain/wholemap";
 import { askResetHeight, randomSettings, type ResetHeightRequest } from "./resetheight";
-import { CornerUndo, MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
+import { CornerUndo, MAX_CLIFF_TYPES, cliffSlot } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
@@ -3834,7 +3834,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const drawn = drawnGroundTiles(terrain, own);
           const usedTiles = [...new Set(inArea.map((c) => drawn[c.texture]))];
           // A cliff's number past the list stands for the first type, as when it's drawn.
-          const cliffOf = (c: Corner) => (c.cliffTexture < cliffGrounds.length ? c.cliffTexture : 0);
+          const cliffOf = (c: Corner) => (cliffSlot(c.cliffTexture) < cliffGrounds.length ? cliffSlot(c.cliffTexture) : 0);
           const layers = new Set(inArea.map((c) => c.layer));
           const usedCliffs = layers.size > 1 ? [...new Set(inArea.map(cliffOf))] : [];
           const commit = (st: ReturnType<typeof changeArea>, nothing = "Nothing to replace there.") => {

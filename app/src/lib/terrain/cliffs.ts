@@ -23,6 +23,10 @@ export class CornerUndo implements CornerLog {
  *  (a new map's corners hold it). Entries past 14 can't be painted. */
 export const MAX_CLIFF_TYPES = 15;
 
+/** The list entry a corner's cliff type number draws with. The game reads 15 as "none" even when the list has a 16th
+ *  entry (map 32a, played 2026-11-22: such corners drew like entry 0, not entry 15), so 15 and above mean the first. */
+export const cliffSlot = (n: number) => (n < MAX_CLIFF_TYPES ? n : 0);
+
 /** Corners of cliff tiles get the cliff type `fixed` (a cliff type number, as chosen in the World
  *  Editor's cliff palette), or without it the cliff type of their ground tile where it has one,
  *  so painting grass next to a cliff, or raising a cliff on grass, gives a grass cliff. That's what the World
