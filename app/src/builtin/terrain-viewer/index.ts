@@ -2282,6 +2282,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void artLoad(readFile(w3, doc, path).then((buf) => { renderer.setWaterWave(decodeImage(buf, path)); loadRedraw(); }, () => {}));
         }
         const thumbCache = new Map<string, Promise<string | null>>();
+        const tileThumbById = new Map<string, Promise<string | null>>();
         /** Data URL of a ground texture's first cell (the plain tile). */
         const tileThumb = (path: string) => {
           let p = thumbCache.get(path);
@@ -4898,15 +4899,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           groundTileUse: () => (cliffData ? tileUse(terrain, cliffData.types) : null),
           removeGroundTiles: (remove, replace) => removeTiles(remove, replace),
           removeUnusedGroundTiles: removeUnusedTiles,
-          groundTileThumb: async (id) => {
-            try {
-              const path = (await tilePaths(w3)).get(id);
-              return path ? await tileThumb(path) : null;
-            } catch (e) {
-              // Every tile of every palette asks: without the game's data they'd all fail, unseen. Said once, as an error.
-              reportOnce(w3, "The ground tile pictures couldn't be read", e);
-              return null;
+          // Per tile id, kept: the palette asks again at every click (and the Slk parse behind the path is not cheap).
+          groundTileThumb: (id) => {
+            let p = tileThumbById.get(id);
+            if (!p) {
+              p = (async () => {
+                try {
+                  const path = (await tilePaths(w3)).get(id);
+                  return path ? await tileThumb(path) : null;
+                } catch (e) {
+                  // Every tile of every palette asks: without the game's data they'd all fail, unseen. Said once, as an error.
+                  reportOnce(w3, "The ground tile pictures couldn't be read", e);
+                  return null;
+                }
+              })();
+              tileThumbById.set(id, p);
             }
+            return p;
           },
           objects: {
             type: (id) => {

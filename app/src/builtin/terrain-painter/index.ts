@@ -217,6 +217,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   // ---- toolbar -----------------------------------------------------------------------
   const buttons = new Map<Tool, HTMLButtonElement>();
   const thumbs = h("span.terrain-tex-thumbs");
+  const thumbButtons = new Map<string, HTMLButtonElement>();
   /** `reset`: a chosen tile no slot is drawn with goes back to the first slot's (after the list changed). The picker
    *  shows the map's palette only; the palette itself is set up in the Terrain Settings tab (settings.ts). */
   const fillPalette = async (reset = false) => {
@@ -224,13 +225,22 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     // The tiles as drawn: with the w3e flag "custom tilesets" 0 the tileset's own list, not the file's.
     const was = paintTile, shown = await ed.paletteGroundTiles().catch(() => [...new Set(terrain.groundTiles)]);
     if (reset && paintTile === was && !shown.includes(paintTile)) paintTile = shown[0] ?? "";
+    // Same tiles as shown: only the highlight moves. Rebuilding the buttons would leave their pictures empty (the row
+    // collapsing) until each thumbnail has loaded again.
+    if (shown.length === thumbButtons.size && shown.every((id, i) => [...thumbButtons.keys()][i] === id)) {
+      for (const [id, b] of thumbButtons) b.classList.toggle("on", id === paintTile);
+      return;
+    }
+    thumbButtons.clear();
     thumbs.replaceChildren(...shown.map((id) => {
       const img = h("img", { alt: id });
       void ed.groundTileThumb(id).then((src) => { if (src) img.src = src; });
-      return h(`button.terrain-tex-thumb${id === paintTile ? ".on" : ""}`, {
+      const b = h(`button.terrain-tex-thumb${id === paintTile ? ".on" : ""}`, {
         title: `${names.get(id) ?? id} (${id})`,
         onclick: () => { paintTile = id; void fillPalette(); ed.focus(); },
       }, img);
+      thumbButtons.set(id, b);
+      return b;
     }));
   };
   void fillPalette(true);
