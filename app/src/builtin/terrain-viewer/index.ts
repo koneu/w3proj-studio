@@ -1601,10 +1601,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return;
         }
         const open = () => w3.commands.execute("w3.terrain.open").catch((e) => w3.window.showError(String(e)));
+        // The Subterrains extension's editor of the terrain's layout (a command: it may be off).
+        const layout = () => w3.commands.execute("w3.terrainLayout.edit").catch((e) => w3.window.showError(String((e as Error).message ?? e)));
         const facts = h("div.terrain-facts.muted", {}, "Reading terrain…");
         el.append(
-          h("div.tree", {}, h("div.tree-row.obj-kind", { onclick: open, title: "F3" },
-            h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open 3D view"))),
+          h("div.tree", {},
+            h("div.tree-row.obj-kind", { onclick: open, title: "F3" },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open 3D view")),
+            h("div.tree-row.obj-kind", { onclick: layout, title: "The subterrains as rectangles over the map: draw, resize, rename, join, delete, or split a flat terrain" },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Edit Terrain Layout"))),
           facts,
         );
         readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }).then((buf) => {

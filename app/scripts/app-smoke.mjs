@@ -6355,6 +6355,99 @@ async function subterrains(page, found) {
   }
 }
 
+/** Edit Terrain Layout (terrain-layout/editor.ts), by the mouse: on a new flat map the tab offers Split Terrain with a
+ *  grid (Columns +, Rows +, the north-south cut dragged west), split as drawn; then a subterrain drawn along the west
+ *  side, its east side dragged two corners further, renamed, previewed (what moves), applied as one change (folders and
+ *  terrain.json as drawn), and Undo takes the whole change back (every file of map/terrain/ as before). The editor's
+ *  pictures go to target/app-smoke/terrain-layout-*.png. */
+async function terrainLayoutEditor(page, found) {
+  const fail = (what) => found.push(`terrainLayoutEditor: ${what}`);
+  await page.evaluate(`(() => { window.__tleKept = { confirm: w3.window.confirm, inputBox: w3.window.inputBox }; w3.window.confirm = async () => true; })()`);
+  try {
+    const tool = mcpTool(page), hands = new Hands(page);
+    const folder = join(work, "terrain-layout");
+    rmSync(folder, { recursive: true, force: true });
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "Layout", width: 32, height: 32, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 30000);
+    await tool("save_project");
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    const map = join(root, "map");
+    const editor = async () => JSON.parse(await tool("get_subterrains")).editor;
+    const shot = async (name) => {
+      const s = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
+      if (s) writeFileSync(join(work, `terrain-layout-${name}.png`), Buffer.from(s.data, "base64"));
+    };
+    // Corner (x, y) on the page, by the editor's own view (get_subterrains editor.view).
+    const at = (v, x, y) => ({ x: v.left + v.width / 2 + (x - v.cx) * v.scale, y: v.top + v.height / 2 - (y - v.cy) * v.scale });
+
+    // The terrain side view's entry opens the tab (the command it runs).
+    await page.evaluate(`w3.commands.execute("w3.terrainLayout.edit")`);
+    await until("the Terrain Layout tab", () => page.evaluate(`w3.editors.activePath() === "w3:terrain-layout" && !!document.querySelector(".layout-stage canvas") && !!document.querySelector('button[data-layout="cols+"]')`), 20000);
+    let e = await until("the flat layout in the editor", async () => { const s = await editor(); return s?.mode === "flat" && s.view.width > 0 ? s : null; }, 20000);
+    // Split Terrain by the grid: 2 × 2, then the north-south cut dragged five corners west.
+    await hands.click('button[data-layout="cols+"]');
+    await hands.click('button[data-layout="rows+"]');
+    e = await until("a 2×2 grid", async () => { const s = await editor(); return s?.grid?.xs.length === 1 && s.grid.ys.length === 1 ? s : null; }, 10000);
+    const [cut] = e.grid.xs, [row] = e.grid.ys;
+    await hands.drag(at(e.view, cut, 3), at(e.view, cut - 5, 3));
+    e = await until("the cut moved", async () => { const s = await editor(); return s?.grid?.xs[0] === cut - 5 ? s : null; }, 10000).catch(async () => { fail(`dragging the cut from ${cut} five corners west left the grid at ${lit((await editor())?.grid)}`); return editor(); });
+    await until("the split's preview", async () => !!(await editor())?.preview, 20000).catch(async () => fail(`no preview of the split: ${lit((await editor())?.refusal)}`));
+    await shot("split-grid");
+    await hands.click('button[data-layout="apply"]');
+    await until("map/terrain/terrain.json", () => existsSync(join(map, "terrain", "terrain.json")), 30000).catch(() => fail("Split Terrain wrote no map/terrain/terrain.json"));
+    await settled(page);
+    const layoutOf = () => JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
+    const x = cut - 5, [W, H] = layoutOf().corners;
+    const want = [["sw", 0, 0, x, row], ["se", x, 0, W - x, row], ["nw", 0, row, x, H - row], ["ne", x, row, W - x, H - row]];
+    if (lit(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h])) !== lit(want)) fail(`the split as drawn: ${lit(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]))}, wanted ${lit(want)}`);
+
+    // Split now: draw a subterrain along the west side (corners 0–3, the whole height of sw).
+    e = await until("the split layout in the editor", async () => { const s = await editor(); return s?.mode === "split" && s.draft.length === 4 ? s : null; }, 20000);
+    await hands.click('button[data-layout="draw"]');
+    await hands.drag(at(e.view, 0.5, 0.5), at(e.view, 3.5, row - 0.5));
+    e = await until("the drawn subterrain", async () => { const s = await editor(); return s?.draft.some((d) => d.name === "new") ? s : null; }, 10000).catch(async () => { fail(`drawing gave the draft ${lit((await editor())?.draft)}`); return null; });
+    if (!e) return;
+    const drawn = e.draft.find((d) => d.name === "new");
+    if (lit([drawn.x, drawn.y, drawn.w, drawn.h, drawn.from]) !== lit([0, 0, 4, row, []])) fail(`the drawn subterrain is ${lit(drawn)}`);
+    // Resized: its east side dragged from corner line 4 to 6 (Select, it is selected after drawing).
+    await hands.click('button[data-layout="select"]');
+    await hands.drag(at(e.view, 4, row / 2), at(e.view, 6, row / 2));
+    e = await until("the resize", async () => { const s = await editor(); return s?.draft.find((d) => d.name === "new")?.w === 6 ? s : null; }, 10000).catch(async () => { fail(`dragging the east side gave ${lit((await editor())?.draft.find((d) => d.name === "new"))}`); return editor(); });
+    const sw = e.draft.find((d) => d.name === "sw");
+    if (lit([sw?.x, sw?.w]) !== lit([6, x - 6])) fail(`sw after the resize: ${lit(sw)}`);
+    // Renamed (the question answered).
+    await page.evaluate(`(() => { w3.window.inputBox = async () => "west_strip"; })()`);
+    await hands.click('button[data-layout="rename"]');
+    e = await until("the rename", async () => { const s = await editor(); return s?.draft.some((d) => d.name === "west_strip") ? s : null; }, 10000).catch(async () => { fail(`the rename left ${lit((await editor())?.draft.map((d) => d.name))}`); return editor(); });
+    e = await until("the preview", async () => { const s = await editor(); return s?.preview ? s : null; }, 20000).catch(async () => { fail(`no preview: ${lit((await editor())?.refusal)}`); return editor(); });
+    if (!e.changes.some((c) => /^New: west_strip, 6×\d+ at 0,0/.test(c))) fail(`the draft's changes say ${lit(e.changes)}`);
+    if (!e.preview?.written.includes("map/terrain/west_strip/terrain.txt")) fail(`the preview doesn't write west_strip's terrain: ${lit(e.preview?.written)}`);
+    await shot("draft");
+    // Applied as one change; Undo takes it back.
+    const terrainDir = join(map, "terrain");
+    const before = snapshot(terrainDir);
+    await hands.click('button[data-layout="apply"]');
+    await until("west_strip on disk", () => existsSync(join(terrainDir, "west_strip", "terrain.txt")), 30000).catch(() => fail("Apply wrote no map/terrain/west_strip/terrain.txt"));
+    await settled(page);
+    const subs = layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]);
+    if (lit(subs) !== lit([["sw", 6, 0, x - 6, row], ["se", x, 0, W - x, row], ["nw", 0, row, x, H - row], ["ne", x, row, W - x, H - row], ["west_strip", 0, 0, 6, row]])) fail(`terrain.json after Apply: ${lit(subs)}`);
+    e = await until("the editor on the applied layout", async () => { const s = await editor(); return s && !s.pending && s.canUndo ? s : null; }, 20000).catch(async () => { fail(`after Apply the editor says ${lit(await editor())}`); return null; });
+    await shot("applied");
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the change taken back", () => !existsSync(join(terrainDir, "west_strip")), 30000).catch(() => fail("Undo left map/terrain/west_strip/"));
+    await settled(page);
+    const back = snapshot(terrainDir);
+    const differ = [...new Set([...before.keys(), ...back.keys()])].filter((k) => before.get(k) !== back.get(k));
+    if (differ.length) fail(`after Undo these map/terrain/ files differ from before Apply: ${differ.join(", ")}`);
+    e = await until("the editor after Undo", async () => { const s = await editor(); return s?.draft.length === 4 && s.canRedo ? s : null; }, 20000).catch(async () => { fail(`after Undo the editor says ${lit((await editor())?.draft)}`); return null; });
+  } finally {
+    await page.evaluate(`(() => { if (window.__tleKept) Object.assign(w3.window, window.__tleKept); delete window.__tleKept; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** The shadow update a save makes says how many doodads it left out when only some models can't be read ("N doodads left
  *  out, their models couldn't be read"; none at all unreadable is the refusal resizeRefusedShadows checks). The control:
  *  the same save without the doodad whose model isn't there says nothing of the kind, and the stored file is written. */
@@ -16624,6 +16717,7 @@ async function run() {
         syncSafety,
         tabsBeforeListing,
         techtreeRandomLevels,
+        terrainLayoutEditor,
         terrainModelTexture,
         terrainSelectCameras,
         terrainTabKeys,
@@ -16893,6 +16987,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeUnreadable", found);
   await subterrains(page, found).catch((e) => found.push(`subterrains: ${e.message}`));
   await leftOpen(page, "subterrains", found);
+  await terrainLayoutEditor(page, found).catch((e) => found.push(`terrainLayoutEditor: ${e.message}`));
+  await leftOpen(page, "terrainLayoutEditor", found);
   await shadowLeftOut(page, found).catch((e) => found.push(`shadow left out: ${e.message}`));
   await leftOpen(page, "shadowLeftOut", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));

@@ -23,7 +23,8 @@ import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
 import { MCP_EDITS_SERVICE } from "../extensions/services";
-import { changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, getSubterrainsTool, isSplit, joinSubterrains, layoutOps, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { addSub, draftOf, gridRects, planOf, renameSub, resizeSub } from "../lib/terrain/layoutdraft";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, resizeTerrain, type PathingOverrides } from "../lib/terrain/resize";
 
@@ -636,7 +637,8 @@ test("the MCP tool change_subterrains: the commands' changes and refusals, witho
     [{ action: "rename", name: "b2" }, /rename needs to/],
     [{ action: "new", name: "x" }, /new needs rect/],
     [{ action: "join", names: ["b2"], to: "x" }, /join needs names/],
-    [{ action: "split" }, /action must be/],
+    [{ action: "move" }, /action must be/],
+    [{ action: "split" }, /split already/],
   ] as const) await assert.rejects(changeSubterrainsTool(w3, args), why);
   // Refused while something is unsaved, as the commands.
   const unsaved = w3.editors.unsavedPaths;
@@ -644,6 +646,103 @@ test("the MCP tool change_subterrains: the commands' changes and refusals, witho
   await assert.rejects(changeSubterrainsTool(w3, { action: "rename", name: "b2", to: "north" }), /save or discard the changes in map\/war3map.w3i.json first/);
   (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = unsaved;
   assert.deepEqual(changedFiles(before, snapshot(root)), []);
+});
+
+// ---- the Terrain Layout editor's calls (terrain-layout/editor.ts through index.ts layoutOps, the backend's preview and undo) ----
+
+test("Terrain Layout editor: a draft of several steps previews what moves (nothing written), applies as one change, Undo takes it back byte for byte, Redo makes it again", async () => {
+  const { w3, root } = await bigSplit("layout-editor");
+  const whole = await loaded(w3);
+  const ops = layoutOps(w3);
+  const state = await ops.readState();
+  assert.equal(state.layout, "split");
+  assert.deepEqual(state.canvas, [25, 17]);
+  assert.deepEqual(state.subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h, s.open, s.idRanges]), [
+    ["a0", 0, 0, 8, 8, true, [[10000, 19999]]], ["a1", 8, 0, 8, 8, true, [[20000, 29999]]], ["a2", 16, 0, 9, 8, true, [[30000, 39999]]],
+    ["b0", 0, 8, 8, 9, true, [[40000, 49999]]], ["b1", 8, 8, 8, 9, true, [[50000, 59999]]], ["b2", 16, 8, 9, 9, true, [[60000, 69999]]],
+  ]);
+  const picture = await ops.picture();
+  assert.ok(picture && picture.width === 25 && picture.height === 17 && picture.rgba.length === 25 * 17 * 4, "a pixel per corner");
+  // The draft as the editor makes it: a0 renamed, b0 resized two columns into b1, a new one over b1's west side.
+  let d = draftOf(state.subterrains, state.canvas);
+  const ok = <T>(v: T | string): T => { if (typeof v === "string") throw new Error(v); return v; };
+  d = ok(renameSub(d, "a0", "south_west"));
+  d = ok(resizeSub(d, "b0", { x: 0, y: 8, w: 10, h: 9 }));
+  d = ok(addSub(d, "mid", { x: 10, y: 8, w: 3, h: 9 }));
+  const before = snapshot(root);
+  const p = await ops.preview(planOf(d));
+  assert.deepEqual(changedFiles(before, snapshot(root)), [], "a preview writes nothing");
+  assert.deepEqual(p.subterrains.map((s) => [s.name, s.x, s.w, s.from]), [["south_west", 0, 8, ["a0"]], ["a1", 8, 8, ["a1"]], ["a2", 16, 9, ["a2"]], ["b0", 0, 10, ["b0"]], ["b1", 13, 3, ["b1"]], ["b2", 16, 9, ["b2"]], ["mid", 10, 3, []]]);
+  const taken = JSON.parse(readFileSync(join(root, "map", "terrain", "b1", "doodads.json"), "utf8")).doodads as { position: number[] }[];
+  const into = (lo: number, hi: number) => taken.filter((t) => t.position[0] >= 128 * lo && t.position[0] < 128 * hi).length;
+  assert.ok(into(8, 10) > 0 && into(10, 13) > 0, "control: doodads lie in both strips");
+  assert.deepEqual(p.moves.filter((m) => m.kind === "doodads"), [{ kind: "doodads", from: "b1", to: "b0", count: into(8, 10) }, { kind: "doodads", from: "b1", to: "mid", count: into(10, 13) }]);
+  // A refused draft: the backend's reason, in words, nothing written.
+  const lost = ok(resizeSub(d, "b2", { x: 16, y: 8, w: 8, h: 9 }));
+  await assert.rejects(ops.preview(planOf(lost)), /Change Subterrains: .*would be lost/);
+  // Applied as one change: the folders and ranges as the commands make them, the map the same.
+  const id = await ops.apply(planOf(d));
+  const applied = snapshot(root);
+  const folders = () => readdirSync(join(root, "map", "terrain"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  assert.deepEqual(folders(), ["a1", "a2", "b0", "b1", "b2", "mid", "south_west"]);
+  assert.deepEqual(changedFiles(before, applied).filter((f) => !p.written.includes(f) && !p.removed.includes(f)), [], "what the preview said, nothing else");
+  assert.deepEqual(await loaded(w3), whole);
+  // Undo: every file as before; refused while something is unsaved; Redo: as applied.
+  const unsaved = w3.editors.unsavedPaths;
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = () => ["map/war3map.w3i.json"];
+  await assert.rejects(ops.undo(id, false), /save or discard the changes in map\/war3map.w3i.json first/);
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = unsaved;
+  assert.deepEqual(changedFiles(applied, snapshot(root)), []);
+  await ops.undo(id, false);
+  assert.deepEqual(changedFiles(before, snapshot(root)), [], "undone: every file as before");
+  assert.deepEqual(folders(), ["a0", "a1", "a2", "b0", "b1", "b2"]);
+  await ops.undo(id, true);
+  assert.deepEqual(changedFiles(applied, snapshot(root)), [], "redone: as applied");
+  // An edit saved since: Undo is refused and changes nothing.
+  await editTerrain(w3);
+  const edited = snapshot(root);
+  await assert.rejects(ops.undo(id, false), /changed since \(map\/terrain\/b2\/terrain\.txt\)/);
+  assert.deepEqual(changedFiles(edited, snapshot(root)), []);
+  // get_subterrains: the layout on disk (and no editor open here).
+  const got = await getSubterrainsTool(w3);
+  assert.deepEqual([got.layout, got.open.length, got.editor], ["split", 7, null]);
+});
+
+test("change_subterrains delete and preview, and a flat project's split by the grid: previewed, refused, applied, undone by merging", async () => {
+  const { w3, root } = await bigSplit("layout-delete");
+  const before = snapshot(root);
+  // Delete b1: it joins the first neighbour that lines up with it (a1 below it: the same columns).
+  const previewed = await changeSubterrainsTool(w3, { action: "delete", name: "b1", preview: true }) as { preview: boolean; plan: string[]; subterrains: { name: string; from: string[] }[] };
+  assert.equal(previewed.preview, true);
+  assert.deepEqual(previewed.plan, ["a0=a0:0,0,8,8", "a1=a1+b1:8,0,8,17", "a2=a2:16,0,9,8", "b0=b0:0,8,8,9", "b2=b2:16,8,9,9"]);
+  assert.deepEqual(changedFiles(before, snapshot(root)), [], "a preview writes nothing");
+  const done = await changeSubterrainsTool(w3, { action: "delete", name: "b1" }) as { subterrains: { name: string; h: number }[] };
+  assert.deepEqual(done.subterrains.map((s) => [s.name, s.h]), [["a0", 8], ["a1", 17], ["a2", 8], ["b0", 9], ["b2", 9]]);
+  await assert.rejects(changeSubterrainsTool(w3, { action: "delete", name: "nope" }), /no subterrain "nope"/);
+
+  // A flat project: the grid's rectangles previewed (objects per subterrain), a refused grid, then split; Undo merges.
+  const flatRoot = project("layout-flat");
+  const fw3 = await open(flatRoot);
+  const ops = layoutOps(fw3);
+  const fs = await ops.readState();
+  assert.deepEqual([fs.layout, fs.canvas, fs.subterrains], ["flat", [5, 3], []]);
+  const flatBefore = snapshot(flatRoot);
+  const rects = gridRects({ canvas: fs.canvas, xs: [2], ys: [1] });
+  const p = await ops.previewSplit(rects);
+  assert.deepEqual(p.subterrains.map((s) => s.name), ["sw", "se", "nw", "ne"]);
+  assert.equal(p.subterrains.reduce((n, s) => n + s.units, 0), 1, "the mini map's footman");
+  assert.ok(p.removed.includes("map/war3map.w3e.txt"));
+  await assert.rejects(ops.previewSplit([{ name: "west", x: 0, y: 0, w: 2, h: 3 }]), /Split Terrain: .*would be lost/);
+  assert.deepEqual(changedFiles(flatBefore, snapshot(flatRoot)), []);
+  await ops.split(rects);
+  assert.ok(isSplit(fw3));
+  assert.deepEqual((await ops.readState()).subterrains.map((s) => s.name), ["sw", "se", "nw", "ne"]);
+  await ops.merge();
+  assert.deepEqual(changedFiles(flatBefore, snapshot(flatRoot)), [], "split and merged back: the flat files as they were");
+  // The tool's split preview, and the single main of a grid without cuts.
+  const tp = await changeSubterrainsTool(fw3, { action: "split", preview: true }) as { plan: string[]; subterrains: { name: string }[] };
+  assert.deepEqual([tp.plan, tp.subterrains.map((s) => s.name)], [[], ["main"]]);
+  assert.deepEqual(gridRects({ canvas: [5, 3], xs: [], ys: [] }).map((r) => r.name), ["main"]);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */
