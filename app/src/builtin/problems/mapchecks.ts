@@ -6,6 +6,7 @@ import type { Problem, ProblemCheck } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { ident, placedName, type PlacedJson } from "../../lib/script/jass";
 import { headerPrintfIssues, printfIssueText } from "../../lib/script/printf";
+import { MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
 import { parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { errorText } from "../../lib/oserror";
@@ -199,13 +200,17 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         const terrain = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
         const ids = async (file: string, key: string) => new Set(parseSlk(await w3.game.readText(file, { background: true })).map((r) => r[key]));
         const ground = await ids("TerrainArt\\Terrain.slk", "tileID"), cliffs = await ids("TerrainArt\\CliffTypes.slk", "cliffID");
-        // A list entry no corner uses is only a warning: a stale slot in the file's list (the W3Champions TurtleRock's
-        // third cliff type is CLno, which the game doesn't define, and no corner has it).
-        const unknown = (list: string[], known: Set<string>, what: string, used: (index: number) => boolean) => list.flatMap((id, i): Problem[] => known.has(id) ? [] : [{
-          severity: used(i) ? "error" : "warning", message: `${what} ${id} isn't one of the game's${used(i) ? "" : " (no corner uses it)"}`, location: path.slice(4), reveal: { command: "w3.terrain.open" },
+        // A list entry no corner uses is fine, whatever it is: the game starts a map whose list holds a stale slot (the
+        // W3Champions TurtleRock's third cliff type is CLno, which the game doesn't define; map 32b, played 2026-11-22).
+        const unknown = (list: string[], known: Set<string>, what: string, used: (index: number) => boolean) => list.flatMap((id, i): Problem[] => known.has(id) || !used(i) ? [] : [{
+          severity: "error", message: `${what} ${id} isn't one of the game's`, location: path.slice(4), reveal: { command: "w3.terrain.open" },
         }]);
-        const usedCliffs = new Set(terrain.corners.map((c) => c.cliffTexture));
-        return [...unknown(terrain.groundTiles, ground, "Ground tile", () => true), ...unknown(terrain.cliffTiles, cliffs, "Cliff type", (i) => usedCliffs.has(i))];
+        const usedCliffs = new Set(terrain.corners.filter((c) => c.cliffTexture < MAX_CLIFF_TYPES).map((c) => c.cliffTexture));
+        // A corner names 0 to 14; 15 means none, so a 16th entry is never drawn (the game draws such corners like entry 0).
+        const long: Problem[] = terrain.cliffTiles.length > MAX_CLIFF_TYPES ? [{
+          severity: "warning", message: `The cliff list has ${terrain.cliffTiles.length} entries: a corner can name only the first ${MAX_CLIFF_TYPES} (0 to ${MAX_CLIFF_TYPES - 1}); ${terrain.cliffTiles.slice(MAX_CLIFF_TYPES).join(", ")} can't be used, and corners holding ${MAX_CLIFF_TYPES} draw with the first type`, location: path.slice(4), reveal: { command: "w3.terrain.open" },
+        }] : [];
+        return [...unknown(terrain.groundTiles, ground, "Ground tile", () => true), ...unknown(terrain.cliffTiles, cliffs, "Cliff type", (i) => usedCliffs.has(i)), ...long];
       },
     },
     {

@@ -153,7 +153,7 @@ test("missing Map Properties art opens Map Properties at its section", async () 
   ]);
 });
 
-test("terrain tiles: a cliff type the game lacks is an error when a corner uses it, a warning when none does", async () => {
+test("terrain tiles: a cliff type the game lacks is an error when a corner uses it, nothing when none does; a list past 15 entries is a warning", async () => {
   const SLK = (id: string, rows: string[]) => `ID;P\nC;X1;Y1;K"${id}"\n${rows.map((r, i) => `C;Y${i + 2};X1;K"${r}"`).join("\n")}\nE\n`;
   const corner = (cliffTexture: number) => ({ height: 0, water: 0, texture: 0, variation: 0, cliffVariation: 0, cliffTexture, layer: 2, ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0, rawWater: 0, texExtra: 0 });
   const files = async (cliffTexture: number, cliffTiles = ["CLdi", "CLno"]) => {
@@ -167,12 +167,17 @@ test("terrain tiles: a cliff type the game lacks is an error when a corner uses 
     return mapChecks(w3 as unknown as W3Api, () => scope).find((c) => c.id === "terrainTiles")!.run();
   };
   const unused = await files(0), used = await files(1);
-  assert.deepEqual(unused.map((p) => p.severity), ["warning"]);
-  assert.match(unused[0].message, /Cliff type CLno isn't one of the game's/);
+  assert.deepEqual(unused, [], "an unused CLno slot starts in the game (map 32b)");
   assert.deepEqual(used.map((p) => p.severity), ["error"], "control: the same list with a corner using CLno");
+  assert.match(used[0].message, /Cliff type CLno isn't one of the game's/);
   // A list of three or more: the game's own third (example map 29) is fine on a corner, an unknown fourth is
   // judged by its own number.
   assert.deepEqual(await files(2, ["CLdi", "CLgr", "CAdi"]), []);
-  assert.deepEqual((await files(2, ["CLdi", "CLgr", "CAdi", "CLno"])).map((p) => p.severity), ["warning"]);
+  assert.deepEqual(await files(2, ["CLdi", "CLgr", "CAdi", "CLno"]), []);
   assert.deepEqual((await files(3, ["CLdi", "CLgr", "CAdi", "CLno"])).map((p) => p.severity), ["error"]);
+  // Sixteen entries: corners holding 15 (none) don't use the 16th, which can't be named; the list is a warning.
+  const sixteen = Array.from({ length: 16 }, (_, i) => (i === 15 ? "CIsn" : "CLdi"));
+  const long = await files(15, sixteen);
+  assert.deepEqual(long.map((p) => p.severity), ["warning"]);
+  assert.match(long[0].message, /16 entries: a corner can name only the first 15 .*CIsn can't be used/);
 });
