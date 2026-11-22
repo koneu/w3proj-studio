@@ -31,6 +31,12 @@ jobs:
       - name: Types and module boundaries
         working-directory: app
         run: npm run check
+      # The TypeScript tests build the CLI (headless/rustbackend.ts), and tests running side by side would each make rustup
+      # install the toolchain on its own first: it has to be there before them (2026-11-22: two of them collided).
+      # Version and components (clippy) come from rust-toolchain.toml.
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
       - name: TypeScript unit tests
         working-directory: app
         run: npm test
@@ -47,10 +53,6 @@ jobs:
         working-directory: app
         run: node scripts/demo-check.mjs --build
 
-      # Version and components (clippy) come from rust-toolchain.toml.
-      - name: Rust toolchain
-        run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
       - name: Rust tests
         run: cargo test --workspace --locked
       - name: Clippy
