@@ -1348,3 +1348,74 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
     assert_eq!(doo["doodads"].as_array().unwrap().len(), 4);
     assert!(!w3proj(&["terrain", "split", s(&project)]).status.success(), "two that differ still share 581");
 }
+
+/// `w3proj terrain merge-hook`: installed into a real repository whose project lies in a folder with a space, the
+/// post-merge hook stays silent after a merge that touched one subterrain and reports the seam check's error after one
+/// that brought two branches' edits of two subterrains together (the cliff of the seams test); installing again
+/// updates it; a post-merge hook of someone else's is never replaced; --remove removes only this one.
+#[test]
+fn the_merge_hook_checks_the_seams_after_a_merge() {
+    let dir = workdir("merge_hook");
+    let repo = dir.join("repo");
+    let project = repo.join("maps").join("My Map");
+    let map = dir.join("first.w3x");
+    pack(&fixture(), &map);
+    unpack(&map, &project);
+    let mut args = vec!["terrain", "split", s(&project)];
+    for r in GRID {
+        args.extend(["--rect", r]);
+    }
+    ok(&args);
+    let git = |args: &[&str]| -> Output {
+        let o = Command::new("git")
+            .args(["-c", "user.name=w3proj test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&repo)
+            .env_remove("W3PROJ_BIN")
+            .output()
+            .expect("git runs");
+        assert!(o.status.success(), "git {args:?}: {}", text(&o));
+        o
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "base"]);
+    let said = ok(&["terrain", "merge-hook", s(&project)]);
+    assert!(said.contains("installed"), "{said}");
+    let hook = PathBuf::from(String::from_utf8_lossy(&git(&["rev-parse", "--absolute-git-dir"]).stdout).trim()).join("hooks").join("post-merge");
+    let text_of_hook = fs::read_to_string(&hook).unwrap();
+    assert!(text_of_hook.contains("project='maps/My Map/'"), "{text_of_hook}");
+    assert!(ok(&["terrain", "merge-hook", s(&project)]).contains("updated"));
+
+    let terrain = |sub: &str| project.join("map/terrain").join(sub).join("terrain.txt");
+    let (sw, se) = (fs::read_to_string(terrain("sw")).unwrap(), fs::read_to_string(terrain("se")).unwrap());
+    let base = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim().to_string();
+    // A branch that touches one subterrain, merged (a fast-forward): the hook stays silent.
+    git(&["checkout", "-q", "-b", "one", &base]);
+    fs::write(project.join("map/terrain/ne/units.json"), fs::read_to_string(project.join("map/terrain/ne/units.json")).unwrap() + "\n").unwrap();
+    git(&["commit", "-q", "-am", "ne only"]);
+    git(&["checkout", "-q", "main"]);
+    let quiet = git(&["merge", "--no-edit", "-q", "one"]);
+    assert!(!text(&quiet).contains("w3proj:"), "one subterrain: the hook stays silent: {}", text(&quiet));
+    // Branch B lowers se's west corner; main raises sw's east one; each alone is fine, merged a cliff of 4 levels.
+    git(&["checkout", "-q", "-b", "b", &base]);
+    fs::write(terrain("se"), se.replace("[layer] all 2\n", "[layer]\n022\n")).unwrap();
+    git(&["commit", "-q", "-am", "se"]);
+    git(&["checkout", "-q", "main"]);
+    fs::write(terrain("sw"), sw.replace("[layer] all 2\n", "[layer]\n24\n")).unwrap();
+    git(&["commit", "-q", "-am", "sw"]);
+    let merged = git(&["merge", "--no-edit", "-q", "b"]);
+    let said = text(&merged);
+    assert!(said.contains("w3proj: the merged branches changed 3 subterrain(s)") && said.contains("cliff-height") && said.contains("seam issues"), "{said}");
+
+    // Someone else's post-merge hook: left as it is, the line to add is printed.
+    fs::write(&hook, "#!/bin/sh\necho mine\n").unwrap();
+    let o = w3proj(&["terrain", "merge-hook", s(&project)]);
+    assert!(!o.status.success() && text(&o).contains("isn't this hook") && text(&o).contains("terrain seams"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&hook).unwrap(), "#!/bin/sh\necho mine\n");
+    assert!(!w3proj(&["terrain", "merge-hook", s(&project), "--remove"]).status.success(), "someone else's isn't removed");
+    assert!(hook.exists());
+    fs::remove_file(&hook).unwrap();
+    ok(&["terrain", "merge-hook", s(&project)]);
+    assert!(ok(&["terrain", "merge-hook", s(&project), "--remove"]).contains("removed") && !hook.exists());
+}

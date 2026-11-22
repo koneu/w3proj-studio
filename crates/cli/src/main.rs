@@ -17,6 +17,7 @@ macro_rules! print {
 mod rebuild;
 mod check;
 mod seams;
+mod mergehook;
 
 /// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
 /// command still finishes its work (writes, exit code) as if nothing happened.
@@ -687,6 +688,16 @@ enum TerrainCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Install the opt-in git hook (post-merge, in the repository holding PROJECT) that runs `w3proj terrain seams`
+    /// after a merge that changed two subterrains or terrain.json of the split project: it only reports. A post-merge
+    /// hook that isn't this one is never replaced (the line to add to it is printed); installing again updates this one.
+    #[command(name = "merge-hook")]
+    MergeHook {
+        project: PathBuf,
+        /// Remove the hook (only this one).
+        #[arg(long)]
+        remove: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -967,6 +978,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Cmd::Terrain { cmd: TerrainCmd::Seams { project, json } } => return seams::run(&project, json, &extra),
+        Cmd::Terrain { cmd: TerrainCmd::MergeHook { project, remove } } => return mergehook::run(&project, remove),
         Cmd::Terrain { cmd: TerrainCmd::FixIds { project, renumber, delete_copies, apply, json } } => {
             let mode = if renumber { Some("renumber") } else if delete_copies { Some("deleteCopies") } else { None };
             let root = project.to_string_lossy().into_owned();
@@ -987,7 +999,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::Terrain { cmd } => {
             let (r, what) = match cmd {
-                TerrainCmd::Check { .. } | TerrainCmd::Seams { .. } | TerrainCmd::FixIds { .. } => unreachable!("matched above"),
+                TerrainCmd::Check { .. } | TerrainCmd::Seams { .. } | TerrainCmd::FixIds { .. } | TerrainCmd::MergeHook { .. } => unreachable!("matched above"),
                 TerrainCmd::Split { project, rects } => (
                     w3proj::terrain_layout::split_project(&project, &rects).with_context(|| format!("splitting the terrain of {}", project.display()))?,
                     "split into map/terrain/",

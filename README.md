@@ -319,7 +319,11 @@ into cliffs, ramps or water no brush would leave. **Check Terrain Seams** (`w3pr
 brushes' rules where two subterrains meet: a cliff of more than two levels between neighbouring corners and ramp flags
 that don't climb one level are errors, water that steps within a tile a warning. It lists each corner with its
 subterrain and changes nothing. `w3proj pack` of a split project runs it first and refuses on errors (and when the check
-can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so.
+can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so. To run it after every git merge that
+brought together changes of two subterrains (or of `terrain.json`), install the opt-in hook once per clone:
+`w3proj terrain merge-hook MyMap/` writes `post-merge` into the repository's hooks folder (worktrees and
+`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` hook that is already
+there and isn't this one is left alone (the line to add to it is printed); `--remove` takes this one out again.
 
 **New Subterrain…**, **Resize Subterrain…**, **Rename Subterrain…** and **Join Subterrains…** (palette, the
 Subterrains view; `w3proj terrain relayout --rect NAME[=OLD+OLD]:x,y,w,h …`) change the rectangles without changing the
@@ -530,6 +534,7 @@ w3proj terrain seams MyMap/         # a split terrain's seams checked with the b
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
                                     # new set of subterrains (joined, renamed, resized, new); the map stays the same
+w3proj terrain merge-hook MyMap/    # opt-in git post-merge hook: `terrain seams` after merges of two subterrains
 w3proj terrain fix-ids MyMap/ --renumber   # creation numbers found twice (flat or split): the plan; --apply writes
                                     # it; --delete-copies removes exact copies only (those that differ stay)
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
