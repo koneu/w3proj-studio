@@ -565,7 +565,7 @@ export async function missingStrings(w3: W3Api): Promise<Problem[]> {
   const sample = [...refs].slice(0, 3).join(", ");
   return [{
     severity: "warning",
-    message: `war3map.wts is missing but ${where.join(", ")} refer${where.length === 1 ? "s" : ""} to ${refs.size} string${refs.size === 1 ? "" : "s"} in it (${sample}${refs.size > 3 ? ", …" : ""}): the World Editor and the game show them empty. Restore war3map.wts from a checkpoint or the packed map, or type the texts again.`,
+    message: `war3map.wts is missing but ${where.join(", ")} refer${where.length === 1 ? "s" : ""} to ${refs.size} string${refs.size === 1 ? "" : "s"} in it (${sample}${refs.size > 3 ? ", …" : ""}): the game shows its defaults instead ("Team 1" for a force, "Player 2" for a player; played 2026-11-22), and the World Editor blanks them on save. Restore war3map.wts from a checkpoint or the packed map, or type the texts again.`,
     location: "war3map.wts",
   }];
 }
