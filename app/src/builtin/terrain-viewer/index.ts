@@ -2981,8 +2981,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             scalesKnown = !unread.some((p) => /\.w3[bd]\.json$/i.test(p));
             // The map's own unit data that can't be read may change a type's movement type: heights stay then.
             unitMovesKnown = !unread.some((p) => /\.w3u\.json$/i.test(p));
+            // The w3i is read while the snap runs, so the flags are fixed right after it (a slow read left the snapped doodads unfixed for a moment).
+            const w3iRead = df && fixesDoodads() ? readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null) : undefined;
             if (df && snapsDoodads()) await snapOnOpen(df);
-            if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown);
+            if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown, false, w3iRead);
             if (disposed) return;
             // The facings the World Editor reads war3mapUnits.doo with (doodadedit.ts unitAnglesAsOpened), with the
             // doodads' (setting Snap Doodads on Load): not an edit either; the next save writes them.
@@ -3167,9 +3169,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  changed, the next save writes them. A map whose w3i can't be read keeps its flags (the playable area isn't
          *  known); a type without a range keeps its scale, and so do all with `scales` false (the map's own ranges
          *  couldn't be read). */
-        async function fixOnOpen(f: PlacedFile, scales: boolean, quiet = false) {
+        async function fixOnOpen(f: PlacedFile, scales: boolean, quiet = false, w3iRead?: Promise<{ cameraComplements?: number[] } | null>) {
           // Taken after the wait: a file reloaded meanwhile is another's, and is taken as it is.
-          const n = await fixList(f.list, scales, () => !disposed && dooFile === f);
+          const n = await fixList(f.list, scales, () => !disposed && dooFile === f, w3iRead);
           if (!n) return;
           objectsTouched = true;
           if (quiet) return;
@@ -3177,8 +3179,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         /** Fix Doodads on Load's scales, flags and life for the doodads of `list`, in place. The number changed; 0 when
          *  `still` is false after the wait or the types aren't loaded. */
-        async function fixList(list: Placed[], scales: boolean, still: () => boolean): Promise<number> {
-          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+        async function fixList(list: Placed[], scales: boolean, still: () => boolean, w3iRead?: Promise<{ cameraComplements?: number[] } | null>): Promise<number> {
+          const info = await (w3iRead ?? readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null));
           if (!still() || !objCtx) return 0;
           if (!info) console.warn("doodad flags kept: the map's w3i couldn't be read");
           if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
