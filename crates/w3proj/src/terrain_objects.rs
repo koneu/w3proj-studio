@@ -451,7 +451,7 @@ fn u32_of(v: Option<&Value>) -> Option<u32> {
 
 /// A flat file's header (`Heads` for its kind) and lists.
 fn read_flat(kind: Kind, bytes: &[u8]) -> Result<(Heads, Vec<Vec<Entry>>)> {
-    let doc: Value = serde_json::from_slice(bytes).map_err(|e| flat_err(kind, format!("it isn't JSON ({e})")))?;
+    let doc: Value = strict_json(bytes).map_err(|e| flat_err(kind, format!("it isn't JSON ({e})")))?;
     let o = doc.as_object().ok_or_else(|| flat_err(kind, "it isn't a JSON object"))?;
     if let Some(k) = o.keys().find(|k| !kind.keys().contains(&k.as_str())) {
         return Err(flat_err(kind, format!("it has a key \"{k}\" the split layout doesn't keep")));
@@ -1027,7 +1027,7 @@ pub fn flat_twins(kind: Kind, bytes: &[u8]) -> Result<Vec<Twins>> {
 pub fn flat_fixed(kind: Kind, bytes: &[u8], renumber: &[(usize, u32)], delete: &[usize]) -> Result<Vec<u8>> {
     let (head, _) = read_flat(kind, bytes)?;
     let field = number_field(kind, doodads_version(&head));
-    let mut doc: Value = serde_json::from_slice(bytes).map_err(|e| flat_err(kind, format!("it isn't JSON ({e})")))?;
+    let mut doc: Value = strict_json(bytes).map_err(|e| flat_err(kind, format!("it isn't JSON ({e})")))?;
     let key = list_key(kind, List::Main);
     let list = doc.get_mut(key).and_then(Value::as_array_mut).ok_or_else(|| flat_err(kind, format!("its {key} isn't a list")))?;
     for &(i, n) in renumber {
@@ -1334,6 +1334,14 @@ mod tests {
         let mut f = files.clone();
         f.remove("terrain/a/doodads.json");
         assert!(assemble(&heads, &subs(), &|p| f.get(p).cloned()).unwrap_err().to_string().contains("missing"));
+    }
+
+    /// The flat file (`war3map.doo.json`) is read as strictly as the split layout: a key twice is an error.
+    #[test]
+    fn flat_files_refuse_keys_twice() {
+        let cut = br#"{"doodads": [{"id": "ATtr", "editorId": 0, "position": [0, 0, 0], "editorId": 1}], "specials": []}"#;
+        let e = read_flat(Kind::Doodads, cut).unwrap_err().to_string();
+        assert!(e.contains("twice"), "{e}");
     }
 
     /// A cut from inside one entry to inside the next leaves valid JSON with keys twice (found by the damaged-input

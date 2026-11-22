@@ -376,7 +376,7 @@ impl Codec for FormatCodec {
         Some(self)
     }
     fn encode(&self, _name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
-        let value: Value = serde_json::from_slice(bytes).map_err(|e| Error::Format(format!("invalid JSON: {e}")))?;
+        let value: Value = crate::terrain_objects::strict_json(bytes).map_err(|e| Error::Format(format!("invalid JSON: {e}")))?;
         encode(&self.def, &value)
     }
 }
