@@ -12,6 +12,7 @@ use serde_json::Value;
 use w3proj::{project, Registry};
 
 pub mod flatview;
+pub mod script;
 pub mod triggers;
 
 pub type CmdResult<T> = Result<T, String>;
@@ -173,6 +174,8 @@ pub fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileIn
     unreadable.sort_by(|a, b| a.path.cmp(&b.path));
     // A split terrain's flat files (flatview): the app's code finds them as in a flat project.
     flatview::list_flat(root, &mut out);
+    // A generated map script (flatview::script_of): under its map/ name, from the store.
+    flatview::list_scripts(root, &mut out);
     Ok((out, unreadable))
 }
 

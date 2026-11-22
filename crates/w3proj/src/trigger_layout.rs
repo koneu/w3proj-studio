@@ -133,7 +133,7 @@ impl ScriptMode {
         }
     }
 
-    fn parse(s: &str) -> Option<ScriptMode> {
+    pub fn parse(s: &str) -> Option<ScriptMode> {
         match s {
             "generated" => Some(ScriptMode::Generated),
             "kept" => Some(ScriptMode::Kept),
@@ -1649,6 +1649,96 @@ pub fn script_mode_on_disk(map_dir: &Path) -> Result<Option<ScriptMode>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Error::Project(format!("map/{ROOT_FILE} can't be read: {e}"))),
     }
+}
+
+/// What `set_script_mode` did.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ModeChange {
+    /// The mode before.
+    pub was: &'static str,
+    /// The script moved (its name: `war3map.j` or `war3map.lua`), None when there was none to move.
+    pub moved: Option<String>,
+}
+
+/// Switches a project's map script between a tracked file (`kept`: `map/war3map.j|lua`) and a generated one in the store
+/// (`generated`: `.w3proj/derived/`, `crate::derived`). The script there is moved to the other place as it is (the caller
+/// makes it again afterwards); the record of what a generated script was made from is cleared either way (a moved script
+/// isn't known to follow anything). Order, so no step loses the script: the new place written, then `triggers.json`, then
+/// the old place removed. Refused, nothing written: a project without `map/triggers/` (its triggers kept raw, or none:
+/// its script stays tracked), a `triggers.json` that can't be read, both `war3map.j` and `war3map.lua` at the old place,
+/// or a different script already at the new place (moving one would replace the other: delete one first). The same
+/// mode again changes nothing.
+pub fn set_script_mode(project: &Path, mode: ScriptMode) -> Result<ModeChange> {
+    use crate::derived;
+    let map_dir = project.join(crate::project::MAP_DIR);
+    let path = map_dir.join(DIR).join(ROOT_JSON);
+    let shown = format!("map/{ROOT_FILE}");
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::Project(format!(
+                "the project has no {shown} (its triggers are kept raw, or it has none), so its map script stays a tracked file in map/"
+            )))
+        }
+        Err(e) => return Err(Error::Project(format!("{shown} can't be read: {e}"))),
+    };
+    let was = mode_of(&bytes)?;
+    if was == mode {
+        return Ok(ModeChange { was: was.as_str(), moved: None });
+    }
+    let mut doc = match parse_json(&bytes, &shown)? {
+        Value::Object(m) => m,
+        _ => return Err(bad(format!("{shown} isn't a JSON object"))),
+    };
+    doc.insert("script".into(), mode.as_str().into());
+    let tracked: Vec<(String, Vec<u8>)> = match std::fs::read_dir(&map_dir) {
+        Ok(entries) => {
+            let mut out = Vec::new();
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if derived::SCRIPT_FILES.iter().any(|s| s.eq_ignore_ascii_case(&name)) && entry.file_type()?.is_file() {
+                    let b = std::fs::read(entry.path()).map_err(|e| Error::Project(format!("map/{name} can't be read: {e}")))?;
+                    out.push((name, b));
+                }
+            }
+            out
+        }
+        Err(e) => return Err(Error::Project(format!("map/ can't be read: {e}"))),
+    };
+    let stored: Vec<(String, Vec<u8>)> = derived::read_script_store(project)?.into_iter().collect();
+    let store_shown = derived::STORE_DIR.join("/");
+    let (from, to, from_shown, to_shown) = match mode {
+        ScriptMode::Generated => (&tracked, &stored, "map".to_string(), store_shown.clone()),
+        ScriptMode::Kept => (&stored, &tracked, store_shown.clone(), "map".to_string()),
+    };
+    if from.len() > 1 {
+        return Err(Error::Project(format!("{from_shown}/ has both {} and {}: keep one (delete the other), then try again", from[0].0, from[1].0)));
+    }
+    if let (Some((name, b)), Some((other, ob))) = (from.first(), to.first()) {
+        if !(name.eq_ignore_ascii_case(other) && b == ob) {
+            return Err(Error::Project(format!(
+                "{from_shown}/{name} and {to_shown}/{other} are both there: moving one would replace the other; delete the one you don't want, then try again"
+            )));
+        }
+    }
+    let moved = from.first().map(|(n, _)| n.clone());
+    match (mode, from.first()) {
+        (ScriptMode::Generated, Some((name, b))) => derived::sync_script_store(project, Some((name, b)))?,
+        (ScriptMode::Kept, Some((name, b))) => crate::project::write_atomic(&map_dir.join(name), b)?,
+        _ => {}
+    }
+    if mode == ScriptMode::Generated {
+        derived::ensure_ignored(project)?;
+    }
+    crate::project::write_atomic(&path, &root_json(&doc))?;
+    match (mode, from.first()) {
+        (ScriptMode::Generated, Some((name, _))) => std::fs::remove_file(map_dir.join(name))?,
+        (ScriptMode::Kept, Some(_)) => derived::sync_script_store(project, None)?,
+        _ => {}
+    }
+    derived::clear_script_record(project)?;
+    Ok(ModeChange { was: was.as_str(), moved })
 }
 
 /// The layout's files on disk (keys relative to `map/`); none without `map/triggers/`. One that can't be read is an error.

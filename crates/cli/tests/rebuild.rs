@@ -274,6 +274,62 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A generated script (map/triggers/triggers.json "script": "generated", in .w3proj/derived/): `w3proj pack` makes it
+/// again when it doesn't follow its sources (switched from a tracked file, a header edited outside the app, none there),
+/// writes it into the store only (never map/), records what it was made from, and packs it. Controls: with `--game none`
+/// nothing is made, so the stale script is refused (--allow-stale-script takes it) and a missing one is refused always.
+#[test]
+fn pack_makes_a_generated_script_in_the_store_and_records_it() {
+    let Some(game) = game() else {
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("pack-generated");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    w3proj::trigger_layout::set_script_mode(&project, w3proj::trigger_layout::ScriptMode::Generated).unwrap();
+    let store = project.join(".w3proj/derived/war3map.j");
+    assert!(store.is_file() && !project.join("map/war3map.j").exists());
+    assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown, "a moved script follows nothing yet");
+    let pack = |label: &str, extra: &[&str], game: &str| {
+        let out = dir.join(format!("{label}.w3x"));
+        let mut args = vec!["pack", s(&project), "-o", s(&out)];
+        args.extend_from_slice(extra);
+        (w3proj(&args, game), out)
+    };
+    let (o, out) = pack("first", &[], &game);
+    assert!(o.status.success() && text(&o).contains("map script made again"), "{}", text(&o));
+    assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Fresh, "the generator recorded its sources: {}", text(&o));
+    assert!(!project.join("map/war3map.j").exists(), "nothing written into map/");
+    assert_eq!(packed_script(&out, &game), fs::read_to_string(&store).unwrap(), "the pack took the script in the store");
+
+    // Follows its sources: packed as it is, the generator not started.
+    let (o, _) = pack("same", &[], &game);
+    assert!(o.status.success() && !text(&o).contains("made again"), "{}", text(&o));
+
+    // The header edited outside the app: stale. Without the game nothing is made, so it is refused, or taken as it is.
+    let header = project.join("map/triggers/header.j");
+    fs::write(&header, format!("{}// edited outside\r\n", fs::read_to_string(&header).unwrap())).unwrap();
+    let (o, _) = pack("refused", &["--game", "none"], &game);
+    assert!(!o.status.success() && text(&o).contains("triggers/header.j changed") && text(&o).contains("--allow-stale-script"), "{}", text(&o));
+    let (o, stale) = pack("stale", &["--game", "none", "--allow-stale-script"], &game);
+    assert!(o.status.success() && !packed_script(&stale, &game).contains("// edited outside"), "{}", text(&o));
+    // With the game: made again with the edit.
+    let (o, out) = pack("edited", &[], &game);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(packed_script(&out, &game).contains("// edited outside"), "{}", text(&o));
+    assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Fresh);
+
+    // None in the store (a fresh clone): refused without the game, whatever the flags; made with it.
+    fs::remove_file(&store).unwrap();
+    let (o, _) = pack("missing", &["--game", "none", "--allow-stale-script"], &game);
+    assert!(!o.status.success() && text(&o).contains("missing"), "{}", text(&o));
+    let (o, out) = pack("clone", &[], &game);
+    assert!(o.status.success() && store.is_file(), "{}", text(&o));
+    assert!(packed_script(&out, &game).contains("function InitTrig_Foo_Script takes nothing returns nothing"));
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Studio's script, but its generator can't run (no game to read the tables from): the pack goes on with the script
 /// as it is and says why it wasn't made again.
 #[test]

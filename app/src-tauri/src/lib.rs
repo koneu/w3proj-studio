@@ -218,6 +218,39 @@ async fn derived_record(root: String, sources: std::collections::BTreeMap<String
         .map_err(err)?
 }
 
+/// The project's map script mode and, for a generated script, whether it follows its sources (`backend::script::state`).
+#[tauri::command]
+async fn script_state(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::script::state(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// The files the map script is made from as they are now, taken before the generator runs (`backend::script::sources`).
+#[tauri::command]
+async fn script_sources(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::script::sources(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// Records that the generated map script was made from `sources` (`script_sources`): `w3proj pack` takes it while they
+/// stay so (`backend::script::record`).
+#[tauri::command]
+async fn script_record(root: String, sources: std::collections::BTreeMap<String, String>) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || backend::script::record(&root, &sources))
+        .await
+        .map_err(err)?
+}
+
+/// Switches the map script between a tracked file and a generated one in `.w3proj/derived/` (`backend::script::set_mode`).
+#[tauri::command]
+async fn script_set_mode(root: String, mode: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::script::set_mode(&root, &mode)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
 /// Splits the project's terrain and placed objects into `map/terrain/` (`backend::flatview::split`): `rects` as
 /// `name:x,y,w,h`, none for one subterrain `main`. The refusal's reason (corners left uncovered that differ from
 /// the default corner, …) is the error; nothing is written then.
@@ -1248,6 +1281,10 @@ pub fn run() {
             project_pack,
             derived_sources,
             derived_record,
+            script_state,
+            script_sources,
+            script_record,
+            script_set_mode,
             terrain_split,
             terrain_merge,
             terrain_relayout,

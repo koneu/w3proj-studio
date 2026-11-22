@@ -178,6 +178,8 @@ pub fn script_is_studios(root: &Path) -> Result<bool, String> {
 pub enum PackScript {
     /// Not Studio's own (or no script): packed as it is, the generator not started.
     NotStudios,
+    /// A generated script that follows its sources: packed as it is, the generator not started.
+    Fresh,
     /// Made again: written (it was stale) or unchanged.
     Made,
     /// Studio's own, yet not made again (the generator kept it, failed or couldn't start): why.
@@ -189,10 +191,22 @@ pub enum PackScript {
 /// locations or ally priorities than war3map.w3i has. `at`: the project's place in the pack, for the lines printed
 /// ("" or "maps/<chapter>/"). A script that isn't Studio's (edited by hand, the World Editor's, vJASS) stays.
 pub fn script_for_pack(project: &Path, at: &str, game: &str, formats: &[PathBuf]) -> PackScript {
-    match script_is_studios(project) {
-        Ok(true) => {}
-        Ok(false) => return PackScript::NotStudios,
-        Err(why) => return PackScript::NotMade(why),
+    // A generated script (map/triggers/triggers.json "script": "generated", in .w3proj/derived/) is the generator's
+    // whatever its stamp says: made again when it doesn't follow its sources, or isn't there (a fresh clone). `w3proj
+    // pack` checks the record afterwards (main.rs check_script).
+    match w3proj::trigger_layout::script_mode_on_disk(&project.join(w3proj::project::MAP_DIR)) {
+        Ok(Some(w3proj::trigger_layout::ScriptMode::Generated)) => {
+            let stored = derived::read_script_store(project).map(|s| !s.is_empty());
+            if matches!((derived::check_script(project), stored), (Ok(Freshness::Fresh), Ok(true))) {
+                return PackScript::Fresh;
+            }
+        }
+        Ok(_) => match script_is_studios(project) {
+            Ok(true) => {}
+            Ok(false) => return PackScript::NotStudios,
+            Err(why) => return PackScript::NotMade(why),
+        },
+        Err(e) => return PackScript::NotMade(e.to_string()),
     }
     let server = Server { root: project.to_path_buf(), formats: formats.to_vec(), game: backend::GameCache::default(), read_only: false };
     let job = json!({ "task": "rebuild", "root": project.to_string_lossy(), "parts": ["script"], "settings": { "game.installDir": game } });
@@ -564,6 +578,18 @@ impl Server {
             }
             // The CLI records what the files follow itself, once the job is done and only if all of them do (rebuild::run).
             "derived_record" => Ok(Answer::Json(Value::Null)),
+            // The generated map script's record is the generator's, as in the app (map-script/index.ts).
+            "script_state" => to_json(backend::script::state(root()?)?),
+            "script_sources" => to_json(backend::script::sources(root()?)?),
+            "script_record" => {
+                self.writable(&Path::new(root()?).join(".w3proj").to_string_lossy())?;
+                let sources: std::collections::BTreeMap<String, String> = serde_json::from_value(args.get("sources").cloned().unwrap_or(Value::Null)).map_err(|e| format!("argument sources: {e}"))?;
+                to_json(backend::script::record(root()?, &sources)?)
+            }
+            "script_set_mode" => {
+                self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                to_json(backend::script::set_mode(root()?, arg(args, "mode")?)?)
+            }
             "game_read" => {
                 let g = self.game.get(arg(args, "install")?)?;
                 Ok(Answer::Bytes(backend::game_read(&g, path()?, arg(args, "modeName")?, &opt_arg(args, "tileset"))?))

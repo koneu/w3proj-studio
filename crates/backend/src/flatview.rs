@@ -103,6 +103,33 @@ pub fn derived_of(path: &Path) -> CmdResult<Option<PathBuf>> {
     Ok(Some(store.join(stored.as_deref().unwrap_or(file))))
 }
 
+/// The map script of a project whose script is generated (`map/war3map.j` or `map/war3map.lua` while
+/// `map/triggers/triggers.json` says `"script": "generated"`, `w3proj::trigger_layout::ScriptMode`): the file in the
+/// project's store `.w3proj/derived/` it is kept as (the name there in any case, else the one asked for), so the app's
+/// generator writes it there and git never sees it. None for any other file and for a kept script (a tracked file). A
+/// `triggers.json` that is there but can't be read is an error, never "a file of its own".
+pub fn script_of(path: &Path) -> CmdResult<Option<PathBuf>> {
+    let Some(file) = path.file_name().and_then(|n| n.to_str()) else { return Ok(None) };
+    if !w3proj::derived::SCRIPT_FILES.iter().any(|s| s.eq_ignore_ascii_case(file)) {
+        return Ok(None);
+    }
+    let Some(map_dir) = path.parent() else { return Ok(None) };
+    if !map_dir.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(w3proj::project::MAP_DIR)) {
+        return Ok(None);
+    }
+    let Some(project) = map_dir.parent() else { return Ok(None) };
+    if w3proj::trigger_layout::script_mode_on_disk(map_dir).map_err(err)? != Some(w3proj::trigger_layout::ScriptMode::Generated) {
+        return Ok(None);
+    }
+    let store = w3proj::derived::store_dir(project);
+    let stored = match std::fs::read_dir(&store) {
+        Ok(entries) => entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).find(|n| n.eq_ignore_ascii_case(file)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", store.display())),
+    };
+    Ok(Some(store.join(stored.as_deref().unwrap_or(file))))
+}
+
 /// The Pathing tool's `.w3proj/pathing.json` of a split project (`w3proj::terrain_pathing`): its project folder. None for
 /// any other file and in a flat project.
 pub fn pathing_of(path: &Path) -> CmdResult<Option<PathBuf>> {
@@ -195,6 +222,8 @@ pub enum View {
     Flat(Flat),
     Derived(PathBuf),
     Pathing(PathBuf),
+    /// A generated map script, kept in the store (`script_of`).
+    Script(PathBuf),
 }
 
 /// `View` of a path. A layout that can't be told is an error, never "a file of its own".
@@ -205,6 +234,9 @@ pub fn view_of(path: &Path) -> CmdResult<Option<View>> {
     if let Some(real) = derived_of(path)? {
         return Ok(Some(View::Derived(real)));
     }
+    if let Some(real) = script_of(path)? {
+        return Ok(Some(View::Script(real)));
+    }
     Ok(pathing_of(path)?.map(View::Pathing))
 }
 
@@ -213,7 +245,7 @@ pub fn view_of(path: &Path) -> CmdResult<Option<View>> {
 pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
     match view_of(path)? {
         Some(View::Flat(f)) => layout::read_flat(&f.map_dir, f.name).map_err(err),
-        Some(View::Derived(real)) => std::fs::read(&real).map_err(|e| format!("{}: {e}", path.display())),
+        Some(View::Derived(real) | View::Script(real)) => std::fs::read(&real).map_err(|e| format!("{}: {e}", path.display())),
         Some(View::Pathing(project)) => read_pathing(&project),
         None => std::fs::read(path).map_err(err),
     }
@@ -223,7 +255,7 @@ pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
 pub fn write_view(path: &Path, bytes: &[u8]) -> CmdResult<Option<Stamp>> {
     Ok(match view_of(path)? {
         Some(View::Flat(f)) => Some(write_flat(&f, bytes)?),
-        Some(View::Derived(real)) => Some(write_derived(path, &real, bytes)?),
+        Some(View::Derived(real) | View::Script(real)) => Some(write_derived(path, &real, bytes)?),
         Some(View::Pathing(project)) => Some(write_pathing(&project, bytes)?),
         None => None,
     })
@@ -234,7 +266,7 @@ pub fn write_view(path: &Path, bytes: &[u8]) -> CmdResult<Option<Stamp>> {
 pub fn stat_view(path: &Path) -> CmdResult<Option<Option<Stamp>>> {
     Ok(match view_of(path)? {
         Some(View::Flat(f)) => Some(Some(f.stamp())),
-        Some(View::Derived(real)) => Some(crate::stamp_of(&real).ok()),
+        Some(View::Derived(real) | View::Script(real)) => Some(crate::stamp_of(&real).ok()),
         Some(View::Pathing(project)) => Some(pathing_stamp(&project)),
         None => None,
     })
@@ -245,7 +277,7 @@ pub fn stat_view(path: &Path) -> CmdResult<Option<Option<Stamp>>> {
 pub fn hash_view(path: &Path) -> CmdResult<Option<Option<String>>> {
     Ok(match view_of(path)? {
         Some(View::Flat(f)) => Some(f.hash().ok()),
-        Some(View::Derived(real)) => Some(std::fs::read(real).ok().map(|b| crate::content_hash(&b))),
+        Some(View::Derived(real) | View::Script(real)) => Some(std::fs::read(real).ok().map(|b| crate::content_hash(&b))),
         Some(View::Pathing(project)) => Some(read_pathing(&project).ok().map(|b| crate::content_hash(&b))),
         None => None,
     })
@@ -255,7 +287,7 @@ pub fn hash_view(path: &Path) -> CmdResult<Option<Option<String>>> {
 pub fn exists_view(path: &Path) -> CmdResult<Option<bool>> {
     Ok(match view_of(path)? {
         Some(View::Flat(_)) => Some(true),
-        Some(View::Derived(real)) => Some(exists_checked(&real)?),
+        Some(View::Derived(real) | View::Script(real)) => Some(exists_checked(&real)?),
         Some(View::Pathing(project)) => Some(pathing_exists(&project)?),
         None => None,
     })
@@ -267,7 +299,7 @@ pub fn exists_view(path: &Path) -> CmdResult<Option<bool>> {
 pub fn delete_view(path: &Path) -> CmdResult<bool> {
     match view_of(path)? {
         Some(View::Flat(_)) => refuse_moving(path).map(|_| true),
-        Some(View::Derived(real)) => std::fs::remove_file(&real).map(|_| true).map_err(|e| format!("{}: {e}", path.display())),
+        Some(View::Derived(real) | View::Script(real)) => std::fs::remove_file(&real).map(|_| true).map_err(|e| format!("{}: {e}", path.display())),
         Some(View::Pathing(project)) => {
             if layout::delete_pathing(&project).map_err(err)?.is_empty() {
                 // Only the file itself (in the way): it goes as any file.
@@ -360,6 +392,38 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
         }
     }
     files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+}
+
+/// Adds the generated map script of every `map/` folder below `root` whose script is generated (`script_of`) to a
+/// project's file list under its `map/` name, from the store, unless a file of that name is listed already.
+pub fn list_scripts(root: &Path, files: &mut Vec<FileInfo>) {
+    let suffix = format!("/{}", w3proj::trigger_layout::ROOT_FILE);
+    let maps: Vec<String> = files
+        .iter()
+        .filter_map(|f| f.path.strip_suffix(&suffix).filter(|m| m.rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case("map"))).map(str::to_string))
+        .collect();
+    let mut more = Vec::new();
+    for map in maps {
+        let map_dir = map.split('/').fold(root.to_path_buf(), |p, part| p.join(part));
+        if w3proj::trigger_layout::script_mode_on_disk(&map_dir).ok().flatten() != Some(w3proj::trigger_layout::ScriptMode::Generated) {
+            continue;
+        }
+        let Some(project) = map_dir.parent() else { continue };
+        let Ok(store) = w3proj::derived::read_script_store(project) else { continue };
+        for name in store.keys() {
+            let path = format!("{map}/{name}");
+            if files.iter().any(|f| f.path.eq_ignore_ascii_case(&path)) {
+                continue;
+            }
+            if let Ok(s) = crate::stamp_of(&w3proj::derived::store_dir(project).join(name)) {
+                more.push(FileInfo { path, size: s.size, modified: s.modified });
+            }
+        }
+    }
+    if !more.is_empty() {
+        files.extend(more);
+        files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    }
 }
 
 /// "Split Terrain into Subterrains…" (`terrain_split`): the project's terrain and placed objects cut into `rects`
@@ -602,6 +666,12 @@ pub fn refuse_moving(path: &Path) -> CmdResult<()> {
             f.name
         )),
         Some(View::Derived(real)) => Err(format!("{} can't be moved: the project's terrain is split, and it is kept as {}", path.display(), real.display())),
+        Some(View::Script(real)) => Err(format!(
+            "{} can't be moved: the project's map script is generated (map/{} \"script\": \"generated\"), and it is kept as {}",
+            path.display(),
+            w3proj::trigger_layout::ROOT_FILE,
+            real.display()
+        )),
         Some(View::Pathing(_)) => Err(format!(
             "{} can't be moved: the project's terrain is split, and its pathing overrides are kept in map/terrain/<subterrain>/{}",
             w3proj::terrain_pathing::JSON_NAME,
