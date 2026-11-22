@@ -444,6 +444,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               input.value = shown();
               return;
             }
+            input.value = shown(); // the value kept: the editor pulls some into range
             opts.then?.();
             update();
           });

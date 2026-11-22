@@ -8481,6 +8481,17 @@ async function typedFieldSave(page, found) {
       if (await dirty(w3i)) fail(`${what} typed as ${typed} left Map Properties unsaved`);
     }
     if (fog() !== 1234) fail(`the refused Start Z changed the saved file: ${lit(fog())}`);
+    // Some fields pull a typed value into range as the World Editor does (map-info/numbers.ts INFO_CLAMPS); the box shows
+    // the value kept. Which of these fields the open map's file has depends on its layout; at least one must be there.
+    let clamped = 0;
+    for (const [key, typed, want] of [["zoomMax", "99999", "3000"], ["terrainFogMaxOpacity", "12.5", "1"], ["terrainFogLinearStart", "-5", "0"], ["waterMinOpacity", "-5", "5"], ["waterMinOpacity", "99999", "100"]]) {
+      const shown = await page.evaluate(`(() => { const i = document.querySelector(".map-info input[data-field=${key}]"); if (!i) return null; i.value = ${lit(typed)}; i.dispatchEvent(new Event("change", { bubbles: true })); return i.value; })()`);
+      if (shown === null) continue;
+      clamped++;
+      if (shown !== want) fail(`${key} typed as ${typed} in Map Properties shows ${lit(shown)}, the World Editor keeps ${want}`);
+    }
+    await settled(page);
+    if (!clamped) fail("no clamped Map Properties field (zoom, terrain fog, water) in the smoke map's war3map.w3i");
     // Closing the tab right after typing asks to save what was typed (it closed without asking, dropping it).
     await until("the fog's Start Z again", () => mark(startZ), 5000);
     await hands.click("[data-smoke=typed]");

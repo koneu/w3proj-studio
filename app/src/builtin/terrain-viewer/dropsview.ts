@@ -4,7 +4,6 @@
 // and the edits that go over several objects at once (the same drops for all, a set added to each, drops copied).
 // The changes themselves are unitprops.ts's: checked first, all or none.
 
-import { typedBetween } from "../../lib/formats/numbers";
 import { campGroups } from "./clusters";
 import type { Placed } from "./objects";
 import { dropsOf, randomItemLabel, setTotal, type DropItem, type Drops } from "./unitprops";
@@ -240,8 +239,10 @@ export function bulkDrops(entries: readonly Placed[], edit: BulkDrops): { error:
   };
 }
 
-/** A chance typed for a dropped item: a whole percentage from 0 to 100 (stored as a u32), else why it is refused; the
- *  drops stay as they were (user decision 2026-11-15: refuse, never round or clamp). */
+/** A chance typed for a dropped item, as the World Editor takes it (measured 2026-11-22): a whole number pulled into
+ *  1..100 (0 gives 1, 101 and 99999999 give 100); text that isn't a whole number is refused. A chance of 0 already in a
+ *  map stays until the user edits it. */
 export function dropChance(typed: string): { value: number } | { refused: string } {
-  return typedBetween("u32", typed, "A chance", { min: 0, max: 100 });
+  if (!/^-?\d+$/.test(typed)) return { refused: "A chance must be a whole number from 1 to 100." };
+  return { value: Math.min(100, Math.max(1, Number(typed))) };
 }

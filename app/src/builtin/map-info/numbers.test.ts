@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
+import { clampInfoNumber, INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
 import { repoPath } from "../../lib/testhelpers/testutil";
 
 const repoFile = (...parts: string[]): string => readFileSync(repoPath(...parts), "utf8");
@@ -74,8 +74,9 @@ test("every Map Properties number field refuses values past its stored type and 
     assert.equal(JSON.stringify(info), before, `${f.label}: refused values mutated nothing else`);
     for (const edge of EDGES[f.kind]) {
       const r = setInfoNumber(info, key, plainText(edge), player);
-      assert.deepEqual(r, { value: edge });
-      assert.equal(infoNumber(info, key, player), edge);
+      const kept = clampInfoNumber(key, edge);
+      assert.deepEqual(r, { value: kept });
+      assert.equal(infoNumber(info, key, player), kept);
     }
   }
 });
@@ -86,4 +87,16 @@ test("a field the map's file doesn't have (a v31 file's camera zoom) is refused,
   assert.equal(infoNumber(info, "zoomDefault"), undefined);
   assert.ok("refused" in setInfoNumber(info, "zoomDefault", "1000"));
   assert.equal(JSON.stringify(info), before);
+});
+
+test("typed values of some fields are pulled in as the World Editor does (verify round 3); the rest are untouched", () => {
+  const info = fixture();
+  const typed = (key: InfoNumberKey, text: string) => { const r = setInfoNumber(info, key, text); assert.ok("value" in r, text); return infoNumber(info, key); };
+  for (const [t, want] of [["99999", 100], ["-5", 5], ["0", 0], ["50", 50]] as const) assert.equal(typed("waterMinOpacity", t), want, `min opacity ${t}`);
+  for (const [t, want] of [["99999", 100], ["0", 0], ["50", 50]] as const) assert.equal(typed("waterWavesVertexDisplacement", t), want, `displacement ${t}`);
+  for (const [t, want] of [["99999", 1], ["12.5", 1], ["-5", 0], ["0.25", 0.25]] as const) assert.equal(typed("terrainFogMaxOpacity", t), want, `fog opacity ${t}`);
+  for (const [t, want] of [["99999", 99999], ["12.5", 12.5], ["-5", 0]] as const) assert.equal(typed("terrainFogLinearStart", t), want, `fog start ${t}`);
+  for (const k of ["zoomMin", "zoomMax"] as const) { assert.equal(typed(k, "99999"), 3000, k); assert.equal(typed(k, "1500"), 1500, k); }
+  assert.equal(typed("zoomDefault", "99999"), 99999, "default zoom is left alone (unmeasured)");
+  assert.equal(typed("terrainFogLinearEnd", "99999"), 99999);
 });

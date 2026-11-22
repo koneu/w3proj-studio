@@ -215,7 +215,7 @@ export function dropsEditor(host: DropsUiHost, entries: readonly Placed[]): HTML
           h("button.icon-button", { title: "Remove the set", "data-prop": `remove-set-${k}`, onclick: () => withSets((x) => { x.splice(k, 1); }) }, "×")),
         ...s.items.map((it, j) => h("div.drops-row", {},
           itemView(host, it.id),
-          h("input.drops-chance-input", { type: "number", min: 0, max: 100, step: 1, value: String(it.chance), "data-prop": `chance-${k}-${j}`, title: "Chance in percent",
+          h("input.drops-chance-input", { type: "number", min: 1, max: 100, step: 1, value: String(it.chance), "data-prop": `chance-${k}-${j}`, title: "Chance in percent",
             onchange: (ev: Event) => {
               const input = ev.target as HTMLInputElement, t = dropChance(input.value);
               if ("refused" in t) { host.warn(`Not changed: ${t.refused}`); input.value = String(it.chance); }

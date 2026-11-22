@@ -51,6 +51,28 @@ export type InfoNumberKey = keyof typeof INFO_NUMBERS;
 /** The `water` struct's fields, in the file's order, by their key there. */
 export const WATER_NUMBERS: readonly InfoNumberKey[] = (Object.keys(INFO_NUMBERS) as InfoNumberKey[]).filter((k) => INFO_NUMBERS[k].path[0] === "water");
 
+/** What the World Editor does with a typed value of some fields (measured, verify round 3): `abs` drops a minus sign,
+ *  then the value is pulled into `min`..`max`. Only on a typed edit: a value already in a map loads and saves as it is. */
+interface Clamp { readonly abs?: boolean; readonly min?: number; readonly max?: number }
+export const INFO_CLAMPS: { readonly [K in InfoNumberKey]?: Clamp } = {
+  waterMinOpacity: { abs: true, max: 100 },
+  waterWavesVertexDisplacement: { max: 100 },
+  terrainFogMaxOpacity: { min: 0, max: 1 },
+  terrainFogLinearStart: { min: 0 },
+  zoomMin: { max: 3000 },
+  zoomMax: { max: 3000 },
+};
+
+/** The value the World Editor keeps when `v` is typed into field `key`. */
+export function clampInfoNumber(key: InfoNumberKey, v: number): number {
+  const c = INFO_CLAMPS[key];
+  if (!c) return v;
+  if (c.abs) v = Math.abs(v);
+  if (c.min !== undefined && v < c.min) v = c.min;
+  if (c.max !== undefined && v > c.max) v = c.max;
+  return v;
+}
+
 type Obj = Record<string | number, unknown>;
 const step = (k: string | number, player: number | undefined) => (k === "*" ? player ?? -1 : k);
 
@@ -64,8 +86,9 @@ export function infoNumber(info: object, key: InfoNumberKey, player?: number): n
 /** Sets a typed value into `info`; a value the field's stored type can't hold is refused and `info` stays as it was. */
 export function setInfoNumber(info: object, key: InfoNumberKey, typed: string, player?: number): { value: number } | { refused: string } {
   const field = INFO_NUMBERS[key];
-  const t = typedNumber(field.kind, typed, field.label);
-  if ("refused" in t) return t;
+  const t0 = typedNumber(field.kind, typed, field.label);
+  if ("refused" in t0) return t0;
+  const t = { value: clampInfoNumber(key, t0.value) };
   const path = field.path.map((k) => step(k, player));
   let o = info as Obj;
   for (const k of path.slice(0, -1)) {
