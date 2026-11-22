@@ -3,7 +3,7 @@
     "limit": 40,
     "name": "paste-negative-reals-on",
     "description": "Paste Ability of an object holding negative reals, with Allow negative real values on as File > Preferences writes it ([Object Editor] Allow Negative Values=true; the box asks 'Are you sure you want to allow negative values?' first; 2026-11-19): negative-reals.w3x (tests/fixtures/we-specs/make-negative-reals.mjs: custom Heal A000, Cooldown -3, -1.5, 2, Casting Time -0.5, Cast Range -100), the Object Editor (F6) on Abilities (its [Object Editor] Last Tab=4 written before the start: the editor opens on the tab it closed on, and a slot whose last Object Editor closed on Units clicked the Units tree, so no paste: branch we-batch-6), End and six Right keys select the custom Heal, Edit > Copy Ability, Edit > Paste Ability, the Object ID dialog's default id (A001) taken with Return: A001 comes with every negative unchanged, as Studio's Ctrl+C, Ctrl+V (objectedit.ts pastedObject)",
-    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x" },
+    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x", "make": "make-negative-reals.mjs" },
     "we": {
       "mode": "sd",
       "freshEditor": true,
@@ -30,7 +30,7 @@
     "limit": 40,
     "name": "paste-negative-reals-off",
     "description": "The same with Allow negative real values off (Allow Negative Values=false): the editor's Paste Ability keeps the negatives too (2026-11-19), and Studio's paste, with its setting off",
-    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x" },
+    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x", "make": "make-negative-reals.mjs" },
     "we": {
       "mode": "sd",
       "freshEditor": true,

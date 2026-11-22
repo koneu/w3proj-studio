@@ -445,6 +445,62 @@ test("a missing input map is that spec's error, naming the generator that makes 
   assert.doesNotMatch(plain, /made by/);
 });
 
+test("input.make: a missing map's generator runs once with the CLI and the game, a failed one is its specs' error; an existing map makes nothing", () => {
+  const dir = scratchDir("we-compare-make-");
+  try {
+    writeFileSync(join(dir, "there.w3x"), "");
+    const spec = (name, map, make) => parseSpec({ name, input: { map, ...(make ? { make } : {}) }, compare: ["war3map.j"] }, dir);
+    assert.equal(spec("a", "gone.w3x", "make-x.mjs").input.make, "make-x.mjs");
+    assert.throws(() => spec("b", "gone.w3x", "../make-x.mjs"), /input\.make is the file name of a make-\*\.mjs/);
+    const calls = [];
+    const specs = [spec("a", "gone.w3x", "make-x.mjs"), spec("b", "gone2.w3x", "make-x.mjs"), spec("c", "there.w3x", "make-y.mjs"), spec("d", "gone3.w3x", "make-z.mjs"), spec("e", "gone4.w3x")];
+    const failed = run.makeInputs(specs, "/game", { repoDir: "/repo", cli: () => "/cli", run: (args) => { calls.push(args); return { status: args[0].endsWith("make-z.mjs") ? 1 : 0, stderr: "no game\n" }; } });
+    assert.deepEqual(calls, [[join("/repo", "tests", "fixtures", "we-specs", "make-x.mjs"), "/cli", "/game"], [join("/repo", "tests", "fixtures", "we-specs", "make-z.mjs"), "/cli", "/game"]]);
+    assert.deepEqual(failed, ["make-z.mjs"]);
+    assert.match(specs[3].error, /make-z\.mjs failed \(exit 1: no game\)/);
+    assert.equal(specs[0].error, undefined);
+    // The committed specs that name a generator name one that exists.
+    const repoDir = resolve(repoPath("tests"), "..");
+    for (const f of ["paste-negative-reals.json", "header-printf.json"]) {
+      for (const s of JSON.parse(readFileSync(join(repoDir, "tests", "we-compare", f), "utf8"))) {
+        assert.ok(readdirSync(join(repoDir, "tests", "fixtures", "we-specs")).includes(s.input.make), `${f} ${s.name}: ${s.input.make}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an unpack with trigger folders and a generated script: war3map.wtg / .wct are `w3proj triggers`' file and custom, war3map.j is the derived one", () => {
+  const dir = scratchDir("we-compare-forms-");
+  try {
+    mkdirSync(join(dir, "map", "triggers"), { recursive: true });
+    mkdirSync(join(dir, ".w3proj", "derived"), { recursive: true });
+    writeFileSync(join(dir, ".w3proj", "derived", "war3map.j"), "function main takes nothing returns nothing\r\nendfunction\r\n");
+    let runs = 0;
+    const forms = run.projectForms(dir, () => { runs++; return { file: { items: [{ name: "T" }] }, custom: { header: "// h" } }; });
+    assert.equal(forms.triggerForm("war3map.wtg"), "json");
+    assert.equal(forms.triggerForm("war3map.w3i"), null);
+    assert.deepEqual(forms.triggerJson("war3map.wtg"), { items: [{ name: "T" }] });
+    assert.deepEqual(forms.triggerJson("war3map.wct"), { header: "// h" });
+    assert.equal(runs, 1, "the CLI runs once per unpack");
+    assert.equal(forms.derivedPath("war3map.j"), join(dir, ".w3proj", "derived", "war3map.j"));
+    assert.equal(forms.derivedPath("war3map.lua"), null);
+    // Control: an unpack without trigger folders (the game's TriggerData missing) keeps the raw files: no JSON claimed.
+    const flat = scratchDir("we-compare-forms-flat-");
+    try {
+      mkdirSync(join(flat, "map"), { recursive: true });
+      const none = run.projectForms(flat, () => { throw new Error("not called"); });
+      assert.equal(none.triggerForm("war3map.wtg"), null);
+      assert.equal(none.derivedPath("war3map.j"), null);
+    } finally {
+      rmSync(flat, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("saving for the pack: the app's pack preparation runs; an editor left unsaved or a failed terrain rebuild stops the spec", async () => {
   const fake = ({ dirtyAfter = [], settle = async () => {}, prepare = async () => {} } = {}) => {
     const tabs = [{ path: "map/a.txt", dirty: true }, { path: "map/b.txt", dirty: false }];
