@@ -105,15 +105,16 @@ fn pack_unpack_pack_changes_nothing() {
     }
 }
 
-/// The fixture's map/ files as an unpack of `map` (the fixture packed) writes them. The fixture still has the triggers
-/// in the layout before map/triggers/ (one war3map.wtg.json and no war3map.wct, as the app's tests read it): without
-/// war3map.wct its war3map.wtg can't go into map/triggers/, so the unpack keeps it raw. (tests/triggers.rs has a map
-/// with both.)
+/// The fixture's map/ files as an unpack of `map` (the fixture packed) writes them. The fixture's trigger folders
+/// (map/triggers/) are made by hand, as a map made in Studio: no ids. Packed, they get ids, and an unpack is an import,
+/// which keeps them in the files: the folders come back as the layout splits the packed war3map.wtg and war3map.wct.
 fn fixture_unpacked(map: &Path) -> BTreeMap<String, Vec<u8>> {
+    use w3proj::trigger_layout as tl;
     let mut want = files(&fixture().join("map"));
-    if want.remove("war3map.wtg.json").is_some() {
-        want.insert("war3map.wtg".into(), w3proj(&["cat", s(map), "war3map.wtg"]).stdout);
-    }
+    want.retain(|k, _| !tl::is_layout_path(k));
+    let (wtg, wct) = (w3proj(&["cat", s(map), "war3map.wtg"]).stdout, w3proj(&["cat", s(map), "war3map.wct"]).stdout);
+    let data = w3proj::triggerdata::TriggerData::parse(&fs::read_to_string(trigger_data()).unwrap());
+    want.extend(tl::split_map(&wtg, &wct, &data, tl::Lang::Jass).unwrap());
     want
 }
 
@@ -215,8 +216,9 @@ fn verify_finds_every_codec_at_work() {
         ("war3map.mmp", "format:minimap"),
         ("war3map.w3u", "objdata-json"),
         ("war3map.w3e", "w3e-text"),
-        // Without war3map.wct the triggers stay raw (`fixture_unpacked`); tests/triggers.rs has a map with both.
-        ("war3map.wtg", "raw"),
+        // The fixture has the trigger folders: both files go into map/triggers/.
+        ("war3map.wtg", "trigger-folders"),
+        ("war3map.wct", "trigger-folders"),
     ] {
         assert_eq!(codec(file).as_deref(), Some(id), "{file} in\n{table}");
     }

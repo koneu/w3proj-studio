@@ -16,7 +16,7 @@ import { meleeFlagsAfter } from "../../lib/terrain/owner";
 import { tilesetFlagAfter } from "../../lib/terrain/tilesetflag";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { SCRIPT_STAMP, scriptHash } from "../../lib/script/guard";
-import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
+import { parseWct, textTriggers } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
 import { buildMinimap, minimapSettings } from "./minimapgen";
@@ -478,8 +478,8 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   // edited lighting), object groups (format unknown) and conversation files World Editor 3.0.1 writes.
   await json("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 7, regions: [] });
   await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 3, cameras: [] });
-  await w3.workspace.writeText(WTG_JSON, writeWtgJson(defaultTriggerFile(o.name)));
-  await writeWctFile(w3.workspace, parseWct(defaultWct(), 1), textTriggers(defaultTriggerFile(o.name)).map((t) => t.name));
+  // The trigger folders (map/triggers/), made here: the project has none yet. New items store no ids.
+  await w3.workspace.writeTriggers({ file: defaultTriggerFile(o.name), custom: parseWct(defaultWct(), textTriggers(defaultTriggerFile(o.name)).length) }, { create: true });
   await w3.workspace.writeText("map/war3map.wts", "\uFEFFSTRING 1\r\n{\r\nPlayer 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nForce 1\r\n}\r\n\r\n");
   await json("map/war3map.mmp.json", { format: "w3proj.minimap/1", version: 0, icons: [startIcon(t, sx, sy)] });
   await json("map/war3map.w3l.json", { format: "w3proj.lights/1", magic: "W3L!", version: 3, terrainModel: "", unitModel: "", terrainEnabled: 0, unitEnabled: 0, unknown: 0 });

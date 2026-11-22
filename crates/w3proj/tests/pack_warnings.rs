@@ -71,7 +71,7 @@ fn a_map_without_a_script_or_war3map_wtg_is_packed_with_a_warning_for_each() {
     fs::remove_file(project.join("map/war3map.lua")).unwrap();
 
     // No war3map.wtg either (a protected map): both warned, and no empty war3map.wtg goes into the archive.
-    fs::remove_file(project.join("map/war3map.wtg.json")).unwrap();
+    fs::remove_dir_all(project.join("map/triggers")).unwrap();
     let out = dir.join("no-wtg.w3x");
     let r = w3proj::pack(&project, Some(&out), &codecs).unwrap();
     assert_eq!(r.warnings.len(), 2, "{:?}", r.warnings);
@@ -79,9 +79,10 @@ fn a_map_without_a_script_or_war3map_wtg_is_packed_with_a_warning_for_each() {
     assert!(r.warnings[1].contains("Trigger data missing or invalid"), "{:?}", r.warnings);
     let packed = names(&out);
     assert!(!packed.iter().any(|n| n.starts_with("war3map.wtg")), "{packed:?}");
-    assert!(!project.join("map/war3map.wtg").exists() && !project.join("map/war3map.wtg.json").exists());
+    assert!(!project.join("map/war3map.wtg").exists() && !project.join("map/triggers").exists());
     // Everything else as in the whole map.
-    let expect: Vec<_> = whole_names.iter().filter(|n| *n != "war3map.j" && *n != "war3map.wtg").cloned().collect();
+    // (The trigger folders gave war3map.wtg and war3map.wct: both go with them.)
+    let expect: Vec<_> = whole_names.iter().filter(|n| *n != "war3map.j" && *n != "war3map.wtg" && *n != "war3map.wct").cloned().collect();
     assert_eq!(packed, expect);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -157,7 +158,7 @@ fn a_campaign_is_not_warned_about_its_own_archive_but_about_a_chapter_map() {
     let bare = campaign.join("maps/Bare.w3x");
     copy_dir(&fixture(), &bare);
     fs::remove_file(bare.join("map/war3map.j")).unwrap();
-    fs::remove_file(bare.join("map/war3map.wtg.json")).unwrap();
+    fs::remove_dir_all(bare.join("map/triggers")).unwrap();
 
     let r = w3proj::pack(&campaign, Some(&dir.join("camp.w3n")), &Registry::default()).unwrap();
     assert_eq!(r.warnings.len(), 2, "{:?}", r.warnings);

@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { describeUses, registerObjectTools, scriptLines } from "./tools";
+import { fakeReadTriggers } from "../../lib/testhelpers/triggers";
 
 const objects = (custom: object[], original: object[] = []) => JSON.stringify({ format: "w3proj.objects/1", version: 3, original, custom });
 const mod = (field: string, value: unknown, type = "int") => ({ field, type, value });
@@ -61,6 +62,7 @@ function project(root: string, files: Record<string, string | null>) {
       resolve: abs,
       readText: read,
       readBytes: async (p: string) => new TextEncoder().encode(await read(p)),
+      readTriggers: fakeReadTriggers((p) => read(p).catch(() => undefined)),
     },
     backend: {
       invoke: async (command: string, args: Record<string, unknown> = {}) => {
@@ -153,8 +155,8 @@ test("delete_object names what still uses the object: map script, custom scripts
   const p = project(root, {
     [`${root}/map/war3map.w3u.json`]: objects([{ id: "h000", base: "hfoo", mods: [] }, { id: "h001", base: "hbar", mods: [mod("uabi", "h000,Aloc", "string")] }]),
     [`${root}/map/war3map.j`]: "function main takes nothing returns nothing\n  call CreateUnit( p, 'h000', 0, 0, 0 )\nendfunction\n",
-    [`${root}/map/war3map.wtg.json`]: JSON.stringify(wtg),
-    [`${root}/map/war3map.wct.txt`]: "//== war3map.wct: version 1, comment \"\" ==\n//== header ==\n\n//== trigger 0: Spawn ==\n\n//== trigger 1: Setup ==\nset u = CreateUnit( p, 'h000', 0, 0, 0 )\n",
+    // The trigger folders as the fake workspace stands them (lib/testhelpers/triggers.ts).
+    [`${root}/map/triggers/triggers.json`]: JSON.stringify({ ...wtg, texts: ["", "set u = CreateUnit( p, 'h000', 0, 0, 0 )"] }),
     [`${root}/map/war3mapUnits.doo.json`]: JSON.stringify({ units: [{ id: "h000" }, { id: "hfoo" }, { id: "h000" }] }),
     [`${root}/map/war3map.doo.json`]: null,
   });

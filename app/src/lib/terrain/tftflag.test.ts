@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { meleeFiles, readTypeVersions, savedMelee, type MeleeFiles } from "./meleesave";
 import { placedNeedTft, REQUIRES_TFT, TFT_UNITS_SUBVERSION, tftFlagsAfter, tftUnitsLayout, typeVersions } from "./tftflag";
+import { fakeReadTriggers } from "../testhelpers/triggers";
 
 /** UnitData.slk: a footman (0), a tavern (1), a Reforged unit (2); ItemData.slk: an item of version 0 and one of 1. */
 const UNITS = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"version"\nC;Y2;X1;K"hfoo"\nC;X2;K0\nC;Y3;X1;K"ntav"\nC;X2;K1\nC;Y4;X1;K"sfoo"\nC;X2;K2\nC;Y5;X1;K"ngol"\nC;X2;K0\nE\n';
@@ -106,6 +107,7 @@ test("a save sets and clears 0x4000 on melee maps and others alike, through save
     files: () => Object.keys(own).map((path) => ({ path })),
     readText: async (p) => { const v = own[p]; if (typeof v !== "string") throw v ?? new Error(`not found: ${p}`); return v; },
     readBytes: async (p) => { throw new Error(`not found: ${p}`); },
+    readTriggers: fakeReadTriggers((p) => { const v = own[p]; if (v instanceof Error) throw v; return v; }),
     gameText: game ? async (p: string) => { if (!(p in game)) throw new Error(p); return game[p]; } : undefined,
   });
   const MELEE = 0x9c14, NOT = MELEE & ~4;
@@ -142,7 +144,7 @@ test("a save sets and clears 0x4000 on melee maps and others alike, through save
     assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3mapSkin.w3a.json": objects([{ base: "AHhb", mods: [] }], []) }), REQUIRES_TFT, `nor cleared (${hex})`);
     assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.w3u.json": "{" }), REQUIRES_TFT, `unreadable object data keeps it (${hex})`);
     assert.equal(await tftOf(flags, only, { "map/war3map.w3a.json": "{" }), 0, `unreadable ability data doesn't set it (${hex})`);
-    assert.equal((await savedMelee(project(GAME, { "map/war3map.wtg.json": new Error("EACCES") }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable triggers keep it (${flags.toString(16)})`);
+    assert.equal((await savedMelee(project(GAME, { "map/triggers/triggers.json": new Error("EACCES") }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable triggers keep it (${flags.toString(16)})`);
     assert.equal((await savedMelee(project(GAME, {}), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, 0, `control: neither, cleared (${flags.toString(16)})`);
     // war3map.doo's drops (tft-dest-drop, branch we-batch-3): read from the project; a raw or unreadable file can't be told.
     const doo = (id: string) => JSON.stringify({ doodads: [{ id: "LTcr", position: [0, 0, 0], itemTable: -1, itemSets: [[{ id, chance: 100 }]] }], specials: [] });

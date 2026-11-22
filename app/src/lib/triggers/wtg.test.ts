@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseTriggerData } from "./triggerdata";
-import { parseWct, parseWctText, parseWtg, parseWtgJson, textTriggers, writeWct, writeWctText, writeWtg, writeWtgJson, type Call, type CustomTextFile, type Eca, type TriggerFile } from "./wtg";
+import { parseWct, parseWtg, textTriggers, writeWct, writeWtg, type Call, type CustomTextFile, type Eca, type TriggerFile } from "./wtg";
 
 /** Just the functions the samples use, in TriggerData.txt's own form. */
 const data = parseTriggerData(`
@@ -69,13 +69,6 @@ test("the Reforged layout: magic, marker, version", () => {
   assert.equal(dv.getUint32(8, true), 7);
 });
 
-test("JSON form: the same file, and the same bytes", () => {
-  const f = reforged(), json = writeWtgJson(f);
-  assert.deepEqual(parseWtgJson(json), f);
-  assert.deepEqual(writeWtg(parseWtgJson(json)), writeWtg(f));
-  assert.equal(writeWtgJson(parseWtgJson(json)), json);
-});
-
 for (const version of [7, 4]) {
   test(`classic trigger file, version ${version}`, () => {
     const eca = version === 7 ? branch : { ...setScore, params: [{ type: 1, value: "Score" }, { type: 3, value: "5" }] };
@@ -119,7 +112,7 @@ test("names and text in old code pages survive reading and writing", () => {
   const back = parseWtg(b, data);
   assert.notEqual((back.items[3] as { name: string }).name, name);
   assert.deepEqual(writeWtg(back), b);
-  assert.deepEqual(writeWtg(parseWtgJson(writeWtgJson(back))), b);
+  assert.deepEqual(writeWtg(structuredClone(back)), b);
   assert.equal(plain.length, b.length + "Start".length - 4);
   const c: CustomTextFile = { reforged: true, version: 1, comment: "", header: null, texts: [] };
   const wct = writeWct(c), withText = new Uint8Array([...wct.subarray(0, wct.length - 4), 3, 0, 0, 0, 0xc7, 0xd1, 0]);
@@ -161,20 +154,4 @@ test("custom script, classic: with and without a header", () => {
   assert.deepEqual(parseWct(writeWct(v1), 2), v1);
   const v0: CustomTextFile = { reforged: false, version: 0, comment: "", header: null, texts: ["a", "b"] };
   assert.deepEqual(parseWct(writeWct(v0), 2), v0);
-});
-
-test("custom script as text: back to the same file, trigger names are only comments", () => {
-  const f = texts(), text = writeWctText(f, ["Start", "Script", "Other"]);
-  assert.match(text, /^\/\/== trigger 1 \(no text\): Script ==/m);
-  assert.deepEqual(parseWctText(text), f);
-  assert.deepEqual(writeWct(parseWctText(text)), writeWct(f));
-  const lf: CustomTextFile = { ...f, header: "a\nb", texts: ["c"] };
-  assert.deepEqual(parseWctText(writeWctText(lf)), lf);
-});
-
-test("custom script as text: a hand-damaged file is refused", () => {
-  assert.throws(() => parseWctText("no header line\n"), /first line/);
-  const good = writeWctText(texts());
-  assert.throws(() => parseWctText(good.replace("trigger 1", "trigger 7")), /trigger 7 where trigger 1/);
-  assert.throws(() => parseWctText(good.replace("//== header ==", "//== trigger 0 ==")), /expected|header/);
 });

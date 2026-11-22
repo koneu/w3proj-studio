@@ -6,7 +6,8 @@ import { test } from "node:test";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { defaultTriggerFile } from "../../lib/triggers/defaults";
-import { writeWtgJson } from "../../lib/triggers/wtg";
+import { textTriggers } from "../../lib/triggers/wtg";
+import { TRIGGERS_ROOT } from "../../lib/triggers/project";
 import { activate } from "./index";
 import { readFixture } from "../../lib/testhelpers/testutil";
 
@@ -77,6 +78,13 @@ function project(opts: { generateOnSave: boolean; start?: [number, number]; mine
       writeText: async (p: string, t: string) => { written.set(p, t); },
       onDidChange: () => none,
       onDidSave: (f: (path: string) => void) => { saved.push(f); return none; },
+      // The trigger folders as the backend reads them: map/triggers/triggers.json stands for them here, holding the
+      // TriggerFile as JSON.
+      readTriggers: async () => {
+        if (!(TRIGGERS_ROOT in files)) return null;
+        const file = JSON.parse(await read(TRIGGERS_ROOT));
+        return { file, custom: { reforged: file.reforged, version: 1, comment: "", header: null, texts: textTriggers(file).map(() => null) }, files: [], headerFile: null, stored: {}, language: "jass", script: "kept", warnings: [] };
+      },
     },
     backend: {
       invoke: async (command: string, args: Record<string, unknown> = {}) => {
@@ -172,17 +180,17 @@ test("a map that meets the melee rules gets the flag back when its triggers or d
   const doodads = (x: number) => JSON.stringify({ doodads: [{ id: "LTlt", position: [x, 1024, 0] }], specials: [] });
   const make = (treeX: number) => project({
     generateOnSave: false, off: true, start: [1024, 1024], mine: [1024 + 750, 1024], bytes: { "map/war3map.w3e": lake(17) },
-    own: { "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("Melee")), "map/war3map.doo.json": doodads(treeX) },
+    own: { [TRIGGERS_ROOT]: JSON.stringify(defaultTriggerFile("Melee")), "map/war3map.doo.json": doodads(treeX) },
     game: { "TerrainArt\\Terrain.slk": slk, "Units\\DestructableData.slk": dests }, gameBytes: { "PathTextures\\4x4Default.tga": tga },
   });
   const p = make(1024 + 320);
-  await p.save("map/war3map.wtg.json");
+  await p.save(TRIGGERS_ROOT);
   assert.equal(p.flags() & MELEE, MELEE);
   const tree = make(1024 + 256);
   await tree.save("map/war3map.doo.json");
   assert.equal(tree.flags() & MELEE, 0, "a tree 256 from the start, its cells on the start's square: left off");
   const custom = make(1024 + 600);
-  await custom.save("map/war3map.wtg.json", (f) => { (f.items as { type: number; name: string }[]).find((i) => i.type === 8)!.name = "Mine"; });
+  await custom.save(TRIGGERS_ROOT, (f) => { (f.items as { type: number; name: string }[]).find((i) => i.type === 8)!.name = "Mine"; });
   assert.equal(custom.flags() & MELEE, 0, "custom triggers: left off");
   assert.equal(custom.written.has("map/war3map.w3i.json"), false);
 });

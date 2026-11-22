@@ -183,3 +183,18 @@ test("Export Triggers names a Reforged file's root after the map file and leaves
   // A classic file has no root.
   assert.equal(exportedTriggers(file, "s.w3m"), file);
 });
+
+test("categories sharing an id (World Editor maps): list_triggers and a new script trigger go by the tree's structure", () => {
+  const cat = (name: string) => ({ type: 4 as const, id: 0x2000003, name, isComment: 0, expanded: 1, parent: 0 });
+  const f: TriggerFile = {
+    reforged: true, version: 7, unknown: 2, counts: Array.from({ length: 8 }, () => ({ count: 9, deleted: [] })), variables: [],
+    items: [{ type: 1, id: 0, name: "Map", isComment: 0, expanded: 1, parent: -1 }, cat("Initialization"), trigger("Melee Initialization", 0x2000003, { id: 0x3000001 }) as TriggerItem,
+      cat("MapEvents"), trigger("Boss Dies", 0x2000003, { id: 0x3000002 }) as TriggerItem],
+  };
+  assert.deepEqual(triggerList(f, false).categories.map((c) => [c.category, c.triggers.map((t) => t.name)]), [["Initialization", ["Melee Initialization"]], ["MapEvents", ["Boss Dies"]]]);
+  const scripts = { reforged: true, version: 1, comment: "", header: null, texts: [null, null] };
+  addScriptTrigger(f, scripts, "Added", "// x", "Initialization");
+  // Right after Initialization's own contents, not after the other category's trigger with its id.
+  assert.deepEqual(f.items.map((i) => i.name), ["Map", "Initialization", "Melee Initialization", "Added", "MapEvents", "Boss Dies"]);
+  assert.deepEqual(scripts.texts, [null, "// x", null]);
+});

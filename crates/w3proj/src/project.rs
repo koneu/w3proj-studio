@@ -788,7 +788,7 @@ fn archive_key(path: &str, raw: &[String], codecs: &Registry, triggers: bool) ->
 
 /// What syncing `ex` into `project` would delete under `map/` and `maps/`: the files the user may
 /// have added there whose archive file the map doesn't have, from the project root with `/`. A file
-/// only written in another form (e.g. `war3map.wtg` raw instead of `war3map.wtg.json`) isn't lost
+/// only written in another form (e.g. `war3map.wtg` raw instead of `map/triggers/`) isn't lost
 /// and isn't in it. A chapter map's whole project folder ends in `/`. Strays aren't in it: they are
 /// never deleted.
 pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result<Vec<String>> {

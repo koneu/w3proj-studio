@@ -397,6 +397,9 @@ export class Workbench {
         copyMany: (pairs) => wb.workspace.copyMany(pairs),
         deleteMany: (paths) => wb.workspace.deleteMany(paths),
         listFolder: (path) => wb.workspace.listFolder(path),
+        readTriggers: () => wb.workspace.readTriggers(),
+        writeTriggers: (save, opts) => wb.workspace.writeTriggers(save, opts),
+        planTriggers: (save) => wb.workspace.planTriggers(save),
       },
       settings: wb.settings,
       keybindings: {

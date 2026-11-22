@@ -15,8 +15,9 @@ export const KEPT_SCRIPT_WORDS = "so it isn't regenerated";
 /** The map script's files (JASS, Lua): what the generator writes. */
 export const SCRIPT_FILES = ["map/war3map.j", "map/war3map.lua"];
 
-/** Files the map script is made from (also as their .json documents): saving one regenerates it. */
-export const SCRIPT_INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a|w3b)|war3mapUnits\.doo|war3mapSkin\.(w3u|w3a|w3b))(\.json)?$/i;
+/** Files the map script is made from (also as their .json documents, and every file of the trigger folders,
+ *  map/triggers/): saving one regenerates it. */
+export const SCRIPT_INPUTS = /^map\/((war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a|w3b)|war3mapUnits\.doo|war3mapSkin\.(w3u|w3a|w3b))(\.json)?|triggers\/.+)$/i;
 
 /** A campaign's object files the map script of its chapter maps is made from too (in the campaign project's map/
  *  folder; also as their .json documents). */

@@ -67,6 +67,8 @@ function chapter(campaign: Record<string, string | null>, own: Record<string, st
       writeText: async (p: string, t: string) => { written.set(p, t); },
       onDidChange: () => none,
       onDidSave: (f: (path: string) => void) => { saved.push(f); return none; },
+      // No trigger folders in this chapter.
+      readTriggers: async () => null,
     },
     backend: {
       invoke: async (command: string, args: Record<string, unknown> = {}) => {

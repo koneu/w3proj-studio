@@ -455,7 +455,10 @@ export class EditorService {
       if (this.unsaved(t)) {
         // Unsaved changes stay. Only files the editor takes without touching them (imported art) are reloaded; its own file isn't.
         const safe = [...paths].filter((k) => this.key(t.path) !== k && this.shows(t, k) && t.instance?.reloadsWithEdits?.(k.toLowerCase()));
-        if (t.instance?.reloadFile && safe.length) await Promise.all(safe.map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)));
+        const taken = t.instance?.reloadFile && safe.length ? (await Promise.all(safe.map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)))).every(Boolean) : false;
+        // All taken in place (the trigger folders, merged with the unsaved changes): what the editor read is what is
+        // on disk now, so its next save doesn't ask about them again.
+        if (taken && t.stamp !== undefined) t.stamp = await this.stampOf(t.path);
         if (paths.has(this.key(t.path)) || [...paths].some((k) => this.shows(t, k) && !safe.includes(k))) kept.push(t.path);
         continue;
       }
@@ -570,6 +573,11 @@ export class EditorService {
         const inPlace = await t.instance!.reloadFile?.(key.toLowerCase()).catch(() => false);
         if (inPlace) t.stamp = await this.stampOf(t.path);
         else if (t.instance) await this.reopen(t);
+        continue;
+      }
+      // A watched file the editor takes with unsaved changes too (the trigger folders' files, saved in the text editor).
+      if (!own && t.instance?.reloadsWithEdits?.(key.toLowerCase()) && t.instance.reloadFile) {
+        if (await t.instance.reloadFile(key.toLowerCase()).catch(() => false)) t.stamp = await this.stampOf(t.path);
         continue;
       }
       if (own) this.flagConflict(t);

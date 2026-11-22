@@ -101,7 +101,7 @@ fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
 fn sample_map(dir: &Path, classic: bool, lua: bool) -> (PathBuf, Vec<u8>, Vec<u8>) {
     let src = dir.join("source");
     copy_dir(&fixture(), &src);
-    fs::remove_file(src.join("map/war3map.wtg.json")).unwrap();
+    fs::remove_dir_all(src.join("map/triggers")).unwrap();
     let (wtg, wct) = tl::sample_map(classic);
     fs::write(src.join("map/war3map.wtg"), &wtg).unwrap();
     fs::write(src.join("map/war3map.wct"), &wct).unwrap();
@@ -306,13 +306,17 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown);
 }
 
-/// A map with war3map.wtg but no war3map.wct (the mini map), and one with neither: no map/triggers/, and pack makes
-/// up none of them.
+/// A map with war3map.wtg but no war3map.wct (the sample's war3map.wtg alone), and one with neither: no
+/// map/triggers/, and pack makes up none of them.
 #[test]
 fn without_both_files_nothing_is_split_or_made_up() {
     let dir = workdir("partial");
+    let src = dir.join("source");
+    copy_dir(&fixture(), &src);
+    fs::remove_dir_all(src.join("map/triggers")).unwrap();
+    fs::write(src.join("map/war3map.wtg"), tl::sample_map(false).0).unwrap();
     let first = dir.join("mini.w3x");
-    assert!(pack(&fixture(), &first, &[]).status.success());
+    assert!(pack(&src, &first, &[]).status.success());
     let project = dir.join("project");
     let out = unpack(&first, &project);
     assert!(out.contains("raw war3map.wtg (trigger-folders: the map has no war3map.wct)"), "{out}");

@@ -24,14 +24,16 @@ import { ident } from "../../lib/script/jass";
 import { convertToCustom, triggerCustomText } from "../../lib/script/triggers";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
-  allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_RAW, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
+  allocItemId, parseWct, parseWtg, textTriggers, TYPE_INDEX, writeWct, writeWtg,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
+import { isTriggerLayoutPath, readTriggerFiles, TRIGGERS_DIR, TRIGGERS_ROOT, WCT_RAW, writeTriggerFiles, wtgPath, type ProjectTriggers } from "../../lib/triggers/project";
+import { idKey, mergeReload, type Merged, type ReloadSide } from "./reload";
 import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
-import { applyExpanded, collapsedOf, dropMode, moveItem, onlyFoldsUnsaved, pasteBlock, subtree, type DropMode } from "./tree";
+import { applyExpanded, childrenOf, collapsedOf, dropMode, moveItem, onlyFoldsUnsaved, pasteBlock, subtree, treeStructure, type DropMode } from "./tree";
 import { deleteVariable, nameField, nameFields, newVariable, renameVariable, variableParams, variablesTable, type NameField, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
@@ -41,8 +43,18 @@ import { ModeCache } from "../../lib/modecache";
 /** A trigger of events, conditions and actions (not custom text, a script item or a comment). */
 const isGuiTrigger = (it: Item): it is TriggerItem => "ecas" in it && it.type === 8 && !it.isCustom && !it.isComment;
 
-/** The project's trigger file (war3map.wtg.json, or a raw war3map.wtg), or null. */
-const triggerFile = (w3: W3Api) => wtgPath(w3.workspace.files());
+/** The Trigger Editor's document: the trigger folders as one (`map/triggers`), or a raw war3map.wtg; null without triggers. */
+const triggerFile = (w3: W3Api) => {
+  const path = wtgPath(w3.workspace.files());
+  return path === TRIGGERS_ROOT ? TRIGGERS_DIR : path;
+};
+/** The data of the game, for a raw war3map.wtg (set in activate). */
+let readData: () => Promise<TriggerData> = () => Promise.reject(new Error("no game data"));
+/** The project's triggers and texts, whichever form they are in; null without triggers. */
+const projectTriggers = async (w3: W3Api) => {
+  const path = wtgPath(w3.workspace.files());
+  return path ? readTriggerFiles(w3.workspace, path, readData) : null;
+};
 
 class KindRegistry implements TriggersService {
   private kinds: TriggerKind[] = [];
@@ -103,6 +115,7 @@ function findRevealed(file: TriggerFile, name: string, at?: RevealAt): Item | un
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  readData = () => triggerData(w3);
   /** The open Trigger Editor, opened if it isn't. */
   const theView = async () => {
     if (!openView) await w3.commands.execute("w3.triggers.open");
@@ -112,36 +125,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The map's triggers for a tool. */
   const toolTriggers = async () => {
     requireProject(w3);
-    const path = wtgPath(w3.workspace.files());
-    if (!path) throw new Error("This map has no triggers (no war3map.wtg).");
-    return readWtgFile(w3.workspace, path, () => triggerData(w3));
+    const read = await projectTriggers(w3);
+    if (!read) throw new Error("This map has no triggers (no map/triggers/ and no war3map.wtg).");
+    return read;
   };
   ctx.subscriptions.push(
-    w3.mcp.registerTool("list_triggers", async ({ variables }) => triggerList(await toolTriggers(), variables === true)),
+    w3.mcp.registerTool("list_triggers", async ({ variables }) => triggerList((await toolTriggers()).file, variables === true)),
     w3.mcp.registerTool("get_trigger", async ({ name }) => {
-      const file = await toolTriggers();
+      const { file, custom: scripts } = await toolTriggers();
       const found = findTrigger(file, String(name));
       if (!found) throw new Error(`There's no trigger "${String(name)}".`);
       const all = textTriggers(file);
-      const scripts = await readWctFile(w3.workspace, all.length);
       const resolve = await mapStrings(w3);
       return triggerDetail(found, scripts?.texts[all.indexOf(found)] ?? null, { data: await triggerData(w3), string: resolve }, resolve);
     }),
   );
-  /** Changes the trigger files as they are on disk: a GUI file kept raw can't take a text edit. */
-  const editTriggers = async (title: string, change: (file: ReturnType<typeof parseWtgJson>, scripts: ReturnType<typeof parseWctText>) => void) => {
+  /** Changes the trigger folders as they are on disk (read in one call; only the files of the items that change are
+   *  written, through the edit log): a map that keeps its triggers raw can't take an edit here. */
+  const editTriggers = async (title: string, change: (file: TriggerFile, scripts: CustomTextFile) => void) => {
     requireProject(w3);
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
-    return edits.edit(title, async (read) => {
-      const [wtg, wct] = await Promise.all([read(WTG_JSON), read(WCT_TEXT)]);
-      if (wtg === null) throw new Error("This project keeps its triggers raw, or has none, so they can't be edited here.");
-      if (wct === null) throw new Error("This project keeps its trigger scripts raw, or has none, so they can't be edited here.");
-      const file = parseWtgJson(wtg), scripts = parseWctText(wct);
+    return edits.edit(title, async () => {
+      const layout = await w3.workspace.readTriggers();
+      if (!layout) throw new Error("This project keeps its triggers raw, or has none, so they can't be edited here.");
+      const file = structuredClone(layout.file), scripts = structuredClone(layout.custom);
       change(file, scripts);
-      return [{ path: WTG_JSON, text: writeWtgJson(file) }, { path: WCT_TEXT, text: writeWctText(scripts, textTriggers(file).map((t) => t.name)) }];
+      const plan = await w3.workspace.planTriggers({ file, custom: scripts, stored: layout.stored });
+      return [...plan.write, ...plan.delete.map((path) => ({ path, text: null }))];
     });
   };
-  const named = (file: ReturnType<typeof parseWtgJson>, name: unknown) => {
+  const named = (file: TriggerFile, name: unknown) => {
     const found = findTrigger(file, String(name));
     if (!found) throw new Error(`There's no trigger "${String(name)}".`);
     return found;
@@ -194,10 +207,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   );
   const kinds = new KindRegistry();
   const open = () => w3.commands.execute("w3.triggers.open").catch((e) => w3.window.showError(String(e)));
-  // war3map.wct.txt (every trigger's text in one file) in the text editor: highlighted in the map's script language,
-  // with its functions listed, not checked (its texts use the map's generated globals and each other).
+  // A custom text's or script item's own file (map/triggers/…/Name.j or .lua) in the text editor: highlighted in its
+  // language, with its functions listed, not checked as plain JASS (its text uses the map's generated globals and the
+  // other texts). vJASS texts are left to the vJASS extension's claim.
   void w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).then((code) => {
-    ctx.subscriptions.push(code.registerFileLanguage({ id: "wct", title: "Custom script texts", base: "jass", baseOf: () => scriptLanguage(w3), extensions: [".wct.txt"] }));
+    ctx.subscriptions.push(code.registerFileLanguage({
+      id: "trigger-text", title: "Trigger script", base: "jass",
+      baseOf: async (path) => (/\.lua$/i.test(path) ? "lua" : "jass"),
+      detect: (path, text) => isTriggerLayoutPath(path) && /\.(j|lua)$/i.test(path) && !/^\s*(library|scope|struct|module|interface)\b|^\s*\/\/!\s*(textmacro|zinc)\b/m.test(text),
+    }));
   }).catch(() => {});
   ctx.subscriptions.push(
     w3.services.provide(TRIGGERS_SERVICE, kinds),
@@ -205,7 +223,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       await projectWithFiles(w3);
       const path = triggerFile(w3);
-      if (!path) throw new Error("This project has no war3map.wtg.");
+      if (!path) throw new Error("This project has no triggers (no map/triggers/ and no war3map.wtg).");
       await w3.editors.open(path, "w3.triggerEditor");
       openView?.setMode("triggers");
     }),
@@ -267,7 +285,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       await projectWithFiles(w3);
       const path = triggerFile(w3);
-      if (!path) throw new Error("This project has no war3map.wtg.");
+      if (!path) throw new Error("This project has no triggers (no map/triggers/ and no war3map.wtg).");
       startWithVariables = !openView;
       await w3.editors.open(path, "w3.triggerEditor");
       openView?.showVariables();
@@ -277,14 +295,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its triggers.")); return; }
         const path = triggerFile(w3);
-        if (!path) { el.append(h("div.view-empty", {}, "This project has no war3map.wtg.")); return; }
+        if (!path) { el.append(h("div.view-empty", {}, "This project has no triggers.")); return; }
         const facts = h("div.terrain-facts.muted", {}, "Reading triggers…");
         el.append(h("div.tree", {}, h("div.tree-row.obj-kind", { onclick: open, title: "F4" },
           h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open Trigger Editor")),
           h("div.tree-row.obj-kind", { onclick: () => w3.commands.execute("w3.triggers.variables").catch((e) => w3.window.showError(String(e))) },
             h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Variables"))), facts);
         void (async () => {
-          const file = await readWtgFile(w3.workspace, path, () => triggerData(w3));
+          const read = await projectTriggers(w3);
+          if (!read) throw new Error("This project has no triggers.");
+          const file = read.file;
           const n = (t: number) => file.items.filter((i) => i.type === t).length;
           facts.replaceChildren(
             h("div", {}, `${n(8) + n(32)} triggers · ${n(4)} categories`),
@@ -337,15 +357,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.classList.add("trig-editor");
         el.append(h("div.muted.trig-loading", {}, "Reading triggers…"));
         const data = await triggerData(w3);
-        let file: TriggerFile;
+        const game = doc.path.startsWith("game:");
+        // The trigger folders are one document (read in one call); a raw war3map.wtg (and a game file) is read as it is.
+        const folders = !game && doc.path.toLowerCase() === TRIGGERS_DIR;
+        let file: TriggerFile, custom: CustomTextFile | null, layout: ProjectTriggers | null = null;
         try {
-          file = await readWtgFile(doc, doc.path, async () => data);
+          if (folders) {
+            layout = await w3.workspace.readTriggers();
+            if (!layout) throw new Error(`${TRIGGERS_DIR}/ isn't there`);
+            ({ file, custom } = layout);
+          } else if (game) {
+            file = parseWtg(await doc.readBytes(), data);
+            custom = null;
+          } else ({ file, custom } = await readTriggerFiles(w3.workspace, doc.path, async () => data));
         } catch (e) {
-          el.replaceChildren(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.replaceChildren(errorView(`Can't read ${doc.path}: ${errorText(e)}`, folders ? null : h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
-        const game = doc.path.startsWith("game:");
-        const custom = game ? null : await readWctFile(w3.workspace, textTriggers(file).length);
         let wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
         let strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
@@ -384,13 +412,52 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (it) view.revealItem(it, at);
         }
         if (!askedWhere) view.applyViewState(doc.viewState);
+        // The trigger folders: each item's file as last read or saved, and that state, to tell the editor's changes
+        // from the files' when they change outside the app (reload below).
+        let base: ReloadSide | null = null;
+        const known = (l: ProjectTriggers | null, side: { file: TriggerFile; texts: (string | null)[]; header: string | null }, files: (string | null)[]) => {
+          if (!l) return;
+          view.files = new Map(side.file.items.flatMap((it, i) => (files[i] ? [[idKey(it), files[i]!] as [string, string]] : [])));
+          base = { file: structuredClone(side.file), texts: [...side.texts], header: side.header, files: [...files] };
+        };
+        if (layout) known(layout, { file: layout.file, texts: layout.custom.texts, header: layout.custom.header }, layout.files);
         const write = async () => {
           // What is saved is the state at the start; an edit made meanwhile stays unsaved.
           const at = view.mark();
-          await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, at.file);
-          await writeWctFile(w3.workspace, at.custom, textTriggers(at.file).map((t) => t.name));
+          if (layout) {
+            const done = await w3.workspace.writeTriggers({ file: at.file, custom: at.custom, stored: layout.stored });
+            // The items' files now (a new item has one, a renamed one another); read back when they can't be told.
+            const now = done.files.length === at.file.items.length ? null : await w3.workspace.readTriggers().catch(() => null);
+            known(layout, { file: at.file, texts: at.custom.texts, header: at.custom.header }, now && now.file.items.length === at.file.items.length ? now.files : done.files);
+            view.clearConflicts();
+          } else await writeTriggerFiles({ writeBytes: (p, b) => (p === doc.path ? doc.writeBytes(b) : w3.workspace.writeBytes(p, b)), writeTriggers: w3.workspace.writeTriggers }, doc.path, { file: at.file, custom: at.custom });
           view.markSaved(at.step, at.toggles);
         };
+        // The trigger folders changed outside the app (or another editor saved one of their files): one read for all of
+        // them (a checkout touches many files at once), after the last change. With nothing unsaved the tree takes the
+        // files as they are now, in place; with unsaved changes each item the editor changed keeps its change (flagged
+        // when the files changed it too) and the others reload (reload.ts).
+        let reloading: Promise<boolean> | null = null;
+        const reloadFolders = () => (reloading ??= new Promise<boolean>((done) => setTimeout(() => {
+          reloading = null;
+          void (async () => {
+            const theirs = await w3.workspace.readTriggers().catch((e: unknown) => e as Error);
+            if (view.closed) return true;
+            if (theirs instanceof Error || !theirs) {
+              // Unreadable or gone: an editor with unsaved changes keeps them (a save then says why it can't); one
+              // without opens again and shows why.
+              if (view.dirty) void w3.window.showWarning(`The trigger files changed outside the app and can't be read now (${theirs instanceof Error ? errorText(theirs) : "map/triggers/ is gone"}); your unsaved changes in the Trigger Editor stay.`);
+              return view.dirty;
+            }
+            const theirSide: ReloadSide = { file: theirs.file, texts: theirs.custom.texts, header: theirs.custom.header, files: theirs.files };
+            const merged = view.dirty && base ? mergeReload(base, view.side(), theirSide) : null;
+            layout = theirs;
+            view.takeFromDisk(theirs.file, theirs.custom, theirs.files, merged);
+            known(theirs, theirSide, theirs.files);
+            if (merged?.conflicts.length) void w3.window.showWarning(`${merged.conflicts.length} trigger item${merged.conflicts.length === 1 ? "" : "s"} changed outside the app while you had unsaved changes to ${merged.conflicts.length === 1 ? "it" : "them"}: your version is kept (marked in the tree); saving writes over the other change.`);
+            return true;
+          })().then(done, () => done(false));
+        }, 100)));
         // The user's save (Ctrl+S, Save All, Save on closing): a name typed into the focused name field is part of it,
         // after the rename's question if it asks one (the workbench's commitField leaves editors with a flush alone).
         const save = async () => {
@@ -408,12 +475,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           flush: () => view.flush(),
           viewOnlyUnsaved: () => view.onlyFoldsDirty,
           save,
-          // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
-          // again, else its next save would put back the texts it read.
+          // The triggers' texts are this editor's too: a raw war3map.wct saved by something else opens it again, else
+          // its next save would put back the texts it read. The trigger folders' files are taken in place, with
+          // unsaved changes too (reloadFolders).
           // The string table gives the texts of TRIGSTR_ parameters: saved by another editor, they are shown again
           // in place (nothing is edited, selection and scroll stay). A table that can't be read keeps the old texts.
-          watches: game ? [] : [WCT_TEXT, WCT_RAW, WTS],
+          watches: game ? [] : folders ? [WTS] : [WCT_RAW, WTS],
+          watchesPath: (key: string) => folders && isTriggerLayoutPath(key),
+          reloadsWithEdits: (key: string) => folders && isTriggerLayoutPath(key),
           reloadFile: async (path: string) => {
+            if (folders && isTriggerLayoutPath(path)) return reloadFolders();
             if (path !== WTS) return false;
             const text = await w3.workspace.readText(WTS).catch(() => null);
             if (view.closed) return true;
@@ -477,11 +548,7 @@ async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][],
   const path = wtgPath(w3.workspace.files());
   if (!path) return null;
   // A file that is there and can't be read stops here: it isn't written over.
-  const read = async () => {
-    const file = await readWtgFile(w3.workspace, path, () => triggerData(w3));
-    const custom = await readWctFile(w3.workspace, textTriggers(file).length);
-    return { file, custom };
-  };
+  const read = () => readTriggerFiles(w3.workspace, path, () => triggerData(w3));
   const first = await read();
   const scriptsOf = (c: CustomTextFile | null) => (c ? [c.header, ...c.texts] : []);
   const would = countRenames(first.file, scriptsOf(first.custom), renames);
@@ -491,12 +558,17 @@ async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][],
   // The Trigger Editor opened during the question: it holds the triggers now.
   if (openView) return tries < 2 ? renameGlobals(w3, kind, pairs, what, tries + 1) : null;
   // Read again: the files may have changed during the question.
-  const { file, custom } = await read();
+  const { file, custom, layout } = await read();
   const texts = custom ? [{ get: () => custom.header, set: (t: string) => { custom.header = t; } }, ...custom.texts.map((_, k) => ({ get: () => custom.texts[k], set: (t: string) => { custom.texts[k] = t; } }))] : [];
   const n = applyRenames(file, texts, renames, withScripts);
-  // Custom Script actions are in the trigger file too.
-  if (n.gui || n.script) await writeWtgFile(w3.workspace, path, file);
-  if (custom && n.script) await writeWctFile(w3.workspace, custom, textTriggers(file).map((t) => t.name));
+  // Custom Script actions are in the triggers too. The trigger folders write only the files that changed.
+  if (n.gui || n.script) {
+    if (layout) await w3.workspace.writeTriggers({ file, custom: custom!, stored: layout.stored });
+    else {
+      await w3.workspace.writeBytes(path, writeWtg(file));
+      if (custom && n.script) await w3.workspace.writeBytes(WCT_RAW, writeWct(custom));
+    }
+  }
   return { ...n, inEditor: false };
 }
 
@@ -1061,6 +1133,62 @@ class TriggerView {
   /** The state `step` and `toggles` (from mark) were saved; edits and toggles after it stay unsaved. */
   markSaved(step = this.state, toggles = this.toggles) { this.savedAt = step; this.savedToggles = toggles; this.report(); }
 
+  // ---- the trigger folders changed outside the app ----------------------------------
+  /** Each item's file in the trigger folders (idKey → project path), as last read or saved; empty for a raw file. */
+  files = new Map<string, string>();
+  /** Items the files changed while an unsaved change to them was kept here (their keys: file, "$name", "#header"). */
+  private conflicts = new Set<string>();
+  private keyOf(it: Item): string | null { return this.files.get(idKey(it)) ?? (it.type === 64 ? `$${it.name}` : null); }
+  /** The state now with each item's file, for reload.ts. */
+  side(): ReloadSide {
+    const s = this.snapshot();
+    return { file: s.file, texts: s.texts, header: s.header, files: s.file.items.map((it) => this.files.get(idKey(it)) ?? null) };
+  }
+  /** The trigger folders as they are on disk now (`file`, `custom`), in place: the state saved; with `merged` (the
+   *  unsaved changes kept over them, reload.ts) that is one undo step on top, unsaved. The undo history before it
+   *  goes (its states are the old files'). The selection and the open and closed categories stay where their items are. */
+  takeFromDisk(file: TriggerFile, custom: CustomTextFile, files: (string | null)[], merged: Merged | null) {
+    this.flush();
+    const was = this.find(this.selected);
+    const selectedKey = was ? this.keyOf(was) : null;
+    const collapsedKeys = new Set(this.file.items.filter((i) => this.collapsed.has(i.id)).map((i) => this.keyOf(i)).filter((k): k is string => !!k));
+    const knownKeys = new Set(this.file.items.map((i) => this.keyOf(i)).filter((k): k is string => !!k));
+    this.files = new Map(file.items.flatMap((it, i) => (files[i] ? [[idKey(it), files[i]!] as [string, string]] : [])));
+    const put = (f: TriggerFile, texts: (string | null)[], header: string | null) => {
+      this.file = structuredClone(f);
+      this.texts = new Map(textTriggers(this.file).map((t, i) => [t, texts[i] ?? null]));
+      this.header = header;
+    };
+    this.custom = custom;
+    put(file, custom.texts, custom.header);
+    this.collapsed = collapsedOf(this.file);
+    const theirs = this.snapshot();
+    this.undo = [];
+    this.at = 0;
+    if (merged) {
+      put(merged.file, merged.texts, merged.header);
+      this.undo.push({ label: "Keep my changes over the trigger files changed outside the app", before: theirs, after: this.snapshot(), id: this.nextId++, replaces: true });
+      this.at = 1;
+    }
+    this.savedAt = 0;
+    this.savedToggles = this.toggles;
+    this.follows.clear();
+    this.conflicts = new Set(merged?.conflicts ?? []);
+    for (const it of this.file.items) {
+      const k = this.keyOf(it);
+      if (!k || !knownKeys.has(k) || !(it.type === 2 || it.type === 4)) continue;
+      if (collapsedKeys.has(k)) this.collapsed.add(it.id); else this.collapsed.delete(it.id);
+    }
+    const now = selectedKey ? this.file.items.find((i) => this.keyOf(i) === selectedKey) : undefined;
+    if (this.selected.kind === "item") this.selected = now ? { kind: "item", type: now.type, id: now.id } : { kind: "header" };
+    this.report();
+    this.renderTree();
+    this.renderDetail();
+    this.edited();
+  }
+  /** After a save: the files have what the editor has. */
+  clearConflicts() { if (this.conflicts.size) { this.conflicts.clear(); this.renderTree(); } }
+
   /** Selects the variables table. */
   showVariables() { this.flush(); this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
 
@@ -1176,14 +1304,13 @@ class TriggerView {
   private insertionPoint(category: boolean): { parent: number; index: number } {
     const sel = this.find(this.selected);
     const items = this.file.items;
-    if (sel && (sel.type === 4 || sel.type === 2) && !category) {
-      const last = items.reduce((at, it, i) => (it.parent === sel.id ? i : at), items.indexOf(sel));
-      return { parent: sel.id, index: last + 1 };
-    }
-    if (sel && sel.type !== 1 && !(category && sel.type !== 4)) return { parent: sel.parent, index: items.indexOf(sel) + 1 };
+    // After a folder's contents (and theirs), found by the tree's structure: categories may share an id.
+    const end = (folder: Item) => items.indexOf(subtree(this.file, folder).at(-1)!) + 1;
+    if (sel && (sel.type === 4 || sel.type === 2) && !category) return { parent: sel.id, index: end(sel) };
+    if (sel && sel.type !== 1 && !(category && sel.type !== 4)) return { parent: sel.parent, index: end(sel) };
     if (!category) {
       const cat = items.find((i) => i.type === 4);
-      if (cat) return { parent: cat.id, index: items.reduce((at, it, i) => (it.parent === cat.id ? i : at), items.indexOf(cat)) + 1 };
+      if (cat) return { parent: cat.id, index: end(cat) };
     }
     return { parent: this.root(), index: items.length };
   }
@@ -1236,7 +1363,7 @@ class TriggerView {
       cat = { type: 4, id: this.allocId(4), name: "Variables", isComment: 0, expanded: 1, parent: this.root() };
       items.push(cat);
     }
-    return { parent: cat.id, index: items.reduce((last, it, i) => (it.parent === cat!.id ? i : last), items.indexOf(cat)) + 1 };
+    return { parent: cat.id, index: items.indexOf(subtree(this.file, cat).at(-1)!) + 1 };
   }
   private deleteSelected(cut = false) {
     const sel = this.find(this.selected);
@@ -1247,9 +1374,8 @@ class TriggerView {
       return;
     }
     this.edit(`Delete ${sel.name}`, () => {
-      const gone = new Set<Item>();
-      const collect = (it: Item) => { gone.add(it); for (const c of this.file.items) if (c.parent === it.id && (it.type === 2 || it.type === 4) && c !== it) collect(c); };
-      collect(sel);
+      // The item and what is in it, by the tree's structure: another category with the same id keeps its contents.
+      const gone = new Set<Item>(subtree(this.file, sel));
       for (const it of gone) {
         if (this.file.reforged) this.file.counts[TYPE_INDEX[it.type]]?.deleted.push(it.id);
         if (it.type === 64) this.file.variables = this.file.variables.filter((v) => v.id !== it.id);
@@ -1261,13 +1387,14 @@ class TriggerView {
   private move(dir: -1 | 1) {
     const sel = this.find(this.selected);
     if (!sel || sel.type === 1) return;
-    const items = this.file.items;
-    const siblings = items.filter((i) => i.parent === sel.parent && i.type !== 1);
+    // Its siblings by the tree's structure; a folder moves with what is in it.
+    const s = treeStructure(this.file);
+    const siblings = s.children.get(s.parentOf.get(sel) ?? null) ?? [];
     const other = siblings[siblings.indexOf(sel) + dir];
     if (!other) return;
     this.edit(`Move ${sel.name}`, () => {
-      const a = items.indexOf(sel), b = items.indexOf(other);
-      [items[a], items[b]] = [items[b], items[a]];
+      if (dir < 0) moveItem(this.file, sel, other, "before");
+      else moveItem(this.file, other, sel, "before");
     });
   }
 
@@ -1370,13 +1497,13 @@ class TriggerView {
   private convertCommand() { this.run("w3.triggers.convertToCustomText"); }
 
   // ---- tree -------------------------------------------------------------------------
-  private row(label: string, cls: string, depth: number, sel: Selection, opts: { toggle?: number; title?: string; off?: boolean } = {}) {
+  private row(label: string, cls: string, depth: number, sel: Selection, opts: { toggle?: number; title?: string; off?: boolean; conflict?: boolean } = {}) {
     const s = this.selected;
     const active = s.kind === sel.kind && (sel.kind !== "item" || (s.kind === "item" && s.type === sel.type && s.id === sel.id));
     const caret = opts.toggle !== undefined
       ? h("span.trig-caret", { onclick: (e: Event) => { e.stopPropagation(); this.toggle(opts.toggle!); } }, this.collapsed.has(opts.toggle) ? "▸" : "▾")
       : h("span.trig-caret");
-    return h(`div.trig-row.${cls}${active ? ".active" : ""}${opts.off ? ".off" : ""}`, {
+    return h(`div.trig-row.${cls}${active ? ".active" : ""}${opts.off ? ".off" : ""}${opts.conflict ? ".trig-conflict" : ""}`, {
       style: { paddingLeft: `${6 + depth * 14}px` }, title: opts.title ?? "",
       onclick: () => { this.flush(); this.selected = sel; this.renderTree(); this.renderDetail(); this.el.focus(); },
       ondblclick: () => { if (opts.toggle !== undefined) this.toggle(opts.toggle); },
@@ -1434,31 +1561,36 @@ class TriggerView {
     const rows: HTMLElement[] = [];
     const root = this.file.items.find((i) => i.type === 1);
     const q = this.query.trim().toLowerCase();
+    const CONFLICT = "Changed outside the app too: your unsaved version is kept; saving writes over the other change.";
     if (!q) {
-      rows.push(this.row(root?.name || this.w3.workspace.project()?.name || "Map", "trig-map", 0, { kind: "header" }, { title: "Map header: custom script code" }));
+      rows.push(this.row(root?.name || this.w3.workspace.project()?.name || "Map", "trig-map", 0, { kind: "header" },
+        this.conflicts.has("#header") ? { title: CONFLICT, conflict: true } : { title: "Map header: custom script code" }));
       rows.push(this.row(`Variables (${this.file.variables.length})`, "trig-vars", 0, { kind: "variables" }));
     }
-    const children = new Map<number, Item[]>();
-    for (const it of this.file.items) if (it.type !== 1) children.set(it.parent, [...(children.get(it.parent) ?? []), it]);
+    // Each folder's contents by the tree's structure (categories may share an id).
+    const children = treeStructure(this.file).children;
     // While searching: only matches and the categories around them (expanded).
     const shown = q ? this.searchMatches(q, children) : null;
     if (shown && !shown.size) rows.push(h("div.trig-row.muted", {}, "No matches."));
-    const walk = (parent: number, depth: number) => {
+    const walk = (parent: Item | null, depth: number) => {
       for (const it of children.get(parent) ?? []) {
         if (shown && !shown.has(it)) continue;
         const sel: Selection = { kind: "item", type: it.type, id: it.id };
+        const key = this.conflicts.size ? this.keyOf(it) : null;
+        const conflict = !!key && this.conflicts.has(key);
         if (it.type === 2 || it.type === 4) {
           const comment = it.type === 4 && it.isComment;
           rows.push(this.row(it.name, it.type === 4 ? (comment ? "trig-cat.trig-cat-comment" : "trig-cat") : "trig-lib", depth, sel,
-            { toggle: it.id, title: comment ? "Category is Comment" : undefined }));
-          if (shown || !this.collapsed.has(it.id)) walk(it.id, depth + 1);
-        } else if (it.type === 64) { if (this.mode !== "triggers") rows.push(this.row(it.name, "trig-var", depth, sel)); }
+            { toggle: it.id, title: conflict ? CONFLICT : comment ? "Category is Comment" : undefined, conflict }));
+          if (shown || !this.collapsed.has(it.id)) walk(it, depth + 1);
+        } else if (it.type === 64) { if (this.mode !== "triggers") rows.push(this.row(it.name, "trig-var", depth, sel, conflict ? { title: CONFLICT, conflict } : {})); }
         else if ("ecas" in it && this.mode !== "variables") {
-          rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.type === 32 ? "trig-script" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel, { off: !it.enabled }));
+          rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.type === 32 ? "trig-script" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel,
+            { off: !it.enabled, ...(conflict ? { title: CONFLICT, conflict } : {}) }));
         }
       }
     };
-    walk(root ? root.id : -1, 1);
+    walk(null, 1);
     this.tree.replaceChildren(...rows);
   }
 
@@ -1469,7 +1601,7 @@ class TriggerView {
     onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") { this.searchBox.value = ""; this.query = ""; this.renderTree(); } } });
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   /** Items matching `q` in the current mode, with the categories containing them. */
-  private searchMatches(q: string, children: Map<number, Item[]>): Set<Item> {
+  private searchMatches(q: string, children: Map<Item | null, Item[]>): Set<Item> {
     const display = this.handle.display;
     const hit = (s: string | null | undefined) => !!s && s.toLowerCase().includes(q);
     const ecaHit = (es: Eca[]): boolean => es.some((e) => {
@@ -1487,12 +1619,11 @@ class TriggerView {
     const shown = new Set<Item>();
     const visit = (it: Item): boolean => {
       let any = it.type !== 2 && it.type !== 4 ? matches(it) : hit(it.name);
-      for (const c of children.get(it.id) ?? []) if (it.type === 2 || it.type === 4) any = visit(c) || any;
+      for (const c of children.get(it) ?? []) if (it.type === 2 || it.type === 4) any = visit(c) || any;
       if (any) shown.add(it);
       return any;
     };
-    const root = this.file.items.find((i) => i.type === 1);
-    for (const it of children.get(root ? root.id : -1) ?? []) visit(it);
+    for (const it of children.get(null) ?? []) visit(it);
     return shown;
   }
   /** Selects a trigger (from a gg_trg_ reference elsewhere); `at.path`: also the line in it, and the
@@ -1502,12 +1633,8 @@ class TriggerView {
     if (at?.path && "ecas" in it) this.kinds.all().find((k) => k.matches(it, this.handle))?.reveal?.(it, { path: at.path, ...(at.param ? { param: at.param } : {}) });
     if (this.query) { this.query = ""; this.searchBox.value = ""; }
     if ("ecas" in it && this.mode === "variables") this.mode = "triggers";
-    for (let p = it.parent; ;) {
-      const c = this.file.items.find((x) => (x.type === 4 || x.type === 2) && x.id === p);
-      if (!c) break;
-      this.collapsed.delete(c.id);
-      p = c.parent;
-    }
+    const s = treeStructure(this.file);
+    for (let c = s.parentOf.get(it) ?? null; c; c = s.parentOf.get(c) ?? null) this.collapsed.delete(c.id);
     this.selected = { kind: "item", type: it.type, id: it.id };
     this.area = "tree";
     this.renderTree();
@@ -1558,7 +1685,7 @@ class TriggerView {
       return;
     }
     if (!("ecas" in it)) {
-      const n = this.file.items.filter((i) => i.parent === it.id).length;
+      const n = childrenOf(this.file, it).length;
       this.detail.replaceChildren(h("div.trig-head", {}, name), h("p.muted", {}, `Category · ${n} item${n === 1 ? "" : "s"}`));
       return;
     }

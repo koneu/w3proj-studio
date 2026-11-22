@@ -3,6 +3,7 @@ import { invoke, isAbsolutePath, joinPath, readBytes, readText, writeBytes, writ
 import { fileKey, isWindowsPath, onWindows } from "../lib/paths";
 import { Emitter } from "./dom";
 import { PendingWork } from "../lib/settle";
+import { isTriggerLayoutPath, type ProjectTriggers, type TriggerSave, type TriggersPlan, type TriggersWritten } from "../lib/triggers/project";
 
 /** A file's size and last write (ms) as the backend reports them. */
 /** A file's size and last write (ms); `hash`: of its contents, where asked for (`statHashed`). */
@@ -221,7 +222,7 @@ export class WorkspaceService {
     // Whether a difference is our own write: one that finished during the read always is (the read may
     // have missed it); an earlier one only while the file still has the size and time it was left with.
     const isOwn = (k: string, f?: FileInfo) => {
-      if (this.writing.get(k)) return true;
+      if (this.writing.get(k) || (this.writingTriggers && isTriggerLayoutPath(k))) return true;
       if (!this.ownWrites.has(k)) return false;
       if (!ownBefore.has(k)) return true;
       const stamp = ownBefore.get(k)!.stamp;
@@ -322,27 +323,74 @@ export class WorkspaceService {
       if (left > 0) this.writing.set(at.key, left); else this.writing.delete(at.key);
     }
     if (this.info?.root !== root) return;
-    this.noteOwn(at, stamp ? { size: stamp.size, modified: stamp.modified } : null, size, seq, root);
-    // The files the write went into besides (a split terrain's subterrain files): ours too, not another program's.
+    let listChanged = this.noteOwn(at, stamp ? { size: stamp.size, modified: stamp.modified } : null, size, seq, root);
+    // The files the write went into besides (a split terrain's subterrain files, the trigger layout's files): ours
+    // too, not another program's. One removed has size and time 0.
     for (const a of stamp?.also ?? []) {
       const other = this.keyOf(a.path, root);
-      if (other) this.noteOwn(other, { size: a.size, modified: a.modified }, a.size, seq, root);
+      if (other) listChanged = this.noteOwn(other, { size: a.size, modified: a.modified }, a.size, seq, root) || listChanged;
     }
+    if (listChanged) this.onDidChange.fire();
   }
-  /** Notes a file written by us (`trackedWrite`): its stamp as the write left it, its entry in the list. */
-  private noteOwn(at: { rel: string; key: string }, stamp: Stamp | null, size: number, seq: number, root: string | undefined) {
+  /** Notes a file written (or, with size and time 0, removed) by us (`trackedWrite`): its stamp as the write left it,
+   *  its entry in the list. Whether the list got or lost an entry. */
+  private noteOwn(at: { rel: string; key: string }, stamp: Stamp | null, size: number, seq: number, root: string | undefined): boolean {
     const known = this.ownWrites.get(at.key);
-    if (known && known.seq > seq) return;
+    if (known && known.seq > seq) return false;
+    if (stamp && stamp.size === 0 && stamp.modified === 0) {
+      // Removed: gone from the list, and its absence is ours.
+      this.ownWrites.set(at.key, { stamp: null, seq });
+      if (!this.listed.has(at.key)) return false;
+      this.setList(this.fileList.filter((f) => this.key(f.path, root) !== at.key));
+      return true;
+    }
     this.ownWrites.set(at.key, { stamp, seq });
     const entry: FileInfo = { path: at.rel, size: stamp ? stamp.size : size, modified: stamp ? stamp.modified : Date.now() };
     const i = this.listed.has(at.key) ? this.fileList.findIndex((f) => this.key(f.path, root) === at.key) : -1;
     if (i >= 0) {
       if (stamp) this.fileList[i] = { ...this.fileList[i], size: entry.size, modified: entry.modified };
-    } else {
-      this.setList([...this.fileList, entry].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
-      this.onDidChange.fire();
+      return false;
     }
+    this.setList([...this.fileList, entry].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
+    return true;
   }
+
+  /** The project's trigger tree (`map/triggers/`) in one backend call; null when it has none (lib/triggers/project.ts). */
+  readTriggers(): Promise<ProjectTriggers | null> {
+    if (!this.info) return Promise.reject(new Error("no project is open"));
+    return invoke<ProjectTriggers | null>("triggers_read", { root: this.info.root });
+  }
+  /** What saving a trigger tree would write and remove; nothing is written. */
+  planTriggers(save: TriggerSave): Promise<TriggersPlan> {
+    if (!this.info) return Promise.reject(new Error("no project is open"));
+    return invoke<TriggersPlan>("triggers_plan", { root: this.info.root, save });
+  }
+  /** Saves a trigger tree into `map/triggers/` in one backend call: only the files whose content changed are written
+   *  (and the files of deleted items removed). Every file it touched counts as our own write, not another program's
+   *  change, and is announced (onDidSave) for the editors showing it. `create`: a new map's, where there is none yet. */
+  async writeTriggers(save: TriggerSave, opts: { create?: boolean } = {}): Promise<TriggersWritten> {
+    if (!this.info) throw new Error("no project is open");
+    const root = this.info.root;
+    const seq = ++this.writeSeq;
+    this.writingTriggers++;
+    let w: TriggersWritten & { also: { path: string; size: number; modified: number }[] };
+    try {
+      w = await this.pending.track(invoke<TriggersWritten & { also: { path: string; size: number; modified: number }[] }>("triggers_write", { root, save, create: opts.create === true }));
+    } finally {
+      this.writingTriggers--;
+    }
+    if (this.info?.root !== root) return { written: w.written, deleted: w.deleted, files: w.files, headerFile: w.headerFile };
+    let listChanged = false;
+    for (const a of w.also) {
+      const at = this.keyOf(a.path, root);
+      if (at) listChanged = this.noteOwn(at, { size: a.size, modified: a.modified }, a.size, seq, root) || listChanged;
+    }
+    if (listChanged) this.onDidChange.fire();
+    for (const p of [...w.written, ...w.deleted]) this.onDidSave.fire(p);
+    return { written: w.written, deleted: w.deleted, files: w.files, headerFile: w.headerFile };
+  }
+  /** Trigger saves under way: the layout's files they touch are ours meanwhile. */
+  private writingTriggers = 0;
   private writeSeq = 0;
   /** Own writes under way, per key. */
   private writing = new Map<string, number>();

@@ -7,6 +7,7 @@ import { GameService } from "../workbench/game";
 import { readBytes, writeBytes } from "../workbench/backend";
 import { backendInvoke } from "../workbench/trackedinvoke";
 import { SettingsService, WorkspaceService } from "../workbench/workspace";
+import type { TriggerSave } from "../lib/triggers/project";
 
 const none: Disposable = { dispose() {} };
 
@@ -137,6 +138,9 @@ export function headless(manifests: ExtensionManifest[], fixed: Record<string, u
       copyMany: (pairs: [string, string][]) => workspace.copyMany(pairs),
       deleteMany: (paths: string[]) => workspace.deleteMany(paths),
       listFolder: (path: string) => workspace.listFolder(path),
+      readTriggers: () => workspace.readTriggers(),
+      writeTriggers: (save: TriggerSave, opts?: { create?: boolean }) => workspace.writeTriggers(save, opts),
+      planTriggers: (save: TriggerSave) => workspace.planTriggers(save),
     },
     settings,
     keybindings: { ...absent<object>("keybindings"), labelFor: () => undefined, label: (k: string) => k, onDidChange: () => none },

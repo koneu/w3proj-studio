@@ -495,23 +495,6 @@ pub fn write(f: &TriggerFile) -> Vec<u8> {
     w.out
 }
 
-/// The one-file JSON form (`war3map.wtg.json`, the layout before `map/triggers/`) → binary: only for
-/// packing projects that still have it (`codec::TriggersJson`).
-pub fn from_json(json: &[u8]) -> Result<Vec<u8>> {
-    let f: TriggerFile = serde_json::from_slice(json).map_err(|e| err(e.to_string()))?;
-    for it in &f.items {
-        let ok = match it {
-            Item::Category(c) => matches!(c.ty, 1 | 2 | 4),
-            Item::Trigger(t) => matches!(t.ty, 8 | 16 | 32),
-            Item::Element(e) => e.ty == 64,
-        };
-        if !ok {
-            return Err(err("an item's type doesn't match its fields"));
-        }
-    }
-    Ok(write(&f))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

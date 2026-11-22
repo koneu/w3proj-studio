@@ -27,7 +27,7 @@ import { parseModel } from "./model/mdl";
 import { parseMdx, renameTextures } from "./model/mdx";
 import { parseW3e } from "./terrain/w3e";
 import { parseTriggerData } from "./triggers/triggerdata";
-import { parseWct, parseWctText, parseWtg, writeWtg } from "./triggers/wtg";
+import { parseWct, parseWtg, writeWtg } from "./triggers/wtg";
 import { waitUntil } from "./testhelpers/testutil";
 
 /**
@@ -78,7 +78,6 @@ const TARGETS: Record<string, (b: Uint8Array) => unknown> = {
   wai(b) { parseWai(b, () => 1); },
   wtg(b) { parseWtg(b, triggers); },
   wct(b) { parseWct(b, 4); },
-  wctText(b) { parseWctText(latin1(b)); },
   sound(b) { soundDurationMs(b); },
   jass(b) {
     const s = latin1(b);
@@ -91,7 +90,7 @@ const TARGETS: Record<string, (b: Uint8Array) => unknown> = {
   triggerData(b) { parseTriggerData(latin1(b)); },
 };
 
-const TEXT = new Set(["mdl", "lightText","wctText", "jass", "lua", "slk", "ini", "triggerData"]);
+const TEXT = new Set(["mdl", "lightText", "jass", "lua", "slk", "ini", "triggerData"]);
 
 /** Which targets a real file seeds, by its name. */
 function targetsOf(name: string): string[] {
@@ -147,7 +146,6 @@ function madeUpSeeds(): Seed[] {
   const wct = new Uint8Array(64);
   wct.set([4, 0, 0, 0x80, 1, 0, 0, 0], 0);
   add("wct", "empty", wct);
-  add("wctText", "script", text("function f takes nothing returns nothing\nendfunction\n"));
   const wai = new Uint8Array(512);
   wai.set([2, 0, 0, 0, 120, 0], 0);
   add("wai", "empty", wai);

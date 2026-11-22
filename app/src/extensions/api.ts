@@ -1,6 +1,8 @@
 // The public extension API. Built-in and user extensions get the same object;
 // nothing else in the workbench is reachable from an extension.
 
+import type { ProjectTriggers, TriggerSave, TriggersPlan, TriggersWritten } from "../lib/triggers/project";
+
 export interface Disposable {
   dispose(): void;
 }
@@ -184,8 +186,9 @@ export interface EditorInstance {
    *  takes the change in place, keeping what it has loaded. False: opened again, which is slow.
    *  `path`: the project path in lower case (on any system), to compare with lower-cased names. */
   reloadFile?(path: string): Promise<boolean>;
-  /** True for a watched file whose reloadFile is safe with unsaved changes (it only redraws, e.g. imported art): then
-   *  it's called even while the editor has unsaved changes, which stay as they are. */
+  /** True for a watched file whose reloadFile is safe with unsaved changes (it only redraws, e.g. imported art, or
+   *  merges the change with them, as the Trigger Editor does with the trigger folders' files): then it's called even
+   *  while the editor has unsaved changes, which stay. */
   reloadsWithEdits?(path: string): boolean;
   /** Other project files the editor shows (e.g. "map/war3map.wts" for TRIGSTR texts): when
    *  something else saves one, the editor is opened again if it has no unsaved changes. (Its own
@@ -404,6 +407,13 @@ export interface W3Api {
     exists(path: string): Promise<boolean>;
     /** A project file was written through the workspace (path as written, forward slashes). */
     onDidSave(listener: (path: string) => void): Disposable;
+    /** The project's trigger tree (`map/triggers/`, one file per trigger) in one call, as the Trigger Editor holds it;
+     *  null when the project has none (lib/triggers/project.ts). */
+    readTriggers(): Promise<ProjectTriggers | null>;
+    /** Saves a trigger tree into `map/triggers/` in one call: only files whose content changed are written. */
+    writeTriggers(save: TriggerSave, opts?: { create?: boolean }): Promise<TriggersWritten>;
+    /** What `writeTriggers` would write and remove; nothing is written. */
+    planTriggers(save: TriggerSave): Promise<TriggersPlan>;
   };
   settings: Settings;
   /** Keys of commands: the defaults and the user's keybindings.json. */

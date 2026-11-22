@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::format::{self, FormatCodec};
 use crate::triggerdata::TriggerData;
-use crate::{objdata, w3e, wct, wtg, Error, Result};
+use crate::{objdata, w3e, Result};
 
 pub trait Codec: Send + Sync {
     /// Stable identifier, e.g. `objdata-json`.
@@ -30,8 +30,8 @@ pub trait Codec: Send + Sync {
     fn as_format(&self) -> Option<&FormatCodec> {
         None
     }
-    /// Whether unpack uses it. A codec that only packs reads project files of an older layout (`TriggersJson`,
-    /// `CustomTextCodec`), which unpack no longer writes.
+    /// Whether unpack uses it (a codec that only packs reads project files of an older layout, which unpack no longer
+    /// writes).
     fn unpacks(&self) -> bool {
         true
     }
@@ -54,32 +54,6 @@ impl Codec for ObjectDataJson {
     }
     fn encode(&self, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
         objdata::from_json(bytes, objdata::kind(name).unwrap_or(false))
-    }
-}
-
-/// Custom script texts as one text file (`war3map.wct.txt`, see `wct`): the layout before `map/triggers/`
-/// (`crate::trigger_layout`). Pack only: unpack writes the folders, and this stays until the app reads them (its
-/// trigger editor and test projects still have the old files).
-pub struct CustomTextCodec;
-
-impl Codec for CustomTextCodec {
-    fn id(&self) -> &'static str {
-        "wct-text"
-    }
-    fn suffix(&self) -> &'static str {
-        ".txt"
-    }
-    fn matches(&self, name: &str) -> bool {
-        name.eq_ignore_ascii_case("war3map.wct")
-    }
-    fn decode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
-        wct::to_text(bytes)
-    }
-    fn encode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
-        wct::from_text(bytes)
-    }
-    fn unpacks(&self) -> bool {
-        false
     }
 }
 
@@ -107,31 +81,6 @@ impl Codec for TerrainText {
 /// Where the GUI trigger codec gets the game's TriggerData.txt (asked on the first decode).
 pub type TriggerDataSource = Arc<dyn Fn() -> Option<Arc<TriggerData>> + Send + Sync>;
 
-/// GUI triggers as one JSON file (`war3map.wtg.json`, see `wtg`): the layout before `map/triggers/`
-/// (`crate::trigger_layout`). Pack only, as `CustomTextCodec`.
-pub struct TriggersJson;
-
-impl Codec for TriggersJson {
-    fn id(&self) -> &'static str {
-        "wtg-json"
-    }
-    fn suffix(&self) -> &'static str {
-        ".json"
-    }
-    fn matches(&self, name: &str) -> bool {
-        name.eq_ignore_ascii_case("war3map.wtg")
-    }
-    fn decode(&self, _: &str, _: &[u8]) -> Result<Vec<u8>> {
-        Err(Error::Format(format!("war3map.wtg: unpack writes map/{}/, not war3map.wtg.json", crate::trigger_layout::DIR)))
-    }
-    fn encode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
-        wtg::from_json(bytes)
-    }
-    fn unpacks(&self) -> bool {
-        false
-    }
-}
-
 pub struct Registry {
     codecs: Vec<Box<dyn Codec>>,
     /// Where the trigger layout gets the game's TriggerData.txt (asked on the first split).
@@ -149,7 +98,7 @@ impl Default for Registry {
 impl Registry {
     /// Built-ins plus definitions from override folders (later folders win).
     pub fn with_formats(override_dirs: &[PathBuf]) -> Result<Self> {
-        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(CustomTextCodec), Box::new(TerrainText), Box::new(TriggersJson)];
+        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(TerrainText)];
         for def in format::load_definitions(override_dirs)? {
             codecs.push(Box::new(FormatCodec::new(def)));
         }

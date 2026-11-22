@@ -22,15 +22,17 @@ import { heightAt, parseW3e, writeW3e } from "../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../lib/terrain/w3etext";
 import { missingRefs, triggerRefs } from "../lib/triggers/refs";
 import { parseTriggerData } from "../lib/triggers/triggerdata";
-import { parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, writeWct, writeWctFile, writeWctText, writeWtg, writeWtgFile, writeWtgJson, wtgPath } from "../lib/triggers/wtg";
+import { parseWct, parseWtg, writeWct, writeWtg } from "../lib/triggers/wtg";
+import { readTriggerFiles, writeTriggerFiles, wtgPath } from "../lib/triggers/project";
 
 export const version = 1;
 
 export const formats = { parseIni, parseSlk, westring, readIni, setIniValue, StringTable, decodeLossless, encodeLossless, toArchiveName, toProjectPath };
 export const terrain = { parseW3e, writeW3e, heightAt, terrainPath, readTerrainBytes, writeTerrainBytes };
 export const triggers = {
-  parseTriggerData, parseWtg, writeWtg, parseWtgJson, writeWtgJson, readWtgFile, writeWtgFile, wtgPath,
-  parseWct, writeWct, parseWctText, writeWctText, readWctFile, writeWctFile, triggerRefs, missingRefs,
+  // The project's triggers in either form (map/triggers/ through w3.workspace.readTriggers, or raw files).
+  parseTriggerData, parseWtg, writeWtg, readTriggerFiles, writeTriggerFiles, wtgPath,
+  parseWct, writeWct, triggerRefs, missingRefs,
 };
 export const objects = { loadKind };
 export const image = { decodeImage, encodeBlp1Jpeg };

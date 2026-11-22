@@ -16,7 +16,8 @@ import type { W3Api } from "../../extensions/api";
 import { readIni } from "../formats/iniedit";
 import { parseSlk } from "../formats/text";
 import { hasCustomTriggers, isDefaultTriggers, NotDefaultFunction, parseWtgWithoutArgs } from "../triggers/defaults";
-import { parseWtgJson, wtgPath } from "../triggers/wtg";
+import type { TriggerFile } from "../triggers/wtg";
+import { TRIGGERS_ROOT, wtgPath, type ProjectTriggers } from "../triggers/project";
 import { meleeBlockers, MELEE_MAP, hasCustomConstants, type MeleeInfo } from "./owner";
 import { decodeImage, type Mip } from "../image/index.ts";
 import { generatePathing, NO_BUILD, NO_WALK, type PathingStamp, type TileRule } from "./pathing";
@@ -307,6 +308,8 @@ export interface MeleeFiles {
   files(): readonly { path: string }[];
   readText(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
+  /** The trigger tree of `map/triggers/` (the workspace's readTriggers); without it such triggers count as unknown. */
+  readTriggers?(): Promise<ProjectTriggers | null>;
   gameText?(path: string): Promise<string>;
   gameBytes?(path: string): Promise<Uint8Array>;
   /** readTypeVersions of gameText, kept between calls (meleeFiles keeps it per game). */
@@ -323,6 +326,7 @@ export function meleeFiles(w3: Pick<W3Api, "workspace" | "game">): MeleeFiles {
     files: () => w3.workspace.files(),
     readText: (p) => w3.workspace.readText(p),
     readBytes: (p) => w3.workspace.readBytes(p),
+    readTriggers: () => w3.workspace.readTriggers(),
     gameText: (p) => w3.game.readText(p),
     gameBytes: (p) => w3.game.read(p, { shared: true }),
     typeVersions: () => {
@@ -469,11 +473,16 @@ async function readGround(ws: MeleeFiles, files: readonly string[]): Promise<Ter
 /** The project's trigger file, parsed (null when there is none or it can't be read), whether that is known: no file,
  *  or one that was read, and whether it holds custom triggers (hasCustomTriggers; also a raw war3map.wtg read up to a
  *  function the default trigger doesn't use, which can't be parsed further without the game's TriggerData). */
-async function readTriggers(ws: MeleeFiles, files: readonly string[]): Promise<{ triggers: ReturnType<typeof parseWtgJson> | null; known: boolean; custom: boolean }> {
+async function readTriggers(ws: MeleeFiles, files: readonly string[]): Promise<{ triggers: TriggerFile | null; known: boolean; custom: boolean }> {
   const wtg = wtgPath(files.map((path) => ({ path })));
   if (!wtg) return { triggers: null, known: true, custom: false };
   try {
-    const triggers = wtg.toLowerCase().endsWith(".json") ? parseWtgJson(await ws.readText(wtg)) : parseWtgWithoutArgs(await ws.readBytes(wtg));
+    let triggers: TriggerFile;
+    if (wtg === TRIGGERS_ROOT) {
+      const layout = ws.readTriggers ? await ws.readTriggers() : null;
+      if (!layout) return { triggers: null, known: false, custom: false };
+      triggers = layout.file;
+    } else triggers = parseWtgWithoutArgs(await ws.readBytes(wtg));
     return { triggers, known: true, custom: hasCustomTriggers(triggers) };
   } catch (e) {
     if (e instanceof NotDefaultFunction) return { triggers: null, known: true, custom: true };

@@ -146,8 +146,8 @@ export interface MoveTextsInput {
   describe?(kind: string, field: string): { field: string; label: string } | undefined;
   /** A game object's name, for a comment on an object that doesn't name itself. */
   baseName?(kind: string, base: string): string | undefined;
-  /** war3map.wtg.json as its trigger file, with the game's TriggerData.txt for the parameters' types: its StringExt
-   *  literals move. */
+  /** The triggers (the tree of map/triggers/, `path` naming it), with the game's TriggerData.txt for the parameters'
+   *  types: its StringExt literals move. */
   triggers?: { path: string; doc: TriggerFile; data: Pick<TriggerData, "find"> } | null;
 }
 

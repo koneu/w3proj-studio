@@ -60,7 +60,7 @@ export function defaultWct(): Uint8Array {
   return new Writer().u32(MARKER).u32(1).str(WCT_COMMENT).u32(0).u32(0).done();
 }
 
-/** The default trigger file as the project keeps it (war3map.wtg.json). Its functions take no
+/** The default trigger file as the app holds it (written into map/triggers/ by a new map). Its functions take no
  *  arguments, so it is read without the game's TriggerData. */
 export function defaultTriggerFile(root?: string): TriggerFile {
   return parseWtgWithoutArgs(defaultWtg(root));

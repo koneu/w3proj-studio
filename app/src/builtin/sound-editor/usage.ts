@@ -5,12 +5,13 @@ import type { W3Api } from "../../extensions/api";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { readWctFile, readWtgFile, textTriggers, wtgPath } from "../../lib/triggers/wtg";
+import { textTriggers } from "../../lib/triggers/wtg";
+import { readTriggerFiles, wtgPath } from "../../lib/triggers/project";
 import { describeUse, soundUsages, unusedSounds, type SoundUsageInput } from "./sounds";
 
 const SOUNDS_FILE = /^map\/war3map\.w3s(\.json)?$/i;
-/** Saved files the scan reads: unsaved edits of these aren't seen by it. */
-const READ_FILES = /^map\/war3map\.(wtg(\.json)?|wct(\.txt)?|w3r(\.json)?|j|lua)$/i;
+/** Saved files the scan reads (the Trigger Editor's document is map/triggers): unsaved edits of these aren't seen by it. */
+const READ_FILES = /^map\/(war3map\.(wtg|wct|w3r(\.json)?|j|lua)|triggers(\/.*)?)$/i;
 
 /** Open documents with unsaved changes that the scan would miss. */
 export function unsavedInputs(w3: W3Api): string[] {
@@ -24,10 +25,9 @@ export function unsavedInputs(w3: W3Api): string[] {
 export async function readSoundUsageInput(w3: W3Api): Promise<SoundUsageInput> {
   const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
   const path = wtgPath(w3.workspace.files());
-  const triggers = path
-    ? await readWtgFile(w3.workspace, path, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")))
-    : null;
-  const custom = await readWctFile(w3.workspace, triggers ? textTriggers(triggers).length : 0);
+  const read = path ? await readTriggerFiles(w3.workspace, path, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"))) : null;
+  const triggers = read?.file ?? null;
+  const custom = read?.custom ?? null;
   const scripts: NonNullable<SoundUsageInput["scripts"]> = [];
   if (custom) {
     scripts.push({ where: "Custom script header", text: custom.header });

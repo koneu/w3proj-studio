@@ -27,6 +27,8 @@ function project(initial: Record<string, string>) {
       readText: async (p: string) => { const t = files.get(p); if (t === undefined) throw new Error("x (os error 2)"); return t; },
       readBytes: async (p: string) => new TextEncoder().encode(files.get(p) ?? ""),
       writeText: async (p: string, t: string) => { writes.push(p); files.set(p, t); },
+      // No trigger folders in these projects.
+      readTriggers: async () => null,
     },
     commands: { execute: async () => {} },
     game: { readText: async () => { throw new Error("no game"); } },

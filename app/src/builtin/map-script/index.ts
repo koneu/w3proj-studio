@@ -31,7 +31,8 @@ import { MELEE_MAP, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeFiles, savedMelee } from "../../lib/terrain/meleesave";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
+import { parseWct, parseWtg, textTriggers, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
+import { WCT_RAW, WTG_RAW } from "../../lib/triggers/project";
 
 /** Hash of the script this app wrote last: a script that still has it holds nothing but what the
  *  map's triggers made, so it's replaced without looking (see lib/script/guard). */
@@ -46,7 +47,7 @@ const INFO_JSON = "map/war3map.w3i.json";
  *  also put it back. The object data and the game interface (meleesave's CUSTOM_DATA, also as skin files) take it off
  *  and decide flag 0x4000 with the placed objects. Looked at after every save, whatever script.generateOnSave says and
  *  whatever the script's language. */
-const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapSkin\.txt|war3mapUnits\.doo(\.json)?|war3map\.doo(\.json)?|war3map\.wtg(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?|war3map(Skin)?\.(w3u|w3t|w3b|w3d|w3a|w3h|w3q)(\.json)?)$/i;
+const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapSkin\.txt|war3mapUnits\.doo(\.json)?|war3map\.doo(\.json)?|war3map\.wtg|triggers\/.+|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?|war3map(Skin)?\.(w3u|w3t|w3b|w3d|w3a|w3h|w3q)(\.json)?)$/i;
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
@@ -184,12 +185,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await followMelee(info as { flags?: unknown }, look, root);
     const g = await gameTables();
 
-    // Either form, read directly (the file list may lag behind a fresh save).
-    // A broken file fails the generation; only a missing one means no triggers.
-    const wtgJson = await w3.workspace.readText(WTG_JSON).catch(() => null);
-    const wtg = wtgJson === null ? await bytes(WTG_RAW) : null;
-    const triggers = held ? held.triggers : wtgJson !== null ? parseWtgJson(wtgJson) : wtg ? parseWtg(wtg, g.data) : undefined;
-    const custom = held ? held.custom : triggers ? await readWctFile(w3.workspace, textTriggers(triggers).length) : null;
+    // Either form, read directly (the file list may lag behind a fresh save): map/triggers/ in one read, else a raw
+    // war3map.wtg and war3map.wct. A broken one fails the generation; only a missing one means no triggers.
+    let triggers: TriggerFile | undefined, custom: CustomTextFile | null = null;
+    if (held) ({ triggers, custom } = held);
+    else {
+      const layout = await w3.workspace.readTriggers();
+      if (layout) ({ file: triggers, custom } = layout);
+      else {
+        const wtg = await bytes(WTG_RAW);
+        triggers = wtg ? parseWtg(wtg, g.data) : undefined;
+        const wct = triggers ? await bytes(WCT_RAW) : null;
+        custom = triggers && wct ? parseWct(wct, textTriggers(triggers).length) : null;
+      }
+    }
     // A language extension compiles maps written in it (JASS maps only); vJASS without one isn't
     // regenerated (the uncompiled text would break the map).
     const textList = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")];

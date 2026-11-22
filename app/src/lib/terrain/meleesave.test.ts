@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
-import { writeWtg, writeWtgJson } from "../triggers/wtg";
+import { writeWtg, type TriggerFile } from "../triggers/wtg";
+import { TRIGGERS_ROOT } from "../triggers/project";
 import { MINE_CLEARANCE, meleeAfterSave, meleeSetBlockers, newStartPlaces, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsUnderWater, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
 import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
@@ -17,7 +18,8 @@ function lake(rows: string[]): Terrain {
   return { version: 11, tileset: "L", customTilesets: false, groundTiles: ["Ldrt"], cliffTiles: ["CLdi"], width, height, offsetX: 0, offsetY: 0, corners, trailer: new Uint8Array(0) } as unknown as Terrain;
 }
 
-/** A project's files: path → text, or an Error for a file that is there but can't be read. */
+/** A project's files: path → text, or an Error for a file that is there but can't be read. The trigger folders stand
+ *  as one entry, map/triggers/triggers.json, holding the TriggerFile the backend's read would give (as JSON). */
 function files(map: Record<string, string | Uint8Array | Error>): MeleeFiles & { reads: string[] } {
   const reads: string[] = [];
   const get = (p: string) => {
@@ -32,6 +34,12 @@ function files(map: Record<string, string | Uint8Array | Error>): MeleeFiles & {
     files: () => Object.keys(map).map((path) => ({ path })),
     readText: (p) => get(p).then((v) => (typeof v === "string" ? v : new TextDecoder().decode(v))),
     readBytes: (p) => get(p).then((v) => (typeof v === "string" ? new TextEncoder().encode(v) : v)),
+    readTriggers: async () => {
+      if (!(TRIGGERS_ROOT in map)) return null;
+      const text = await get(TRIGGERS_ROOT).then((v) => (typeof v === "string" ? v : new TextDecoder().decode(v)));
+      const file = JSON.parse(text) as TriggerFile;
+      return { file, custom: { reforged: file.reforged, version: 1, comment: "", header: null, texts: [] }, files: [], headerFile: null, stored: {}, language: "jass", script: "kept", warnings: [] };
+    },
   };
 }
 
@@ -87,13 +95,13 @@ test("the facts come from the project; missing and unreadable files set nothing"
   const two = defaultTriggerFile("x");
   two.items.push({ ...structuredClone(two.items.find((i) => i.type === 8)!), name: "Second", id: 0x03000001 } as never);
   const keptWith = async (own: Record<string, string | Uint8Array | Error>) => (await savedMelee(files(own), { flags: MELEE }, [], null)).flags;
-  assert.equal(await keptWith({ "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")) }), MELEE, "control: the default triggers");
-  assert.equal(await keptWith({ "map/war3map.wtg.json": writeWtgJson(two) }), OFF, "a second trigger");
-  assert.equal(await keptWith({ "map/war3map.wtg.json": new Error("EACCES") }), MELEE, "triggers unreadable");
+  assert.equal(await keptWith({ "map/triggers/triggers.json": JSON.stringify(defaultTriggerFile("x")) }), MELEE, "control: the default triggers");
+  assert.equal(await keptWith({ "map/triggers/triggers.json": JSON.stringify(two) }), OFF, "a second trigger");
+  assert.equal(await keptWith({ "map/triggers/triggers.json": new Error("EACCES") }), MELEE, "triggers unreadable");
   assert.equal(await keptWith({}), MELEE, "no trigger file");
   const broken = await readMeleeFacts(files({ "map/war3mapMisc.txt": new Error("EACCES"), "map/war3map.w3e": new Uint8Array([1, 2, 3]) }));
   assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, doodads: [], triggersKnown: true }, "unreadable: not known, so the flag stays");
-  assert.equal((await readMeleeFacts(files({ "map/war3map.wtg.json": new Error("EACCES") }))).triggersKnown, undefined, "triggers unreadable: not known");
+  assert.equal((await readMeleeFacts(files({ "map/triggers/triggers.json": new Error("EACCES") }))).triggersKnown, undefined, "triggers unreadable: not known");
   // The doodads, for their drops (flag 0x4000): a missing file is none, one that is there but can't be read isn't known.
   assert.deepEqual((await readMeleeFacts(files({ "map/war3map.doo.json": '{"doodads":[{"id":"LTcr"}]}' }))).doodads, [{ id: "LTcr" }]);
   assert.equal((await readMeleeFacts(files({ "map/war3map.doo.json": new Error("EACCES") }))).doodads, null, "unreadable");
@@ -150,7 +158,7 @@ const FLAT_17 = (() => {
   return t;
 })();
 const FLAT_17_W3E = writeW3e(FLAT_17);
-const DEFAULT_WTG_JSON = writeWtgJson(defaultTriggerFile("x"));
+const DEFAULT_WTG_JSON = JSON.stringify(defaultTriggerFile("x"));
 function flat(size = 17, edit?: (c: Corner, x: number, y: number) => void): Terrain {
   const t = size === 17
     ? { ...FLAT_17, corners: FLAT_17.corners.map((c) => ({ ...c })) }
@@ -266,19 +274,19 @@ test("the facts for putting the flag back come from the project; unreadable ones
   const units = [startMid];
   const doo = (list: { id?: string; position: number[] }[], specials: object[] = []) => JSON.stringify({ doodads: list, specials });
   const project = (own: Record<string, string | Uint8Array | Error> = {}) => ({
-    ...files({ "map/war3map.w3e": FLAT_17_W3E, "map/war3map.wtg.json": DEFAULT_WTG_JSON, "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 600, MID, 0] }]), ...own }),
+    ...files({ "map/war3map.w3e": FLAT_17_W3E, "map/triggers/triggers.json": DEFAULT_WTG_JSON, "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 600, MID, 0] }]), ...own }),
     gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; },
     gameBytes,
   });
   const flags = async (ws: MeleeFiles) => (await savedMelee(ws, { flags: OFF }, units)).flags;
   assert.equal(await flags(project()), MELEE, "everything known and met");
-  assert.equal(await flags(project({ "map/war3map.wtg.json": "", "map/war3map.wtg": defaultWtg("x") })), OFF, "an empty trigger JSON wins over the raw file");
+  assert.equal(await flags(project({ "map/triggers/triggers.json": "", "map/war3map.wtg": defaultWtg("x") })), OFF, "an empty trigger JSON wins over the raw file");
   const rawOnly = { ...files({ "map/war3map.w3e": FLAT_17_W3E, "map/war3map.wtg": defaultWtg("x"), "map/war3map.doo.json": doo([]) }), gameText: async (p: string) => GAME[p], gameBytes };
   assert.equal(await flags(rawOnly), MELEE, "a raw default war3map.wtg");
   const renamed = defaultTriggerFile("x");
   renamed.items.find((i) => i.type === 8)!.name = "Mine";
-  assert.equal(await flags(project({ "map/war3map.wtg.json": writeWtgJson(renamed) })), OFF, "custom triggers");
-  assert.equal(await flags(project({ "map/war3map.wtg.json": new Error("EACCES") })), OFF, "triggers unreadable");
+  assert.equal(await flags(project({ "map/triggers/triggers.json": JSON.stringify(renamed) })), OFF, "custom triggers");
+  assert.equal(await flags(project({ "map/triggers/triggers.json": new Error("EACCES") })), OFF, "triggers unreadable");
   assert.equal(await flags(project({ "map/war3map.w3u.json": JSON.stringify({ custom: [{ id: "h000" }] }) })), OFF, "custom unit data");
   assert.equal(await flags(project({ "map/war3mapSkin.txt": "[Misc]\r\nFoo=1\r\n" })), OFF, "a custom game interface");
   assert.equal(await flags(project({ "map/war3mapMisc.txt": new Error("EACCES") })), OFF, "gameplay constants unreadable");
@@ -307,13 +315,13 @@ test("the facts for putting the flag back come from the project; unreadable ones
   // A map that is melee reads what taking it off needs: the ground, the triggers and what stands round the starts.
   const on = project();
   await savedMelee(on, { flags: MELEE }, units);
-  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.doo.json", "map/war3map.wtg.json"]);
+  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.doo.json", "map/triggers/triggers.json"]);
   // Custom triggers take it off anyway: the doodads are read once, for their drops (flag 0x4000), and what stands round
   // the starts isn't worked out (the texture isn't asked for).
-  const custom = project({ "map/war3map.wtg.json": writeWtgJson(renamed) });
+  const custom = project({ "map/triggers/triggers.json": JSON.stringify(renamed) });
   let textures = 0;
   await savedMelee({ ...custom, gameBytes: async () => { textures++; throw new Error("EIO"); } }, { flags: MELEE }, units);
-  assert.deepEqual(custom.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.doo.json", "map/war3map.wtg.json"]);
+  assert.deepEqual(custom.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.doo.json", "map/triggers/triggers.json"]);
   assert.equal(textures, 0);
 });
 
@@ -358,7 +366,7 @@ test("doodads and destructables without a pathing texture (flowers) near a start
   // Doodads.slk: a flower (no pathing) and a rock (pathing); DestructableData.slk: a cage (empty) and a tree (pathing).
   const near = (id: string) => ({ id, position: [MID + 150, MID, 0] });
   const flags = async (doodads: object[], tables = GAME) => (await savedMelee({
-    ...files({ "map/war3map.w3e": writeW3e(flat()), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads, specials: [] }) }),
+    ...files({ "map/war3map.w3e": writeW3e(flat()), "map/triggers/triggers.json": JSON.stringify(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads, specials: [] }) }),
     gameText: async (p: string) => { if (!(p in tables)) throw new Error(p); return tables[p]; },
     gameBytes,
   }, { flags: OFF }, [startMid])).flags;
@@ -381,7 +389,7 @@ test("with the custom tilesets flag 0 the start's ground is buildable by the til
     t.groundTiles = ["Lrok", "Ldrt"];
     t.customTilesetsRaw = custom;
     t.customTilesets = custom !== 0;
-    const ws = { ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) }),
+    const ws = { ...files({ "map/war3map.w3e": writeW3e(t), "map/triggers/triggers.json": JSON.stringify(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) }),
       gameText: async (p: string) => GAME[p] };
     return (await savedMelee(ws, { flags: OFF }, [startMid])).flags;
   };
@@ -399,7 +407,7 @@ test("custom object data and interface files count only when they change somethi
     empty.push([`map/war3mapSkin.${ext}.json`, JSON.stringify({ format: "w3proj.objects/1", version: 2, original: [], custom: [] })], [`map/war3mapSkin.${ext}`, header(0, 0)]);
   }
   empty.push(["map/war3map.w3u.json", "{}"], ["map/war3mapSkin.txt", ""], ["map/war3mapSkin.txt", "// nothing\r\n[Misc]\r\n"]);
-  const base = { "map/war3map.w3e": FLAT_17_W3E, "map/war3map.wtg.json": DEFAULT_WTG_JSON, "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) };
+  const base = { "map/war3map.w3e": FLAT_17_W3E, "map/triggers/triggers.json": DEFAULT_WTG_JSON, "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) };
   const project = (own: Record<string, string | Uint8Array | Error>) => ({ ...files({ ...base, ...own }), gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; } });
   const units = [startMid];
   const putBack = async (own: Record<string, string | Uint8Array | Error>) => (await savedMelee(project(own), { flags: OFF }, units)).flags;

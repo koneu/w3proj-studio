@@ -1,0 +1,23 @@
+{
+  "type": 8,
+  "name": "Foo Branch",
+  "description": "",
+  "isComment": 0,
+  "enabled": true,
+  "initiallyOff": false,
+  "runOnInit": true,
+  "ecas": [
+    {"kind":0,"name":"FooTimerEvent","enabled":true,"params":[{"type":0,"value":"5"}],"children":[]},
+    {
+      "kind": 2,
+      "name": "IfThenElseMultiple",
+      "enabled": true,
+      "params": [],
+      "children": [
+        {"kind":1,"group":0,"name":"IsFooReady","enabled":true,"params":[{"type":0,"value":"1"},{"type":0,"value":"2"}],"children":[]},
+        {"kind":2,"group":1,"name":"DoFooThing","enabled":true,"params":[{"type":3,"value":"\"yes\""},{"type":0,"value":"2.5"}],"children":[]},
+        {"kind":2,"group":2,"name":"LogFoo","enabled":true,"params":[{"type":1,"value":"fooList","index":{"type":1,"value":"fooCount"}}],"children":[]}
+      ]
+    }
+  ]
+}

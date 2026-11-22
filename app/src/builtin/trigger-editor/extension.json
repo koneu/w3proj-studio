@@ -2,7 +2,7 @@
   "id": "w3.triggerEditor",
   "name": "Trigger Editor",
   "version": "0.2.0",
-  "description": "GUI triggers (war3map.wtg) and custom script (war3map.wct): the tree of categories, triggers and variables, names, flags, comments, undo and saving. What a trigger contains is shown by trigger kinds from other extensions (service w3.triggers).",
+  "description": "GUI triggers and custom script (the trigger folders map/triggers/, or a raw war3map.wtg and war3map.wct): the tree of categories, triggers and variables, names, flags, comments, undo and saving. What a trigger contains is shown by trigger kinds from other extensions (service w3.triggers).",
   "activationEvents": ["onStartup"],
   "contributes": {
     "mcpTools": [
@@ -28,7 +28,7 @@
     ],
     "viewContainers": [{ "id": "triggers", "title": "Triggers", "icon": "ϟ", "order": 5 }],
     "views": [{ "id": "w3.triggers.overview", "title": "Triggers", "container": "triggers" }],
-    "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "graphicsMode": "reopen", "patterns": ["war3map.wtg", "war3map.wtg.json"] }],
+    "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "graphicsMode": "reopen", "patterns": ["war3map.wtg", "map/triggers"] }],
     "commands": [
       { "id": "w3.triggers.export", "when": "project", "title": "Export Triggers…", "category": "Triggers" },
       { "id": "w3.triggers.import", "when": "project", "title": "Import Triggers…", "category": "Triggers" },

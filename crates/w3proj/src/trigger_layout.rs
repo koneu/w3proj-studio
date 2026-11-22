@@ -407,7 +407,7 @@ pub fn from_binary(tf: &TriggerFile, w: &Wct) -> Result<Tree> {
 
 impl Tree {
     /// The variable table in tree order: variables in the order of their nodes, then those without one as listed.
-    fn tree_order(&self) -> Vec<String> {
+    pub fn tree_order(&self) -> Vec<String> {
         let mut out: Vec<String> = self.nodes.iter().filter_map(|n| if let Kind::Var { name } = &n.kind { Some(name.clone()) } else { None }).collect();
         let placed: HashSet<&str> = out.iter().map(String::as_str).collect();
         let rest: Vec<String> = self.vars.iter().filter(|v| !placed.contains(v.v.name.as_str())).map(|v| v.v.name.clone()).collect();
@@ -416,7 +416,7 @@ impl Tree {
     }
 
     /// The language its files are in (a `.lua` header or script file: Lua), for writing them again.
-    fn lang_hint(&self) -> Lang {
+    pub fn lang_hint(&self) -> Lang {
         let files = self.header_file.iter().chain(self.nodes.iter().filter_map(|n| n.file.as_ref()));
         for f in files {
             if Lang::of_file(f) == Some(Lang::Lua) {

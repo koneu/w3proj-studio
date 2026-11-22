@@ -1,7 +1,7 @@
 // Move Texts to String Table (w3.strings.moveToTable): lib/formats/movetexts.ts on the open project, as one undoable edit
 // (the MCP edit log, like Adjust Map String IDs): refused while anything is unsaved, every file read again inside the
-// edit, undone in one step. The triggers (war3map.wtg.json) take part with the game's TriggerData.txt, and only when the
-// file is laid out as Studio writes it (writeWtgJson), so the moved texts are all that changes in it.
+// edit, undone in one step. The triggers (map/triggers/) take part with the game's TriggerData.txt; only the files of
+// the items whose texts moved are written (the backend's plan), so the moved texts are all that changes.
 
 import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -10,7 +10,8 @@ import { readPrunedStrings, recordPrunedStrings } from "../../lib/formats/pruned
 import { LOCALE_WTS, moveTexts, OBJECT_KINDS, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { parseWtgJson, writeWtgJson, WTG_JSON, WTG_RAW, type TriggerFile } from "../../lib/triggers/wtg";
+import type { TriggerFile } from "../../lib/triggers/wtg";
+import { isTriggerLayoutPath, TRIGGERS_ROOT, WTG_RAW, type ProjectTriggers } from "../../lib/triggers/project";
 
 /** What reading a string table (war3map.wts, or `path`) failing says: a file that isn't UTF-8 text gets a plain
  *  sentence, anything else stays. */
@@ -83,19 +84,21 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     }
     // The triggers: only with the game's parameter types, and only a file the codec's writer gives back as it is (so
     // nothing but the moved texts changes in it).
+    // The trigger folders (map/triggers/) are read in one call; saved, only the files of the items whose texts moved
+    // change (the backend's plan writes no file whose content stays).
     let triggers: { path: string; doc: TriggerFile; data: TriggerData } | null = null;
+    let layout: ProjectTriggers | null = null;
     triggersSkipped = undefined;
-    const wtgText = await read(WTG_JSON);
-    if (wtgText !== null) {
-      let doc: TriggerFile;
-      try { doc = parseWtgJson(wtgText); } catch { throw new Error(`${WTG_JSON} is there but can't be read; nothing was changed.`); }
+    // Read directly, whether or not the file list names map/triggers/ yet: right after a project opens it may not.
+    layout = await w3.workspace.readTriggers().catch((e) => { throw new Error(`map/triggers/ is there but can't be read (${String((e as Error)?.message ?? e)}); nothing was changed.`); });
+    if (layout) {
       if (!trigData) triggersSkipped = "the game's TriggerData.txt can't be read, so the triggers' texts weren't moved";
-      else if (writeWtgJson(doc) !== wtgText) triggersSkipped = `${WTG_JSON} isn't laid out as Studio writes it, so the triggers' texts weren't moved`;
-      else triggers = { path: WTG_JSON, doc, data: trigData };
+      else triggers = { path: TRIGGERS_ROOT, doc: structuredClone(layout.file), data: trigData };
     }
-    const edited = new Set([WTS, `${INFO}.json`, ...objects.map((o) => o.path), ...(triggers ? [WTG_JSON] : [])].map((p) => p.toLowerCase()));
-    // What else refers to strings: every text file of the map, and the map's own files kept raw (as bytes).
-    const otherRefs = await stringRefsInMap(w3, files.values(), (lower) => edited.has(lower));
+    const edited = new Set([WTS, `${INFO}.json`, ...objects.map((o) => o.path)].map((p) => p.toLowerCase()));
+    // What else refers to strings: every text file of the map, and the map's own files kept raw (as bytes). The trigger
+    // folders' files are the triggers, when they take part.
+    const otherRefs = await stringRefsInMap(w3, files.values(), (lower) => edited.has(lower) || (!!triggers && isTriggerLayoutPath(lower)));
     raw = [];
     for (const [lower, path] of files) {
       if (edited.has(lower) || STRING_REF_TEXT_FILE.test(path) || edited.has(`${lower}.json`)) continue;
@@ -112,8 +115,12 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       },
       baseName: (kind, base) => data.get(kind)?.names.get(base),
     });
-    const out: { path: string; text: string }[] = [];
-    if (result.triggers) out.push({ path: result.triggers.path, text: writeWtgJson(result.triggers.doc) });
+    const out: { path: string; text: string | null }[] = [];
+    if (result.triggers && layout) {
+      const plan = await w3.workspace.planTriggers({ file: result.triggers.doc, custom: layout.custom, stored: layout.stored });
+      for (const f of plan.write) out.push(f);
+      for (const p of plan.delete) out.push({ path: p, text: null });
+    }
     for (const o of result.objects) {
       out.push({ path: o.path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: o.path, text: JSON.stringify(o.doc) }) });
     }

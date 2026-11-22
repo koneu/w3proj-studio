@@ -52,8 +52,16 @@ fn game() -> Option<String> {
     listed.iter().find(|l| Path::new(l).exists()).map(|l| l.to_string())
 }
 
+/// Runs the CLI with `game`. A pack checks the GUI functions of map/triggers/ with the made-up TriggerData.txt the mini
+/// map's triggers are written in (tests/fixtures/TriggerData.txt), not the game's, which doesn't know them.
 fn w3proj(args: &[&str], game: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_w3proj")).args(args).env("W3PROJ_GAME", game).env_remove("W3PROJ_FORMATS").output().unwrap()
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/TriggerData.txt");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_w3proj"));
+    cmd.args(args);
+    if args.first() == Some(&"pack") {
+        cmd.arg("--trigger-data").arg(&data);
+    }
+    cmd.env("W3PROJ_GAME", game).env_remove("W3PROJ_FORMATS").output().unwrap()
 }
 
 fn text(o: &Output) -> String {
@@ -331,7 +339,7 @@ fn pack_warns_about_a_missing_script_and_war3map_wtg() {
     copy_dir(&fixture(), &project);
     // [Refactored] Removed redundant control pack of unmodified mini-map (already covered in pack_warnings.rs and roundtrip.rs).
     fs::remove_file(project.join("map/war3map.j")).unwrap();
-    fs::remove_file(project.join("map/war3map.wtg.json")).unwrap();
+    fs::remove_dir_all(project.join("map/triggers")).unwrap();
     let out = dir.join("bare.w3x");
     let o = w3proj(&["pack", s(&project), "-o", s(&out)], "none");
     let said = String::from_utf8_lossy(&o.stderr).into_owned();

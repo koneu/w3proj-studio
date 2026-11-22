@@ -40,20 +40,51 @@ export function applyExpanded(file: TriggerFile, collapsed: ReadonlySet<number>)
   }
 }
 
-/** An item and everything inside it, in file order. */
-export function subtree(file: TriggerFile, it: Item): Item[] {
-  if (!isCategory(it)) return [it];
-  const ids = new Set([it.id]), inside = new Set<Item>([it]);
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const x of file.items) {
-      if (inside.has(x) || x.type === 1 || !ids.has(x.parent)) continue;
-      inside.add(x);
-      grew = true;
-      if (isCategory(x)) ids.add(x.id);
+/** The tree's structure, from the items' order: each item's folder (null: the map root) and each folder's contents
+ *  (`children.get(null)`: the root's), in file order. A Reforged file lists a folder before what is in it (a preorder),
+ *  so an item's folder is the nearest open one with its parent id: World Editor maps have categories that share an id,
+ *  and a lookup by id alone would mix their contents. A Classic file lists its categories first and gives each trigger
+ *  its category's index (the first category with that id, as the file is read). */
+export interface TreeStructure { parentOf: Map<Item, Item | null>; children: Map<Item | null, Item[]> }
+
+export function treeStructure(file: TriggerFile): TreeStructure {
+  const parentOf = new Map<Item, Item | null>(), children = new Map<Item | null, Item[]>([[null, []]]);
+  const put = (it: Item, parent: Item | null) => {
+    parentOf.set(it, parent);
+    children.get(parent)?.push(it) ?? children.set(parent, [it]);
+    if (isCategory(it)) children.set(it, children.get(it) ?? []);
+  };
+  if (file.reforged) {
+    const open: Item[] = [];
+    for (const it of file.items) {
+      if (it.type === 1) continue;
+      while (open.length && open[open.length - 1].id !== it.parent) open.pop();
+      put(it, open[open.length - 1] ?? null);
+      if (isCategory(it)) open.push(it);
+    }
+  } else {
+    const first = new Map<number, Item>();
+    for (const it of file.items) if (isCategory(it) && !first.has(it.id)) first.set(it.id, it);
+    for (const it of file.items) {
+      if (it.type === 1) continue;
+      put(it, isCategory(it) ? null : first.get(it.parent) ?? null);
     }
   }
+  return { parentOf, children };
+}
+
+/** An item and everything inside it, in file order (by the tree's structure: treeStructure). */
+export function subtree(file: TriggerFile, it: Item, structure = treeStructure(file)): Item[] {
+  if (!isCategory(it)) return [it];
+  const inside = new Set<Item>();
+  const visit = (x: Item) => { inside.add(x); for (const c of structure.children.get(x) ?? []) visit(c); };
+  visit(it);
   return file.items.filter((x) => inside.has(x));
+}
+
+/** The contents of a folder (null: the map root), by the tree's structure. */
+export function childrenOf(file: TriggerFile, folder: Item | null, structure = treeStructure(file)): Item[] {
+  return structure.children.get(folder?.type === 1 ? null : folder) ?? [];
 }
 
 /** Where `drag` goes when dropped on `target` (`upper`: on its upper third), or null if it can't. */

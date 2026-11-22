@@ -16,7 +16,8 @@ import { idsUsedBy, modsOf } from "../../lib/objects/refs";
 import { isNotFoundError } from "../../lib/oserror";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { parseWct, parseWctText, readWtgFile, textTriggers, WCT_RAW, WCT_TEXT, wtgPath, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
+import { textTriggers, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
+import { readTriggerFiles, TRIGGERS_ROOT, wtgPath } from "../../lib/triggers/project";
 import { addCustomObject, fieldLevel, fieldValue, NEGATIVE_REALS_SETTING, objectToEdit, rawOnlySkin, removeObject, setObjectField, type EditFile } from "./objectedit";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObject, type MapObjects } from "./objectinfo";
 import { campaignObjects, stripColors } from "./service";
@@ -86,7 +87,6 @@ export function describeUses(id: string, u: Uses): string {
 
 /** Reads a project file's text: null when it isn't there; throws when it's there but can't be read. */
 const textOrNull = (w3: W3Api, path: string) => w3.workspace.readText(path).then((t) => t, (e) => { if (isNotFoundError(e)) return null; throw e; });
-const bytesOrNull = (w3: W3Api, path: string) => w3.workspace.readBytes(path).then((t) => t, (e) => { if (isNotFoundError(e)) return null; throw e; });
 
 /** What in the open project names `id` (see Uses): the map script, custom script triggers, GUI triggers' object
  *  codes, other objects' fields (`prefix`'s object data, every kind) and placed objects. */
@@ -119,22 +119,16 @@ export async function usesOf(w3: W3Api, id: string, prefix: string): Promise<Use
   }
   // The triggers: GUI ones by their parameters' object codes, those in custom script by their text.
   let triggers: TriggerFile | null = null;
+  let custom: CustomTextFile | null = null;
   const wtg = wtgPath(w3.workspace.files());
   if (wtg) {
     try {
-      triggers = await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")));
+      const read = await readTriggerFiles(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")));
+      triggers = read.file;
+      custom = read.custom;
       for (const t of triggerRefs(triggers).get(id) ?? []) u.guiTriggers.push(t);
-    } catch { u.unchecked.push("war3map.wtg"); }
+    } catch { u.unchecked.push(wtg === TRIGGERS_ROOT ? "map/triggers" : "war3map.wtg"); }
   }
-  let custom: CustomTextFile | null = null;
-  try {
-    const text = await textOrNull(w3, WCT_TEXT);
-    if (text !== null) custom = parseWctText(text);
-    else {
-      const bytes = await bytesOrNull(w3, WCT_RAW);
-      if (bytes) custom = parseWct(bytes, triggers ? textTriggers(triggers).length : 0);
-    }
-  } catch { u.unchecked.push("war3map.wct"); }
   if (custom) {
     const names = triggers ? textTriggers(triggers).map((t) => t.name) : [];
     if (custom.header && scriptLines(custom.header, id).length) u.customScripts.push("the map (its header)");

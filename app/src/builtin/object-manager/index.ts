@@ -11,7 +11,8 @@ import { loadKind } from "../../lib/objects/metadata";
 import { DueTimer, PendingWork, whileRunning } from "../../lib/settle";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { readWtgFile, wtgPath, type TriggerFile } from "../../lib/triggers/wtg";
+import type { TriggerFile } from "../../lib/triggers/wtg";
+import { readTriggerFiles, wtgPath } from "../../lib/triggers/project";
 import { StringTable } from "../../lib/formats/wts";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
@@ -390,7 +391,7 @@ async function contents(w3: W3Api, live: LiveSources, saved: Map<string, Promise
   for (const [ext] of KINDS) savedKinds.set(ext, await cached(`kind:${ext}`, () => (objects ? objects.savedObjects(ext).catch(() => null) : json<KindData>(`war3map.${ext}`))) as KindData | null);
   const wtg = wtgPath(w3.workspace.files());
   const savedTriggers = wtg
-    ? await cached(`wtg:${wtg}`, () => readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null))
+    ? await cached(`wtg:${wtg}`, () => readTriggerFiles(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).then((r) => r.file, () => null))
     : null;
   const imp = await json<{ files: { path: string }[] }>("war3map.imp");
   const script = await cached("script", () => w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => ""));

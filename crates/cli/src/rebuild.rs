@@ -520,6 +520,18 @@ impl Server {
             // The plan only: the caller writes its files.
             "terrain_fix_ids" => to_json(backend::flatview::fix_ids(root()?, args.get("mode").and_then(Value::as_str), false, &self.formats)?),
             "terrain_whole" => to_json(backend::flatview::whole(root()?)?),
+            // The trigger tree in one call each way, as the app reads and saves it (backend::triggers).
+            "triggers_read" => to_json(backend::triggers::read(root()?, &self.formats)?),
+            "triggers_plan" | "triggers_write" => {
+                let save: backend::triggers::Save = serde_json::from_value(args.get("save").cloned().unwrap_or(Value::Null)).map_err(|e| format!("argument save: {e}"))?;
+                let create = args.get("create").and_then(Value::as_bool).unwrap_or(false);
+                if cmd == "triggers_plan" {
+                    Ok(Answer::Json(backend::triggers::plan_json(&backend::triggers::plan(root()?, &self.formats, &save, create)?)?))
+                } else {
+                    self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                    to_json(backend::triggers::write(root()?, &self.formats, &save, create)?)
+                }
+            }
             "codec_decode" => to_json(backend::codec_decode(root()?, path()?, &self.formats)?),
             "codec_canonicalize" => to_json(backend::codec_canonicalize(root()?, path()?, arg(args, "text")?, &self.formats)?),
             "codec_write" => {

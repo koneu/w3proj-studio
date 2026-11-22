@@ -6,6 +6,8 @@ import { typedInitialValue } from "../../lib/triggers/literals";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
 import { allocItemId, textTriggers, TYPE_INDEX, type CustomTextFile, type Eca, type TriggerFile, type TriggerItem, type Variable } from "../../lib/triggers/wtg";
 
+import { subtree, treeStructure } from "./tree";
+
 const INDENT = "    ";
 
 function lines(ecas: Eca[], ctx: DisplayContext, depth: number): string[] {
@@ -50,8 +52,8 @@ export function addScriptTrigger(file: TriggerFile, scripts: CustomTextFile, nam
   const t: TriggerItem = {
     type: 8, id: allocItemId(file, 8), name, description: "", isComment: 0, enabled: true, isCustom: true, initiallyOff: false, runOnInit: false, parent: home.id, ecas: [],
   };
-  const last = file.items.reduce((at, it, i) => (it.parent === home.id ? i : at), file.items.indexOf(home));
-  file.items.splice(last + 1, 0, t);
+  // After the category's contents, by the tree's structure (categories may share an id).
+  file.items.splice(file.items.indexOf(subtree(file, home).at(-1)!) + 1, 0, t);
   // Texts go by the triggers' order.
   scripts.texts.splice(textTriggers(file).indexOf(t), 0, script);
   return t;
@@ -134,8 +136,10 @@ export function triggerList(file: TriggerFile, withVariables: boolean) {
   const categories = file.items.filter((i) => i.type === 4);
   const triggers = file.items.filter((i): i is TriggerItem => i.type === 8 || i.type === 32);
   const line = (t: TriggerItem) => ({ name: t.name, enabled: t.enabled, form: isScript(t) ? "script" : "gui" });
-  const grouped = categories.map((c) => ({ category: c.name, triggers: triggers.filter((t) => t.parent === c.id).map(line) }));
-  const elsewhere = triggers.filter((t) => !categories.some((c) => c.id === t.parent)).map(line);
+  // Each trigger's category by the tree's structure: World Editor maps have categories that share an id.
+  const { parentOf } = treeStructure(file);
+  const grouped = categories.map((c) => ({ category: c.name, triggers: triggers.filter((t) => parentOf.get(t) === c).map(line) }));
+  const elsewhere = triggers.filter((t) => { const p = parentOf.get(t); return !p || p.type !== 4; }).map(line);
   return {
     triggers: triggers.length,
     categories: elsewhere.length ? [...grouped, { category: "", triggers: elsewhere }] : grouped,

@@ -8,11 +8,12 @@
 
 import { AiWordedError, projectPath } from "../../extensions/mcp";
 
-export interface EditFile { path: string; text: string }
+/** A file's new text; null: it is removed (a trigger file whose item went). */
+export interface EditFile { path: string; text: string | null }
 /** A file an edit changed by way of what it wrote (the map script, regenerated from the triggers, and its stamp). */
 export interface DerivedChange { path: string; before: string | null; after: string | null }
 export interface EditRecord {
-  id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[]; follows: EditFollow[];
+  id: number; title: string; at: number; files: { path: string; before: string | null; after: string | null }[]; follows: EditFollow[];
   /** Derived files as they were before the edit and after it: undo puts them back where nothing changed them since. */
   derived: DerivedChange[];
 }

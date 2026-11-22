@@ -10,7 +10,7 @@ import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { errorText } from "../../lib/oserror";
 import { missingRefs, triggerRefs } from "../../lib/triggers/refs";
 import type { TriggerIssue } from "../../lib/triggers/validate";
-import { wtgPath } from "../../lib/triggers/wtg";
+import { wtgPath } from "../../lib/triggers/project";
 import type { FileKind } from "./lookup";
 import { RunScope } from "./runscope";
 

@@ -8,6 +8,7 @@ import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { mapChecks } from "./mapchecks";
 import { RunScope } from "./runscope";
+import { fakeReadTriggers, HEADER_FILE } from "../../lib/testhelpers/triggers";
 
 const TRIGGER_DATA = `
 [TriggerTypes]
@@ -36,6 +37,7 @@ function app(files: Record<string, string>): W3Api {
       files: () => Object.keys(files).map((path) => ({ path, size: 1, modified: 1 })),
       readText: async (p: string) => { if (p in files) return files[p]; throw new Error(`no ${p}`); },
       readBytes: async (p: string) => { if (p in files) return new TextEncoder().encode(files[p]); throw new Error(`no ${p}`); },
+      readTriggers: fakeReadTriggers((p) => files[p]),
     },
     game: {
       readText: async (p: string) => { if (p === "UI\\TriggerData.txt") return TRIGGER_DATA; throw new Error(`no ${p}`); },
@@ -52,7 +54,7 @@ async function run(files: Record<string, string>, id: string) {
 }
 
 test("findings of Validate Map Triggers open the trigger at the line and parameter", async () => {
-  const found = await run({ "map/war3map.wtg.json": wtg([
+  const found = await run({ "map/triggers/triggers.json": wtg([
     { kind: 0, name: "UnitDies", enabled: true, params: [{ type: 1, value: "gg_unit_hfoo_0001" }], children: [] },
     { kind: 2, name: "KillUnit", enabled: true, params: [{ type: 0, value: "PlayerRed" }], children: [] },
   ]) }, "triggerValidate");
@@ -64,29 +66,26 @@ test("findings of Validate Map Triggers open the trigger at the line and paramet
 });
 
 test("a trigger file that can't be read is an error; no trigger file is nothing", async () => {
-  const broken = await run({ "map/war3map.wtg.json": "{ not json" }, "triggerValidate");
+  const broken = await run({ "map/triggers/triggers.json": "{ not json" }, "triggerValidate");
   assert.equal(broken.length, 1);
   assert.match(broken[0].message, /^The triggers can't be read/);
   assert.equal(broken[0].severity, "error");
   assert.deepEqual(await run({ "map/war3map.w3i.json": "{}" }, "triggerValidate"), []);
   // The other trigger checks don't report the unreadable file again.
-  assert.deepEqual(await run({ "map/war3map.wtg.json": "{ not json" }, "triggerNoEvents"), []);
-  assert.deepEqual(await run({ "map/war3map.wtg.json": "{ not json" }, "triggerRefs"), []);
+  assert.deepEqual(await run({ "map/triggers/triggers.json": "{ not json" }, "triggerNoEvents"), []);
+  assert.deepEqual(await run({ "map/triggers/triggers.json": "{ not json" }, "triggerRefs"), []);
 });
 
 test("triggers nothing runs are a check of their own", async () => {
-  const files = { "map/war3map.wtg.json": wtg([{ kind: 2, name: "KillUnit", enabled: true, params: [{ type: 1, value: "gg_unit_hfoo_0001" }], children: [] }]) };
+  const files = { "map/triggers/triggers.json": wtg([{ kind: 2, name: "KillUnit", enabled: true, params: [{ type: 1, value: "gg_unit_hfoo_0001" }], children: [] }]) };
   assert.deepEqual(await run(files, "triggerValidate"), []);
   const unused = await run(files, "triggerNoEvents");
   assert.deepEqual(unused.map((p) => [p.severity, p.message, p.location]), [["warning", "has no events, and no trigger or script runs it", "Doomed"]]);
   assert.equal(unused[0].about, "Doomed", "the Problems ignore names the report by its trigger");
-  // Run from the map's custom script: not unused.
-  const wct = (code: string) => `//== war3map.wct: version 1, reforged, comment "" ==\n//== header ==\n${code}\n//== trigger 0 (no text): Doomed ==\n`;
-  assert.deepEqual(await run({ ...files, "map/war3map.wct.txt": wct("call TriggerExecute(gg_trg_Doomed)") }, "triggerNoEvents"), []);
-  // Control: the same file running another trigger was read, and this one is still unused.
-  assert.equal((await run({ ...files, "map/war3map.wct.txt": wct("call TriggerExecute(gg_trg_Other)") }, "triggerNoEvents")).length, 1);
-  // A script file that can't be read: which triggers it runs isn't known, so none is called unused.
-  assert.deepEqual(await run({ ...files, "map/war3map.wct.txt": "not a wct" }, "triggerNoEvents"), []);
+  // Run from the map's custom script header: not unused.
+  assert.deepEqual(await run({ ...files, [HEADER_FILE]: "call TriggerExecute(gg_trg_Doomed)\n" }, "triggerNoEvents"), []);
+  // Control: the same header running another trigger was read, and this one is still unused.
+  assert.equal((await run({ ...files, [HEADER_FILE]: "call TriggerExecute(gg_trg_Other)\n" }, "triggerNoEvents")).length, 1);
 });
 
 test("missing Map Properties art opens Map Properties at its section", async () => {

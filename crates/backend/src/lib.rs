@@ -12,6 +12,7 @@ use serde_json::Value;
 use w3proj::{project, Registry};
 
 pub mod flatview;
+pub mod triggers;
 
 pub type CmdResult<T> = Result<T, String>;
 

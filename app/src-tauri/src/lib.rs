@@ -367,6 +367,30 @@ fn codec_write(app: AppHandle, root: String, path: String, text: String) -> CmdR
     backend::codec_write(&root, &path, &text, &user_format_dirs(&app)?)
 }
 
+/// The project's trigger tree (`map/triggers/`) in one call, as the app holds it (backend::triggers::read); null without
+/// one. Off the UI thread: a big map has thousands of files.
+#[tauri::command]
+async fn triggers_read(app: AppHandle, root: String) -> CmdResult<Option<backend::triggers::Read>> {
+    let formats = user_format_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || backend::triggers::read(&root, &formats)).await.map_err(err)?
+}
+
+/// What saving the app's trigger tree would write and remove (backend::triggers::plan): nothing is written.
+#[tauri::command]
+async fn triggers_plan(app: AppHandle, root: String, save: backend::triggers::Save, create: Option<bool>) -> CmdResult<Value> {
+    let formats = user_format_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || backend::triggers::plan(&root, &formats, &save, create.unwrap_or(false)).and_then(|p| backend::triggers::plan_json(&p)))
+        .await
+        .map_err(err)?
+}
+
+/// Saves the app's trigger tree into `map/triggers/`, only the files whose content changed (backend::triggers::write).
+#[tauri::command]
+async fn triggers_write(app: AppHandle, root: String, save: backend::triggers::Save, create: Option<bool>) -> CmdResult<backend::triggers::Written> {
+    let formats = user_format_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || backend::triggers::write(&root, &formats, &save, create.unwrap_or(false))).await.map_err(err)?
+}
+
 /// The app's user format folder: `<config>/formats`.
 fn user_format_dirs(app: &AppHandle) -> CmdResult<Vec<PathBuf>> {
     Ok(vec![config_dir(app)?.join("formats")])
@@ -1200,6 +1224,9 @@ pub fn run() {
             terrain_check,
             terrain_fix_ids,
             terrain_whole,
+            triggers_read,
+            triggers_plan,
+            triggers_write,
             terrain_open_state,
             terrain_set_open,
             objects_canonicalize,
