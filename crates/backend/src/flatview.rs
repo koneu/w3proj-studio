@@ -620,7 +620,8 @@ mod tests {
         // The same content again: nothing written.
         assert!(crate::write_bytes(&w3e, &edited).unwrap().also.is_empty());
 
-        // Refused: deleting it, a terrain of another size, text that isn't a terrain (nothing written).
+        // Refused: deleting it, a terrain of another size whose offset moved by part of a tile (Map Size moves it by
+        // tiles), text that isn't a terrain (nothing written).
         assert!(refuse_moving(&w3e).unwrap_err().contains("Merge the subterrains"));
         assert!(refuse_moving(&flat.join("map/war3map.w3e.txt")).is_ok(), "control");
         let files_before = layout_files(&split);
@@ -628,7 +629,7 @@ mod tests {
         let mut wider = String::new();
         let edited_text = String::from_utf8(edited.clone()).unwrap();
         let (mut row, mut in_grid, mut numbers): (Vec<&str>, bool, bool) = (Vec::new(), false, false);
-        for line in edited_text.replace("corners 5 3", "corners 15 1").lines() {
+        for line in edited_text.replace("corners 5 3", "corners 15 1").replace("offset -128 -64", "offset -127 -64").lines() {
             if line.starts_with('[') {
                 // A grid follows a section line without "all"; height and water are rows of numbers.
                 in_grid = !line.contains(" all ");
@@ -644,7 +645,7 @@ mod tests {
             wider += &(line.to_string() + "\n");
         }
         let e = crate::write_bytes(&w3e, wider.as_bytes()).unwrap_err();
-        assert!(e.contains("can't change size"), "{e}\n{wider}");
+        assert!(e.contains("part of a tile"), "{e}\n{wider}");
         assert!(crate::write_bytes(&w3e, b"W3E version 11\n").is_err());
         assert_eq!(layout_files(&split), files_before);
         // A unit moved: only units files change, and the terrain's stamp stays (it isn't made from them).

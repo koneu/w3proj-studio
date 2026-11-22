@@ -6308,6 +6308,34 @@ async function subterrains(page, found) {
       else if (Buffer.isBuffer(packedBefore) && !packedAfter.equals(packedBefore)) fail("the project packs another map after the subterrain changes");
     }
 
+    // Stage 6: Map Size on the split terrain (resize_map, the real apply path): grown by 32 tiles east and north, the
+    // canvas grows, the subterrains on those edges grow with it, the others keep their rectangles, folders and ranges;
+    // the project packs; Undo Resize puts every file back as it was. (Before, the save refused the new size.)
+    {
+      const layoutNow = () => JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
+      const was = layoutNow();
+      const before = snapshot(map);
+      const grown = await tool("resize_map", { right: 32, top: 32 }).then(() => null, (e) => String(e.message ?? e));
+      if (grown) fail(`resize_map on the split terrain: ${grown}`);
+      else {
+        await editorUp();
+        await settled(page);
+        const now = layoutNow();
+        if (lit(now.corners) !== lit([was.corners[0] + 32, was.corners[1] + 32])) fail(`the grown canvas is ${lit(now.corners)}, was ${lit(was.corners)}`);
+        const want = was.subterrains.map((s) => ({ ...s, w: s.x + s.w === was.corners[0] ? s.w + 32 : s.w, h: s.y + s.h === was.corners[1] ? s.h + 32 : s.h }));
+        if (lit(now.subterrains) !== lit(want)) fail(`the subterrains after the growth: ${lit(now.subterrains)}, not ${lit(want)}`);
+        const r = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-grown.w3x"), "--keep-script"], { encoding: "utf8" });
+        if (r.status !== 0) fail(`\`w3proj pack\` after the growth: ${(r.stdout + r.stderr).trim().slice(-400)}`);
+        const undone = await run("w3.terrainMapSize.undo");
+        if (undone) fail(`Undo Resize failed: ${undone}`);
+        await editorUp();
+        await settled(page);
+        const changed = differ(before, snapshot(map));
+        if (changed.length) fail(`Undo Resize of the split terrain left ${changed.join(", ")} changed`);
+      }
+      await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+    }
+
     // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.
     const merged = await run("w3.terrainLayout.merge", { quiet: true });
     if (merged) fail(`Merge Subterrains failed: ${merged}`);

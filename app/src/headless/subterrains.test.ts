@@ -25,7 +25,7 @@ import manifest from "../builtin/terrain-layout/extension.json";
 import { MCP_EDITS_SERVICE } from "../extensions/services";
 import { checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
-import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
+import { pathingOverridesText, resizeTerrain, type PathingOverrides } from "../lib/terrain/resize";
 
 const cache = join(repoPath("app", "node_modules"), ".cache", "w3-layout-test");
 mkdirSync(cache, { recursive: true });
@@ -116,6 +116,33 @@ async function editTerrain(w3: W3Api) {
   ne.variation = (ne.variation + 5) % 16;
   await writeTerrainBytes(path, writeW3e(t), io);
 }
+
+test("Map Size on a split terrain: the app's resized terrain saves, the canvas and the edge subterrains grow, objects stay theirs; shrunk back, every file as it was", async () => {
+  const { w3, root } = await splitProject("mapsize");
+  const path = terrainPath(w3.workspace.files().map((f) => f.path))!;
+  const io = { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path), writeText: (t: string) => w3.workspace.writeText(path, t), writeBytes: (b: Uint8Array) => w3.workspace.writeBytes(path, b) };
+  const t = parseW3e(await readTerrainBytes(path, io));
+  const layoutOf = () => JSON.parse(readFileSync(join(root, "map", "terrain", "terrain.json"), "utf8")) as { corners: number[]; offset: number[]; subterrains: { name: string; x: number; y: number; w: number; h: number; idRange: unknown }[] };
+  const was = layoutOf();
+  const before = snapshot(root);
+  const units = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!.list.map((u) => [u.id, ...u.position]);
+  // Two tiles west and one north added, as Map Size's resizeTerrain makes them (new corners copy the edge).
+  const grown = resizeTerrain(t, [2, 0, 0, 1]);
+  await writeTerrainBytes(path, writeW3e(grown), io);
+  await w3.workspace.refresh();
+  const now = layoutOf();
+  assert.deepEqual(now.corners, [was.corners[0] + 2, was.corners[1] + 1]);
+  assert.deepEqual(now.offset, [was.offset[0] - 256, was.offset[1]]);
+  // West ones reach the new west edge, north ones the new north edge, the rest moved by the two corners.
+  const want = was.subterrains.map((s) => ({ ...s, x: s.x === 0 ? 0 : s.x + 2, w: s.x === 0 ? s.w + 2 : s.w, h: s.y + s.h === was.corners[1] ? s.h + 1 : s.h }));
+  assert.deepEqual(now.subterrains, want);
+  assert.equal(w3eToText(await readTerrainBytes(path, io)), w3eToText(writeW3e(grown)), "the terrain reads back as written");
+  assert.deepEqual((await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!.list.map((u) => [u.id, ...u.position]), units, "the objects stay where they were");
+  // Shrunk back (what Undo Resize writes): the split files byte for byte.
+  await writeTerrainBytes(path, writeW3e(t), io);
+  await w3.workspace.refresh();
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
+});
 
 /** The first unit moved east of the 2×2 grid's seam (corner 2: world x 128), saved as the terrain editor saves it. */
 async function moveUnit(w3: W3Api) {

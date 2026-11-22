@@ -327,8 +327,10 @@ map: terrain, objects (by position), regions and pathing overrides are cut into 
 others takes a whole side off each (or all of one); a subterrain keeps its creation-number ranges when moved, resized or
 renamed (its folder is renamed), a joined one gets all of theirs, a new one the next block. Refused, nothing written,
 while anything is unsaved, when one would be cut in pieces, or when a corner left out differs from the default corner.
-**Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. A split terrain still can't
-change its map size (Map Size refuses at the save): merge it first.
+**Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. **Map Size** works on a split
+terrain with every subterrain open: the subterrains keep their ground, those on an edge that grows reach the new edge
+(the ground Map Size adds copies that edge), what is cut off goes as in a flat map (a subterrain cut off entirely with
+its folder), pathing overrides move with their ground; Undo Resize puts the files back.
 
 A creation number (the number scripts name objects by, `gg_dest_LT04_0581`) found on more than one doodad, unit or
 region stops a split and a pack; **Check Terrain IDs** (`w3proj terrain check`, flat projects too) lists every object

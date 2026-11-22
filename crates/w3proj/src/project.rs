@@ -1736,6 +1736,10 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
                 .collect::<Result<_>>()?;
                 tl::relayout(&mut files, &plan)?;
             }
+            // And Map Size: grown by two tiles on every side and cut back, the same files (`terrain_layout::write_flat`).
+            if !tl::map_size_round_trip(&files, 2)? {
+                return Ok(Some("split layout after Map Size grew and shrank it"));
+            }
             tl::flatten(&mut files)?;
             files.extend(store);
             if files != ex.files {

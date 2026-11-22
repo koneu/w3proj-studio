@@ -4597,6 +4597,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error(lockedText ?? "This map is read-only.");
+          // A split terrain resizes every subterrain (the canvas, those on its edges, the cut ones): only with all open.
+          if (partial) throw new Error("The map size changes every subterrain on its edges, and some are closed: open them all (Open Subterrains…) first. Nothing was changed.");
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
           // A file the resize must rewrite that is there but can't be read would be left at the old size (a half-resized
