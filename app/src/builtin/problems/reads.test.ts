@@ -102,6 +102,8 @@ function fakeApp(more: { overlay?: Record<string, string>; game?: Record<string,
       invoke: async (command: string, args: Record<string, unknown> = {}) => {
         count(`${command} ${String(args.path ?? args.root ?? "")}`);
         if (command === "fs_exists") return existsSync(String(args.path)) || Object.keys(OVERLAY).some((p) => resolve(join(root, p)) === resolve(String(args.path)));
+        // Check Trigger Tree is the backend's (one call a run): the mini map's trigger folders have nothing to report.
+        if (command === "triggers_check") return [];
         throw new Error(`${command}: not in this test`);
       },
     },
