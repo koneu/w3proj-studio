@@ -28,7 +28,8 @@ const tileColors = new ModeCache<Rgb | null>();
 export { smallestMipColor };
 
 /** The files a ground, cliff or blight texture's colour is read from, the first that can be: in HD and DE (`mode`
- *  not "sd") its Reforged `_Diffuse` texture, then the plain (classic) one. */
+ *  not "sd") its Reforged `_Diffuse` texture, then the plain (classic) one. DE reads the 3.0 layer's own `_Diffuse`
+ *  (the game's DE lookup), as the World Editor's DE minimap has them (we-compare de-ruins-minimap-de, 2026-11-22). */
 export function hdFirst(path: string, mode: string): string[] {
   return mode === "sd" ? [path] : [path.replace(/\.\w+$/, "_Diffuse.blp"), path];
 }
