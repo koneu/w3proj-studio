@@ -15,6 +15,10 @@ test("files of the map folder the list doesn't name are unlisted; the map's own 
     "map/Units/Human/TownHall/TownHall.mdx", "map/_HD.w3mod/war3mapImported/A.blp"]);
   // A campaign's list: its own files and its import folder.
   assert.deepEqual(unlistedFiles(["map/war3campaign.w3f.json", "map/war3campImported/s.blp"], [{ flags: 5, path: "s.blp" }], "war3campImported"), []);
+  // The trigger folders are war3map.wtg and war3map.wct, not imports; a map/triggers/ without its root file isn't them.
+  const folders = ["map/triggers/triggers.json", "map/triggers/order.txt", "map/triggers/Setup/Start.gui.json", "map/triggers/Setup/Lib.j"];
+  assert.deepEqual(unlistedFiles(folders, [], "war3mapImported"), []);
+  assert.deepEqual(unlistedFiles(["map/triggers/Lib.j"], [], "war3mapImported"), ["map/triggers/Lib.j"]);
 });
 
 // The World Editor's save drops a war3mapPreview.tga the import list doesn't name and keeps a listed one (we-compare

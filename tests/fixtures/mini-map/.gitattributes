@@ -1,0 +1,2 @@
+# Trigger texts keep their own line endings, CRLF in one and LF in the next.
+map/triggers/** -text

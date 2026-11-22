@@ -75,7 +75,12 @@ export function unlistedFiles(projectFiles: readonly string[], entries: readonly
   // A split terrain (map/terrain/terrain.json): what map/terrain/ holds is the map's own terrain and placed objects,
   // never packed as files of their own (crates/w3proj terrain_layout.rs). Not imports, and never cleaned up as such.
   const split = all.some((p) => p.toLowerCase() === "map/terrain/terrain.json");
-  const inMap = all.filter((p) => p.toLowerCase().startsWith("map/") && !(split && p.toLowerCase().startsWith("map/terrain/")));
+  // The trigger folders (map/triggers/triggers.json) the same: war3map.wtg and war3map.wct, never files of their own.
+  const triggers = all.some((p) => p.toLowerCase() === "map/triggers/triggers.json");
+  const inMap = all.filter((p) => {
+    const l = p.toLowerCase();
+    return l.startsWith("map/") && !(split && l.startsWith("map/terrain/")) && !(triggers && l.startsWith("map/triggers/"));
+  });
   const byLower = new Map<string, string>();
   for (const p of inMap) if (!byLower.has(p.toLowerCase())) byLower.set(p.toLowerCase(), p);
   const claimed = new Set(entries.map((e) => entryFile(e, folder, (l) => byLower.get(l))?.toLowerCase()).filter((x): x is string => !!x));
