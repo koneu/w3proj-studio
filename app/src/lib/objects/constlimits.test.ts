@@ -40,7 +40,7 @@ const LIMITS: GameplayLimits = readGameplayLimits(null, GAME);
 test("Movement Speed past MaxUnitSpeed warns; at it, below it or 0 doesn't", () => {
   const unit = lookup({ ubdg: 0, umas: 0, umis: 0 });
   const w = constantWarning("umvs", 450, true, LIMITS, unit);
-  assert.ok(w && /400 at most/.test(w.text) && /Unit Speed - Maximum/.test(w.text) && /game's default/.test(w.text), w?.text);
+  assert.ok(w && /400 at most/.test(w.text) && /Unit Speed - Maximum/.test(w.text) && /game's default/.test(w.text), w?.text ?? "no warning");
   assert.equal(w.setByMap, true);
   for (const v of [400, 300, 150, 0, "", "x"]) assert.equal(constantWarning("umvs", v, true, LIMITS, unit), null, String(v));
 });
@@ -53,14 +53,14 @@ test("below MinUnitSpeed warns, unless the unit's own minimum allows it", () => 
 test("the unit's own Speed Maximum replaces the constant when it isn't 0", () => {
   assert.equal(constantWarning("umvs", 405, false, LIMITS, lookup({ umas: 522 })), null);
   const w = constantWarning("umvs", 450, false, LIMITS, lookup({ umas: [420, true] }));
-  assert.ok(w && /420 at most/.test(w.text) && /Speed Maximum \(umas\)/.test(w.text), w?.text);
+  assert.ok(w && /420 at most/.test(w.text) && /Speed Maximum \(umas\)/.test(w.text), w?.text ?? "no warning");
   assert.equal(w.setByMap, true, "the map set the unit's maximum");
 });
 
 test("buildings go by the building constants", () => {
   const map = readGameplayLimits("[Misc]\nMaxBldgSpeed=50\n", GAME);
   const w = constantWarning("umvs", 60, false, map, lookup({ ubdg: 1 }));
-  assert.ok(w && /50 at most/.test(w.text) && /Building Speed - Maximum, set by this map/.test(w.text), w?.text);
+  assert.ok(w && /50 at most/.test(w.text) && /Building Speed - Maximum, set by this map/.test(w.text), w?.text ?? "no warning");
   assert.equal(w.setByMap, true, "the map's constant");
   assert.equal(constantWarning("umvs", 200, false, map, lookup({ ubdg: 0 })), null, "a unit: 400");
   assert.match(constantWarning("umvs", 60, false, map, lookup({ ubdg: 0 }))?.text ?? "", /150 at least/, "a unit: 150 at least");
