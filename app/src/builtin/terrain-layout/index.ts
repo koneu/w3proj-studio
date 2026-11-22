@@ -4,6 +4,7 @@
 // object files by those names (the backend answers for them from map/terrain/, crates/backend flatview.rs).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { checkpointOrStop } from "../../lib/checkpoint";
 import { errorText } from "../../lib/oserror";
 import { LAYOUT_FILE } from "../../lib/terrain/creationids";
@@ -95,7 +96,7 @@ export async function mergeTerrain(w3: W3Api, arg?: { quiet?: boolean }): Promis
 
 /** What Check Terrain IDs found (terrain_ids.rs Report, backend flatview.rs check). */
 export interface IdCheck {
-  duplicates: { kind: string; number: number; files: string[] }[];
+  duplicates: { kind: string; number: number; files: string[]; members: FixMember[] }[];
   overlaps: { a: string; aRange: [number, number]; b: string; bRange: [number, number] }[];
   /** Information only: moved objects and imported maps have numbers outside their subterrain's ranges. */
   outside: { subterrain: string; kind: string; count: number; examples: number[] }[];
@@ -106,13 +107,12 @@ export interface IdCheck {
   lines: string[];
 }
 
-/** Check Terrain IDs: creation numbers found twice per kind, overlapping id ranges (errors), numbers outside their
- *  subterrain's ranges (information), as `w3proj terrain check`. The report goes to the Subterrains output; a message
- *  says the outcome. Rejects when the terrain isn't split or its files can't be read. */
+/** Check Terrain IDs: creation numbers found twice per kind, every object holding one listed (a flat project too),
+ *  overlapping id ranges (errors), numbers outside their subterrain's ranges (information), as `w3proj terrain check`.
+ *  The report goes to the Subterrains output; a message says the outcome. Rejects when the files can't be read. */
 export async function checkTerrainIds(w3: W3Api, arg?: { quiet?: boolean }): Promise<IdCheck> {
   const project = w3.workspace.project();
   if (!project) throw new Error("Check Terrain IDs: no project is open.");
-  if (!isSplit(w3)) throw new Error("Check Terrain IDs: the terrain isn't split (there is no map/terrain/terrain.json).");
   let report: IdCheck;
   try {
     report = await w3.backend.invoke<IdCheck>("terrain_check", { root: project.root });
@@ -126,11 +126,95 @@ export async function checkTerrainIds(w3: W3Api, arg?: { quiet?: boolean }): Pro
   const twice = report.duplicates.length, overlaps = report.overlaps.length;
   if (report.errors) {
     out.show();
-    void w3.window.showError(`Check Terrain IDs: ${[twice ? `${twice} creation number${twice === 1 ? "" : "s"} found twice` : "", overlaps ? `${overlaps} overlapping id range${overlaps === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")}. The Subterrains output lists them.`);
+    void w3.window.showError(`Check Terrain IDs: ${[twice ? `${twice} creation number${twice === 1 ? "" : "s"} found twice` : "", overlaps ? `${overlaps} overlapping id range${overlaps === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")}. The Subterrains output lists them${twice ? "; Fix Duplicate Creation Numbers… renumbers them or deletes exact copies" : ""}.`);
   } else {
     void w3.window.showInfo(`Check Terrain IDs: ${report.numbers} creation numbers, none twice, no overlapping ranges.`);
   }
   return report;
+}
+
+/** One object holding a creation number found twice, and what a fix does with it (terrain_ids.rs FixMember). */
+export interface FixMember {
+  file: string;
+  index: number;
+  id: string;
+  x: number | null;
+  y: number | null;
+  copyOf?: number;
+  action: "keep" | "renumber" | "delete" | "stays";
+  to?: number;
+}
+/** What fixing creation numbers found twice does (terrain_ids.rs FixPlan, backend flatview.rs fix_ids). */
+export interface FixPlan {
+  mode: "renumber" | "deleteCopies" | null;
+  groups: { kind: string; number: number; members: FixMember[] }[];
+  renumbered: number;
+  deleted: number;
+  stillTwice: number;
+  unchecked: string[];
+  files: { path: string; text: string }[];
+  lines: string[];
+}
+export type FixMode = "renumber" | "deleteCopies";
+
+/** Fix Duplicate Creation Numbers…: every creation number found twice (flat or split project) with all its objects,
+ *  then, by choice, Renumber (every object of a number but the first gets the next free number: its subterrain's range,
+ *  in a flat map above the highest) or Delete Copies (only exact copies of an earlier object go; those that differ stay
+ *  and are said). The plans and their counts are shown first; nothing changes without a choice. Refused while anything
+ *  is unsaved; the files are written as one edit (Undo takes it back). `arg.mode` chooses without asking, `arg.dryRun`
+ *  only gives the plan (MCP, app-smoke). Resolves with the plan carried out (or shown), null when cancelled or there is
+ *  nothing to fix. */
+export async function fixCreationIds(w3: W3Api, arg?: { mode?: FixMode; dryRun?: boolean; quiet?: boolean }): Promise<FixPlan | null> {
+  const what = "Fix Duplicate Creation Numbers";
+  const project = w3.workspace.project();
+  if (!project) throw new Error(`${what}: no project is open.`);
+  const root = project.root;
+  const plan = async (mode: FixMode | null) => {
+    try {
+      return await w3.backend.invoke<FixPlan>("terrain_fix_ids", { root, mode });
+    } catch (e) {
+      throw new Error(`${what}: ${errorText(e).replace(/\.?$/, ".")} Nothing was changed.`);
+    }
+  };
+  const found = await plan(null);
+  const out = w3.output.channel("Subterrains");
+  if (!found.groups.length) {
+    if (!arg?.quiet) void w3.window.showInfo(`${what}: no creation number is found twice.`);
+    return arg?.dryRun ? found : null;
+  }
+  let mode = arg?.mode ?? null;
+  if (arg?.dryRun) return mode ? plan(mode) : found;
+  const unsaved = w3.editors.unsavedPaths();
+  if (unsaved.length) throw new Error(`${what}: save or discard the changes in ${unsaved.join(", ")} first.`);
+  const objects = found.groups.reduce((n, g) => n + g.members.length, 0);
+  if (!mode) {
+    const [renumber, deleting] = [await plan("renumber"), await plan("deleteCopies")];
+    out.clear();
+    for (const line of found.lines) out.append(line);
+    out.show();
+    const RENUMBER = `Renumber ${renumber.renumbered}`, DELETE = `Delete ${deleting.deleted} Cop${deleting.deleted === 1 ? "y" : "ies"}`;
+    const choices = deleting.deleted ? [RENUMBER, DELETE] : [RENUMBER];
+    const pick = await w3.window.showWarning(
+      `${found.groups.length} creation number${found.groups.length === 1 ? " is" : "s are"} found twice, on ${objects} objects (the Subterrains output lists them). ` +
+      `Renumber: ${renumber.renumbered} object${renumber.renumbered === 1 ? "" : "s"} get new numbers (scripts naming them by number, gg_…_0581, then mean the first). ` +
+      `Delete Copies: ${deleting.deleted} exact cop${deleting.deleted === 1 ? "y is" : "ies are"} removed, ${deleting.stillTwice} object${deleting.stillTwice === 1 ? "" : "s"} still share a number. Undo takes it back.`,
+      ...choices, "Cancel");
+    mode = pick === RENUMBER ? "renumber" : pick === DELETE ? "deleteCopies" : null;
+    if (!mode) return null;
+  }
+  // The answer took a while: the project, and what is unsaved, as they are now.
+  if (w3.workspace.project()?.root !== root) throw new Error(`${what}: the project changed meanwhile; nothing was changed.`);
+  if (w3.editors.unsavedPaths().length) throw new Error(`${what}: save or discard the changes in ${w3.editors.unsavedPaths().join(", ")} first.`);
+  const chosen = await plan(mode);
+  if (!chosen.files.length) return chosen;
+  const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+  const n = mode === "renumber" ? `${chosen.renumbered} renumbered` : `${chosen.deleted} cop${chosen.deleted === 1 ? "y" : "ies"} deleted`;
+  await edits.edit(`${what} (${n})`, async () => chosen.files);
+  if (w3.workspace.project()?.root === root) await w3.workspace.refresh();
+  out.clear();
+  for (const line of chosen.lines) out.append(line);
+  if (!arg?.quiet) void w3.window.showInfo(`${what}: ${n}${chosen.stillTwice ? `; ${chosen.stillTwice} objects still share a number (they differ: Renumber fixes them)` : ""}.`);
+  return chosen;
 }
 
 /** Check Terrain Seams: the whole terrain as saved (every subterrain read, closed ones too) checked along the seams
@@ -254,6 +338,44 @@ export function joinSubterrains(w3: W3Api, arg?: { names?: string[]; to?: string
     if (to === undefined) return undefined;
     return joinPlan(subs, names, to);
   }, arg?.quiet === true);
+}
+
+/** The MCP tool change_subterrains: New, Resize, Rename or Join Subterrains by their commands' own code (the same plan,
+ *  the same refusals: unsaved changes, a rectangle cutting one in pieces, corners left out that aren't the default one,
+ *  a bad name), without questions: what a command would ask must be given. Resolves with what changed and the
+ *  subterrains afterwards. */
+export async function changeSubterrainsTool(w3: W3Api, args: Record<string, unknown>) {
+  const { action, name, rect, to, names } = args;
+  const str = (v: unknown, what: string) => {
+    if (typeof v !== "string" || !v.trim()) throw new Error(`${String(action)} needs ${what}.`);
+    return v;
+  };
+  const box = (v: unknown): RectArg => {
+    if (typeof v === "string") return v;
+    const r = v as { x?: unknown; y?: unknown; w?: unknown; h?: unknown } | null;
+    if (r && typeof r === "object" && [r.x, r.y, r.w, r.h].every((n) => Number.isInteger(n))) return r as RectArg;
+    throw new Error(`${String(action)} needs rect: "x,y,w,h" in corners, or { x, y, w, h }.`);
+  };
+  let done: Converted | null;
+  switch (action) {
+    case "new": done = await newSubterrain(w3, { name: str(name, "name"), rect: box(rect), quiet: true }); break;
+    case "resize": done = await resizeSubterrain(w3, { name: str(name, "name"), rect: box(rect), quiet: true }); break;
+    case "rename": {
+      const from = str(name, "name"), into = str(to, "to");
+      if (from === into) throw new Error("rename: to is its name already. Nothing was changed.");
+      done = await renameSubterrain(w3, { name: from, to: into, quiet: true });
+      break;
+    }
+    case "join": {
+      if (!Array.isArray(names) || names.length < 2 || !names.every((n) => typeof n === "string")) throw new Error("join needs names: two or more subterrains side by side.");
+      done = await joinSubterrains(w3, { names: names as string[], to: str(to, "to"), quiet: true });
+      break;
+    }
+    default: throw new Error("action must be \"new\", \"resize\", \"rename\" or \"join\".");
+  }
+  const root = w3.workspace.project()?.root;
+  const state = root ? await loadOpenState((cmd, a) => w3.backend.invoke(cmd, a), root).catch(() => null) : null;
+  return { written: done?.written ?? [], removed: done?.removed ?? [], subterrains: state?.subterrains.map(({ name: n, x, y, w, h, open }) => ({ name: n, x, y, w, h, open })) ?? [] };
 }
 
 // ---- Open Subterrains… (spec "Working on Part of the Map") ----
@@ -384,6 +506,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrainLayout.split", shown(w3, (arg?: { layout?: SplitLayout; quiet?: boolean }) => splitTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.merge", shown(w3, (arg?: { quiet?: boolean }) => mergeTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.checkIds", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainIds(w3, arg))),
+    w3.mcp.registerTool("change_subterrains", (args) => changeSubterrainsTool(w3, args)),
+    w3.commands.register("w3.terrainLayout.fixIds", shown(w3, (arg?: { mode?: FixMode; dryRun?: boolean; quiet?: boolean }) => fixCreationIds(w3, arg))),
+    w3.mcp.registerTool("fix_creation_ids", async ({ mode, apply }) => {
+      if (mode !== undefined && mode !== "renumber" && mode !== "deleteCopies") throw new Error("mode must be \"renumber\" or \"deleteCopies\" (or left out to list the numbers found twice).");
+      if (apply === true && mode === undefined) throw new Error("apply needs a mode: \"renumber\" or \"deleteCopies\".");
+      const r = await fixCreationIds(w3, { mode: mode as FixMode | undefined, dryRun: apply !== true, quiet: true });
+      if (!r) return { groups: [], summary: "No creation number is found twice." };
+      return { applied: apply === true && !!r.files.length, mode: r.mode, groups: r.groups, renumbered: r.renumbered, deleted: r.deleted, stillTwice: r.stillTwice, unchecked: r.unchecked, summary: r.lines.find((l) => l.includes("found twice")) ?? "" };
+    }),
     w3.commands.register("w3.terrainLayout.checkSeams", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainSeams(w3, arg))),
     w3.mcp.registerTool("check_terrain_seams", async () => {
       const r = await checkTerrainSeams(w3, { quiet: true });

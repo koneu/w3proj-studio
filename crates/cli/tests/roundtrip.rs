@@ -1216,7 +1216,7 @@ fn terrain_relayout_packs_the_same_map() {
 
 /// `w3proj terrain check`: a split project's creation numbers. Numbers outside a subterrain's range are information
 /// (exit 0); a number in two subterrains' files is an error naming both (exit 1), and the same duplicate stops a pack,
-/// naming both files. A flat project has nothing to check.
+/// naming both files. A flat project without numbers twice passes.
 #[test]
 fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     let dir = workdir("terrain_check");
@@ -1224,7 +1224,7 @@ fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     pack(&fixture(), &map);
     let project = dir.join("project");
     unpack(&map, &project);
-    assert!(!w3proj(&["terrain", "check", s(&project)]).status.success(), "flat: refused");
+    assert!(ok(&["terrain", "check", s(&project)]).contains("0 found twice"), "flat: checked, nothing twice");
     let mut args = vec!["terrain", "split", s(&project)];
     for r in ["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"] {
         args.extend(["--rect", r]);
@@ -1248,3 +1248,141 @@ fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     assert!(!o.status.success() && text(&o).contains("creation number 2 is in map/terrain/sw/units.json and in map/terrain/ne/units.json"), "{}", text(&o));
 }
 
+
+/// `w3proj terrain fix-ids` on the pattern of a real map that couldn't be split (wowr4.6: creation number 581 on three
+/// stacked doodads, the last an exact copy of the one before): `terrain check` lists all three in the flat project, the
+/// split names all three and points at the fix, fix-ids without --apply only prints the plan; --renumber --apply changes
+/// the two numbers and nothing else (the packed war3map.doo differs in their eight bytes only), and the map then splits,
+/// merges back and packs the same. --delete-copies takes only the copy.
+#[test]
+fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
+    let dir = workdir("fix_ids");
+    let map = dir.join("first.w3x");
+    pack(&fixture(), &map);
+    let project = dir.join("project");
+    unpack(&map, &project);
+    let doo_path = project.join("map/war3map.doo.json");
+    let mut doo: serde_json::Value = serde_json::from_slice(&fs::read(&doo_path).unwrap()).unwrap();
+    let list = doo["doodads"].as_array_mut().unwrap();
+    let mut lt = list[1].clone();
+    lt["position"] = serde_json::json!([96.0, 96.0, 0.0]);
+    lt["editorId"] = 581.into();
+    let mut other = lt.clone();
+    other["variation"] = 1.into();
+    list.extend([other, lt.clone(), lt]);
+    fs::write(&doo_path, serde_json::to_vec_pretty(&doo).unwrap()).unwrap();
+    // As unpack writes it, so the plan's file differs from it by the numbers only.
+    let twice = dir.join("twice.w3x");
+    ok(&["pack", s(&project), "-o", s(&twice), "--force-stale"]);
+    unpack(&twice, &project);
+    let o = w3proj(&["terrain", "check", s(&project)]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    for m in ["map/war3map.doo.json [2]", "map/war3map.doo.json [3]", "map/war3map.doo.json [4]", "an exact copy of [3]", "fix-ids"] {
+        assert!(text(&o).contains(m), "{m}: {}", text(&o));
+    }
+    let o = w3proj(&["terrain", "split", s(&project)]);
+    assert!(!o.status.success() && text(&o).contains("doodads[2], doodads[3] and doodads[4] have the same creation number 581") && text(&o).contains("fix-ids"), "{}", text(&o));
+    let before = files(&project);
+    let plan = ok(&["terrain", "fix-ids", s(&project), "--renumber"]);
+    assert!(plan.contains("[3] ") && plan.contains("gets 582") && plan.contains("gets 583") && plan.contains("--apply"), "{plan}");
+    assert_eq!(files(&project), before, "a plan wrote something");
+    let said = ok(&["terrain", "fix-ids", s(&project), "--renumber", "--apply"]);
+    assert!(said.contains("wrote map/war3map.doo.json"), "{said}");
+    let after = files(&project);
+    let changed: Vec<&String> = after.keys().filter(|k| before.get(*k) != after.get(*k)).collect();
+    assert_eq!(changed, ["map/war3map.doo.json"]);
+    let fixed = dir.join("fixed.w3x");
+    ok(&["pack", s(&project), "-o", s(&fixed), "--force-stale"]);
+    let (a, b) = (w3proj(&["cat", s(&twice), "war3map.doo"]).stdout, w3proj(&["cat", s(&fixed), "war3map.doo"]).stdout);
+    assert_eq!(a.len(), b.len());
+    let differ: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+    // 581, 582 and 583 differ in their lowest byte only (0x45, 0x46, 0x47; little-endian u32).
+    let got: Vec<(u8, u8)> = differ.iter().map(|&i| (a[i], b[i])).collect();
+    assert_eq!(got, [(0x45, 0x46), (0x45, 0x47)], "only the two numbers' bytes differ: at {differ:?}");
+    ok(&["terrain", "check", s(&project)]);
+    ok(&["terrain", "split", s(&project)]);
+    ok(&["terrain", "merge", s(&project)]);
+    let again = dir.join("again.w3x");
+    ok(&["pack", s(&project), "-o", s(&again), "--force-stale"]);
+    assert_eq!(w3proj(&["cat", s(&again), "war3map.doo"]).stdout, b, "split and merged back, the same doodads");
+
+    // Delete Copies on the map as it was: only the copy goes, the one that differs stays and is said.
+    let project = dir.join("project2");
+    unpack(&twice, &project);
+    let said = ok(&["terrain", "fix-ids", s(&project), "--delete-copies", "--apply"]);
+    assert!(said.contains("deleted") && said.contains("stays (not an exact copy)") && said.contains("1 deleted, 2 still sharing a number"), "{said}");
+    let doo: serde_json::Value = serde_json::from_slice(&fs::read(project.join("map/war3map.doo.json")).unwrap()).unwrap();
+    assert_eq!(doo["doodads"].as_array().unwrap().len(), 4);
+    assert!(!w3proj(&["terrain", "split", s(&project)]).status.success(), "two that differ still share 581");
+}
+
+/// `w3proj terrain merge-hook`: installed into a real repository whose project lies in a folder with a space, the
+/// post-merge hook stays silent after a merge that touched one subterrain and reports the seam check's error after one
+/// that brought two branches' edits of two subterrains together (the cliff of the seams test); installing again
+/// updates it; a post-merge hook of someone else's is never replaced; --remove removes only this one.
+#[test]
+fn the_merge_hook_checks_the_seams_after_a_merge() {
+    let dir = workdir("merge_hook");
+    let repo = dir.join("repo");
+    let project = repo.join("maps").join("My Map");
+    let map = dir.join("first.w3x");
+    pack(&fixture(), &map);
+    unpack(&map, &project);
+    let mut args = vec!["terrain", "split", s(&project)];
+    for r in GRID {
+        args.extend(["--rect", r]);
+    }
+    ok(&args);
+    let git = |args: &[&str]| -> Output {
+        let o = Command::new("git")
+            .args(["-c", "user.name=w3proj test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&repo)
+            .env_remove("W3PROJ_BIN")
+            .output()
+            .expect("git runs");
+        assert!(o.status.success(), "git {args:?}: {}", text(&o));
+        o
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "base"]);
+    let said = ok(&["terrain", "merge-hook", s(&project)]);
+    assert!(said.contains("installed"), "{said}");
+    let hook = PathBuf::from(String::from_utf8_lossy(&git(&["rev-parse", "--absolute-git-dir"]).stdout).trim()).join("hooks").join("post-merge");
+    let text_of_hook = fs::read_to_string(&hook).unwrap();
+    assert!(text_of_hook.contains("project='maps/My Map/'"), "{text_of_hook}");
+    assert!(ok(&["terrain", "merge-hook", s(&project)]).contains("updated"));
+
+    let terrain = |sub: &str| project.join("map/terrain").join(sub).join("terrain.txt");
+    let (sw, se) = (fs::read_to_string(terrain("sw")).unwrap(), fs::read_to_string(terrain("se")).unwrap());
+    let base = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim().to_string();
+    // A branch that touches one subterrain, merged (a fast-forward): the hook stays silent.
+    git(&["checkout", "-q", "-b", "one", &base]);
+    fs::write(project.join("map/terrain/ne/units.json"), fs::read_to_string(project.join("map/terrain/ne/units.json")).unwrap() + "\n").unwrap();
+    git(&["commit", "-q", "-am", "ne only"]);
+    git(&["checkout", "-q", "main"]);
+    let quiet = git(&["merge", "--no-edit", "-q", "one"]);
+    assert!(!text(&quiet).contains("w3proj:"), "one subterrain: the hook stays silent: {}", text(&quiet));
+    // Branch B lowers se's west corner; main raises sw's east one; each alone is fine, merged a cliff of 4 levels.
+    git(&["checkout", "-q", "-b", "b", &base]);
+    fs::write(terrain("se"), se.replace("[layer] all 2\n", "[layer]\n022\n")).unwrap();
+    git(&["commit", "-q", "-am", "se"]);
+    git(&["checkout", "-q", "main"]);
+    fs::write(terrain("sw"), sw.replace("[layer] all 2\n", "[layer]\n24\n")).unwrap();
+    git(&["commit", "-q", "-am", "sw"]);
+    let merged = git(&["merge", "--no-edit", "-q", "b"]);
+    let said = text(&merged);
+    assert!(said.contains("w3proj: the merged branches changed 3 subterrain(s)") && said.contains("cliff-height") && said.contains("seam issues"), "{said}");
+
+    // Someone else's post-merge hook: left as it is, the line to add is printed.
+    fs::write(&hook, "#!/bin/sh\necho mine\n").unwrap();
+    let o = w3proj(&["terrain", "merge-hook", s(&project)]);
+    assert!(!o.status.success() && text(&o).contains("isn't this hook") && text(&o).contains("terrain seams"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&hook).unwrap(), "#!/bin/sh\necho mine\n");
+    assert!(!w3proj(&["terrain", "merge-hook", s(&project), "--remove"]).status.success(), "someone else's isn't removed");
+    assert!(hook.exists());
+    fs::remove_file(&hook).unwrap();
+    ok(&["terrain", "merge-hook", s(&project)]);
+    assert!(ok(&["terrain", "merge-hook", s(&project), "--remove"]).contains("removed") && !hook.exists());
+}

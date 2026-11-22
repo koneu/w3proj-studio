@@ -1725,6 +1725,8 @@ pub struct VerifyReport {
     pub unresolved_strings: Vec<String>,
     /// Maps (`""`: the map itself, else the chapter folder) whose references couldn't be told, and why.
     pub strings_unchecked: Vec<(String, String)>,
+    /// What the checks did to their copy of the map (creation numbers renumbered before the split round trip).
+    pub notes: Vec<String>,
 }
 
 impl VerifyReport {
@@ -1817,13 +1819,20 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
 /// a split moves them), and a Pathing tool file with overrides over the seams
 /// (`terrain_pathing::sample_json`) into the subterrains' `pathing.txt` and back, byte for byte. Between the
 /// split and the merge the subterrains are joined, renamed and resized (`terrain_layout::relayout`), which must
-/// change nothing either. A terrain kept raw has nothing to split.
-fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &mut Vec<String>) {
+/// change nothing either. A terrain kept raw has nothing to split. A map whose placed objects share creation numbers
+/// (which a split refuses) is first renumbered on this copy as `w3proj terrain fix-ids --renumber` would
+/// (`terrain_ids::renumber_flat_files`), said in `notes`; the round trip then must give back the renumbered files.
+fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &mut Vec<String>, notes: &mut Vec<String>) {
     use crate::terrain_layout as tl;
     let text = ex.files.keys().find(|k| k.eq_ignore_ascii_case(tl::FLAT_FILE));
     if let Some(text) = text.filter(|k| !ex.manifest.pack.raw.contains(k)) {
         let result = w3e::terrain_from_text(&ex.files[text]).and_then(|t| {
-            let mut files = ex.files.clone();
+            let mut base = ex.files.clone();
+            let (renumbered, groups) = crate::terrain_ids::renumber_flat_files(&mut base)?;
+            if renumbered > 0 {
+                notes.push(format!("{at}renumbered {renumbered} creation numbers in {groups} groups found twice before splitting (on the copy; fix-ids)"));
+            }
+            let mut files = base.clone();
             tl::split(&mut files, &tl::grid_2x2(t.width, t.height))?;
             let store = crate::derived::take(&mut files);
             if let Some(json) = crate::terrain_pathing::sample_json([t.width, t.height]) {
@@ -1848,9 +1857,13 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
                 .collect::<Result<_>>()?;
                 tl::relayout(&mut files, &plan)?;
             }
+            // And Map Size: grown by two tiles on every side and cut back, the same files (`terrain_layout::write_flat`).
+            if !tl::map_size_round_trip(&files, 2)? {
+                return Ok(Some("split layout after Map Size grew and shrank it"));
+            }
             tl::flatten(&mut files)?;
             files.extend(store);
-            if files != ex.files {
+            if files != base {
                 return Ok(Some("project files"));
             }
             let packed = |files: &BTreeMap<String, Vec<u8>>| -> Result<Vec<u8>> {
@@ -1860,7 +1873,7 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
                 }
                 build_archive(&ex.manifest, &prefix_of(ex), encoded)
             };
-            Ok((packed(&files)? != packed(&ex.files)?).then_some("packed map"))
+            Ok((packed(&files)? != packed(&base)?).then_some("packed map"))
         });
         match result {
             Ok(None) => {}
@@ -1869,7 +1882,7 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
         }
     }
     for (dir, chapter) in &ex.nested {
-        split_terrain_round_trip(chapter, codecs, &format!("{at}{dir}/"), out);
+        split_terrain_round_trip(chapter, codecs, &format!("{at}{dir}/"), out, notes);
     }
 }
 
@@ -1882,7 +1895,8 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
     let packed = Archive::from_bytes(pack_extracted(&ex, codecs)?)?;
     let mut mismatches = Vec::new();
     compare(&archive, &packed, &ex, "", &mut mismatches);
-    split_terrain_round_trip(&ex, codecs, "", &mut mismatches);
+    let mut notes = Vec::new();
+    split_terrain_round_trip(&ex, codecs, "", &mut mismatches, &mut notes);
     Ok(VerifyReport {
         files: ex.report.files.len(),
         codec_files: ex.report.files.iter().filter(|f| f.codec.is_some()).count(),
@@ -1898,6 +1912,7 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
         errors: ex.report.errors,
         unresolved_strings: unresolved,
         strings_unchecked,
+        notes,
     })
 }
 
@@ -2096,27 +2111,47 @@ mod tests {
             let json = fs::read(mini.join(format!("{name}.json"))).unwrap();
             b.add(name, codecs.for_project_path(&format!("{name}.json")).unwrap().1.encode(name, &json).unwrap());
         }
-        let ex = extract_with(&Archive::from_bytes(b.write(b"").unwrap()).unwrap(), &codecs, &[]);
+        let archive = b.write(b"").unwrap();
+        let ex = extract_with(&Archive::from_bytes(archive.clone()).unwrap(), &codecs, &[]);
         assert_eq!(ex.files["war3map.w3e.txt"], text);
         assert!(ex.files.contains_key("war3map.doo.json") && ex.files.contains_key("war3mapUnits.doo.json") && ex.files.contains_key("war3map.w3r.json"));
         let mut out = Vec::new();
-        split_terrain_round_trip(&ex, &codecs, "", &mut out);
+        let mut notes = Vec::new();
+        split_terrain_round_trip(&ex, &codecs, "", &mut out, &mut notes);
+        assert!(out.is_empty() && notes.is_empty(), "{out:?} {notes:?}");
+        // Three doodads sharing a creation number (a real map's pattern, which a split refuses): renumbered on the copy,
+        // said, and the round trip passes; the map's own files are untouched.
+        let mut twins = extract_with(&Archive::from_bytes(archive).unwrap(), &codecs, &[]);
+        let doo = String::from_utf8(twins.files["war3map.doo.json"].clone()).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&doo).unwrap();
+        let first = v["doodads"][1].clone();
+        let mut lt = first.clone();
+        lt["editorId"] = 581.into();
+        let mut other = lt.clone();
+        other["variation"] = 3.into();
+        v["doodads"].as_array_mut().unwrap().extend([other, lt.clone(), lt]);
+        let bytes = codecs.for_project_path("war3map.doo.json").unwrap().1.encode("war3map.doo", &serde_json::to_vec(&v).unwrap()).unwrap();
+        let canonical = codecs.for_project_path("war3map.doo.json").unwrap().1.decode("war3map.doo", &bytes).unwrap();
+        twins.files.insert("war3map.doo.json".into(), canonical.clone());
+        split_terrain_round_trip(&twins, &codecs, "", &mut out, &mut notes);
         assert!(out.is_empty(), "{out:?}");
+        assert_eq!(notes, ["renumbered 2 creation numbers in 1 groups found twice before splitting (on the copy; fix-ids)"]);
+        assert_eq!(twins.files["war3map.doo.json"], canonical, "the map's files aren't changed");
         let mut odd = ex;
         odd.files.insert("war3map.w3e.txt".into(), [&b"# a comment\n"[..], &text].concat());
-        split_terrain_round_trip(&odd, &codecs, "", &mut out);
+        split_terrain_round_trip(&odd, &codecs, "", &mut out, &mut Vec::new());
         assert_eq!(out, vec!["war3map.w3e and placed objects (split into map/terrain/ and merged: another project files)".to_string()]);
         // An object file in another form than unpack writes (the same JSON on one line).
         odd.files.insert("war3map.w3e.txt".into(), text.clone());
         let units: serde_json::Value = serde_json::from_slice(&odd.files["war3mapUnits.doo.json"]).unwrap();
         odd.files.insert("war3mapUnits.doo.json".into(), serde_json::to_vec(&units).unwrap());
         out.clear();
-        split_terrain_round_trip(&odd, &codecs, "", &mut out);
+        split_terrain_round_trip(&odd, &codecs, "", &mut out, &mut Vec::new());
         assert_eq!(out, vec!["war3map.w3e and placed objects (split into map/terrain/ and merged: another project files)".to_string()]);
         // One that can't be split.
         odd.files.insert("war3mapUnits.doo.json".into(), b"{ broken".to_vec());
         out.clear();
-        split_terrain_round_trip(&odd, &codecs, "", &mut out);
+        split_terrain_round_trip(&odd, &codecs, "", &mut out, &mut Vec::new());
         assert!(out.len() == 1 && out[0].contains("war3mapUnits.doo.json can't go into map/terrain/"), "{out:?}");
     }
 }

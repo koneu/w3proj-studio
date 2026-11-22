@@ -276,6 +276,14 @@ async fn terrain_check(root: String) -> CmdResult<Value> {
     tauri::async_runtime::spawn_blocking(move || backend::flatview::check(&root)).await.map_err(err)?
 }
 
+/// "Fix Duplicate Creation Numbers…": the plan and the new files' text, nothing written (`backend::flatview::fix_ids`;
+/// the app writes the files as one undoable edit).
+#[tauri::command]
+async fn terrain_fix_ids(app: AppHandle, root: String, mode: Option<String>) -> CmdResult<Value> {
+    let formats = user_format_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || backend::flatview::fix_ids(&root, mode.as_deref(), false, &formats)).await.map_err(err)?
+}
+
 /// "Check Terrain Seams": the split project's whole terrain from disk, closed subterrains too, and its rectangles
 /// (`backend::flatview::whole`); null for a flat one.
 #[tauri::command]
@@ -1190,6 +1198,7 @@ pub fn run() {
             terrain_relayout,
             terrain_id_layout,
             terrain_check,
+            terrain_fix_ids,
             terrain_whole,
             terrain_open_state,
             terrain_set_open,

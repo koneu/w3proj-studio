@@ -347,7 +347,11 @@ into cliffs, ramps or water no brush would leave. **Check Terrain Seams** (`w3pr
 brushes' rules where two subterrains meet: a cliff of more than two levels between neighbouring corners and ramp flags
 that don't climb one level are errors, water that steps within a tile a warning. It lists each corner with its
 subterrain and changes nothing. `w3proj pack` of a split project runs it first and refuses on errors (and when the check
-can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so.
+can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so. To run it after every git merge that
+brought together changes of two subterrains (or of `terrain.json`), install the opt-in hook once per clone:
+`w3proj terrain merge-hook MyMap/` writes `post-merge` into the repository's hooks folder (worktrees and
+`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` hook that is already
+there and isn't this one is left alone (the line to add to it is printed); `--remove` takes this one out again.
 
 **New Subterrain…**, **Resize Subterrain…**, **Rename Subterrain…** and **Join Subterrains…** (palette, the
 Subterrains view; `w3proj terrain relayout --rect NAME[=OLD+OLD]:x,y,w,h …`) change the rectangles without changing the
@@ -355,8 +359,16 @@ map: terrain, objects (by position), regions and pathing overrides are cut into 
 others takes a whole side off each (or all of one); a subterrain keeps its creation-number ranges when moved, resized or
 renamed (its folder is renamed), a joined one gets all of theirs, a new one the next block. Refused, nothing written,
 while anything is unsaved, when one would be cut in pieces, or when a corner left out differs from the default corner.
-**Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. A split terrain still can't
-change its map size (Map Size refuses at the save): merge it first.
+**Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. **Map Size** works on a split
+terrain with every subterrain open: the subterrains keep their ground, those on an edge that grows reach the new edge
+(the ground Map Size adds copies that edge), what is cut off goes as in a flat map (a subterrain cut off entirely with
+its folder), pathing overrides move with their ground; Undo Resize puts the files back.
+
+A creation number (the number scripts name objects by, `gg_dest_LT04_0581`) found on more than one doodad, unit or
+region stops a split and a pack; **Check Terrain IDs** (`w3proj terrain check`, flat projects too) lists every object
+holding one, and **Fix Duplicate Creation Numbers…** (`w3proj terrain fix-ids`, MCP `fix_creation_ids`) shows the plan
+and then, by choice, renumbers every one but the first (in its subterrain's range; a flat map above the highest number)
+or deletes exact copies only. Nothing is renumbered on its own.
 
 Every codec is checked on unpack: a file is only stored as JSON or text if
 `encode(decode(file))` gives back the original bytes. If not, it stays raw, so packing doesn't
@@ -553,6 +565,9 @@ w3proj terrain seams MyMap/         # a split terrain's seams checked with the b
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
                                     # new set of subterrains (joined, renamed, resized, new); the map stays the same
+w3proj terrain merge-hook MyMap/    # opt-in git post-merge hook: `terrain seams` after merges of two subterrains
+w3proj terrain fix-ids MyMap/ --renumber   # creation numbers found twice (flat or split): the plan; --apply writes
+                                    # it; --delete-copies removes exact copies only (those that differ stay)
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
                                     # --mode sd|hd|de; --force also makes fresh ones and replaces a script

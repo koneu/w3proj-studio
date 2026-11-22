@@ -17,6 +17,7 @@ macro_rules! print {
 mod rebuild;
 mod check;
 mod seams;
+mod mergehook;
 
 /// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
 /// command still finishes its work (writes, exit code) as if nothing happened.
@@ -692,13 +693,33 @@ enum TerrainCmd {
         #[arg(long = "rect", value_name = "NAME[=OLD+OLD]:X,Y,W,H", required = true)]
         rects: Vec<w3proj::terrain_layout::Planned>,
     },
-    /// Check a split terrain's creation numbers (what scripts call gg_unit_hfoo_0012, gg_dest_…): a number found twice
-    /// in one kind (units and items, doodads, regions) and id ranges that overlap are errors (exit code 1); objects
-    /// whose number lies outside their subterrain's idRange are listed as information only (moved objects and
-    /// imported maps have them).
+    /// Check a project's creation numbers (what scripts call gg_unit_hfoo_0012, gg_dest_…): a number found twice in one
+    /// kind (units and items, doodads, regions) is an error (exit code 1), listed with every object holding it, in a
+    /// flat project too; in a split one id ranges that overlap are errors as well, and objects whose number lies outside
+    /// their subterrain's idRange are listed as information only (moved objects and imported maps have them).
     Check {
         project: PathBuf,
         /// The report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fix creation numbers found twice (flat or split project). Without --apply only the plan is printed. 0 and
+    /// 4294967295 (doodads, units) aren't numbers and are left alone; split and pack never renumber on their own.
+    #[command(name = "fix-ids")]
+    FixIds {
+        project: PathBuf,
+        /// Every object of a number but the first (lowest index) gets the next free number: in its subterrain's
+        /// idRange (full: the next block above every range, recorded), in a flat map the next above the highest.
+        #[arg(long, conflicts_with = "delete_copies")]
+        renumber: bool,
+        /// Remove the objects that are exact copies of an earlier one (every field alike but the number); objects that
+        /// differ stay, still sharing the number, and are listed.
+        #[arg(long)]
+        delete_copies: bool,
+        /// Write the files (without it nothing changes).
+        #[arg(long)]
+        apply: bool,
+        /// The plan as JSON.
         #[arg(long)]
         json: bool,
     },
@@ -712,6 +733,16 @@ enum TerrainCmd {
         /// The report as JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Install the opt-in git hook (post-merge, in the repository holding PROJECT) that runs `w3proj terrain seams`
+    /// after a merge that changed two subterrains or terrain.json of the split project: it only reports. A post-merge
+    /// hook that isn't this one is never replaced (the line to add to it is printed); installing again updates this one.
+    #[command(name = "merge-hook")]
+    MergeHook {
+        project: PathBuf,
+        /// Remove the hook (only this one).
+        #[arg(long)]
+        remove: bool,
     },
 }
 
@@ -946,6 +977,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     }
                 }
                 if let Ok(r) = report {
+                    for note in &r.notes {
+                        println!("note {} — {note}", map.display());
+                    }
                     warned += usize::from(!r.unresolved_strings.is_empty() || !r.strings_unchecked.is_empty());
                     if !r.unresolved_strings.is_empty() {
                         println!(
@@ -996,9 +1030,28 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Cmd::Terrain { cmd: TerrainCmd::Seams { project, json } } => return seams::run(&project, json, &extra),
+        Cmd::Terrain { cmd: TerrainCmd::MergeHook { project, remove } } => return mergehook::run(&project, remove),
+        Cmd::Terrain { cmd: TerrainCmd::FixIds { project, renumber, delete_copies, apply, json } } => {
+            let mode = if renumber { Some("renumber") } else if delete_copies { Some("deleteCopies") } else { None };
+            let root = project.to_string_lossy().into_owned();
+            let v: serde_json::Value = backend::flatview::fix_ids(&root, mode, apply && mode.is_some(), &extra).map_err(|e: String| anyhow::anyhow!("fixing the creation numbers of {}: {e}", project.display()))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            } else {
+                for line in v["lines"].as_array().into_iter().flatten() {
+                    println!("{}", line.as_str().unwrap_or_default());
+                }
+                let written: Vec<&str> = v["written"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
+                if apply && mode.is_some() {
+                    println!("wrote {}", if written.is_empty() { "nothing".to_string() } else { written.join(", ") });
+                } else if mode.is_some() && v["files"].as_array().is_some_and(|f| !f.is_empty()) {
+                    println!("(a plan only: --apply writes it)");
+                }
+            }
+        }
         Cmd::Terrain { cmd } => {
             let (r, what) = match cmd {
-                TerrainCmd::Check { .. } | TerrainCmd::Seams { .. } => unreachable!("matched above"),
+                TerrainCmd::Check { .. } | TerrainCmd::Seams { .. } | TerrainCmd::FixIds { .. } | TerrainCmd::MergeHook { .. } => unreachable!("matched above"),
                 TerrainCmd::Split { project, rects } => (
                     w3proj::terrain_layout::split_project(&project, &rects).with_context(|| format!("splitting the terrain of {}", project.display()))?,
                     "split into map/terrain/",

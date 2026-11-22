@@ -1293,18 +1293,131 @@ pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String
     }
     files.insert(name.to_string(), bytes.to_vec());
     let t = w3e::terrain_from_text(&files[FLAT_FILE])?;
-    if [t.width, t.height] != layout.corners() {
-        return Err(Error::Project(format!(
-            "the terrain is {}×{} corners, its subterrains cover a canvas of {}×{} (map/{LAYOUT_FILE}): a split terrain can't change size yet; merge it first (Merge Subterrains)",
-            t.width,
-            t.height,
-            layout.head.width,
-            layout.head.height
-        )));
-    }
     let flats: Flats = KINDS.into_iter().filter(|k| layout.objects.has(*k)).map(|k| (k, files[k.flat()].clone())).collect();
-    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats)?;
-    write_changed(map_dir, &sliced)
+    if [t.width, t.height] == layout.corners() && t.offset == layout.head.offset {
+        let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats)?;
+        return write_changed(map_dir, &sliced);
+    }
+    // Map Size: the canvas grows or shrinks; what no subterrain holds any more goes. The layout's files as on disk
+    // (the flat files above were assembled from them, which took them out), for the pathing overrides and what goes.
+    let old_files = read_layout_files(map_dir)?;
+    let sliced = resized_files(&old_files, &layout, &t, &flats)?;
+    let written = write_changed(map_dir, &sliced)?;
+    // The old layout's files the new one doesn't have (a subterrain cut away, overrides cut off) go.
+    for rel in old_files.keys().filter(|k| under_dir(k) && !sliced.contains_key(*k)) {
+        fs::remove_file(crate::paths::join_rel(map_dir, rel))?;
+    }
+    let new_layout = Layout::parse(&sliced[LAYOUT_FILE])?;
+    for s in &layout.subterrains {
+        if !new_layout.subterrains.iter().any(|n| n.folder == s.folder) {
+            remove_empty(&crate::paths::join_rel(map_dir, &format!("{DIR}/{}", s.folder)));
+        }
+    }
+    Ok(written)
+}
+
+/// A terrain after Map Size (`change`: tiles added to the west, east, south and north, negative cut), as the app's
+/// resizeTerrain makes it: world positions stay, a new corner copies the nearest corner of the old edge (its variation
+/// too: the app rolls new ones, which is the same for the subterrains).
+pub(crate) fn map_sized(t: &Terrain, change: [i64; 4]) -> Terrain {
+    let [l, r, b, n] = change;
+    let (w, h) = ((t.width as i64 + l + r) as usize, (t.height as i64 + b + n) as usize);
+    let mut corners = Vec::with_capacity(w * h);
+    for y in 0..h as i64 {
+        for x in 0..w as i64 {
+            let (ox, oy) = ((x - l).clamp(0, t.width as i64 - 1) as usize, (y - b).clamp(0, t.height as i64 - 1) as usize);
+            corners.push(t.corners[oy * t.width + ox]);
+        }
+    }
+    Terrain { width: w, height: h, offset: [t.offset[0] - (l * 128) as f32, t.offset[1] - (b * 128) as f32], corners, ..t.clone() }
+}
+
+/// `w3proj verify`'s Map Size check of a split layout's files (relative to `map/`): the terrain grown by `by` corners on
+/// every side (`map_sized`, objects as they are) and cut back to its size gives the same files.
+pub fn map_size_round_trip(files: &BTreeMap<String, Vec<u8>>, by: i64) -> Result<bool> {
+    let layout = Layout::parse(files.get(LAYOUT_FILE).ok_or_else(|| Error::Project(format!("map/{LAYOUT_FILE} is missing")))?)?;
+    let mut flat = files.clone();
+    flatten(&mut flat)?;
+    let t = w3e::terrain_from_text(&flat[FLAT_FILE])?;
+    let flats: Flats = KINDS.into_iter().filter(|k| layout.objects.has(*k)).map(|k| (k, flat[k.flat()].clone())).collect();
+    let grown = resized_files(files, &layout, &map_sized(&t, [by; 4]), &flats)?;
+    let back = resized_files(&grown, &Layout::parse(&grown[LAYOUT_FILE])?, &t, &flats)?;
+    Ok(back.into_iter().eq(files.iter().filter(|(k, _)| under_dir(k)).map(|(k, v)| (k.clone(), v.clone()))))
+}
+
+/// The split layout's files (relative to `map/`) after Map Size made the terrain `t` (another size or offset; the
+/// object files `flats` as the resize left them): the subterrains follow (`resized_canvas`), every file is cut anew from
+/// `t` and `flats`, the pathing overrides (read from `files` with `layout`) move with their ground, those now off the
+/// map go. The whole new set of files: one of `files` under `map/terrain/` that isn't in it is no longer the layout's.
+fn resized_files(files: &BTreeMap<String, Vec<u8>>, layout: &Layout, t: &Terrain, flats: &Flats) -> Result<BTreeMap<String, Vec<u8>>> {
+    let shift = canvas_shift(layout, t)?;
+    let subs = resized_canvas(&layout.subterrains, layout.corners(), [t.width, t.height], shift)?;
+    let pathing = crate::terrain_pathing::assemble(layout, &|p| files.get(p).cloned())?;
+    let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats)?;
+    if let Some(json) = pathing {
+        let cells = crate::terrain_pathing::parse_json(&json, layout.corners())?;
+        let [w, h] = crate::terrain_pathing::map_size([t.width, t.height]);
+        let moved: Vec<crate::terrain_pathing::Cell> = cells
+            .into_iter()
+            .filter_map(|c| {
+                let (x, y) = (i64::from(c.x) + shift[0] * 4, i64::from(c.y) + shift[1] * 4);
+                (x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h).then_some(crate::terrain_pathing::Cell { x: x as u32, y: y as u32, ..c })
+            })
+            .collect();
+        let new_layout = Layout::parse(&sliced[LAYOUT_FILE])?;
+        sliced.extend(crate::terrain_pathing::slice(&crate::terrain_pathing::json_text([t.width, t.height], &moved), &new_layout)?);
+    }
+    Ok(sliced)
+}
+
+/// The corners a terrain of another size adds on the canvas's west and south side (negative: cuts), as Map Size
+/// changes it: world positions stay, so the shift is the offsets' difference in tiles. An offset that moved by part of
+/// a tile is refused.
+fn canvas_shift(layout: &Layout, t: &Terrain) -> Result<[i64; 2]> {
+    let mut out = [0i64; 2];
+    for (i, o) in out.iter_mut().enumerate() {
+        let d = (f64::from(layout.head.offset[i]) - f64::from(t.offset[i])) / 128.0;
+        if !d.is_finite() || d.fract() != 0.0 {
+            return Err(Error::Project(format!(
+                "the terrain's offset moved by part of a tile ({} to {}), so the subterrains can't follow it (map/{LAYOUT_FILE}): merge them first (Merge Subterrains)",
+                layout.head.offset[i], t.offset[i]
+            )));
+        }
+        *o = d as i64;
+    }
+    Ok(out)
+}
+
+/// The subterrains of a canvas of `old` corners after Map Size made it `new`, `shift` corners added on the west and
+/// south (negative: cut off), as the flat resize changes the map: each rectangle keeps its ground (moves by `shift` in
+/// corners), one that reached an edge of the old canvas reaches the same edge of the new one (the ground Map Size adds
+/// copies the edge, so it is the edge subterrain's), what lies past the new canvas is cut off, and a subterrain cut
+/// off entirely goes (its objects went with the resize, as in a flat map). Names, folders and id ranges stay. Refused
+/// when none is left.
+pub fn resized_canvas(subs: &[Subterrain], old: [usize; 2], new: [usize; 2], shift: [i64; 2]) -> Result<Vec<Subterrain>> {
+    let span = |at: usize, len: usize, old_n: usize, new_n: usize, d: i64| -> Option<(usize, usize)> {
+        let (mut a, mut b) = (at as i64 + d, (at + len) as i64 + d);
+        if at == 0 && d > 0 {
+            a = 0;
+        }
+        if at + len == old_n {
+            b = b.max(new_n as i64);
+        }
+        let (a, b) = (a.max(0), b.min(new_n as i64));
+        (b > a).then_some((a as usize, (b - a) as usize))
+    };
+    let out: Vec<Subterrain> = subs
+        .iter()
+        .filter_map(|s| {
+            let (x, w) = span(s.x, s.w, old[0], new[0], shift[0])?;
+            let (y, h) = span(s.y, s.h, old[1], new[1], shift[1])?;
+            Some(Subterrain { x, y, w, h, ..s.clone() })
+        })
+        .collect();
+    if out.is_empty() {
+        return Err(Error::Project("the new map size leaves no subterrain (there has to be one at least)".into()));
+    }
+    Ok(out)
 }
 
 // ---- the Pathing tool's file of a split project (the app's file layer) ----
@@ -1941,13 +2054,15 @@ mod tests {
         assert_eq!(write_flat(&dir, "war3mapUnits.doo.json", units.as_bytes()).unwrap(), ["terrain/se/units.json", "terrain/sw/units.json"]);
         assert!(objects::same(&read_flat(&dir, "war3mapUnits.doo.json").unwrap(), units.as_bytes()));
 
-        // Refused, nothing written: another canvas size, text that isn't a terrain, a name the layout doesn't hold.
+        // Refused, nothing written: another canvas whose offset moved by part of a tile (Map Size moves it by tiles),
+        // text that isn't a terrain, a name the layout doesn't hold.
         let before = read_layout_files(&dir).unwrap();
         let mut bigger = edited.clone();
         bigger.width += 1;
+        bigger.offset[0] += 1.0;
         bigger.corners = vec![bigger.corners[0]; bigger.width * bigger.height];
         let e = write_flat(&dir, FLAT_FILE, &w3e::terrain_text(&bigger).unwrap()).unwrap_err().to_string();
-        assert!(e.contains("can't change size"), "{e}");
+        assert!(e.contains("part of a tile"), "{e}");
         assert!(write_flat(&dir, FLAT_FILE, b"not a terrain").is_err());
         assert!(write_flat(&dir, "war3map.w3c.json", b"{}").is_err());
         assert_eq!(read_layout_files(&dir).unwrap(), before, "a refused write changes nothing");
@@ -2203,6 +2318,176 @@ mod tests {
         for (name, bytes) in &flat {
             assert_eq!(&fs::read(map_dir.join(name)).unwrap(), bytes, "{name} after split, relayout and merge");
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The flat object files as the app's Map Size leaves them for terrain `t`: objects strictly inside the new map, the
+    /// special doodads moved with their tiles (those off the map gone), regions whose minimum corner is off the map gone.
+    fn objects_map_sized(flat: &Files, t: &Terrain, shift: [i64; 2]) -> Files {
+        let (left, bottom) = (f64::from(t.offset[0]), f64::from(t.offset[1]));
+        let (right, top) = (left + 128.0 * (t.width - 1) as f64, bottom + 128.0 * (t.height - 1) as f64);
+        let inside = |x: f64, y: f64| left < x && x < right && bottom < y && y < top;
+        let mut out = Files::new();
+        for (name, list, special) in [("war3map.doo.json", "doodads", true), ("war3mapUnits.doo.json", "units", false), ("war3map.w3r.json", "regions", false)] {
+            let mut doc: Value = serde_json::from_slice(&flat[name]).unwrap();
+            doc[list].as_array_mut().unwrap().retain(|e| match e.get("position") {
+                Some(p) => inside(p[0].as_f64().unwrap(), p[1].as_f64().unwrap()),
+                None => inside(e["left"].as_f64().unwrap(), e["bottom"].as_f64().unwrap()),
+            });
+            if special {
+                let specials = doc["specials"].as_array_mut().unwrap();
+                for s in specials.iter_mut() {
+                    s["x"] = (s["x"].as_i64().unwrap() + shift[0]).into();
+                    s["y"] = (s["y"].as_i64().unwrap() + shift[1]).into();
+                }
+                specials.retain(|s| (0..t.width as i64 - 1).contains(&s["x"].as_i64().unwrap()) && (0..t.height as i64 - 1).contains(&s["y"].as_i64().unwrap()));
+            }
+            out.insert(name.into(), [serde_json::to_vec_pretty(&doc).unwrap(), b"\n".to_vec()].concat());
+        }
+        out
+    }
+
+    /// Map Size on a split terrain (what `write_flat` does when the terrain comes with another size): random changes of
+    /// the four sides (seeded), the terrain and objects as the app's resize leaves them. The layout's files then hold
+    /// exactly that map; every object lies in the subterrain owning its position; the subterrains left keep name,
+    /// folder and ranges; the pathing overrides move with their ground (those off the map go). A growth shrunk back
+    /// gives the split files back byte for byte (nothing was cut). A partial load refuses the change.
+    #[test]
+    fn random_map_sizes_keep_the_split_map() {
+        let (flat, split, json) = split_with_everything();
+        let old_layout = Layout::parse(&split[LAYOUT_FILE]).unwrap();
+        let old_t = w3e::terrain_from_text(&flat[FLAT_FILE]).unwrap();
+        let old_cells = crate::terrain_pathing::parse_json(&json, old_layout.corners()).unwrap();
+        let mut seed: u64 = 0x5eed_512e;
+        let mut next = |n: i64| -> i64 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) % n as u64) as i64
+        };
+        eprintln!("random_map_sizes_keep_the_split_map: seed 0x5eed512e");
+        let (mut grown_back, mut cut, mut dropped) = (0, 0, 0);
+        for round in 0..60 {
+            let mut change = [0i64; 4];
+            for c in change.iter_mut() {
+                *c = next(9) - 4;
+            }
+            // At least two corners each way.
+            if old_t.width as i64 + change[0] + change[1] < 2 || old_t.height as i64 + change[2] + change[3] < 2 {
+                continue;
+            }
+            let t = map_sized(&old_t, change);
+            let shift = [change[0], change[2]];
+            let objects = objects_map_sized(&flat, &t, shift);
+            let mut files = split.clone();
+            files.insert(FLAT_FILE.into(), w3e::terrain_text(&t).unwrap());
+            files.extend(objects.clone());
+            let flats: Flats = KINDS.into_iter().map(|k| (k, objects[k.flat()].clone())).collect();
+            let out = resized_files(&files, &old_layout, &t, &flats).unwrap_or_else(|e| panic!("round {round} {change:?}: {e}"));
+            assert!(out.keys().all(|k| under_dir(k)), "round {round}");
+            let layout = Layout::parse(&out[LAYOUT_FILE]).unwrap();
+            assert_eq!(layout.corners(), [t.width, t.height]);
+            // The map is the resized one.
+            let mut back = out.clone();
+            assert!(flatten(&mut back).unwrap());
+            assert_eq!(back[FLAT_FILE], files[FLAT_FILE], "round {round} {change:?}: the terrain");
+            for (name, bytes) in &objects {
+                assert!(objects::same(&back[name], bytes), "round {round} {change:?}: {name}");
+            }
+            // Owners by position, names, folders and ranges kept.
+            for (i, s) in layout.subterrains.iter().enumerate() {
+                let was = old_layout.subterrains.iter().find(|o| o.name == s.name).expect("only old subterrains");
+                assert_eq!((&s.folder, &s.id_ranges), (&was.folder, &was.id_ranges), "round {round}");
+                for (kind, list) in [(Kind::Units, "units"), (Kind::Doodads, "doodads")] {
+                    let doc: Value = serde_json::from_slice(&out[&s.object_path(kind)]).unwrap();
+                    for e in doc[list].as_array().unwrap() {
+                        let (x, y) = (e["position"][0].as_f64().unwrap(), e["position"][1].as_f64().unwrap());
+                        assert_eq!(objects::owner(&layout.subterrains, layout.offset(), x, y), i, "round {round}: {list} at {x},{y}");
+                    }
+                }
+            }
+            dropped += old_layout.subterrains.len() - layout.subterrains.len();
+            // The pathing overrides moved with their ground.
+            let (w, h) = (4 * (t.width - 1) as i64, 4 * (t.height - 1) as i64);
+            let want: Vec<crate::terrain_pathing::Cell> = old_cells
+                .iter()
+                .filter_map(|c| {
+                    let (x, y) = (i64::from(c.x) + 4 * shift[0], i64::from(c.y) + 4 * shift[1]);
+                    (x >= 0 && y >= 0 && x < w && y < h).then_some(crate::terrain_pathing::Cell { x: x as u32, y: y as u32, ..*c })
+                })
+                .collect();
+            let got = crate::terrain_pathing::assemble(&layout, &|p| out.get(p).cloned()).unwrap();
+            if want.is_empty() {
+                assert_eq!(got, None, "round {round}");
+            } else {
+                assert_eq!(got, Some(crate::terrain_pathing::json_text([t.width, t.height], &want)), "round {round} {change:?}: the overrides");
+            }
+            // Grown only: shrunk back, the split files as they were.
+            if change.iter().all(|c| *c >= 0) {
+                let mut again = out.clone();
+                again.insert(FLAT_FILE.into(), flat[FLAT_FILE].clone());
+                let flats: Flats = KINDS.into_iter().map(|k| (k, flat[k.flat()].clone())).collect();
+                let undone = resized_files(&again, &layout, &old_t, &flats).unwrap();
+                let before: Files = split.iter().filter(|(k, _)| under_dir(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
+                assert_eq!(undone, before, "round {round} {change:?}: grown and shrunk back");
+                grown_back += 1;
+            } else {
+                cut += 1;
+            }
+        }
+        assert!(grown_back > 0 && cut > 20 && dropped > 0, "grown back {grown_back}, cut {cut}, subterrains cut away {dropped}: the rounds reached too little");
+        // An offset moved by part of a tile is refused.
+        let mut odd = map_sized(&old_t, [1, 0, 0, 0]);
+        odd.offset[0] += 1.0;
+        assert!(canvas_shift(&old_layout, &odd).unwrap_err().to_string().contains("part of a tile"));
+    }
+
+    /// On disk: Map Size cutting the east half off a 2×2 split removes the east subterrains' folders and their pathing
+    /// overrides, the west ones keep theirs; grown back, the east is the west ones' (the ground Map Size adds copies the
+    /// edge), and the map reads as written.
+    #[test]
+    fn map_size_on_disk_removes_what_it_cuts_away() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-mapsize-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        crate::project::create(&dir, None).unwrap();
+        let map_dir = dir.join("map");
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        with_objects(&mut flat, 8);
+        write_changed(&map_dir, &flat).unwrap();
+        let json = crate::terrain_pathing::json_path(&dir);
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
+        fs::write(&json, crate::terrain_pathing::sample_json([t.width, t.height]).unwrap()).unwrap();
+        split_project(&dir, &grid_2x2(t.width, t.height)).unwrap();
+        assert!(map_dir.join("terrain/se/pathing.txt").is_file() || map_dir.join("terrain/ne/pathing.txt").is_file());
+        // Cut 5 corners off the east (the east subterrains start at corner 4): objects there go, as Map Size removes them.
+        let cut = map_sized(&t, [0, -5, 0, 0]);
+        for (name, list) in [("war3map.doo.json", "doodads"), ("war3mapUnits.doo.json", "units")] {
+            let mut doc: Value = serde_json::from_slice(&read_flat(&map_dir, name).unwrap()).unwrap();
+            doc[list].as_array_mut().unwrap().retain(|e| e["position"][0].as_f64().unwrap() < -100.0);
+            if list == "doodads" {
+                doc["specials"] = serde_json::json!([]);
+            }
+            write_flat(&map_dir, name, &serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+        }
+        let mut regions: Value = serde_json::from_slice(&read_flat(&map_dir, "war3map.w3r.json").unwrap()).unwrap();
+        regions["regions"] = serde_json::json!([]);
+        write_flat(&map_dir, "war3map.w3r.json", &serde_json::to_vec_pretty(&regions).unwrap()).unwrap();
+        write_flat(&map_dir, FLAT_FILE, &w3e::terrain_text(&cut).unwrap()).unwrap();
+        let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).unwrap()).unwrap();
+        assert_eq!(layout.subterrains.iter().map(|s| (s.name.as_str(), s.w)).collect::<Vec<_>>(), [("sw", 4), ("nw", 4)]);
+        assert!(!map_dir.join("terrain/se").exists() && !map_dir.join("terrain/ne").exists(), "the cut subterrains' folders are gone");
+        assert_eq!(read_flat(&map_dir, FLAT_FILE).unwrap(), w3e::terrain_text(&cut).unwrap());
+        // The overrides on the west half stay, those cut off go.
+        let cells = crate::terrain_pathing::parse_json(&crate::terrain_pathing::sample_json([t.width, t.height]).unwrap(), [t.width, t.height]).unwrap();
+        let kept: Vec<_> = cells.into_iter().filter(|c| c.x < 4 * 3).collect();
+        assert!(!kept.is_empty());
+        let got = crate::terrain_pathing::assemble(&layout, &|p| fs::read(crate::paths::join_rel(&map_dir, p)).ok()).unwrap();
+        assert_eq!(got, Some(crate::terrain_pathing::json_text([cut.width, cut.height], &kept)));
+        // Grown back east: the west subterrains reach the new edge.
+        let grown = map_sized(&cut, [0, 5, 0, 0]);
+        write_flat(&map_dir, FLAT_FILE, &w3e::terrain_text(&grown).unwrap()).unwrap();
+        let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).unwrap()).unwrap();
+        assert_eq!(layout.subterrains.iter().map(|s| (s.name.as_str(), s.w)).collect::<Vec<_>>(), [("sw", 9), ("nw", 9)]);
+        assert_eq!(read_flat(&map_dir, FLAT_FILE).unwrap(), w3e::terrain_text(&grown).unwrap());
         let _ = fs::remove_dir_all(&dir);
     }
 

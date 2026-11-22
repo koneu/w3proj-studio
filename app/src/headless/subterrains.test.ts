@@ -22,9 +22,10 @@ import { nextRegionIndex } from "../lib/terrain/regions";
 import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
-import { checkTerrainIds, checkTerrainSeams, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { MCP_EDITS_SERVICE } from "../extensions/services";
+import { changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
-import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
+import { pathingOverridesText, resizeTerrain, type PathingOverrides } from "../lib/terrain/resize";
 
 const cache = join(repoPath("app", "node_modules"), ".cache", "w3-layout-test");
 mkdirSync(cache, { recursive: true });
@@ -115,6 +116,33 @@ async function editTerrain(w3: W3Api) {
   ne.variation = (ne.variation + 5) % 16;
   await writeTerrainBytes(path, writeW3e(t), io);
 }
+
+test("Map Size on a split terrain: the app's resized terrain saves, the canvas and the edge subterrains grow, objects stay theirs; shrunk back, every file as it was", async () => {
+  const { w3, root } = await splitProject("mapsize");
+  const path = terrainPath(w3.workspace.files().map((f) => f.path))!;
+  const io = { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path), writeText: (t: string) => w3.workspace.writeText(path, t), writeBytes: (b: Uint8Array) => w3.workspace.writeBytes(path, b) };
+  const t = parseW3e(await readTerrainBytes(path, io));
+  const layoutOf = () => JSON.parse(readFileSync(join(root, "map", "terrain", "terrain.json"), "utf8")) as { corners: number[]; offset: number[]; subterrains: { name: string; x: number; y: number; w: number; h: number; idRange: unknown }[] };
+  const was = layoutOf();
+  const before = snapshot(root);
+  const units = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!.list.map((u) => [u.id, ...u.position]);
+  // Two tiles west and one north added, as Map Size's resizeTerrain makes them (new corners copy the edge).
+  const grown = resizeTerrain(t, [2, 0, 0, 1]);
+  await writeTerrainBytes(path, writeW3e(grown), io);
+  await w3.workspace.refresh();
+  const now = layoutOf();
+  assert.deepEqual(now.corners, [was.corners[0] + 2, was.corners[1] + 1]);
+  assert.deepEqual(now.offset, [was.offset[0] - 256, was.offset[1]]);
+  // West ones reach the new west edge, north ones the new north edge, the rest moved by the two corners.
+  const want = was.subterrains.map((s) => ({ ...s, x: s.x === 0 ? 0 : s.x + 2, w: s.x === 0 ? s.w + 2 : s.w, h: s.y + s.h === was.corners[1] ? s.h + 1 : s.h }));
+  assert.deepEqual(now.subterrains, want);
+  assert.equal(w3eToText(await readTerrainBytes(path, io)), w3eToText(writeW3e(grown)), "the terrain reads back as written");
+  assert.deepEqual((await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!.list.map((u) => [u.id, ...u.position]), units, "the objects stay where they were");
+  // Shrunk back (what Undo Resize writes): the split files byte for byte.
+  await writeTerrainBytes(path, writeW3e(t), io);
+  await w3.workspace.refresh();
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
+});
 
 /** The first unit moved east of the 2×2 grid's seam (corner 2: world x 128), saved as the terrain editor saves it. */
 async function moveUnit(w3: W3Api) {
@@ -217,7 +245,52 @@ test("a new object in a split project is numbered from its subterrain's range an
   // The control: the flat project numbers one past the highest (the footman's 2).
   assert.deepEqual(await placeUnits(flat, [SW]), [3]);
   assert.equal((await loadPlacedFile(flat, "war3mapUnits.doo", "units"))!.idLayout, null);
-  await assert.rejects(checkTerrainIds(flat, { quiet: true }), /isn't split/);
+  // A flat project is checked too (numbers found twice; it has no ranges).
+  const flatCheck = await checkTerrainIds(flat, { quiet: true });
+  assert.equal(flatCheck.errors, false, flatCheck.lines.join("\n"));
+});
+
+test("Fix Duplicate Creation Numbers on a flat project (three stacked doodads share a number, the last an exact copy): listed, refused unsaved, renumbered as one edit, then it splits", async () => {
+  const root = project("fixids");
+  const path = join(root, "map", "war3map.doo.json");
+  const doo = JSON.parse(readFileSync(path, "utf8")) as { doodads: Record<string, unknown>[] };
+  const lt = { ...doo.doodads[1], position: [96, 96, 0], editorId: 581 };
+  doo.doodads.push({ ...lt, variation: 3 }, lt, { ...lt });
+  writeFileSync(path, JSON.stringify(doo, null, 2));
+  const w3 = await open(root);
+  const writes: string[] = [];
+  // The undoable edit as the MCP server provides it: here written through the workspace.
+  w3.services.provide(MCP_EDITS_SERVICE, { edit: async (_t: string, change: (read: (p: string) => Promise<string | null>) => Promise<{ path: string; text: string }[]>) => {
+    const files = await change((p) => w3.workspace.readText(p).catch(() => null));
+    for (const f of files) { writes.push(f.path); await w3.workspace.writeText(f.path, f.text); }
+    return files.length > 0;
+  } });
+  const check = await checkTerrainIds(w3, { quiet: true });
+  assert.equal(check.errors, true);
+  assert.deepEqual(check.duplicates.map((d) => [d.kind, d.number, d.members.map((m) => [m.index, m.id, m.copyOf ?? null])]), [["doodads", 581, [[2, "LOtr", null], [3, "LOtr", null], [4, "LOtr", 3]]]]);
+  await assert.rejects(splitTerrain(w3, { layout: "main", quiet: true }), /doodads\[2\], doodads\[3\] and doodads\[4\] have the same creation number 581.*fix-ids/);
+  // The plans, nothing written.
+  const before = snapshot(root);
+  const renumber = await fixCreationIds(w3, { mode: "renumber", dryRun: true, quiet: true });
+  assert.deepEqual(renumber?.groups[0].members.map((m) => [m.action, m.to ?? null]), [["keep", null], ["renumber", 582], ["renumber", 583]]);
+  const deleting = await fixCreationIds(w3, { mode: "deleteCopies", dryRun: true, quiet: true });
+  assert.deepEqual([deleting?.deleted, deleting?.stillTwice, deleting?.groups[0].members.map((m) => m.action)], [1, 2, ["keep", "stays", "delete"]]);
+  assert.deepEqual(changedFiles(before, snapshot(root)), [], "a plan writes nothing");
+  // Refused while something is unsaved.
+  const unsaved = w3.editors.unsavedPaths;
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = () => ["map/war3map.w3i.json"];
+  await assert.rejects(fixCreationIds(w3, { mode: "renumber", quiet: true }), /save or discard the changes in map\/war3map.w3i.json first/);
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = unsaved;
+  assert.deepEqual(writes, []);
+  const done = await fixCreationIds(w3, { mode: "renumber", quiet: true });
+  assert.equal(done?.renumbered, 2);
+  assert.deepEqual(writes, ["map/war3map.doo.json"], "one edit of one file");
+  const after = JSON.parse(readFileSync(path, "utf8")) as { doodads: Record<string, unknown>[] };
+  assert.deepEqual(after.doodads.map((d) => d.editorId), [0, 1, 581, 582, 583]);
+  assert.deepEqual(after.doodads.map((d) => ({ ...d, editorId: 0 })), doo.doodads.map((d) => ({ ...d, editorId: 0 })), "nothing else changed");
+  assert.equal((await checkTerrainIds(w3, { quiet: true })).errors, false);
+  await splitTerrain(w3, { layout: "main", quiet: true });
+  assert.ok(isSplit(w3));
 });
 
 test("a full range: the next block above every range, recorded in terrain.json by the save", async () => {
@@ -256,7 +329,8 @@ test("two branches placing in different subterrains merge without a duplicate nu
   await assert.rejects(loadPlacedFile(a.w3, "war3mapUnits.doo", "units"), /creation number 10000 twice/);
   const report = await checkTerrainIds(a.w3, { quiet: true });
   assert.equal(report.errors, true);
-  assert.deepEqual(report.duplicates, [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"] }]);
+  assert.deepEqual(report.duplicates.map(({ members, ...d }) => ({ ...d, members: members.map((m) => [m.file, m.id]) })),
+    [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"], members: [["map/terrain/sw/units.json", "hfoo"], ["map/terrain/sw/units.json", "hfoo"]] }]);
 });
 
 // ---- stage 3: derived files in .w3proj/derived/, the Pathing tool's file in the subterrains' pathing.txt ----
@@ -530,6 +604,46 @@ test("New, Resize, Rename and Join Subterrains: the map stays the same, objects 
   assert.equal(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"south_west\", \"north\"]\n}\n");
   await openSubterrains(w3, { all: true });
   await same("rename with some closed");
+});
+
+test("the MCP tool change_subterrains: the commands' changes and refusals, without questions", async () => {
+  const { w3, root } = await bigSplit("tool");
+  const whole = await loaded(w3);
+  const folders = () => readdirSync(join(root, "map", "terrain"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  const renamed = await changeSubterrainsTool(w3, { action: "rename", name: "a0", to: "south_west" });
+  assert.deepEqual(folders(), ["a1", "a2", "b0", "b1", "b2", "south_west"]);
+  assert.ok(renamed.written.some((p) => p.startsWith("map/terrain/south_west/")) && renamed.removed.some((p) => p.startsWith("map/terrain/a0/")), JSON.stringify(renamed));
+  assert.deepEqual(renamed.subterrains.map((s) => s.name).sort(), ["a1", "a2", "b0", "b1", "b2", "south_west"]);
+  await changeSubterrainsTool(w3, { action: "join", names: ["a1", "a2"], to: "south_east" });
+  await changeSubterrainsTool(w3, { action: "resize", name: "b0", rect: "0,8,10,9" });
+  await changeSubterrainsTool(w3, { action: "new", name: "mid", rect: { x: 10, y: 8, w: 2, h: 9 } });
+  assert.deepEqual(folders(), ["b0", "b1", "b2", "mid", "south_east", "south_west"]);
+  assert.deepEqual(await loaded(w3), whole, "the map stayed the same");
+  // The commands' refusals, word for word; arguments a command would ask for are required; nothing written.
+  const before = snapshot(root);
+  const reason = (p: Promise<unknown>) => p.then(() => "done", (e: Error) => e.message);
+  for (const [tool, command] of [
+    [{ action: "resize", name: "b2", rect: "16,8,8,9" }, () => resizeSubterrain(w3, { name: "b2", rect: "16,8,8,9", quiet: true })],
+    [{ action: "rename", name: "b2", to: "MID" }, () => renameSubterrain(w3, { name: "b2", to: "MID", quiet: true })],
+    [{ action: "new", name: "hole", rect: "20,10,2,2" }, () => newSubterrain(w3, { name: "hole", rect: "20,10,2,2", quiet: true })],
+    [{ action: "join", names: ["south_west", "b2"], to: "x" }, () => joinSubterrains(w3, { names: ["south_west", "b2"], to: "x", quiet: true })],
+  ] as const) {
+    const byTool = await reason(changeSubterrainsTool(w3, tool)), byCommand = await reason(command());
+    assert.equal(byTool, byCommand, JSON.stringify(tool));
+    assert.match(byTool, /Nothing was changed\.$/, JSON.stringify(tool));
+  }
+  for (const [args, why] of [
+    [{ action: "rename", name: "b2" }, /rename needs to/],
+    [{ action: "new", name: "x" }, /new needs rect/],
+    [{ action: "join", names: ["b2"], to: "x" }, /join needs names/],
+    [{ action: "split" }, /action must be/],
+  ] as const) await assert.rejects(changeSubterrainsTool(w3, args), why);
+  // Refused while something is unsaved, as the commands.
+  const unsaved = w3.editors.unsavedPaths;
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = () => ["map/war3map.w3i.json"];
+  await assert.rejects(changeSubterrainsTool(w3, { action: "rename", name: "b2", to: "north" }), /save or discard the changes in map\/war3map.w3i.json first/);
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = unsaved;
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */

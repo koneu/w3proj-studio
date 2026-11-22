@@ -97,6 +97,21 @@ export function editableAt(m: PartialMask | null, offsetX: number, offsetY: numb
   return m.corners[cy * m.width + cx] === OPEN;
 }
 
+/** Whether every corner of the box (corner coordinates, inclusive) is open; corners off the map don't count (an edit
+ *  never reaches them). */
+export function cornersOpen(m: PartialMask | null, x0: number, y0: number, x1: number, y1: number): boolean {
+  if (!m) return true;
+  for (let y = Math.max(0, y0); y <= Math.min(m.height - 1, y1); y++) {
+    for (let x = Math.max(0, x0); x <= Math.min(m.width - 1, x1); x++) if (m.corners[y * m.width + x] !== OPEN) return false;
+  }
+  return true;
+}
+
+/** What a refused placement, paste or move of objects says when a spot lies outside the open subterrains. */
+export function notOpenText(what: string, x: number, y: number): string {
+  return `${what} ${Math.round(x)}, ${Math.round(y)} isn't in an open subterrain (the dimmed strip and the closed area are read-only). Open Subterrains… opens it.`;
+}
+
 /** The open subterrains' cells of a new pathing map `made` (war3map.wpm: 16 bytes of header, width and height at 8 and
  *  12, then the cells, rows from the south) over the stored one `stored`: a cell keeps the stored value unless its tile's
  *  south-west corner is open (the tile's owner). Nothing stored, or another size: `made` as it is. */

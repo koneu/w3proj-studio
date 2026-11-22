@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CLOSED, editableAt, HALO, mergeOpenPathing, OPEN, partialMask, type OpenState } from "./openset";
+import { CLOSED, cornersOpen, editableAt, HALO, mergeOpenPathing, notOpenText, OPEN, partialMask, type OpenState } from "./openset";
 
 /** 4×3 corners: the west two columns open, the third halo, the fourth closed (rows from the south). */
 const state = (mask: string): OpenState => ({ partial: true, source: "file", corners: [4, 3], halo: 2, subterrains: [], mask, error: null });
@@ -25,6 +25,16 @@ test("an object may go where its corner (the one at or south-west of it) is open
   assert.equal(editableAt(m, 0, 0, 255, 10), true, "corner 1");
   assert.equal(editableAt(m, 0, 0, 256, 10), false, "corner 2: halo");
   assert.equal(editableAt(m, 0, 0, -1, 10), false, "off the map");
+});
+
+test("a paste's ground box is open only when every corner of it is; corners off the map don't count", () => {
+  const m = partialMask(state(MASK), 4, 3)!;
+  assert.equal(cornersOpen(null, 0, 0, 99, 99), true, "no mask");
+  assert.equal(cornersOpen(m, 0, 0, 1, 2), true, "the two open columns");
+  assert.equal(cornersOpen(m, 0, 0, 2, 0), false, "reaching the halo column");
+  assert.equal(cornersOpen(m, -5, -5, 1, 2), true, "off the map to the south-west");
+  assert.equal(cornersOpen(m, 3, 0, 9, 0), false, "the closed column");
+  assert.match(notOpenText("Not placed: the spot", 10.4, -3.6), /^Not placed: the spot 10, -4 isn't in an open subterrain/);
 });
 
 test("a partial derive keeps the stored pathing cells outside the open subterrains", () => {

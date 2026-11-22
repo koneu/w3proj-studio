@@ -16,6 +16,8 @@ import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere
 import { nextRegionIndex, regionBoxProblem, regionEdgeOnGrid, regionsOnGrid, shiftInside, typedRegionEdge } from "../../lib/terrain/regions";
 import { worldRect } from "../../lib/terrain/resize";
 import { loadIdLayout, type IdLayout } from "../../lib/terrain/creationids";
+import { openAreaTest } from "../../lib/terrain/openarea";
+import { notOpenText } from "../../lib/terrain/openset";
 
 const FILE = "map/war3map.w3r";
 /** Regions snap to this grid (World Editor default). */
@@ -65,6 +67,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       for (const k of ["left", "bottom", "right", "top"] as const) if (typeof box[k] === "number") box[k] = regionEdgeOnGrid(box[k] as number);
       const problem = regionBoxProblem(box, facts && worldRect(facts));
       if (problem) throw new Error(`Not added: ${problem}`);
+      // A partial load (Open Subterrains…): a region belongs to the subterrain of its minimum corner, which must be open.
+      const open = await openAreaTest(w3);
+      if (open && !open(box.left as number, box.bottom as number)) throw new Error(notOpenText("Not added: its south-west corner at", box.left as number, box.bottom as number));
       // A split terrain's ranges: the subterrain holding the minimum corner numbers it.
       const idLayout = await loadIdLayout(w3);
       await editRegions(w3, `Add region ${name}`, (doc) => {
@@ -162,11 +167,16 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** A split terrain's subterrains and id ranges, for a new region's number (null: a flat project; undefined: not read,
    *  or terrain.json couldn't be: then no region is drawn rather than numbered as in a flat project). */
   let idLayout: IdLayout | null | undefined;
+  /** A partial load (Open Subterrains…): whether a point lies in an open subterrain (null: everything is open;
+   *  undefined: not told, then no region is drawn). */
+  let openTest: ((x: number, y: number) => boolean) | null | undefined;
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
     idLayout = undefined;
     idLayout = await loadIdLayout(w3);
+    openTest = undefined;
+    openTest = await openAreaTest(w3).catch(() => undefined);
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.regions ??= [];
@@ -444,7 +454,10 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         draft = null;
         if (r.right - r.left >= GRID && r.top - r.bottom >= GRID) {
           // Numbered now its minimum corner is known: in a split terrain that corner's subterrain gives the number.
-          const index = idLayout === undefined ? { refused: "the split terrain's map/terrain/terrain.json couldn't be read." } : nextRegionIndex(doc.regions, idLayout, [r.left, r.bottom]);
+          const index = idLayout === undefined ? { refused: "the split terrain's map/terrain/terrain.json couldn't be read." }
+            : openTest === undefined ? { refused: "which subterrains are open can't be told (Open Subterrains… says why)." }
+            : openTest && !openTest(r.left, r.bottom) ? { refused: notOpenText("its south-west corner at", r.left, r.bottom) }
+            : nextRegionIndex(doc.regions, idLayout, [r.left, r.bottom]);
           if (typeof index !== "number") {
             w3.window.showWarning(`No region drawn: ${index.refused}`);
             render();

@@ -358,9 +358,9 @@ pub(crate) fn write_flat(map_dir: &Path, layout: &mut Layout, p: &Partial, name:
     if name == tl::FLAT_FILE {
         let new = w3e::terrain_from_text(bytes)?;
         let old = w3e::terrain_from_text(old)?;
-        if [new.width, new.height] != layout.corners() {
+        if [new.width, new.height] != layout.corners() || new.offset != layout.head.offset {
             return Err(Error::Project(format!(
-                "the terrain is {}×{} corners, its subterrains cover a canvas of {}×{} (map/{}): a split terrain can't change size yet; merge it first (Merge Subterrains)",
+                "the terrain is {}×{} corners, its subterrains cover a canvas of {}×{} (map/{}): the map size changes only with every subterrain open (Open Subterrains…)",
                 new.width,
                 new.height,
                 layout.head.width,
