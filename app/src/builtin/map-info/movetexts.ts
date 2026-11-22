@@ -49,7 +49,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
   const objectFiles = OBJECT_KINDS.flatMap((kind) => [false, true].map((skin) => ({ kind, skin, path: `map/war3map${skin ? "Skin" : ""}.${kind}` })));
   const data = await gameData(w3, [...new Set(objectFiles.filter((f) => has(`${f.path}.json`)).map((f) => f.kind))]);
   // The triggers' parameter types; without them the triggers stay as they are (their references still count). Read
-  // whether or not the file list names war3map.wtg.json yet: right after a project opens it may not.
+  // whether or not the file list names map/triggers/ yet: right after a project opens it may not.
   const trigData: TriggerData | null = await w3.game.readText("UI\\TriggerData.txt").then((t) => parseTriggerData(t), () => null);
   // A map script still due from the last save is written first: the references it holds are searched below, and it's
   // what the map's data makes (a script that isn't, kept by the Map Script extension, counts as it is).

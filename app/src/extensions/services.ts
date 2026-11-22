@@ -482,7 +482,7 @@ export interface FileLanguage {
   title: string;
   /** Highlighting and completion it builds on ("jass": JASS symbols and other extensions' JASS items). */
   base: "jass" | "lua" | "text";
-  /** The base for one file when it depends on more than the file (war3map.wct.txt: the map's script language);
+  /** The base for one file when it depends on more than the file (a trigger file: its extension, .j or .lua);
    *  asked as the file opens, `base` when omitted or when it fails. */
   baseOf?(path: string): Promise<"jass" | "lua" | "text">;
   /** File extensions with the dot (".vj", ".zn"); the files also need an editor contribution
