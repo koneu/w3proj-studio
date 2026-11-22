@@ -5619,7 +5619,7 @@ async function resizeUndoChecks(page, found) {
 
   // Smaller, by the Map Size tab: it names what is cut off, and the shrink is undone.
   await page.evaluate(`window.__warned.length = 0`);
-  await hands.click(".terrain-tab", "Map Size");
+  await run("w3.terrainMapSize.edit");
   await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
   // Typed sides that aren't whole numbers, or a border below 0, are refused with why and Apply stays off (they were
   // rounded and clamped): sidesProblem. Set back to 0, Apply has nothing to do again.
@@ -5656,7 +5656,7 @@ async function resizeUndoChecks(page, found) {
   // (not on the new files), the undo that follows is not met by a question about files changed since, and nothing is written
   // to the old terrain afterwards (the three grids all have the size of the terrain).
   // (Through the Map Size tab, which makes no checkpoint for a larger map: a checkpoint settles the rebuild too.)
-  await hands.click(".terrain-tab", "Map Size");
+  await run("w3.terrainMapSize.edit");
   await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
   await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[1]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
   await settled(page);
@@ -5945,7 +5945,7 @@ async function resizeUnreadable(page, found) {
       if (moved.length) fail(`${label}: the refused resize changed ${moved.join(", ")}`);
       // The same by the Map Size tab: its message says why.
       await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
-      await hands.click(".terrain-tab", "Map Size");
+      await run("w3.terrainMapSize.edit");
       await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
       await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[1]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
       await settled(page);

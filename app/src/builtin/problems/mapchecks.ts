@@ -159,5 +159,30 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         return out.slice(0, 200);
       },
     },
+    {
+      id: "creationIds",
+      title: "Duplicate creation numbers",
+      async run() {
+        const root = w3.workspace.project()?.root;
+        if (!root) return [];
+        // A project without terrain files has none; the plan itself changes nothing.
+        const plan = await w3.backend.invoke<{ groups: { kind: string; number: number; members: { file: string; index: number }[] }[] }>("terrain_fix_ids", { root, mode: null }).catch(() => null);
+        if (!plan?.groups.length) return [];
+        const fix = (mode: "renumber" | "deleteCopies") => async () => { await w3.commands.execute("w3.terrainLayout.fixIds", { mode, quiet: false }); };
+        const fixes = [
+          { label: "Renumber", title: "Every object of a number but the first gets the next free number", run: fix("renumber") },
+          { label: "Delete Copies", title: "Remove the objects that are exact copies of an earlier one", run: fix("deleteCopies") },
+        ];
+        const out = plan.groups.slice(0, LIMIT).map((g): Problem => ({
+          severity: "error",
+          message: `Creation number ${g.number} (${g.kind}) is held by ${g.members.length} objects: ${g.members.slice(0, 4).map((m) => `${m.file.replace(/^.*[\\/]/, "")}[${m.index}]`).join(", ")}${g.members.length > 4 ? ", …" : ""}. Split Terrain and pack refuse it.`,
+          location: g.members[0]?.file,
+          about: `${g.kind}:${g.number}`,
+          fixes,
+        }));
+        if (plan.groups.length > LIMIT) out.push({ severity: "warning", message: `… and ${plan.groups.length - LIMIT} more creation numbers held twice` });
+        return out;
+      },
+    },
   ];
 }

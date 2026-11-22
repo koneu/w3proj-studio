@@ -103,6 +103,8 @@ export interface TerrainToolGroup {
   title: string;
   /** Tab order, lower first. */
   order?: number;
+  /** No tab in the viewer's toolbar: the group only hooks into each editor. */
+  hidden?: boolean;
   /** Called once per open terrain editor. */
   create(editor: TerrainEditorHandle): TerrainToolGroupInstance;
   /** With no terrain editor open (a rebuild after a tool's edit): what the instance's filterPathing would do,

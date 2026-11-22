@@ -1606,6 +1606,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // The Subterrains extension's editor of the terrain's layout (a command: it may be off).
         const layout = () => w3.commands.execute("w3.terrainLayout.edit").catch((e) => w3.window.showError(String((e as Error).message ?? e)));
         const settings = () => w3.commands.execute("w3.terrain.settings").catch((e) => w3.window.showError(String((e as Error).message ?? e)));
+        const mapSize = () => w3.commands.execute("w3.terrainMapSize.edit").catch((e) => w3.window.showError(String((e as Error).message ?? e)));
         const facts = h("div.terrain-facts.muted", {}, "Reading terrain…");
         el.append(
           h("div.tree", {},
@@ -1614,7 +1615,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.tree-row.obj-kind", { onclick: layout, title: "The subterrains as rectangles over the map: draw, resize, rename, join, delete, or split a flat terrain" },
               h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Edit Terrain Layout")),
             h("div.tree-row.obj-kind", { onclick: settings, title: "The tileset, the map's ground tiles and cliff types, the canvas and the terrain's other settings" },
-              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Edit Tileset / Terrain Settings"))),
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Edit Tileset / Terrain Settings")),
+            h("div.tree-row.obj-kind", { onclick: mapSize, title: "Grow or shrink the map per side and set the unplayable border (camera bounds)" },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Map Size and Camera Bounds"))),
           facts,
         );
         readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }).then((buf) => {
@@ -5142,7 +5145,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const keys = keysOf(id);
             return h(`button.terrain-tab${id === activeGroup ? ".on" : ""}`, { onclick: () => showTab(id), ...(keys.length ? { title: `${title} (${keys.join(", ")})` } : {}) }, title);
           };
-          tabsEl.replaceChildren(tab(null, "Select"), ...toolGroups.all().filter((g) => groupInsts.has(g.id)).map((g) => tab(g.id, g.title)),
+          tabsEl.replaceChildren(tab(null, "Select"), ...toolGroups.all().filter((g) => groupInsts.has(g.id) && !g.hidden).map((g) => tab(g.id, g.title)),
             h("span.terrain-tabs-gap"),
             h("button", { title: "Undo (Ctrl+Z)", onclick: undo }, "↶"),
             h("button", { title: "Redo (Ctrl+Y)", onclick: redo }, "↷"));
