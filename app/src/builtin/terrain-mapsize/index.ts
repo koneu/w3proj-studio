@@ -7,7 +7,7 @@
 // (lib/terrain/resizeundo), so Ctrl+Z in the reopened editor, or Undo Resize,
 // puts them back, and Redo Resize does it again.
 
-import type { ExtensionContext, W3Api } from "../../extensions/api";
+import type { EditorInstance, ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { COORD_LIMIT, playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
 import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO } from "../../lib/terrain/resizeundo";
@@ -84,9 +84,63 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrainMapSize.undo", (opts?: { quiet?: boolean }) => (opts?.quiet ? undoQuiet() : undo())),
     w3.commands.register("w3.terrainMapSize.redo", (opts?: { quiet?: boolean }) => (opts?.quiet ? redoQuiet() : redo())),
   );
+  // A hidden tool group only tells which terrain editors are open (the tab works on the project's own); no viewer tab.
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
-    ctx.subscriptions.push(s.registerToolGroup({ id: "mapsize", title: "Map Size", order: 40, create: (ed) => mapSize(w3, ed) }));
+    ctx.subscriptions.push(s.registerToolGroup({ id: "mapsize", title: "Map Size", order: 40, hidden: true, create: (ed) => {
+      editors.add(ed); for (const f of editorsChanged) f();
+      return { toolbar: h("div"), dispose() { editors.delete(ed); for (const f of editorsChanged) f(); } };
+    } }));
   });
+  const projectEditor = () => {
+    const path = w3.workspace.files().map((f) => f.path).find((p) => /(^|\/)war3map\.w3e(\.txt)?$/i.test(p) || /(^|\/)terrain\.json$/i.test(p));
+    const all = [...editors].reverse();
+    return all.find((e) => e.path === path) ?? all[0] ?? null;
+  };
+  const openEditor = async () => {
+    if (!projectEditor()) await w3.commands.execute("w3.terrain.open");
+    for (let i = 0; i < 100 && !projectEditor(); i++) await new Promise((r) => setTimeout(r, 50));
+  };
+  ctx.subscriptions.push(
+    w3.editors.registerProvider(MAPSIZE_EDITOR, { resolve: (el) => mapSizeTab(w3, el, projectEditor, openEditor) }),
+    w3.commands.register("w3.terrainMapSize.edit", async () => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await openEditor();
+      await w3.editors.open(MAPSIZE_DOC, MAPSIZE_EDITOR);
+    }),
+  );
+}
+
+export const MAPSIZE_DOC = "w3:terrain-mapsize";
+export const MAPSIZE_EDITOR = "w3.terrainMapSize";
+const editors = new Set<TerrainEditorHandle>();
+const editorsChanged = new Set<() => void>();
+
+/** The Map Size tab: the panel for the project's open terrain editor, made again when that editor is replaced (a resize
+ *  reopens it). */
+function mapSizeTab(w3: W3Api, el: HTMLElement, editor: () => TerrainEditorHandle | null, openEditor: () => Promise<void>): EditorInstance {
+  const root = h("div.mapsize-tab", { tabindex: "-1" });
+  el.append(root);
+  let current: { ed: TerrainEditorHandle; panel: TerrainToolGroupInstance } | null = null;
+  const sync = () => {
+    const ed = editor();
+    if (ed === current?.ed) return;
+    current?.panel.dispose?.();
+    current = null;
+    if (!ed) {
+      root.replaceChildren(h("div.terrain-settings-empty", {},
+        h("h2", {}, "Map Size and Camera Bounds"),
+        h("p.muted", {}, "The map size is the terrain's: open the terrain editor to change it here."),
+        h("button", { onclick: () => void openEditor().then(sync, (e) => w3.window.showError(String((e as Error).message ?? e))) }, "Open the terrain editor")));
+      return;
+    }
+    const panel = mapSize(w3, ed);
+    panel.activate?.();
+    current = { ed, panel };
+    root.replaceChildren(h("h2", {}, "Map Size and Camera Bounds"), panel.toolbar);
+  };
+  editorsChanged.add(sync);
+  sync();
+  return { dispose() { editorsChanged.delete(sync); current?.panel.dispose?.(); current = null; } };
 }
 
 function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
@@ -110,6 +164,7 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     changeInputs.forEach((i, k) => { (i as HTMLInputElement).value = String(change[k]); });
     borderInputs.forEach((i, k) => { (i as HTMLInputElement).value = String(complements[k]); });
   };
+  const canvas = h("canvas.mapsize-preview", { title: "Playable (light), unplayable border (dark), cut off (red), added (green)" }) as HTMLCanvasElement;
   const grid = h("div.mapsize-grid", {}, h("span"), ...SIDES.map((s) => h("b", {}, s)),
     h("span", {}, "Add / remove tiles"), ...changeInputs,
     h("span", {}, "Unplayable border"), ...borderInputs);
@@ -127,6 +182,7 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       h("div", {}, `Now ${t.width - 1} × ${t.height - 1} tiles (playable ${t.width - 1 - stored[0] - stored[1]} × ${t.height - 1 - stored[2] - stored[3]})`),
       h("div", {}, `After ${w} × ${hgt} tiles (playable ${pw} × ${ph})`),
       problem ? h("div.mapsize-problem", {}, problem) : h("div.muted", {}, `The whole map's size is a multiple of ${SIZE_STEP} tiles. New ground copies the edge beside it. Doodads on or past the new edge, and units and items not in the playable area, are removed; start locations off the map move inside. No edge goes past ±${COORD_LIMIT}.`));
+    drawPreview(canvas, t, ch, co, w, hgt);
     if (!active) return;
     const W = t.width - 1, H = t.height - 1;
     const rgba = new Uint8Array(W * H * 4);
@@ -183,9 +239,35 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   })().catch(() => {});
 
   return {
-    toolbar: h("div.terrain-group-tools.mapsize", {}, grid, h("div.mapsize-side", {}, info, h("div.mapsize-buttons", {}, apply, reset))),
+    toolbar: h("div.terrain-group-tools.mapsize", {}, grid, h("div.mapsize-side", {}, info, h("div.mapsize-buttons", {}, apply, reset)), canvas),
     activate() { active = true; render(); },
     deactivate() { active = false; ed.setGroundOverlay(null); },
     dispose() { ed.setGroundOverlay(null); },
   };
+}
+
+/** The preview as a picture, north up: the resized map over the current one. */
+function drawPreview(canvas: HTMLCanvasElement, t: TerrainEditorHandle["terrain"], ch: Sides, co: Sides, w: number, hgt: number) {
+  const W = t.width - 1, H = t.height - 1;
+  if (!Number.isFinite(w) || !Number.isFinite(hgt) || w <= 0 || hgt <= 0 || w * hgt > 1_000_000) { canvas.width = canvas.height = 0; return; }
+  const x0 = Math.min(0, ch[0]), x1 = Math.max(w, ch[0] + W), y0 = Math.min(0, ch[2]), y1 = Math.max(hgt, ch[2] + H);
+  const cw = x1 - x0, chh = y1 - y0;
+  if (cw * chh > 1_000_000) { canvas.width = canvas.height = 0; return; }
+  canvas.width = cw; canvas.height = chh;
+  const scale = Math.max(1, Math.floor(320 / Math.max(cw, chh)));
+  canvas.style.width = `${cw * scale}px`; canvas.style.height = `${chh * scale}px`;
+  const c = canvas.getContext("2d");
+  if (!c) return;
+  const img = c.createImageData(cw, chh);
+  for (let ny = y0; ny < y1; ny++) {
+    for (let nx = x0; nx < x1; nx++) {
+      const inNew = nx >= 0 && ny >= 0 && nx < w && ny < hgt;
+      const inOld = nx >= ch[0] && ny >= ch[2] && nx < ch[0] + W && ny < ch[2] + H;
+      const border = inNew && (nx < co[0] || nx >= w - co[1] || ny < co[2] || ny >= hgt - co[3]);
+      const rgb = !inNew ? [220, 40, 40] : !inOld ? [60, 170, 80] : border ? [60, 60, 60] : [200, 200, 200];
+      const o = ((chh - 1 - (ny - y0)) * cw + (nx - x0)) * 4;
+      img.data.set([rgb[0], rgb[1], rgb[2], inNew || inOld ? 255 : 0], o);
+    }
+  }
+  c.putImageData(img, 0, 0);
 }

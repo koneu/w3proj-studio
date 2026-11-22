@@ -911,6 +911,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .mapsize-num { width: 5.5em; font: inherit; }
 .mapsize-side { display: flex; flex-direction: column; gap: 4px; }
 .mapsize-buttons { display: flex; gap: 6px; }
+.mapsize-tab { padding: 12px 16px; overflow: auto; height: 100%; box-sizing: border-box; }
+.mapsize-preview { image-rendering: pixelated; border: 1px solid var(--vscode-panel-border, #555); align-self: flex-start; }
 .mapsize-problem { color: #f14c4c; }
 
 /* Object editor field controls (object-editor/fields.ts) */

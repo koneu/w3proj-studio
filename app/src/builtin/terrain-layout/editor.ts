@@ -623,7 +623,12 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
     rows.push(h("div.layout-section", {}, pending() ? "Draft (nothing written yet)" : "No changes"));
     if (pending()) {
       if (state.layout === "split") for (const c of changes) rows.push(h("div.layout-change", {}, c));
-      if (refusal) rows.push(h("div.layout-refusal", {}, `Apply would be refused: ${refusal}`));
+      if (refusal) {
+        rows.push(h("div.layout-refusal", {}, `Apply would be refused: ${refusal}`));
+        // Duplicate creation numbers have a fix of their own: offered here (Renumber or Delete Copies).
+        if (/creation number/i.test(refusal)) rows.push(h("div.layout-actions", {},
+          h("button", { "data-layout": "fix-ids", disabled: busy, onclick: () => void w3.commands.execute("w3.terrainLayout.fixIds").then(() => changed(), (e) => w3.window.showError(String((e as Error).message ?? e))) }, "Fix Duplicate Creation Numbers…")));
+      }
       else if (preview) {
         const objs = preview.subterrains.reduce((n, s) => n + s.doodads + s.units + s.regions, 0);
         rows.push(h("div.layout-preview", {}, `Apply writes ${preview.written.length} file${preview.written.length === 1 ? "" : "s"} and removes ${preview.removed.length}; the map stays the same (${objs} placed object${objs === 1 ? "" : "s"} and regions in all).`));
