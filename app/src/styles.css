@@ -1122,3 +1122,35 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .color-tools-swatches { display: inline-flex; flex-wrap: wrap; gap: 2px; }
 .color-tools-swatch { width: 14px; height: 14px; min-width: 14px; padding: 0; border: 1px solid var(--border, #555); }
 .color-tools-preview { background: #000; color: #fff; padding: 4px 6px; max-width: 640px; box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--border, #555); }
+
+/* The Terrain Layout editor (terrain-layout/editor.ts): the map with the subterrains' rectangles, the list and the draft beside it. */
+.layout-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.layout-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.layout-toolbar button.active { background: var(--accent-2); border-color: var(--accent-2); color: white; }
+.layout-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border); }
+.layout-label { font-weight: 600; }
+.layout-check { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; }
+.layout-body { display: flex; flex: 1; min-height: 0; }
+.layout-stage { position: relative; flex: 1; min-width: 0; overflow: hidden; outline: none; }
+.layout-stage:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-2); }
+.layout-canvas { position: absolute; left: 0; top: 0; display: block; }
+.layout-side { width: 300px; flex-shrink: 0; overflow: auto; padding: 6px 8px; border-left: 1px solid var(--border); background: var(--bg-2); font-size: 12px; }
+.layout-section { margin: 8px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--fg-muted); }
+.layout-row { padding: 2px 4px; cursor: pointer; border-radius: 3px; }
+.layout-row:hover { background: var(--bg-hover); }
+.layout-row.selected { outline: 1px solid var(--accent-2); }
+.layout-name { font-weight: 600; }
+.layout-change, .layout-move, .layout-preview { padding: 1px 0; }
+.layout-refusal { padding: 4px 0; color: var(--error); }
+.layout-actions { display: flex; gap: 6px; margin-top: 8px; }
+.layout-actions button.primary { display: inline-block; width: auto; margin: 0; }
+.layout-status { padding: 2px 8px; font-size: 11px; }
+
+/* The Terrain Settings tab (terrain-painter/settings.ts). */
+.terrain-settings { height: 100%; overflow: auto; padding: 8px 16px; box-sizing: border-box; outline: none; }
+.terrain-settings h3 { margin: 10px 0 2px; font-size: 12px; }
+.terrain-settings .terrain-tilemgr { margin-bottom: 12px; }
+.terrain-settings-facts { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; max-width: 640px; }
+.terrain-settings-fact { display: flex; gap: 8px; }
+.terrain-settings-key { width: 130px; flex-shrink: 0; color: var(--fg-muted); }
+.terrain-settings-locked { margin-bottom: 10px; padding: 4px 6px; border-radius: 3px; background: rgba(229, 192, 123, 0.14); max-width: 640px; }

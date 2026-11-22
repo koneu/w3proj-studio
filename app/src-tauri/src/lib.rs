@@ -236,10 +236,41 @@ async fn terrain_merge(root: String) -> CmdResult<Value> {
         .map_err(err)?
 }
 
-/// New, resized, renamed and joined subterrains (`backend::flatview::relayout`).
+/// New, resized, renamed and joined subterrains (`backend::flatview::relayout`); `undoable`: kept so
+/// `terrain_relayout_undo` can take it back (`backend::flatview::relayout_undoable`, the layout editor's Apply).
 #[tauri::command]
-async fn terrain_relayout(root: String, plan: Vec<String>) -> CmdResult<Value> {
-    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::relayout(&root, &plan)?).map_err(err))
+async fn terrain_relayout(root: String, plan: Vec<String>, undoable: Option<bool>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if undoable == Some(true) {
+            serde_json::to_value(backend::flatview::relayout_undoable(&root, &plan)?).map_err(err)
+        } else {
+            serde_json::to_value(backend::flatview::relayout(&root, &plan)?).map_err(err)
+        }
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Takes a change of `terrain_relayout` with `undoable` back, or makes it again (`backend::flatview::relayout_undo`).
+#[tauri::command]
+async fn terrain_relayout_undo(root: String, id: u64, redo: Option<bool>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::relayout_undo(&root, id, redo == Some(true))?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// What `terrain_relayout` would do, nothing written (`backend::flatview::relayout_preview`).
+#[tauri::command]
+async fn terrain_relayout_preview(root: String, plan: Vec<String>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::relayout_preview(&root, &plan)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// What `terrain_split` would do, nothing written (`backend::flatview::split_preview`).
+#[tauri::command]
+async fn terrain_split_preview(root: String, rects: Vec<String>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::split_preview(&root, &rects)?).map_err(err))
         .await
         .map_err(err)?
 }
@@ -1220,6 +1251,9 @@ pub fn run() {
             terrain_split,
             terrain_merge,
             terrain_relayout,
+            terrain_relayout_undo,
+            terrain_relayout_preview,
+            terrain_split_preview,
             terrain_id_layout,
             terrain_check,
             terrain_fix_ids,

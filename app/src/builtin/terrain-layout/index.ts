@@ -11,7 +11,16 @@ import { LAYOUT_FILE } from "../../lib/terrain/creationids";
 import { loadOpenState, openSummary, type OpenState } from "../../lib/terrain/openset";
 import { checkSeams, seamLines, seamSummary, type SeamReport } from "../../lib/terrain/seams";
 import { joinPlan, nameProblem, parseRect, placePlan, planText, renamePlan, type PlannedSubterrain, type SubRect } from "../../lib/terrain/subterrainplan";
+import { deleteSub, draftOf, planOf } from "../../lib/terrain/layoutdraft";
+import { layoutPicture, slotColor, type Rgb } from "../../lib/terrain/layoutpicture";
+import { drawnGroundTiles, parseW3e } from "../../lib/terrain/w3e";
+import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
+import { ownGroundTiles } from "../../lib/terrain/tilesets";
+import { parseSlk } from "../../lib/formats/text";
+import { decodeImage } from "../../lib/image/index";
+import { smallestMipColor } from "../../lib/image/mipcolor";
 import { h } from "../../workbench/dom";
+import { LAYOUT_DOC, layoutEditor, type LayoutEditorState, type LayoutOps, type LayoutPicture, type LayoutPreview, type LayoutState } from "./editor";
 
 /** The project's layout file when its terrain is split. */
 export { LAYOUT_FILE };
@@ -56,16 +65,16 @@ async function askLayout(w3: W3Api): Promise<SplitLayout | undefined> {
 /** Runs a conversion: refused while an editor has unsaved changes (they'd be saved into the old layout's files, or
  *  lost); the derived work of the last edit first; a checkpoint where they're on; afterwards the file list read again
  *  and the editors of the converted files opened again (their files' stamps changed, their content didn't). */
-async function convert(w3: W3Api, what: string, run: (root: string) => Promise<Converted>, quiet: boolean): Promise<Converted | null> {
+async function convert<T extends Converted>(w3: W3Api, what: string, run: (root: string) => Promise<T>, quiet: boolean, checkpoint = true): Promise<T> {
   const project = w3.workspace.project();
   if (!project) throw new Error(`${what}: no project is open.`);
   const unsaved = w3.editors.unsavedPaths();
   if (unsaved.length) throw new Error(`${what}: save or discard the changes in ${unsaved.join(", ")} first.`);
   await w3.commands.execute("w3.terrain.settle").catch(() => {});
   // A checkpoint that fails stops it ("Nothing changed: …"); without the extension it goes on, as other big changes.
-  await checkpointOrStop(w3, what);
+  if (checkpoint) await checkpointOrStop(w3, what);
   const root = project.root;
-  let done: Converted;
+  let done: T;
   try {
     done = await run(root);
   } catch (e) {
@@ -259,20 +268,32 @@ const rectText = (s: { x: number; y: number; w: number; h: number }) => `${s.x},
  *  cancelled). Refused while anything is unsaved, before any question; the change itself goes through `convert` (the
  *  derived work first, a checkpoint, the file list read again, the editors of the terrain and object files opened
  *  again: the open choice may have changed with the names). The map stays the same; only which file holds what changes. */
-async function changeSubterrains(w3: W3Api, what: string, plan: (subs: SubRect[]) => Promise<PlannedSubterrain[] | string | undefined>, quiet: boolean): Promise<Converted | null> {
+async function changeSubterrains(w3: W3Api, what: string, plan: (subs: SubRect[]) => Promise<PlannedSubterrain[] | string | undefined>, quiet: boolean, preview?: boolean): Promise<Converted | Previewed | null> {
   const project = w3.workspace.project();
   if (!project) throw new Error(`${what}: no project is open.`);
+  if (preview) {
+    // Only what it would do: nothing is written, so unsaved changes don't stop it (they would stop the change).
+    const p = await planned(w3, what, plan);
+    if (p === undefined) return null;
+    return { plan: p.map(planText), preview: await previewLayout(w3, p, what) };
+  }
   const unsaved = w3.editors.unsavedPaths();
   if (unsaved.length) throw new Error(`${what}: save or discard the changes in ${unsaved.join(", ")} first.`);
-  const s = await openState(w3, what);
-  const p = await plan(s.subterrains.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+  const p = await planned(w3, what, plan);
   if (p === undefined) return null;
-  if (typeof p === "string") throw new Error(`${what}: ${p.replace(/\.?$/, ".")} Nothing was changed.`);
   // The questions took time: another project, or an edit made meanwhile, stops it.
   if (w3.workspace.project()?.root !== project.root) throw new Error(`${what}: the project changed meanwhile. Nothing was changed.`);
   const done = await convert(w3, what, (root) => w3.backend.invoke<Converted>("terrain_relayout", { root, plan: p.map(planText) }), quiet);
   w3.views.refresh(SUBTERRAINS_VIEW);
   return done;
+}
+
+/** The new set `plan` makes from the subterrains on disk; a string from `plan` is the refusal (thrown). */
+async function planned(w3: W3Api, what: string, plan: (subs: SubRect[]) => Promise<PlannedSubterrain[] | string | undefined>): Promise<PlannedSubterrain[] | undefined> {
+  const s = await openState(w3, what);
+  const p = await plan(s.subterrains.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+  if (typeof p === "string") throw new Error(`${what}: ${p.replace(/\.?$/, ".")} Nothing was changed.`);
+  return p;
 }
 
 /** Picks one of `subs` (`given` skips the question). */
@@ -286,7 +307,7 @@ const RECT_PROMPT = "x,y,w,h in corners ((0,0) the south-west corner; a subterra
 
 /** New Subterrain…: a rectangle that takes a whole side off the subterrains it covers (or all of one), or lies where
  *  none is; it gets the next block of creation numbers. */
-export function newSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; quiet?: boolean }) {
+export function newSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; quiet?: boolean; preview?: boolean }) {
   return changeSubterrains(w3, "New Subterrain", async (subs) => {
     const name = arg?.name ?? (await w3.window.inputBox({ prompt: "The new subterrain's name (its folder under map/terrain/)" }));
     if (name === undefined) return undefined;
@@ -296,12 +317,12 @@ export function newSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; 
     if (text === undefined) return undefined;
     const r = rectOf(text);
     return r ? placePlan(subs, { name, ...r, from: [] }) : `"${typeof text === "string" ? text : rectText(text)}" isn't x,y,w,h`;
-  }, arg?.quiet === true);
+  }, arg?.quiet === true, arg?.preview);
 }
 
 /** Resize Subterrain…: its new rectangle takes from its neighbours what it covers (a whole side of each); corners it
  *  gives up must be the default corner, or another subterrain has to take them (resize that one over them). */
-export function resizeSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; quiet?: boolean }) {
+export function resizeSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; quiet?: boolean; preview?: boolean }) {
   return changeSubterrains(w3, "Resize Subterrain", async (subs) => {
     const s = await pickSubterrain(w3, subs, "Resize which subterrain?", arg?.name);
     if (s === undefined || typeof s === "string") return s;
@@ -309,22 +330,22 @@ export function resizeSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectAr
     if (text === undefined) return undefined;
     const r = rectOf(text);
     return r ? placePlan(subs, { name: s.name, ...r, from: [s.name] }, s.name) : `"${typeof text === "string" ? text : rectText(text)}" isn't x,y,w,h`;
-  }, arg?.quiet === true);
+  }, arg?.quiet === true, arg?.preview);
 }
 
 /** Rename Subterrain…: its folder is renamed, its creation-number ranges stay. */
-export function renameSubterrain(w3: W3Api, arg?: { name?: string; to?: string; quiet?: boolean }) {
+export function renameSubterrain(w3: W3Api, arg?: { name?: string; to?: string; quiet?: boolean; preview?: boolean }) {
   return changeSubterrains(w3, "Rename Subterrain", async (subs) => {
     const s = await pickSubterrain(w3, subs, "Rename which subterrain?", arg?.name);
     if (s === undefined || typeof s === "string") return s;
     const to = arg?.to ?? (await w3.window.inputBox({ prompt: `${s.name}'s new name (its folder is renamed)`, value: s.name }));
     if (to === undefined || to === s.name) return undefined;
     return renamePlan(subs, s.name, to);
-  }, arg?.quiet === true);
+  }, arg?.quiet === true, arg?.preview);
 }
 
 /** Join Subterrains…: two or more side by side become one over the rectangle round them, with all their ranges. */
-export function joinSubterrains(w3: W3Api, arg?: { names?: string[]; to?: string; quiet?: boolean }) {
+export function joinSubterrains(w3: W3Api, arg?: { names?: string[]; to?: string; quiet?: boolean; preview?: boolean }) {
   return changeSubterrains(w3, "Join Subterrains", async (subs) => {
     let names = arg?.names;
     if (!names) {
@@ -337,15 +358,31 @@ export function joinSubterrains(w3: W3Api, arg?: { names?: string[]; to?: string
     const to = arg?.to ?? (await w3.window.inputBox({ prompt: "The joined subterrain's name", value: names[0] }));
     if (to === undefined) return undefined;
     return joinPlan(subs, names, to);
-  }, arg?.quiet === true);
+  }, arg?.quiet === true, arg?.preview);
 }
 
-/** The MCP tool change_subterrains: New, Resize, Rename or Join Subterrains by their commands' own code (the same plan,
- *  the same refusals: unsaved changes, a rectangle cutting one in pieces, corners left out that aren't the default one,
- *  a bad name), without questions: what a command would ask must be given. Resolves with what changed and the
- *  subterrains afterwards. */
+/** Delete Subterrain (the layout editor's Delete, and the MCP tool's): it joins the first neighbour whose rectangle and
+ *  its make one rectangle (its objects and creation-number ranges go there); without one its corners are left
+ *  uncovered, which the backend allows only where they are all the default corner. The last one stays. */
+export function deleteSubterrain(w3: W3Api, arg: { name: string; quiet?: boolean; preview?: boolean }) {
+  return changeSubterrains(w3, "Delete Subterrain", async (subs) => {
+    const r = deleteSub(draftOf(subs, [0, 0]), arg.name);
+    return typeof r === "string" ? r : planOf(r.draft);
+  }, arg.quiet === true, arg.preview);
+}
+
+/** What a change would do, as the tool's `preview` answers it. */
+interface Previewed { plan: string[]; preview: LayoutPreview }
+const isPreviewed = (v: Converted | Previewed | null): v is Previewed => !!v && "preview" in v;
+
+/** The MCP tool change_subterrains: New, Resize, Rename, Join or Delete Subterrains by their commands' own code (the
+ *  same plan, the same refusals: unsaved changes, a rectangle cutting one in pieces, corners left out that aren't the
+ *  default one, a bad name), and Split Terrain of a flat project, without questions: what a command would ask must be
+ *  given. `preview`: only what it would do (the layout editor's preview: files, objects per subterrain, objects that
+ *  change subterrain), nothing written. Resolves with what changed and the subterrains afterwards. */
 export async function changeSubterrainsTool(w3: W3Api, args: Record<string, unknown>) {
-  const { action, name, rect, to, names } = args;
+  const { action, name, rect, to, names, rects } = args;
+  const preview = args.preview === true;
   const str = (v: unknown, what: string) => {
     if (typeof v !== "string" || !v.trim()) throw new Error(`${String(action)} needs ${what}.`);
     return v;
@@ -356,26 +393,155 @@ export async function changeSubterrainsTool(w3: W3Api, args: Record<string, unkn
     if (r && typeof r === "object" && [r.x, r.y, r.w, r.h].every((n) => Number.isInteger(n))) return r as RectArg;
     throw new Error(`${String(action)} needs rect: "x,y,w,h" in corners, or { x, y, w, h }.`);
   };
-  let done: Converted | null;
+  let done: Converted | Previewed | null;
   switch (action) {
-    case "new": done = await newSubterrain(w3, { name: str(name, "name"), rect: box(rect), quiet: true }); break;
-    case "resize": done = await resizeSubterrain(w3, { name: str(name, "name"), rect: box(rect), quiet: true }); break;
+    case "new": done = await newSubterrain(w3, { name: str(name, "name"), rect: box(rect), quiet: true, preview }); break;
+    case "resize": done = await resizeSubterrain(w3, { name: str(name, "name"), rect: box(rect), quiet: true, preview }); break;
     case "rename": {
       const from = str(name, "name"), into = str(to, "to");
       if (from === into) throw new Error("rename: to is its name already. Nothing was changed.");
-      done = await renameSubterrain(w3, { name: from, to: into, quiet: true });
+      done = await renameSubterrain(w3, { name: from, to: into, quiet: true, preview });
       break;
     }
     case "join": {
       if (!Array.isArray(names) || names.length < 2 || !names.every((n) => typeof n === "string")) throw new Error("join needs names: two or more subterrains side by side.");
-      done = await joinSubterrains(w3, { names: names as string[], to: str(to, "to"), quiet: true });
+      done = await joinSubterrains(w3, { names: names as string[], to: str(to, "to"), quiet: true, preview });
       break;
     }
-    default: throw new Error("action must be \"new\", \"resize\", \"rename\" or \"join\".");
+    case "delete": done = await deleteSubterrain(w3, { name: str(name, "name"), quiet: true, preview }); break;
+    case "split": {
+      if (rects !== undefined && (!Array.isArray(rects) || !rects.every((r) => typeof r === "string"))) throw new Error("split takes rects: a list of \"name:x,y,w,h\" (none: one subterrain main over the canvas).");
+      const list = (rects as string[] | undefined) ?? [];
+      const layout: SplitLayout = list.length ? list : "main";
+      if (preview) {
+        if (isSplit(w3)) throw new Error("Split Terrain: the terrain is split already (map/terrain/).");
+        done = { plan: rectsOf(layout), preview: await previewSplitRects(w3, rectsOf(layout)) };
+      } else done = await splitTerrain(w3, { layout, quiet: true });
+      break;
+    }
+    default: throw new Error("action must be \"new\", \"resize\", \"rename\", \"join\", \"delete\" or \"split\".");
   }
+  if (isPreviewed(done)) return { preview: true, plan: done.plan, ...done.preview };
   const root = w3.workspace.project()?.root;
   const state = root ? await loadOpenState((cmd, a) => w3.backend.invoke(cmd, a), root).catch(() => null) : null;
   return { written: done?.written ?? [], removed: done?.removed ?? [], subterrains: state?.subterrains.map(({ name: n, x, y, w, h, open }) => ({ name: n, x, y, w, h, open })) ?? [] };
+}
+
+// ---- the Terrain Layout editor (editor.ts) ----
+
+/** The layout on disk as the Terrain Layout editor and get_subterrains show it: a split project's subterrains with
+ *  their open state and creation-number ranges; a flat project's canvas. */
+export async function readLayoutState(w3: W3Api): Promise<LayoutState> {
+  const project = w3.workspace.project();
+  if (!project) throw new Error("No project is open.");
+  const root = project.root;
+  const invoke = <T>(cmd: string, args: Record<string, unknown>) => w3.backend.invoke<T>(cmd, args);
+  if (isSplit(w3)) {
+    const s = await loadOpenState(invoke, root);
+    if (!s) throw new Error("the terrain isn't split into subterrains");
+    const ids = await invoke<{ subterrains: { name: string; idRanges: [number, number][] }[] } | null>("terrain_id_layout", { root });
+    return {
+      layout: "split", canvas: s.corners, partial: s.partial, error: s.error,
+      subterrains: s.subterrains.map(({ name, x, y, w, h, open, halo, bytes }) => ({ name, x, y, w, h, open, halo, bytes, idRanges: ids?.subterrains.find((i) => i.name === name)?.idRanges ?? [] })),
+    };
+  }
+  const t = await readTerrain(w3);
+  return { layout: "flat", canvas: [t.width, t.height], subterrains: [], partial: false, error: null };
+}
+
+/** The project's terrain as the editors read it (a split one assembled; closed subterrains default-filled). */
+async function readTerrain(w3: W3Api) {
+  const path = terrainPath(w3.workspace.files().map((f) => f.path));
+  if (!path) throw new Error("This project has no war3map.w3e.");
+  return parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
+}
+
+/** The editor's background: the ground in its tiles' colours (the game's textures' smallest mip, as the minimap; a
+ *  colour per slot without the game). */
+async function layoutPictureOf(w3: W3Api): Promise<LayoutPicture> {
+  const t = await readTerrain(w3);
+  const rows = await w3.game.readText("TerrainArt\\Terrain.slk").then(parseSlk, () => [] as Record<string, string>[]);
+  const byId = new Map(rows.map((r) => [r.tileID, r]));
+  const drawn = drawnGroundTiles(t, ownGroundTiles(rows, t.tileset));
+  const colors: (Rgb | null)[] = await Promise.all(drawn.map(async (id) => {
+    const row = byId.get(id);
+    if (!row?.dir || !row.file) return null;
+    const path = `${row.dir}\\${row.file}.blp`;
+    try { return smallestMipColor(decodeImage(await w3.game.read(path), path)); } catch { return null; }
+  }));
+  return { width: t.width, height: t.height, rgba: layoutPicture(t, (slot) => colors[slot] ?? slotColor(slot)) };
+}
+
+/** What `plan` would do (the backend's preview); its refusal as the error, worded as the change's. */
+export async function previewLayout(w3: W3Api, plan: PlannedSubterrain[], what = "Change Subterrains"): Promise<LayoutPreview> {
+  const root = w3.workspace.project()?.root;
+  if (!root) throw new Error(`${what}: no project is open.`);
+  try {
+    return await w3.backend.invoke<LayoutPreview>("terrain_relayout_preview", { root, plan: plan.map(planText) });
+  } catch (e) {
+    throw new Error(`${what}: ${errorText(e).replace(/\.?$/, ".")}`);
+  }
+}
+
+/** What Split Terrain into `rects` (the backend's form) would do. */
+async function previewSplitRects(w3: W3Api, rects: string[]): Promise<LayoutPreview> {
+  const root = w3.workspace.project()?.root;
+  if (!root) throw new Error("Split Terrain: no project is open.");
+  try {
+    return await w3.backend.invoke<LayoutPreview>("terrain_split_preview", { root, rects });
+  } catch (e) {
+    throw new Error(`Split Terrain: ${errorText(e).replace(/\.?$/, ".")}`);
+  }
+}
+
+/** Rectangles as Split Terrain takes them: none is one subterrain `main` over the canvas (the default corner the most
+ *  common one), others `name:x,y,w,h`. */
+const gridLayout = (rects: SubRect[]): SplitLayout => (rects.length ? rects.map((r) => `${r.name}:${rectText(r)}`) : "main");
+
+/** The layout editor's Apply: the whole draft as one change of the subterrains (the backend's relayout, kept so
+ *  `undoLayoutChange` takes it back as one step). Refused, nothing changed, while anything is unsaved; the reasons of
+ *  the Subterrains commands. The number to take it back with. */
+export async function applyLayout(w3: W3Api, plan: PlannedSubterrain[]): Promise<number> {
+  const what = "Change Subterrains";
+  if (!isSplit(w3)) throw new Error(`${what}: the terrain isn't split into subterrains (Split Terrain first).`);
+  const done = await convert(w3, what, (root) => w3.backend.invoke<Converted & { undo: number }>("terrain_relayout", { root, plan: plan.map(planText), undoable: true }), true);
+  w3.views.refresh(SUBTERRAINS_VIEW);
+  return done.undo;
+}
+
+/** Takes a change of `applyLayout` back (`redo`: makes it again): refused while anything is unsaved, or when the
+ *  subterrains' files changed since (the backend says which). */
+export async function undoLayoutChange(w3: W3Api, id: number, redo: boolean): Promise<void> {
+  await convert(w3, redo ? "Redo Change Subterrains" : "Undo Change Subterrains", (root) => w3.backend.invoke<Converted>("terrain_relayout_undo", { root, id, redo }), true, false);
+  w3.views.refresh(SUBTERRAINS_VIEW);
+}
+
+/** The Terrain Layout editor's calls (editor.ts). */
+export function layoutOps(w3: W3Api): LayoutOps {
+  return {
+    readState: () => readLayoutState(w3),
+    picture: () => layoutPictureOf(w3),
+    preview: (plan) => previewLayout(w3, plan),
+    previewSplit: (rects) => previewSplitRects(w3, rectsOf(gridLayout(rects))),
+    apply: (plan) => applyLayout(w3, plan),
+    undo: (id, redo) => undoLayoutChange(w3, id, redo),
+    split: async (rects) => { await splitTerrain(w3, { layout: gridLayout(rects), quiet: true }); },
+    merge: async () => { await mergeTerrain(w3, { quiet: true }); },
+    seams: async () => {
+      const r = await checkTerrainSeams(w3, { quiet: true });
+      return r.issues.flatMap((i) => i.corners.map((c) => ({ x: c.x, y: c.y, error: i.severity === "error", text: i.message })));
+    },
+  };
+}
+
+/** The open Terrain Layout editor's state (null: none open), for get_subterrains. */
+let editorState: LayoutEditorState | null = null;
+
+/** The MCP tool get_subterrains: the layout on disk (subterrains, rectangles, open ones, creation-number ranges, or a
+ *  flat project's canvas) and, when the Terrain Layout editor is open, its draft and preview. */
+export async function getSubterrainsTool(w3: W3Api) {
+  const s = await readLayoutState(w3);
+  return { ...s, open: s.subterrains.filter((x) => x.open).map((x) => x.name), editor: editorState };
 }
 
 // ---- Open Subterrains… (spec "Working on Part of the Map") ----
@@ -491,6 +657,10 @@ function renderView(w3: W3Api, el: HTMLElement) {
   }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
 }
 
+/** The Terrain Layout editor's id. */
+export const LAYOUT_EDITOR = "w3.terrainLayout.editor";
+export { LAYOUT_DOC };
+
 /** A command's failure as an error message (the reason the backend gave), and again for the caller. */
 const shown = <A, R>(w3: W3Api, run: (arg?: A) => Promise<R>) => async (arg?: A) => {
   try {
@@ -525,6 +695,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrainLayout.resizeSubterrain", shown(w3, (arg?: { name?: string; rect?: RectArg; quiet?: boolean }) => resizeSubterrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.renameSubterrain", shown(w3, (arg?: { name?: string; to?: string; quiet?: boolean }) => renameSubterrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.joinSubterrains", shown(w3, (arg?: { names?: string[]; to?: string; quiet?: boolean }) => joinSubterrains(w3, arg))),
+    w3.commands.register("w3.terrainLayout.deleteSubterrain", shown(w3, (arg?: { name?: string; quiet?: boolean }) => {
+      if (!arg?.name) throw new Error("Delete Subterrain: name one (the Terrain Layout editor's Delete picks it on the map).");
+      return deleteSubterrain(w3, { name: arg.name, quiet: arg.quiet });
+    })),
+    w3.mcp.registerTool("get_subterrains", () => getSubterrainsTool(w3)),
+    w3.editors.registerProvider(LAYOUT_EDITOR, { resolve: (el) => layoutEditor(w3, el, layoutOps(w3), (s) => { editorState = s; }) }),
+    w3.commands.register("w3.terrainLayout.edit", async () => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await w3.editors.open(LAYOUT_DOC, LAYOUT_EDITOR);
+    }),
     w3.views.register(SUBTERRAINS_VIEW, { render: (el) => renderView(w3, el) }),
     w3.workspace.onDidChange(() => w3.views.refresh(SUBTERRAINS_VIEW)),
   );

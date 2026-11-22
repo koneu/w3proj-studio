@@ -438,6 +438,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  until it is opened again, so no edit lands on a view that isn't drawn. Saving still works. */
   const lostViews = new Set<string>();
   const VIEW_LOST = "The terrain editor's 3D view stopped (the graphics device was reset): save, then reopen the editor. Nothing is edited there until then.";
+  /** A palette change a partial open refuses (spec "Working on Part of the Map": the palettes are global). */
+  const PARTIAL_PALETTE = "Only some subterrains are open: the tileset and the ground tile and cliff lists are the whole map's, so they can only be added to here. Open all subterrains (Open Subterrains…) to reorder, remove or change the tileset.";
   const refuseLostView = (path: string | null | undefined) => { if (path && lostViews.has(path)) throw new Error(VIEW_LOST); };
   /** The editor of the project's own terrain, which is the only one that writes into the project. */
   const ownEditor = () => editorOf(projectTerrain(w3));
@@ -1601,10 +1603,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return;
         }
         const open = () => w3.commands.execute("w3.terrain.open").catch((e) => w3.window.showError(String(e)));
+        // The Subterrains extension's editor of the terrain's layout (a command: it may be off).
+        const layout = () => w3.commands.execute("w3.terrainLayout.edit").catch((e) => w3.window.showError(String((e as Error).message ?? e)));
+        const settings = () => w3.commands.execute("w3.terrain.settings").catch((e) => w3.window.showError(String((e as Error).message ?? e)));
         const facts = h("div.terrain-facts.muted", {}, "Reading terrain…");
         el.append(
-          h("div.tree", {}, h("div.tree-row.obj-kind", { onclick: open, title: "F3" },
-            h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open 3D view"))),
+          h("div.tree", {},
+            h("div.tree-row.obj-kind", { onclick: open, title: "F3" },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open 3D view")),
+            h("div.tree-row.obj-kind", { onclick: layout, title: "The subterrains as rectangles over the map: draw, resize, rename, join, delete, or split a flat terrain" },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Edit Terrain Layout")),
+            h("div.tree-row.obj-kind", { onclick: settings, title: "The tileset, the map's ground tiles and cliff types, the canvas and the terrain's other settings" },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Edit Tileset / Terrain Settings"))),
           facts,
         );
         readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }).then((buf) => {
@@ -2112,6 +2122,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  gives each old index's new index. Corners and cliff types are
          *  remapped; one undo step. */
         const changeTileList = (tiles: string[], map: (oldIndex: number) => number) => {
+          // The lists are the whole map's (terrain.json): with subterrains closed, only appending can't clash with them.
+          if (partial && !terrain.groundTiles.every((t, i) => tiles[i] === t && map(i) === i)) throw new Error(PARTIAL_PALETTE);
           const snap = () => ({
             ground: [...terrain.groundTiles], cliffs: [...terrain.cliffTiles], custom: terrain.customTilesetsRaw,
             tex: terrain.corners.map((c) => c.texture), ctex: terrain.corners.map((c) => c.cliffTexture),
@@ -2165,6 +2177,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const before = snap();
           change();
           const after = snap();
+          if (partial && !before.cliffs.every((c, i) => after.cliffs[i] === c)) {
+            restore(before);
+            throw new Error(PARTIAL_PALETTE);
+          }
           pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: true, objects: false });
           void syncTileList();
           replanCliffs();
@@ -4818,11 +4834,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const handle: TerrainEditorHandle = {
           terrain, editable, redraw, host: el, resizeMap, resizeRemovals,
+          path: doc.path, partial: !!partial, undo, redo,
           terrainChanged: (cliffs) => { renderer.terrainChanged(); if (cliffs) void liveCliffs(); doc.setDirty(true); redraw(); },
           commitTerrain,
           tilesets: tilesetList,
           setTileset: (id) => {
             if (id === terrain.tileset) return;
+            if (partial) throw new Error(PARTIAL_PALETTE);
             const set = (v: string, custom: number) => {
               terrain.tileset = v;
               terrain.customTilesetsRaw = custom;

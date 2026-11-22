@@ -511,7 +511,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Tileset", h("div.form-stack", {},
                 lists ? select(lists.tilesets, () => info.tileset, (t) => { info.tileset = t; }) : h("code", {}, info.tileset),
                 tilesetSync()),
-                "The terrain's own tileset and ground tiles are changed in the terrain editor (Terrain › Tiles…)."),
+                "The terrain's own tileset and ground tiles are changed in Edit Tileset / Terrain Settings."),
               row("Playable area", h("span", {}, `${info.playableWidth} × ${info.playableHeight}`)),
               row("Saved", h("span", {}, `${info.saves} times · editor ${info.editorVersion}${info.gameVersion ? ` · game ${info.gameVersion.join(".")}` : ""} · format v${v}`)),
             ),

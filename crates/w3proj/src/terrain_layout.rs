@@ -917,31 +917,10 @@ fn ignore_store(project: &Path, lines: &[&str]) -> Result<Option<String>> {
 /// refuses the split.
 pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
-    let manifest = crate::project::Manifest::load(project)?;
-    let packed_raw = |name: &str| manifest.pack.raw.iter().any(|r| r.eq_ignore_ascii_case(name));
-    if packed_raw(FLAT_FILE) {
-        return Err(Error::Project(format!("map/{FLAT_FILE} is packed raw (w3proj.toml [pack] raw): it isn't the map's terrain text")));
-    }
+    let SplitPlan { files, before, pathing_json, .. } = split_plan(project, rects)?;
     let map_dir = project.join(crate::project::MAP_DIR);
-    if is_split_on_disk(&map_dir)? {
-        return Err(Error::Project("the terrain is split already".into()));
-    }
-    let mut files = read_layout_files(&map_dir)?;
-    read_if_there(&map_dir, &[FLAT_FILE, FLAT_RAW], &mut files)?;
-    let object_names: Vec<&str> = KINDS.iter().map(|k| k.flat()).filter(|n| !packed_raw(n)).collect();
-    read_if_there(&map_dir, &object_names, &mut files)?;
-    let before: Vec<String> = [FLAT_FILE].into_iter().chain(object_names).filter(|n| files.contains_key(*n)).map(str::to_string).collect();
     let fresh = derived_fresh(project)?;
-    split(&mut files, rects)?;
-    // Everything that could refuse, before anything is written.
-    let pathing_json = crate::terrain_pathing::read_json(project)?;
-    if let Some(json) = &pathing_json {
-        let layout = Layout::parse(&files[LAYOUT_FILE])?;
-        let sliced = crate::terrain_pathing::slice(json, &layout).map_err(|e| Error::Project(format!("{e}: fix or move away {} first", crate::terrain_pathing::JSON_NAME)))?;
-        files.extend(sliced);
-    }
     let backup = pathing_json.as_ref().map(|_| crate::terrain_pathing::backup_path(project)).transpose()?;
-    crate::derived::can_move(project, true)?;
     let written = write_changed(&map_dir, &files)?;
     let removed: Vec<&String> = before.iter().filter(|n| !files.contains_key(*n)).collect();
     for name in &removed {
@@ -964,6 +943,44 @@ pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
         crate::derived::record_now(project)?;
     }
     Ok(done)
+}
+
+/// What a split of a flat project into `rects` makes, before anything is written: the flat files read (`old`), the
+/// layout's files (`files`, the pathing overrides sliced in), the flat files there were (`before`), the Pathing tool's
+/// `.w3proj/pathing.json` if there is one. Everything that refuses a split refuses here.
+struct SplitPlan {
+    old: BTreeMap<String, Vec<u8>>,
+    files: BTreeMap<String, Vec<u8>>,
+    before: Vec<String>,
+    pathing_json: Option<Vec<u8>>,
+}
+
+fn split_plan(project: &Path, rects: &[Rect]) -> Result<SplitPlan> {
+    let manifest = crate::project::Manifest::load(project)?;
+    let packed_raw = |name: &str| manifest.pack.raw.iter().any(|r| r.eq_ignore_ascii_case(name));
+    if packed_raw(FLAT_FILE) {
+        return Err(Error::Project(format!("map/{FLAT_FILE} is packed raw (w3proj.toml [pack] raw): it isn't the map's terrain text")));
+    }
+    let map_dir = project.join(crate::project::MAP_DIR);
+    if is_split_on_disk(&map_dir)? {
+        return Err(Error::Project("the terrain is split already".into()));
+    }
+    let mut files = read_layout_files(&map_dir)?;
+    read_if_there(&map_dir, &[FLAT_FILE, FLAT_RAW], &mut files)?;
+    let object_names: Vec<&str> = KINDS.iter().map(|k| k.flat()).filter(|n| !packed_raw(n)).collect();
+    read_if_there(&map_dir, &object_names, &mut files)?;
+    let before: Vec<String> = [FLAT_FILE].into_iter().chain(object_names).filter(|n| files.contains_key(*n)).map(str::to_string).collect();
+    let old = files.clone();
+    split(&mut files, rects)?;
+    // Everything that could refuse, before anything is written.
+    let pathing_json = crate::terrain_pathing::read_json(project)?;
+    if let Some(json) = &pathing_json {
+        let layout = Layout::parse(&files[LAYOUT_FILE])?;
+        let sliced = crate::terrain_pathing::slice(json, &layout).map_err(|e| Error::Project(format!("{e}: fix or move away {} first", crate::terrain_pathing::JSON_NAME)))?;
+        files.extend(sliced);
+    }
+    crate::derived::can_move(project, true)?;
+    Ok(SplitPlan { old, files, before, pathing_json })
 }
 
 /// Merges a split project's terrain and objects back into `map/war3map.w3e.txt` and the flat object
@@ -1120,6 +1137,11 @@ pub fn relayout(files: &mut BTreeMap<String, Vec<u8>>, plan: &[Planned]) -> Resu
 /// the same).
 pub fn relayout_project(project: &Path, plan: &[Planned]) -> Result<Converted> {
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+    relayout_on_disk(project, plan)
+}
+
+/// `relayout_project` without taking `FLAT_WRITES` (the caller holds it).
+fn relayout_on_disk(project: &Path, plan: &[Planned]) -> Result<Converted> {
     let map_dir = project.join(crate::project::MAP_DIR);
     if !is_split_on_disk(&map_dir)? {
         return Err(Error::Project(format!("the terrain isn't split (there is no map/{LAYOUT_FILE})")));
@@ -1170,6 +1192,246 @@ pub fn relayout_project(project: &Path, plan: &[Planned]) -> Result<Converted> {
     }
     let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
     Ok(Converted { written: written.iter().map(at).collect(), removed: removed.into_iter().map(at).collect() })
+}
+
+// ---- the layout editor: what a change would do, and taking one back ----
+
+/// One subterrain of a layout as the layout editor previews it (`relayout_preview`, `split_preview`).
+#[derive(Debug, serde::Serialize)]
+pub struct PreviewSub {
+    pub name: String,
+    pub folder: String,
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+    #[serde(rename = "idRanges")]
+    pub id_ranges: Vec<[u32; 2]>,
+    /// The subterrains of the current layout it continues (none: a new one, or a split).
+    pub from: Vec<String>,
+    pub doodads: usize,
+    pub units: usize,
+    pub regions: usize,
+}
+
+/// Objects of one kind that change subterrain: they were in `from`, which the subterrain `to` doesn't continue.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Move {
+    pub kind: &'static str,
+    pub from: String,
+    pub to: String,
+    pub count: usize,
+}
+
+/// What a change of the subterrains would do, nothing written: the files written and removed (relative to the
+/// project), every subterrain afterwards with its objects, and the objects that change subterrain.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct Preview {
+    pub written: Vec<String>,
+    pub removed: Vec<String>,
+    pub subterrains: Vec<PreviewSub>,
+    pub moves: Vec<Move>,
+}
+
+/// The entries of a subterrain's object file of `kind`, every list (doodads: the special ones too), each as one
+/// canonical text without `order` (a place in the flat file, not part of the object). No file: none.
+fn sub_objects(files: &BTreeMap<String, Vec<u8>>, s: &Subterrain, kind: Kind) -> Result<Vec<String>> {
+    let path = s.object_path(kind);
+    let Some(bytes) = files.get(&path) else { return Ok(Vec::new()) };
+    let doc: Value = serde_json::from_slice(bytes).map_err(|e| bad(format!("map/{path} isn't JSON: {e}")))?;
+    let mut out = Vec::new();
+    for key in [kind.name(), "specials"] {
+        for e in doc.get(key).and_then(Value::as_array).into_iter().flatten() {
+            let mut e = e.clone();
+            if let Some(m) = e.as_object_mut() {
+                m.shift_remove("order");
+            }
+            out.push(e.to_string());
+        }
+    }
+    Ok(out)
+}
+
+/// What the files `new` make of the files `old` (both relative to `map/`; `old` split or flat): per subterrain of
+/// `new` its objects, the objects of each kind that come from a subterrain it doesn't continue (`from`: a new name →
+/// the old names it continues), the files written and removed.
+fn preview_of(old: &BTreeMap<String, Vec<u8>>, new: &BTreeMap<String, Vec<u8>>, from: &HashMap<String, Vec<String>>) -> Result<Preview> {
+    let layout = Layout::parse(&new[LAYOUT_FILE])?;
+    // Where each object was: its text → the old subterrains holding such an object.
+    let mut was: HashMap<(Kind, String), Vec<String>> = HashMap::new();
+    if is_split(old)? {
+        for s in &Layout::parse(&old[LAYOUT_FILE])?.subterrains {
+            for kind in KINDS {
+                for o in sub_objects(old, s, kind)? {
+                    was.entry((kind, o)).or_default().push(s.name.clone());
+                }
+            }
+        }
+    }
+    let mut moves: BTreeMap<(Kind, String, String), usize> = BTreeMap::new();
+    let mut subterrains = Vec::with_capacity(layout.subterrains.len());
+    for s in &layout.subterrains {
+        let continues = from.get(&s.name).cloned().unwrap_or_default();
+        let mut counts = [0usize; 3];
+        for (k, kind) in KINDS.iter().enumerate() {
+            let list = sub_objects(new, s, *kind)?;
+            counts[k] = list.len();
+            for o in list {
+                if let Some(old_name) = was.get_mut(&(*kind, o)).and_then(Vec::pop) {
+                    if !continues.contains(&old_name) {
+                        *moves.entry((*kind, old_name, s.name.clone())).or_default() += 1;
+                    }
+                }
+            }
+        }
+        subterrains.push(PreviewSub {
+            name: s.name.clone(),
+            folder: s.folder.clone(),
+            x: s.x,
+            y: s.y,
+            w: s.w,
+            h: s.h,
+            id_ranges: s.id_ranges.clone(),
+            from: continues,
+            doodads: counts[0],
+            units: counts[1],
+            regions: counts[2],
+        });
+    }
+    let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
+    Ok(Preview {
+        written: new.iter().filter(|(k, b)| old.get(*k) != Some(*b)).map(|(k, _)| at(k)).collect(),
+        removed: old.keys().filter(|k| !new.contains_key(*k)).map(at).collect(),
+        subterrains,
+        moves: moves.into_iter().map(|((kind, from, to), count)| Move { kind: kind.name(), from, to, count }).collect(),
+    })
+}
+
+/// What `relayout_project` would do with `plan`, nothing written; its refusals as the error.
+pub fn relayout_preview(project: &Path, plan: &[Planned]) -> Result<Preview> {
+    let map_dir = project.join(crate::project::MAP_DIR);
+    let old = {
+        let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+        if !is_split_on_disk(&map_dir)? {
+            return Err(Error::Project(format!("the terrain isn't split (there is no map/{LAYOUT_FILE})")));
+        }
+        let mut files = read_layout_files(&map_dir)?;
+        let flat_names: Vec<&str> = KINDS.iter().flat_map(|k| [k.flat(), k.raw()]).collect();
+        read_if_there(&map_dir, &flat_names, &mut files)?;
+        files
+    };
+    let layout = Layout::parse(&old[LAYOUT_FILE])?;
+    let mut new = old.clone();
+    relayout(&mut new, plan)?;
+    let from = plan
+        .iter()
+        .map(|p| {
+            let continues = match &p.from {
+                Some(f) => f.clone(),
+                None => layout.subterrains.iter().filter(|s| s.name == p.rect.name).map(|s| s.name.clone()).collect(),
+            };
+            (p.rect.name.clone(), continues)
+        })
+        .collect();
+    preview_of(&old, &new, &from)
+}
+
+/// What `split_project` would do with `rects`, nothing written; its refusals as the error.
+pub fn split_preview(project: &Path, rects: &[Rect]) -> Result<Preview> {
+    let plan = {
+        let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+        split_plan(project, rects)?
+    };
+    preview_of(&plan.old, &plan.files, &HashMap::new())
+}
+
+/// A split project's layout as it is on disk: the files under `map/terrain/` (relative to `map/`) and the open choice
+/// (`.w3proj/open-subterrains.json`, None when there is none). What `restore_layout` puts back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayoutState {
+    pub files: BTreeMap<String, Vec<u8>>,
+    pub open: Option<Vec<u8>>,
+}
+
+impl LayoutState {
+    /// How many bytes it holds.
+    pub fn size(&self) -> usize {
+        self.files.values().map(Vec::len).sum::<usize>() + self.open.as_ref().map_or(0, Vec::len)
+    }
+}
+
+fn layout_state(project: &Path) -> Result<LayoutState> {
+    let files = read_layout_files(&project.join(crate::project::MAP_DIR))?;
+    let open = match fs::read(crate::terrain_open::path(project)) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(Error::Project(format!("{} can't be read: {e}", crate::terrain_open::NAME))),
+    };
+    Ok(LayoutState { files, open })
+}
+
+/// `relayout_project`, with the layout as it was before and as it is after: what taking it back needs
+/// (`restore_layout`).
+pub fn relayout_project_undoable(project: &Path, plan: &[Planned]) -> Result<(Converted, LayoutState, LayoutState)> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+    if !is_split_on_disk(&project.join(crate::project::MAP_DIR))? {
+        return Err(Error::Project(format!("the terrain isn't split (there is no map/{LAYOUT_FILE})")));
+    }
+    let before = layout_state(project)?;
+    let done = relayout_on_disk(project, plan)?;
+    let after = layout_state(project)?;
+    Ok((done, before, after))
+}
+
+/// Puts a split project's layout (the files under `map/terrain/` and the open choice) back to `to`, only while it is
+/// `from` on disk: anything saved since (an edit in a subterrain, another change of the layout) refuses it, so nothing
+/// is lost. Files whose bytes differ are written, the others removed, folders left empty go; the derived files'
+/// record is made again when it said they followed (the map is the same).
+pub fn restore_layout(project: &Path, from: &LayoutState, to: &LayoutState) -> Result<Converted> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+    let map_dir = project.join(crate::project::MAP_DIR);
+    let now = layout_state(project)?;
+    if now != *from {
+        let mut changed: Vec<String> = now.files.keys().chain(from.files.keys()).filter(|k| now.files.get(*k) != from.files.get(*k)).map(|k| format!("map/{k}")).collect();
+        changed.sort();
+        changed.dedup();
+        if now.open != from.open {
+            changed.push(crate::terrain_open::NAME.to_string());
+        }
+        let shown = changed.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+        let more = if changed.len() > 3 { format!(" and {} more", changed.len() - 3) } else { String::new() };
+        return Err(Error::Project(format!("the subterrains' files changed since ({shown}{more}): taking the change back would lose that")));
+    }
+    let fresh = derived_fresh(project)?;
+    let written = write_changed(&map_dir, &to.files)?;
+    let removed: Vec<&String> = now.files.keys().filter(|k| !to.files.contains_key(*k)).collect();
+    for p in &removed {
+        fs::remove_file(crate::paths::join_rel(&map_dir, p))?;
+    }
+    let prefix = format!("{DIR}/");
+    let folders: HashSet<&str> = removed.iter().filter_map(|p| p.strip_prefix(&prefix)).filter_map(|p| p.split_once('/')).map(|(f, _)| f).collect();
+    for f in folders {
+        remove_empty(&crate::paths::join_rel(&map_dir, &format!("{DIR}/{f}")));
+    }
+    let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
+    let mut done = Converted { written: written.iter().map(at).collect(), removed: removed.into_iter().map(at).collect() };
+    if now.open != to.open {
+        let p = crate::terrain_open::path(project);
+        match &to.open {
+            Some(b) => {
+                crate::project::write_atomic(&p, b)?;
+                done.written.push(crate::terrain_open::NAME.to_string());
+            }
+            None => {
+                fs::remove_file(&p).map_err(|e| Error::Project(format!("{} can't be removed: {e}", crate::terrain_open::NAME)))?;
+                done.removed.push(crate::terrain_open::NAME.to_string());
+            }
+        }
+    }
+    if fresh {
+        crate::derived::record_now(project)?;
+    }
+    Ok(done)
 }
 
 // ---- the flat files a split project stands for (the app's file layer) ----
@@ -2318,6 +2580,79 @@ mod tests {
         for (name, bytes) in &flat {
             assert_eq!(&fs::read(map_dir.join(name)).unwrap(), bytes, "{name} after split, relayout and merge");
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The layout editor: a preview says what a split or relayout would write and which objects change subterrain,
+    /// writing nothing, and refuses with the change's own reason; a change kept for undo is taken back byte for byte
+    /// (the open choice and the derived files' record too) and made again, and refused once a file changed since.
+    #[test]
+    fn a_relayout_previewed_taken_back_and_made_again() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-undo-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        crate::project::create(&dir, None).unwrap();
+        let map_dir = dir.join("map");
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        with_objects(&mut flat, 8);
+        write_changed(&map_dir, &flat).unwrap();
+        fs::write(map_dir.join("war3map.wpm"), b"pathing").unwrap();
+        crate::derived::record_now(&dir).unwrap();
+        let disk = || -> Vec<(String, Vec<u8>)> { crate::project::walk(&dir).unwrap().into_iter().map(|p| (p.clone(), fs::read(crate::paths::join_rel(&dir, &p)).unwrap())).collect() };
+
+        // A split previewed: one subterrain with every object, the flat files to go; nothing written.
+        let flat_disk = disk();
+        let p = split_preview(&dir, &[]).unwrap();
+        assert_eq!(p.subterrains.iter().map(|s| (s.name.as_str(), s.doodads, s.units, s.regions)).collect::<Vec<_>>(), [("main", 5, 4, 1)]);
+        assert!(p.written.contains(&"map/terrain/terrain.json".to_string()) && p.removed.contains(&"map/war3map.w3e.txt".to_string()), "{p:?}");
+        assert!(p.moves.is_empty());
+        assert!(split_preview(&dir, &[rect("west:0,0,2,3")]).unwrap_err().to_string().contains("would be lost"));
+        assert_eq!(disk(), flat_disk, "a preview writes nothing");
+
+        split_project(&dir, &grid_2x2(t.width, t.height)).unwrap();
+        let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).unwrap()).unwrap();
+        crate::terrain_open::store(&dir, &layout, &["sw".into(), "ne".into()]).unwrap();
+        let split_disk = disk();
+        // Column 0 (the objects at world x -500) into a new subterrain: those of sw and nw move into it.
+        let new = plan(&["west=:0,0,1,7", "sw:1,0,3,3", "se:4,0,5,3", "nw:1,3,3,4", "ne:4,3,5,4"]);
+        let p = relayout_preview(&dir, &new).unwrap();
+        let moves: Vec<(&str, &str, &str, usize)> = p.moves.iter().map(|m| (m.kind, m.from.as_str(), m.to.as_str(), m.count)).collect();
+        assert_eq!(moves, [("doodads", "nw", "west", 1), ("doodads", "sw", "west", 1), ("units", "nw", "west", 1), ("units", "sw", "west", 1)]);
+        assert_eq!(p.subterrains.iter().map(|s| (s.name.as_str(), s.units, s.from.clone())).collect::<Vec<_>>()[..2], [("west", 2, vec![]), ("sw", 0, vec!["sw".to_string()])]);
+        assert_eq!(p.subterrains[0].id_ranges, [[50000, 59999]], "a new one gets the next block");
+        assert!(p.written.contains(&"map/terrain/west/units.json".to_string()) && p.removed.is_empty(), "{p:?}");
+        let refused = relayout_preview(&dir, &plan(&["sw:0,0,4,3", "nw:0,3,4,4", "ne:4,3,5,4"])).unwrap_err().to_string();
+        assert!(refused.contains("would be lost"), "{refused}");
+        assert_eq!(disk(), split_disk, "a preview writes nothing");
+
+        // Applied, kept for undo; the preview said what it wrote.
+        let (done, before, after) = relayout_project_undoable(&dir, &new).unwrap();
+        assert_eq!(done.written, p.written);
+        let applied_disk = disk();
+        assert_ne!(applied_disk, split_disk);
+        assert_eq!(crate::terrain_open::parse(after.open.as_deref().unwrap()).unwrap(), ["west", "sw", "ne"], "a new one is open");
+        // Taken back: every file as before, the new folder gone, the open choice back, the derived files still follow.
+        let back = restore_layout(&dir, &after, &before).unwrap();
+        assert!(back.removed.contains(&"map/terrain/west/units.json".to_string()) && back.written.contains(&crate::terrain_open::NAME.to_string()), "{back:?}");
+        assert_eq!(disk(), split_disk);
+        assert!(!map_dir.join("terrain").join("west").exists());
+        assert_eq!(crate::derived::check(&dir).unwrap(), crate::derived::Freshness::Fresh);
+        // Made again, then a file changed since: taking it back is refused and changes nothing.
+        restore_layout(&dir, &before, &after).unwrap();
+        assert_eq!(disk(), applied_disk);
+        let units = map_dir.join("terrain").join("west").join("units.json");
+        let original = fs::read(&units).unwrap();
+        let edited = [original.clone(), b" ".to_vec()].concat();
+        fs::write(&units, &edited).unwrap();
+        let changed = disk();
+        let e = restore_layout(&dir, &after, &before).unwrap_err().to_string();
+        assert!(e.contains("changed since (map/terrain/west/units.json)"), "{e}");
+        assert_eq!(disk(), changed);
+        // Control: refused when the layout isn't the one it was made from, also for the open choice alone.
+        fs::write(&units, &original).unwrap();
+        assert_eq!(disk(), applied_disk);
+        fs::remove_file(crate::terrain_open::path(&dir)).unwrap();
+        assert!(restore_layout(&dir, &after, &before).unwrap_err().to_string().contains(crate::terrain_open::NAME));
         let _ = fs::remove_dir_all(&dir);
     }
 

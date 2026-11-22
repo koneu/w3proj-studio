@@ -513,7 +513,24 @@ impl Server {
             "terrain_relayout" => {
                 self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
                 let plan: Vec<String> = args.get("plan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-                to_json(backend::flatview::relayout(root()?, &plan)?)
+                if args.get("undoable").and_then(Value::as_bool) == Some(true) {
+                    to_json(backend::flatview::relayout_undoable(root()?, &plan)?)
+                } else {
+                    to_json(backend::flatview::relayout(root()?, &plan)?)
+                }
+            }
+            "terrain_relayout_undo" => {
+                self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                let id = args.get("id").and_then(Value::as_u64).ok_or("expected id")?;
+                to_json(backend::flatview::relayout_undo(root()?, id, args.get("redo").and_then(Value::as_bool) == Some(true))?)
+            }
+            "terrain_relayout_preview" => {
+                let plan: Vec<String> = args.get("plan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                to_json(backend::flatview::relayout_preview(root()?, &plan)?)
+            }
+            "terrain_split_preview" => {
+                let rects: Vec<String> = args.get("rects").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                to_json(backend::flatview::split_preview(root()?, &rects)?)
             }
             "terrain_id_layout" => to_json(backend::flatview::id_layout(root()?)?),
             "terrain_check" => to_json(backend::flatview::check(root()?)?),
