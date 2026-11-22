@@ -448,6 +448,21 @@ async fn triggers_plan(app: AppHandle, root: String, save: backend::triggers::Sa
         .map_err(err)?
 }
 
+/// Check Trigger Tree: what the files of `map/triggers/` get wrong (backend::triggers::check); [] without them.
+#[tauri::command]
+async fn triggers_check(app: AppHandle, root: String) -> CmdResult<Vec<w3proj::trigger_check::Issue>> {
+    let formats = user_format_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || backend::triggers::check(&root, &formats)).await.map_err(err)?
+}
+
+/// What Check Trigger Tree's fixes ("renumber", "order", "collapse") would write and remove (backend::triggers::fix):
+/// nothing is written, the app writes them as one undoable edit.
+#[tauri::command]
+async fn triggers_fix(app: AppHandle, root: String, fixes: Vec<String>) -> CmdResult<Value> {
+    let formats = user_format_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || backend::triggers::fix(&root, &formats, &fixes)).await.map_err(err)?
+}
+
 /// Saves the app's trigger tree into `map/triggers/`, only the files whose content changed (backend::triggers::write).
 #[tauri::command]
 async fn triggers_write(app: AppHandle, root: String, save: backend::triggers::Save, create: Option<bool>) -> CmdResult<backend::triggers::Written> {
@@ -1298,6 +1313,8 @@ pub fn run() {
             triggers_read,
             triggers_plan,
             triggers_write,
+            triggers_check,
+            triggers_fix,
             terrain_open_state,
             terrain_set_open,
             objects_canonicalize,

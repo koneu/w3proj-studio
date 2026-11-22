@@ -253,6 +253,36 @@ fn in_memory(tree: &Tree, lang: Lang, warnings: Vec<String>) -> CmdResult<Read> 
     })
 }
 
+/// Check Trigger Tree (`triggers_check`, `w3proj::trigger_check`): what the files of `map/triggers/` on disk get wrong,
+/// in the map's script language; nothing without them.
+pub fn check(root: &str, formats: &[PathBuf]) -> CmdResult<Vec<w3proj::trigger_check::Issue>> {
+    let project = Path::new(root);
+    let files = disk(project)?;
+    Ok(w3proj::trigger_check::check(&files, Some(language(project, formats))))
+}
+
+/// What Check Trigger Tree's fixes change (`triggers_fix`): `{ write: [{ path, text }], delete: [path] }` (project
+/// paths); nothing is written (the app writes them as one undoable edit, `w3proj triggers --fix` itself).
+pub fn fix(root: &str, formats: &[PathBuf], fixes: &[String]) -> CmdResult<serde_json::Value> {
+    let project = Path::new(root);
+    let wanted = fixes
+        .iter()
+        .map(|f| w3proj::trigger_check::Fix::parse(f).ok_or_else(|| format!("no fix {f:?} (renumber, order, collapse)")))
+        .collect::<CmdResult<Vec<_>>>()?;
+    let files = disk(project)?;
+    let changes = w3proj::trigger_check::fix(&files, language(project, formats), &wanted).map_err(err)?;
+    let mut write = Vec::new();
+    let mut delete = Vec::new();
+    for (path, bytes) in changes {
+        let at = format!("{PREFIX}{path}");
+        match bytes {
+            Some(b) => write.push(serde_json::json!({ "path": at, "text": String::from_utf8(b).map_err(|_| format!("{at} isn't UTF-8 text"))? })),
+            None => delete.push(at),
+        }
+    }
+    Ok(serde_json::json!({ "write": write, "delete": delete }))
+}
+
 /// The ids (namespace, id) a tree's files store.
 fn stored_ids(tree: &Tree) -> HashSet<(char, u32)> {
     let mut out = HashSet::new();

@@ -306,6 +306,133 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown);
 }
 
+/// Git in `repo`, with an identity and no signing (as the roundtrip tests run it); panics when it fails unless
+/// `may_fail` (a merge with conflicts).
+fn git(repo: &Path, args: &[&str], may_fail: bool) -> Output {
+    let o = Command::new("git")
+        .args(["-c", "user.name=w3proj test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+        .args(args)
+        .current_dir(repo)
+        // Git's messages in English, whatever the machine's language.
+        .env("LC_ALL", "C")
+        .env("LANGUAGE", "C")
+        .output()
+        .expect("git runs");
+    assert!(may_fail || o.status.success(), "git {args:?}: {}", text(&o));
+    o
+}
+
+/// Edits a text file in place.
+fn edit(path: &Path, change: impl FnOnce(String) -> String) {
+    let t = fs::read_to_string(path).unwrap();
+    let new = change(t.clone());
+    assert_ne!(new, t, "{} didn't change", path.display());
+    fs::write(path, new).unwrap();
+}
+
+/// The unpacked sample map in a git repository, committed on `main`.
+fn merge_project(test: &str) -> (PathBuf, PathBuf) {
+    let dir = workdir(test);
+    let (map, _, _) = sample_map(&dir, false, false);
+    let project = dir.join("project");
+    unpack(&map, &project);
+    git(&project, &["init", "-q"], false);
+    git(&project, &["add", "-A"], false);
+    git(&project, &["commit", "-q", "-m", "base"], false);
+    (dir, project)
+}
+
+fn check(project: &Path, more: &[&str]) -> Output {
+    let mut args = vec!["triggers", s(project), "--check"];
+    args.extend(more);
+    w3proj(&args)
+}
+
+/// Two branches move one imported GUI trigger to different folders, and add the same variable in different
+/// folders: Git merges the folders without a textual conflict on the variables, and keeps both copies of the moved
+/// file (rename/rename). Check Trigger Tree reports the id held twice (an error pack only tells) and the variable
+/// defined twice (a warning); --fix renumber,collapse repairs both, and the map packs. The variable defined
+/// differently is an error that stops the pack.
+#[test]
+fn a_merge_of_two_branches_is_checked_and_fixed() {
+    let (dir, project) = merge_project("merge-ids");
+    let t = project.join("map/triggers");
+    assert!(check(&project, &[]).status.success(), "the unpacked map has nothing to report: {}", text(&check(&project, &[])));
+    let var = "{\"name\":\"Shared\",\"type\":\"integer\",\"isArray\":false,\"arraySize\":1,\"initialized\":false,\"initialValue\":\"\",\"unknown\":1}\n";
+    // Branch a: into Systems, the variable at the root.
+    git(&project, &["checkout", "-q", "-b", "a"], false);
+    git(&project, &["mv", "map/triggers/Initialization/Melee_Initialization.gui.json", "map/triggers/Systems/Melee_Initialization.gui.json"], false);
+    edit(&t.join("Initialization/order.txt"), |o| o.replace("Melee_Initialization.gui.json\n", ""));
+    edit(&t.join("Systems/order.txt"), |o| format!("{o}Melee_Initialization.gui.json\n"));
+    edit(&t.join("variables.json"), |v| format!("{v}{var}"));
+    git(&project, &["commit", "-q", "-am", "a"], false);
+    // Branch b: into Systems/Sub, the variable in Initialization.
+    git(&project, &["checkout", "-q", "main"], false);
+    git(&project, &["checkout", "-q", "-b", "b"], false);
+    git(&project, &["mv", "map/triggers/Initialization/Melee_Initialization.gui.json", "map/triggers/Systems/Sub/Melee_Initialization.gui.json"], false);
+    edit(&t.join("Initialization/order.txt"), |o| o.replace("Melee_Initialization.gui.json\n", ""));
+    edit(&t.join("Systems/Sub/order.txt"), |o| format!("{o}Melee_Initialization.gui.json\n"));
+    edit(&t.join("Initialization/variables.json"), |v| format!("{v}{var}"));
+    git(&project, &["commit", "-q", "-am", "b"], false);
+    let merged = git(&project, &["merge", "--no-edit", "a"], true);
+    assert!(text(&merged).contains("rename/rename"), "{}", text(&merged));
+    assert!(t.join("Systems/Melee_Initialization.gui.json").is_file() && t.join("Systems/Sub/Melee_Initialization.gui.json").is_file(), "{}", text(&merged));
+    let o = check(&project, &[]);
+    let report = text(&o);
+    assert!(!o.status.success(), "{report}");
+    // In tree order Systems/Sub comes before the entry order.txt appends to Systems: the later copy is Systems'.
+    assert!(report.contains("error    map/triggers/Systems/Melee_Initialization.gui.json: \"Melee Initialization\" has the id 0x3000000") && report.contains("[--fix renumber]"), "{report}");
+    assert!(report.contains("warning  map/triggers/Initialization/variables.json:2: the variable Shared is also defined in map/triggers/variables.json:2; one is kept [--fix collapse]"), "{report}");
+    // An id twice doesn't stop the pack: it is told.
+    let o = pack(&project, &dir.join("merged.w3x"), &[]);
+    assert!(o.status.success() && text(&o).contains("has the id 0x3000000"), "{}", text(&o));
+    // Repaired: the later copy has no id any more, the earlier keeps its own; one definition of Shared is left.
+    let first = fs::read_to_string(t.join("Systems/Sub/Melee_Initialization.gui.json")).unwrap();
+    let o = check(&project, &["--fix", "renumber,collapse"]);
+    let report = text(&o);
+    assert!(o.status.success(), "{report}");
+    assert!(report.contains("wrote map/triggers/Systems/Melee_Initialization.gui.json") && report.contains("wrote map/triggers/Initialization/variables.json"), "{report}");
+    assert!(!report.contains("has the id") && !report.contains("also defined"), "{report}");
+    assert_eq!(fs::read_to_string(t.join("Systems/Sub/Melee_Initialization.gui.json")).unwrap(), first);
+    assert!(!fs::read_to_string(t.join("Systems/Melee_Initialization.gui.json")).unwrap().contains("\"id\""));
+    assert!(!fs::read_to_string(t.join("Initialization/variables.json")).unwrap().contains("Shared"));
+    let o = pack(&project, &dir.join("fixed.w3x"), &[]);
+    assert!(o.status.success() && !text(&o).contains("has the id"), "{}", text(&o));
+    // Defined differently: an error, and the pack stops.
+    edit(&t.join("Initialization/variables.json"), |v| format!("{v}{}", var.replace("integer", "real")));
+    let o = check(&project, &["--json"]);
+    assert!(!o.status.success());
+    let issues: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(issues[0]["code"], "variableConflict", "{issues:#}");
+    assert!(issues[0]["message"].as_str().unwrap().contains("differently (type integer / real)"), "{issues:#}");
+    let o = pack(&project, &dir.join("broken.w3x"), &[]);
+    assert!(!o.status.success() && text(&o).contains("Check Trigger Tree") && text(&o).contains("differently"), "{}", text(&o));
+}
+
+/// Both branches change the same line of a trigger's text: the merge leaves conflict markers, which Check Trigger
+/// Tree reports at their line and pack refuses; resolved, it packs.
+#[test]
+fn conflict_markers_stop_the_pack() {
+    let (dir, project) = merge_project("merge-conflict");
+    let setup = project.join("map/triggers/Initialization/Setup_Players.j");
+    for branch in ["a", "b"] {
+        git(&project, &["checkout", "-q", "main"], false);
+        git(&project, &["checkout", "-q", "-b", branch], false);
+        edit(&setup, |t| t.replace("function Trig_Setup_Players_Actions takes nothing returns nothing\r\n", &format!("function Trig_Setup_Players_Actions takes nothing returns nothing\r\n    // {branch}\r\n")));
+        git(&project, &["commit", "-q", "-am", branch], false);
+    }
+    let merged = git(&project, &["merge", "--no-edit", "a"], true);
+    assert!(!merged.status.success(), "{}", text(&merged));
+    let o = check(&project, &[]);
+    assert!(!o.status.success() && text(&o).contains("error    map/triggers/Initialization/Setup_Players.j:3: an unresolved merge conflict"), "{}", text(&o));
+    let o = pack(&project, &dir.join("conflicted.w3x"), &[]);
+    assert!(!o.status.success() && text(&o).contains("map/triggers/Initialization/Setup_Players.j:3: an unresolved merge conflict"), "{}", text(&o));
+    // Resolved by taking ours.
+    git(&project, &["checkout", "--ours", "map/triggers/Initialization/Setup_Players.j"], false);
+    assert!(check(&project, &[]).status.success(), "{}", text(&check(&project, &[])));
+    assert!(pack(&project, &dir.join("resolved.w3x"), &[]).status.success());
+}
+
 /// A map with war3map.wtg but no war3map.wct (the sample's war3map.wtg alone), and one with neither: no
 /// map/triggers/, and pack makes up none of them.
 #[test]

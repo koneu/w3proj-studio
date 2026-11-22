@@ -222,7 +222,7 @@ fn type_index(ty: u32) -> usize {
 }
 
 /// A custom-text trigger or script item: code in war3map.wct, a script file in the layout.
-fn is_script(t: &Trigger) -> bool {
+pub(crate) fn is_script(t: &Trigger) -> bool {
     t.ty == 32 || (t.ty == 8 && t.is_custom)
 }
 
@@ -668,7 +668,7 @@ fn text_file(text: &str) -> Vec<u8> {
 
 /// A file's bytes as a text: UTF-8 as it is (U+10FF00 + b is byte b); a file that isn't UTF-8 (saved in a code page)
 /// goes into the map byte for byte.
-fn file_text(bytes: &[u8]) -> String {
+pub(crate) fn file_text(bytes: &[u8]) -> String {
     match std::str::from_utf8(bytes) {
         Ok(s) => s.to_string(),
         Err(_) => crate::lossless::decode(bytes),
@@ -738,7 +738,7 @@ pub fn split_frontmatter(file: &[u8], lua: bool) -> std::result::Result<Split, S
 }
 
 /// Whether a text defines `InitTrig_<name>` (`function InitTrig_X takes …` in JASS, `function InitTrig_X(` in Lua).
-fn defines_init_trig(text: &str, name: &str) -> bool {
+pub(crate) fn defines_init_trig(text: &str, name: &str) -> bool {
     let want = format!("InitTrig_{name}");
     let mut rest = text;
     while let Some(i) = rest.find("function") {
@@ -1199,6 +1199,40 @@ fn parse_json(bytes: &[u8], at: &str) -> Result<Value> {
 
 const TRIGGER_KEYS: [&str; 10] = ["type", "id", "name", "description", "isComment", "enabled", "isCustom", "initiallyOff", "runOnInit", "ecas"];
 
+/// What reading the files found worth a warning (`from_files_noted`); Display gives the line `from_files` warns with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    pub kind: NoteKind,
+    /// The file, relative to `map/` (`triggers/…`).
+    pub file: String,
+    /// Its line, from 1.
+    pub line: Option<usize>,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteKind {
+    /// An order.txt entry that names nothing there.
+    OrderMissing,
+    /// An order.txt entry listed a second time.
+    OrderTwice,
+    /// An order.txt `$name` entry for a variable its folder's variables.json doesn't have.
+    OrderNotVariable,
+    /// A variable defined a second time, alike (one is kept).
+    VariableTwice,
+    /// A variable placed in two folders' order.txt.
+    VariablePlacedTwice,
+}
+
+impl std::fmt::Display for Note {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.line {
+            Some(l) => write!(f, "map/{}:{l}: {}", self.file, self.message),
+            None => write!(f, "map/{}: {}", self.file, self.message),
+        }
+    }
+}
+
 struct Reader<'a> {
     files: BTreeMap<&'a str, &'a [u8]>,
     /// Folder (below `map/triggers/`, "" the root) → its files and sub-folders.
@@ -1208,7 +1242,49 @@ struct Reader<'a> {
     vars: Vec<Var>,
     /// Name → index in `vars`, and the file that defines it.
     var_at: HashMap<String, (usize, String)>,
-    warnings: Vec<String>,
+    warnings: Vec<Note>,
+}
+
+/// Keys a variables.json line may have.
+const VARIABLE_KEYS: [&str; 10] = ["name", "type", "isArray", "arraySize", "initialized", "initialValue", "unknown", "id", "node", "parent"];
+
+/// One line of a variables.json (`at`: file and line, for messages): the variable, its id (none in a Classic map) and
+/// whether it asks for a node in the tree.
+pub(crate) fn parse_variable_line(l: &str, at: &str, classic: bool) -> Result<(Variable, Option<u32>, bool)> {
+    let value: Value = serde_json::from_str(l).map_err(|e| bad(format!("{at}: {e}")))?;
+    let o = Obj::new(&value, at.to_string(), &VARIABLE_KEYS)?;
+    let name = o.need_str("name")?;
+    check_var_name(&name).map_err(|m| bad(format!("{at}: {m}")))?;
+    let v = Variable {
+        name,
+        ty: o.need_str("type")?,
+        unknown: o.u32("unknown")?.unwrap_or(1),
+        is_array: o.bool("isArray")?.unwrap_or(false),
+        array_size: o.u32("arraySize")?.unwrap_or(1),
+        initialized: o.bool("initialized")?.unwrap_or(false),
+        initial_value: o.str("initialValue")?.unwrap_or_default(),
+        id: 0,
+        parent: o.i32("parent")?.unwrap_or(-1),
+    };
+    let node = !classic && o.bool("node")?.unwrap_or(true);
+    let id = if classic { None } else { o.u32("id")? };
+    Ok((v, id, node))
+}
+
+/// Whether two definitions of a variable are the same (type, array, size, initial value).
+pub(crate) fn same_variable(a: &Variable, b: &Variable) -> bool {
+    a.ty == b.ty && a.is_array == b.is_array && a.array_size == b.array_size && a.initialized == b.initialized && a.initial_value == b.initial_value
+}
+
+/// A folder's `_category.json` (`shown`: its path for messages): type, id, name, isComment, expanded.
+pub(crate) fn parse_category(bytes: &[u8], shown: &str) -> Result<(u32, Option<u32>, String, u32, u32)> {
+    let v = parse_json(bytes, shown)?;
+    let o = Obj::new(&v, shown.to_string(), &["type", "id", "name", "isComment", "expanded"])?;
+    let ty = o.u32("type")?.unwrap_or(4);
+    if ty != 2 && ty != 4 {
+        return Err(bad(format!("{shown}: a folder is a category (type 4) or library (type 2), not type {ty}")));
+    }
+    Ok((ty, o.u32("id")?, o.need_str("name")?, o.u32("isComment")?.unwrap_or(0), o.u32("expanded")?.unwrap_or(1)))
 }
 
 enum Entry {
@@ -1234,30 +1310,18 @@ impl Reader<'_> {
                 continue;
             }
             let at = format!("{}:{}", Reader::shown(path), ln + 1);
-            let value: Value = serde_json::from_str(l).map_err(|e| bad(format!("{at}: {e}")))?;
-            let o = Obj::new(&value, at.clone(), &["name", "type", "isArray", "arraySize", "initialized", "initialValue", "unknown", "id", "node", "parent"])?;
-            let name = o.need_str("name")?;
-            check_var_name(&name).map_err(|m| bad(format!("{at}: {m}")))?;
-            let v = Variable {
-                name: name.clone(),
-                ty: o.need_str("type")?,
-                unknown: o.u32("unknown")?.unwrap_or(1),
-                is_array: o.bool("isArray")?.unwrap_or(false),
-                array_size: o.u32("arraySize")?.unwrap_or(1),
-                initialized: o.bool("initialized")?.unwrap_or(false),
-                initial_value: o.str("initialValue")?.unwrap_or_default(),
-                id: 0,
-                parent: o.i32("parent")?.unwrap_or(-1),
-            };
-            let node = !self.classic && o.bool("node")?.unwrap_or(true);
-            let id = if self.classic { None } else { o.u32("id")? };
+            let (v, id, node) = parse_variable_line(l, &at, self.classic)?;
+            let name = v.name.clone();
             if let Some((k, first)) = self.var_at.get(&name) {
-                let old = &self.vars[*k].v;
-                let same = old.ty == v.ty && old.is_array == v.is_array && old.array_size == v.array_size && old.initialized == v.initialized && old.initial_value == v.initial_value;
-                if !same {
+                if !same_variable(&self.vars[*k].v, &v) {
                     return Err(bad(format!("{at}: the variable {name} is also defined in {first}, differently")));
                 }
-                self.warnings.push(format!("{at}: the variable {name} is also defined in {first}; one is kept"));
+                self.warnings.push(Note {
+                    kind: NoteKind::VariableTwice,
+                    file: format!("{PREFIX}{path}"),
+                    line: Some(ln + 1),
+                    message: format!("the variable {name} is also defined in {first}; one is kept"),
+                });
                 out.push((name, false));
                 continue;
             }
@@ -1277,28 +1341,29 @@ impl Reader<'_> {
         let mut entries: Vec<Entry> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         if let Some(bytes) = self.files.get(at(ORDER).as_str()).copied() {
-            let shown = Reader::shown(&at(ORDER));
+            let file = format!("{PREFIX}{}", at(ORDER));
+            let mut note = |kind: NoteKind, ln: usize, message: String| self.warnings.push(Note { kind, file: file.clone(), line: Some(ln + 1), message });
             for (ln, l) in String::from_utf8_lossy(bytes).split('\n').enumerate() {
                 let l = l.strip_suffix('\r').unwrap_or(l);
                 if l.is_empty() {
                     continue;
                 }
                 if !seen.insert(l.to_string()) {
-                    self.warnings.push(format!("{shown}:{}: {l} is listed twice", ln + 1));
+                    note(NoteKind::OrderTwice, ln, format!("{l} is listed twice"));
                     continue;
                 }
                 if let Some(v) = l.strip_prefix('$') {
                     if here.iter().any(|(n, _)| n == v) {
                         entries.push(Entry::Var(v.to_string()));
                     } else {
-                        self.warnings.push(format!("{shown}:{}: {l} isn't a variable of {}", ln + 1, Reader::shown(&at(VARIABLES))));
+                        note(NoteKind::OrderNotVariable, ln, format!("{l} isn't a variable of {}", Reader::shown(&at(VARIABLES))));
                     }
                 } else if subdirs.contains(l) {
                     entries.push(Entry::Dir(l.to_string()));
                 } else if files.contains(l) && !own(l) {
                     entries.push(Entry::File(l.to_string()));
                 } else {
-                    self.warnings.push(format!("{shown}:{}: {l} isn't there", ln + 1));
+                    note(NoteKind::OrderMissing, ln, format!("{l} isn't there"));
                 }
             }
         }
@@ -1319,16 +1384,7 @@ impl Reader<'_> {
                     let path = at(&name);
                     let cat_path = format!("{path}/{CATEGORY}");
                     let (ty, id, display, is_comment, expanded) = match self.files.get(cat_path.as_str()).copied() {
-                        Some(bytes) => {
-                            let shown = Reader::shown(&cat_path);
-                            let v = parse_json(bytes, &shown)?;
-                            let o = Obj::new(&v, shown.clone(), &["type", "id", "name", "isComment", "expanded"])?;
-                            let ty = o.u32("type")?.unwrap_or(4);
-                            if ty != 2 && ty != 4 {
-                                return Err(bad(format!("{shown}: a folder is a category (type 4) or library (type 2), not type {ty}")));
-                            }
-                            (ty, o.u32("id")?, o.need_str("name")?, o.u32("isComment")?.unwrap_or(0), o.u32("expanded")?.unwrap_or(1))
-                        }
+                        Some(bytes) => parse_category(bytes, &Reader::shown(&cat_path))?,
                         None => (4, None, name.clone(), 0, 1),
                     };
                     self.nodes.push(Node { parent: folder, id, kind: Kind::Folder { ty, name: display, is_comment, expanded }, file: Some(path.clone()) });
@@ -1342,7 +1398,12 @@ impl Reader<'_> {
                 Entry::Var(name) => {
                     let k = self.var_at[&name].0;
                     if self.vars[k].node {
-                        self.warnings.push(format!("{}: the variable {name} is placed in another folder already", Reader::shown(&at(ORDER))));
+                        self.warnings.push(Note {
+                            kind: NoteKind::VariablePlacedTwice,
+                            file: format!("{PREFIX}{}", at(ORDER)),
+                            line: None,
+                            message: format!("the variable {name} is placed in another folder already"),
+                        });
                         continue;
                     }
                     self.vars[k].node = true;
@@ -1353,9 +1414,14 @@ impl Reader<'_> {
         Ok(())
     }
 
-    /// A trigger file: its id, the trigger (id and parent unused) and its text.
     fn item(&mut self, path: &str) -> Result<(Option<u32>, Trigger, Option<String>)> {
-        let bytes = self.files[path];
+        read_item(path, self.files[path], self.classic)
+    }
+}
+
+/// A trigger file (`path` below `map/triggers/`): its id, the trigger (id and parent unused) and its text.
+pub(crate) fn read_item(path: &str, bytes: &[u8], classic: bool) -> Result<(Option<u32>, Trigger, Option<String>)> {
+    {
         let shown = Reader::shown(path);
         let lower = path.to_ascii_lowercase();
         let blank = |ty: u32, name: String| Trigger {
@@ -1405,7 +1471,7 @@ impl Reader<'_> {
             // Made outside Studio: a custom-text trigger if it defines InitTrig_<its name>, else a script item.
             let file = path.rsplit('/').next().unwrap_or(path);
             let name = stem_of(file).to_string();
-            let ty = if self.classic || defines_init_trig(&text, &name) { 8 } else { 32 };
+            let ty = if classic || defines_init_trig(&text, &name) { 8 } else { 32 };
             let mut t = blank(ty, name);
             t.is_custom = true;
             return Ok((None, t, Some(text)));
@@ -1434,6 +1500,13 @@ impl Reader<'_> {
 /// worth a warning (order.txt entries that aren't there, a variable defined twice alike). Errs, naming the file (and
 /// line), on a file that can't be read: never a half-read tree.
 pub fn from_files(files: &BTreeMap<String, Vec<u8>>) -> Result<(Tree, Vec<String>)> {
+    let (tree, notes) = from_files_noted(files)?;
+    Ok((tree, notes.iter().map(Note::to_string).collect()))
+}
+
+/// `from_files`, with the warnings as notes (kind, file, line): Check Trigger Tree (`crate::trigger_check`) tells them
+/// apart and offers fixes.
+pub fn from_files_noted(files: &BTreeMap<String, Vec<u8>>) -> Result<(Tree, Vec<Note>)> {
     let ours: BTreeMap<&str, &[u8]> = files.iter().filter_map(|(k, v)| Some((k.strip_prefix(PREFIX)?, v.as_slice()))).collect();
     let root_bytes = ours.get(ROOT_JSON).ok_or_else(|| bad(format!("map/{ROOT_FILE} is missing")))?;
     let shown = format!("map/{ROOT_FILE}");
@@ -1613,11 +1686,25 @@ pub fn check_functions(tree: &Tree, data: &TriggerData) -> Result<()> {
     Ok(())
 }
 
-/// war3map.wtg and war3map.wct of the layout in project files, for `lang` (a script file of the other language is an
-/// error), and the warnings. With the game's TriggerData, a GUI function it doesn't know is an error too
-/// (`check_functions`).
+/// war3map.wtg and war3map.wct of the layout in project files, for `lang`, and the warnings. Check Trigger Tree
+/// (`crate::trigger_check`) runs first: its errors (conflict markers, files that can't be read, a variable defined
+/// twice differently, names only case tells apart, a script file in the other language, …) stop the pack; the rest,
+/// a stored id found twice too, is told; nothing is repaired here. With the game's TriggerData, a GUI function it doesn't
+/// know is an error too (`check_functions`).
 pub fn assemble(files: &BTreeMap<String, Vec<u8>>, lang: Lang, data: Option<&TriggerData>) -> Result<(Vec<u8>, Vec<u8>, Vec<String>)> {
-    let (tree, mut warnings) = from_files(files)?;
+    let issues = crate::trigger_check::check(files, Some(lang));
+    let errors: Vec<String> = issues.iter().filter(|i| i.stops_pack()).map(ToString::to_string).collect();
+    if !errors.is_empty() {
+        let n = errors.len();
+        let shown = errors.iter().take(10).cloned().collect::<Vec<_>>().join("; ");
+        let more = if n > 10 { format!("; and {} more", n - 10) } else { String::new() };
+        return Err(bad(format!(
+            "map/{DIR}/ has {n} error{} (Check Trigger Tree), so it isn't packed: {shown}{more}. W3Proj Studio's Problems view or `w3proj triggers --check` lists them, with fixes where one is safe",
+            if n == 1 { "" } else { "s" }
+        )));
+    }
+    let mut warnings: Vec<String> = issues.iter().map(ToString::to_string).collect();
+    let (tree, _) = from_files(files)?;
     check_language(&tree, lang)?;
     if let Some(data) = data {
         check_functions(&tree, data)?;

@@ -553,6 +553,12 @@ impl Server {
             "terrain_whole" => to_json(backend::flatview::whole(root()?)?),
             // The trigger tree in one call each way, as the app reads and saves it (backend::triggers).
             "triggers_read" => to_json(backend::triggers::read(root()?, &self.formats)?),
+            // Check Trigger Tree, and its fixes as a plan only (the caller writes the files).
+            "triggers_check" => to_json(backend::triggers::check(root()?, &self.formats)?),
+            "triggers_fix" => {
+                let fixes: Vec<String> = args.get("fixes").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                Ok(Answer::Json(backend::triggers::fix(root()?, &self.formats, &fixes)?))
+            }
             "triggers_plan" | "triggers_write" => {
                 let save: backend::triggers::Save = serde_json::from_value(args.get("save").cloned().unwrap_or(Value::Null)).map_err(|e| format!("argument save: {e}"))?;
                 let create = args.get("create").and_then(Value::as_bool).unwrap_or(false);

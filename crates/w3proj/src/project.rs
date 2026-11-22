@@ -1886,6 +1886,20 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
     }
 }
 
+/// Check Trigger Tree on a map's unpacked trigger folders (and its chapters'): an import is never reported, its
+/// categories' shared ids neither; anything found is a mismatch.
+fn trigger_tree_clean(ex: &Extracted, codecs: &Registry, at: &str, out: &mut Vec<String>) {
+    use crate::trigger_layout as tl;
+    if tl::is_layout(&ex.files, &ex.manifest.pack.raw) {
+        for issue in crate::trigger_check::check(&ex.files, Some(tl::language(&ex.files, codecs))) {
+            out.push(format!("{at}map/triggers/ (Check Trigger Tree reports an import): {issue}"));
+        }
+    }
+    for (dir, chapter) in &ex.nested {
+        trigger_tree_clean(chapter, codecs, &format!("{at}{dir}/"), out);
+    }
+}
+
 pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) -> Result<VerifyReport> {
     let archive = Archive::open(map)?;
     let ex = extract_named(&archive, codecs, more_names);
@@ -1895,6 +1909,7 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
     let packed = Archive::from_bytes(pack_extracted(&ex, codecs)?)?;
     let mut mismatches = Vec::new();
     compare(&archive, &packed, &ex, "", &mut mismatches);
+    trigger_tree_clean(&ex, codecs, "", &mut mismatches);
     let mut notes = Vec::new();
     split_terrain_round_trip(&ex, codecs, "", &mut mismatches, &mut notes);
     Ok(VerifyReport {

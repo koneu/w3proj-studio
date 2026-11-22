@@ -18,6 +18,7 @@ mod rebuild;
 mod check;
 mod seams;
 mod mergehook;
+mod triggers;
 
 /// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
 /// command still finishes its work (writes, exit code) as if nothing happened.
@@ -625,8 +626,23 @@ enum Cmd {
     Ls { map: PathBuf },
     /// Print a project's trigger tree (map/triggers/) as JSON, as W3Proj Studio reads it: `file` (the tree, every
     /// item with an id, given in memory where the files store none), `custom` (the header and texts), `files` (each
-    /// item's file). Exit 1 when the folders can't be read; `null` without them.
-    Triggers { project: PathBuf },
+    /// item's file). Exit 1 when the folders can't be read; `null` without them. `--check`: Check Trigger Tree instead,
+    /// as W3Proj Studio's Problems view runs it (conflict markers, files that can't be read, ids or variables found
+    /// twice, order.txt entries, names, …); exit 1 when it finds errors.
+    Triggers {
+        project: PathBuf,
+        /// Check Trigger Tree: what the files of map/triggers/ get wrong, mostly after a Git merge.
+        #[arg(long)]
+        check: bool,
+        /// With --check: repair first (comma-separated): renumber (the later of two items sharing a stored id loses
+        /// it; pack gives it a free one), order (order.txt as the tree is read), collapse (the later of two alike
+        /// variable definitions goes), or all.
+        #[arg(long, requires = "check", value_delimiter = ',')]
+        fix: Vec<String>,
+        /// With --check: the report as JSON.
+        #[arg(long, requires = "check")]
+        json: bool,
+    },
     /// MCP server over stdin and stdout: AI clients start this to use the running W3Proj Studio.
     Mcp,
     /// The app's backend commands over stdin and stdout, framed as `w3proj rebuild` answers them: for the app's
@@ -1077,7 +1093,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
             println!("terrain {what}: {} written, {} removed", r.written.len(), r.removed.len());
         }
-        Cmd::Triggers { project } => {
+        Cmd::Triggers { project, check: true, fix, json } => return triggers::run(&project, &fix, json, &extra),
+        Cmd::Triggers { project, .. } => {
             let read = backend::triggers::read(&project.to_string_lossy(), &extra).map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string(&read)?);
         }
