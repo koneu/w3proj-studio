@@ -147,7 +147,7 @@ const KNOWN_DAMAGED: { path: string; error: RegExp; why: string }[] = [
   // 36864 bytes, exactly 9 × 4096: the file stops inside its BONE chunk (at 15507 the chunk says 22620 bytes, 21349 are
   // left). The project's checkpoints (the only other copies, packed from it) hold the same 36864 bytes; no original
   // archive of the map is in the corpus. Examined 2026-11-22.
-  { path: "build_2/wowr4.6/map/war3mapImported/GoblinFemale_Portrait.mdx", error: /chunk at 15507 runs past the end of the file/, why: "cut off at 36864 bytes (9 × 4096) inside its BONE chunk in the source project" },
+  { path: "wowr4.6/map/war3mapImported/GoblinFemale_Portrait.mdx", error: /chunk at 15507 runs past the end of the file/, why: "cut off at 36864 bytes (9 × 4096) inside its BONE chunk in the source project" },
 ];
 
 test("the Classic models of real maps (MDX 800 files of smoketest_maps, drawn by the game) read without an error", (ctx) => {
