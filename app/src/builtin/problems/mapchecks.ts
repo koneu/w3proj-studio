@@ -5,6 +5,7 @@ import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { ident, placedName, type PlacedJson } from "../../lib/script/jass";
+import { headerPrintfIssues, printfIssueText } from "../../lib/script/printf";
 import { parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { errorText } from "../../lib/oserror";
@@ -111,6 +112,25 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         // A trigger file that can't be read is the Trigger validation's to report.
         const issues = await scope().triggerIssues().catch(() => null);
         return triggerProblems((issues ?? []).filter((i) => i.kind === "noEvents"), "triggers nothing runs", 5000, true);
+      },
+    },
+    {
+      // The World Editor writes the custom script header through printf (lib/script/printf): a conversion in it is a
+      // number of the editor's own in its save, or crashes that save. Studio's script keeps it as written.
+      id: "headerPrintf",
+      title: "Custom script header and printf",
+      async run() {
+        // A trigger file that can't be read is the Trigger validation's to report.
+        const read = await scope().triggersAndTexts().catch(() => null);
+        const issues = headerPrintfIssues(read?.custom?.header ?? "");
+        if (!issues.length) return [];
+        const file = w3.workspace.files().find((f) => /^map\/triggers\/header\.(j|lua)$/i.test(f.path))?.path;
+        return issues.slice(0, LIMIT).map((i): Problem => ({
+          severity: i.kind === "crash" ? "error" : "warning",
+          message: `Custom script header: ${printfIssueText(i)} (write %% for a %)`,
+          location: file ? `${file.slice(4)}:${i.line}` : "custom script header",
+          ...(file ? { reveal: { command: "w3.problems.open", args: [file] } } : {}),
+        }));
       },
     },
     {

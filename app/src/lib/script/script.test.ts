@@ -1398,6 +1398,23 @@ test("a header of only line breaks gets its banner and its empty lines, as the W
   assert.deepEqual(lua.slice(k + 3), none.slice(k));
 });
 
+test("the header goes through the World Editor's printf, in war3map.j and war3map.lua; the trigger texts keep every %", () => {
+  // we-compare header-printf (2026-11-22): "%%" → "%", "%*|" → "|", a lone % at the end goes; Lua's "7 % 3" → "7 )".
+  const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: ['function T takes nothing returns string\r\n    return "t%%t"\r\nendfunction'] });
+  const triggers = wtg([trigger("T", [], { isCustom: true })]);
+  const h = 'function H takes nothing returns string\r\n    return "a%%b|%*|100%"\r\nendfunction\r\n// end x%';
+  const j = jassScript(triggers, { custom: custom(h) });
+  has(j, '    return "a%b||100"');
+  has(j, "// end x");
+  has(j, '    return "t%%t"');
+  hasNot(j, "a%%b");
+  const lua = luaScript(triggers, { custom: custom('function H() return "a%%b" .. tostring(7 % 3) end') });
+  has(lua, 'function H() return "a%b" .. tostring(7 ) end');
+  assert.ok(lua.includes('"t%%t"'), lua);
+  // Control: no % at all, the header byte for byte.
+  has(jassScript(triggers, { custom: custom("// plain | * text") }), "// plain | * text");
+});
+
 test("a header keeps its own line breaks, LF, CRLF or mixed, in war3map.j and war3map.lua; only the break after it is CRLF", () => {
   // The World Editor keeps the header's LF breaks (we-compare header-newlines, 2026-11-14: lines equal, bytes not).
   const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: [] });

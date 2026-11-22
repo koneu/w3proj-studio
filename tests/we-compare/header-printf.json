@@ -1,0 +1,56 @@
+[
+  {
+    "name": "header-printf-g",
+    "description": "The World Editor passes the custom script header (only it) through C printf with no arguments (target/evidence/verify-2026-11-22/wb.md): hp-g.w3x (tests/fixtures/we-specs/make-header-printf.mjs: %%, %*, 100%, %%%, %%%%, %%*, %*%, %%d, a%%b%%c, %%%*%%, %**, %%%%%*, x%, %%%%%% and a comment '100%% and %* and 5%' in header.j), the editor opens and saves it; Studio generates the script (lib/script/printf.ts headerPrintf)",
+    "input": { "map": "${REPO}/target/header-printf/hp-g.w3x", "make": "make-header-printf.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.j", "as": "text", "lines": "return \"[0-9A-Z]{2}\\||^// c1" }],
+    "limit": 80
+  },
+  {
+    "name": "header-printf-new",
+    "description": "header-printf-g with the rest of printf's grammar before a char that is no conversion (hp-new.w3x): width (%5%, %*5, %1$), precision (%.3, %.*, %.5.), length modifiers (%hh, %I64, %I3, %I32, %w, %T, %L, %j, %t, %ll; %lz and %N crash the save, so they aren't in it), flags (%-, %0, %#, %+, '% ', %'), other chars (%q, %!, %$, %b, %D, %v, %k, %r)",
+    "input": { "map": "${REPO}/target/header-printf/hp-new.w3x", "make": "make-header-printf.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.j", "as": "text", "lines": "return \"[0-9A-Z]{2}\\||^// c1" }],
+    "limit": 80
+  },
+  {
+    "name": "header-printf-end1",
+    "description": "A header whose very last char is a lone % ('// end x%', no line break after it: hp-end1.w3x)",
+    "input": { "map": "${REPO}/target/header-printf/hp-end1.w3x", "make": "make-header-printf.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.j", "as": "text", "lines": "^// end|CT\\|" }],
+    "limit": 20
+  },
+  {
+    "name": "header-printf-end2",
+    "description": "A header that ends in a % and a width ('// end y%5', no line break after it: hp-end2.w3x)",
+    "input": { "map": "${REPO}/target/header-printf/hp-end2.w3x", "make": "make-header-printf.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.j", "as": "text", "lines": "^// end|CT\\|" }],
+    "limit": 20
+  },
+  {
+    "name": "header-printf-lua",
+    "description": "header-printf-g's cases in a Lua map's header.lua (hp-lua.w3x): war3map.lua",
+    "input": { "map": "${REPO}/target/header-printf/hp-lua.w3x", "make": "make-header-printf.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.lua", "as": "text", "lines": "return \"[0-9A-Z]{2}\\||^-- c1" }],
+    "limit": 80
+  },
+  {
+    "name": "header-printf-lua-mod",
+    "description": "A Lua header using % as Lua's modulo operator (tostring(7 % 3): hp-lua-mod.w3x): war3map.lua",
+    "input": { "map": "${REPO}/target/header-printf/hp-lua-mod.w3x", "make": "make-header-printf.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.lua", "as": "text", "lines": "MD\\|" }],
+    "limit": 20
+  }
+]
