@@ -751,8 +751,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (choice !== "Switch to a Generated Script") return null;
       if (w3.workspace.project()?.root !== root) throw new Error("Another project is open now.");
       if (current !== null && !(await checkpointBefore(w3, `Switch ${file} to a generated script`))) return null;
-      await w3.backend.invoke("script_set_mode", { root, mode: "generated" });
-      await w3.workspace.refresh();
+      // In the queue: a save's run still writing the tracked script finishes first, none starts halfway through the move.
+      const moved = running.catch(() => true).then(async () => {
+        if (w3.workspace.project()?.root !== root) throw new Error("Another project is open now: its script wasn't switched.");
+        await w3.backend.invoke("script_set_mode", { root, mode: "generated" });
+        await w3.workspace.refresh();
+        return true;
+      });
+      running = moved;
+      await moved;
       out.append(`Regenerate Map Script: map/triggers/triggers.json says "script": "generated"; ${file} moved into .w3proj/derived/`);
       const written = await write("Regenerate Map Script", true, root, { compile: true });
       if (written) void w3.window.showInfo(`${file} is generated now (see the Map Script output).`);
