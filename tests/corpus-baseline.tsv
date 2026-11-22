@@ -8,8 +8,8 @@
 10_w3c_251104_0950_HillsbradCreek.w3x	war3map.w3r	format:regions
 10_w3c_251104_0950_HillsbradCreek.w3x	war3map.w3t	objdata-json
 10_w3c_251104_0950_HillsbradCreek.w3x	war3map.w3u	objdata-json
-10_w3c_251104_0950_HillsbradCreek.w3x	war3map.wct	wct-text
-10_w3c_251104_0950_HillsbradCreek.w3x	war3map.wtg	wtg-json
+10_w3c_251104_0950_HillsbradCreek.w3x	war3map.wct	trigger-folders
+10_w3c_251104_0950_HillsbradCreek.w3x	war3map.wtg	trigger-folders
 10_w3c_251104_0950_HillsbradCreek.w3x	war3mapSkin.w3b	objdata-json
 10_w3c_251104_0950_HillsbradCreek.w3x	war3mapSkin.w3t	objdata-json
 10_w3c_251104_0950_HillsbradCreek.w3x	war3mapUnits.doo	format:units
@@ -23,8 +23,8 @@
 12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.w3r	format:regions
 12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.w3t	objdata-json
 12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.w3u	objdata-json
-12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.wct	wct-text
-12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.wtg	wtg-json
+12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.wct	trigger-folders
+12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3map.wtg	trigger-folders
 12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3mapSkin.w3b	objdata-json
 12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3mapSkin.w3t	objdata-json
 12_w3c_251104_0950_TurtleRock_v2.0.w3x	war3mapUnits.doo	format:units
@@ -37,8 +37,8 @@
 26_w3c_251104_0950_GoldRush.w3x	war3map.w3r	format:regions
 26_w3c_251104_0950_GoldRush.w3x	war3map.w3t	objdata-json
 26_w3c_251104_0950_GoldRush.w3x	war3map.w3u	objdata-json
-26_w3c_251104_0950_GoldRush.w3x	war3map.wct	wct-text
-26_w3c_251104_0950_GoldRush.w3x	war3map.wtg	wtg-json
+26_w3c_251104_0950_GoldRush.w3x	war3map.wct	trigger-folders
+26_w3c_251104_0950_GoldRush.w3x	war3map.wtg	trigger-folders
 26_w3c_251104_0950_GoldRush.w3x	war3mapSkin.w3b	objdata-json
 26_w3c_251104_0950_GoldRush.w3x	war3mapSkin.w3t	objdata-json
 26_w3c_251104_0950_GoldRush.w3x	war3mapUnits.doo	format:units
@@ -51,8 +51,8 @@
 3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.w3r	format:regions
 3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.w3t	objdata-json
 3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.w3u	objdata-json
-3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.wct	wct-text
-3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.wtg	wtg-json
+3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.wct	trigger-folders
+3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3map.wtg	trigger-folders
 3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3mapSkin.w3b	objdata-json
 3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3mapSkin.w3t	objdata-json
 3v3_4v4_MurgulOasis_LV_w3c_260125_1357_29.w3x	war3mapUnits.doo	format:units
@@ -65,8 +65,8 @@
 4_w3c_251104_0950_NorthernIsles.w3x	war3map.w3r	format:regions
 4_w3c_251104_0950_NorthernIsles.w3x	war3map.w3t	objdata-json
 4_w3c_251104_0950_NorthernIsles.w3x	war3map.w3u	objdata-json
-4_w3c_251104_0950_NorthernIsles.w3x	war3map.wct	wct-text
-4_w3c_251104_0950_NorthernIsles.w3x	war3map.wtg	wtg-json
+4_w3c_251104_0950_NorthernIsles.w3x	war3map.wct	trigger-folders
+4_w3c_251104_0950_NorthernIsles.w3x	war3map.wtg	trigger-folders
 4_w3c_251104_0950_NorthernIsles.w3x	war3mapSkin.w3b	objdata-json
 4_w3c_251104_0950_NorthernIsles.w3x	war3mapSkin.w3t	objdata-json
 4_w3c_251104_0950_NorthernIsles.w3x	war3mapUnits.doo	format:units
@@ -79,8 +79,8 @@
 4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.w3r	format:regions
 4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.w3t	objdata-json
 4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.w3u	objdata-json
-4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.wct	wct-text
-4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.wtg	wtg-json
+4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.wct	trigger-folders
+4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3map.wtg	trigger-folders
 4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3mapSkin.w3b	objdata-json
 4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3mapSkin.w3t	objdata-json
 4v4_Deadlock_LV_w3c_260125_1357_30.w3x	war3mapUnits.doo	format:units
@@ -93,8 +93,8 @@
 4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.w3r	format:regions
 4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.w3t	objdata-json
 4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.w3u	objdata-json
-4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.wct	wct-text
-4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.wtg	wtg-json
+4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.wct	trigger-folders
+4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3map.wtg	trigger-folders
 4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3mapSkin.w3b	objdata-json
 4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3mapSkin.w3t	objdata-json
 4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x	war3mapUnits.doo	format:units
@@ -107,8 +107,8 @@
 4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.w3r	format:regions
 4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.w3t	objdata-json
 4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.w3u	objdata-json
-4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.wct	wct-text
-4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.wtg	wtg-json
+4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.wct	trigger-folders
+4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3map.wtg	trigger-folders
 4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3mapSkin.w3b	objdata-json
 4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3mapSkin.w3t	objdata-json
 4v4_SnowareBay_w3c_260125_1357_5658.w3x	war3mapUnits.doo	format:units
@@ -121,8 +121,8 @@
 6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.w3r	format:regions
 6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.w3t	objdata-json
 6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.w3u	objdata-json
-6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.wct	wct-text
-6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.wtg	wtg-json
+6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.wct	trigger-folders
+6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3map.wtg	trigger-folders
 6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3mapSkin.w3b	objdata-json
 6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3mapSkin.w3t	objdata-json
 6_w3c_251104_0950_TwistedMeadows_v1.9.w3x	war3mapUnits.doo	format:units
@@ -135,8 +135,8 @@
 7_w3c_251104_0950_Avalanche_LV.w3x	war3map.w3r	format:regions
 7_w3c_251104_0950_Avalanche_LV.w3x	war3map.w3t	objdata-json
 7_w3c_251104_0950_Avalanche_LV.w3x	war3map.w3u	objdata-json
-7_w3c_251104_0950_Avalanche_LV.w3x	war3map.wct	wct-text
-7_w3c_251104_0950_Avalanche_LV.w3x	war3map.wtg	wtg-json
+7_w3c_251104_0950_Avalanche_LV.w3x	war3map.wct	trigger-folders
+7_w3c_251104_0950_Avalanche_LV.w3x	war3map.wtg	trigger-folders
 7_w3c_251104_0950_Avalanche_LV.w3x	war3mapSkin.w3b	objdata-json
 7_w3c_251104_0950_Avalanche_LV.w3x	war3mapSkin.w3t	objdata-json
 7_w3c_251104_0950_Avalanche_LV.w3x	war3mapUnits.doo	format:units
@@ -146,8 +146,8 @@ blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.w3c	format:cameras
 blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.w3e	w3e-text
 blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.w3i	format:w3i
 blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.w3r	format:regions
-blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.wct	wct-text
-blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.wtg	wtg-json
+blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.wct	trigger-folders
+blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3map.wtg	trigger-folders
 blizzard/(2)AutumnLeaves_S2_v2.0.w3x	war3mapUnits.doo	format:units
 blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.doo	format:doodads
 blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.mmp	format:minimap
@@ -155,8 +155,8 @@ blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.w3c	format:cameras
 blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.w3e	w3e-text
 blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.w3i	format:w3i
 blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.w3r	format:regions
-blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.wct	wct-text
-blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.wtg	wtg-json
+blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.wct	trigger-folders
+blizzard/(2)EchoIsles_S2_v2.2.w3x	war3map.wtg	trigger-folders
 blizzard/(2)EchoIsles_S2_v2.2.w3x	war3mapUnits.doo	format:units
 blizzard/(2)Hammerfall_S3.w3x	war3map.doo	format:doodads
 blizzard/(2)Hammerfall_S3.w3x	war3map.mmp	format:minimap
@@ -164,8 +164,8 @@ blizzard/(2)Hammerfall_S3.w3x	war3map.w3c	format:cameras
 blizzard/(2)Hammerfall_S3.w3x	war3map.w3e	w3e-text
 blizzard/(2)Hammerfall_S3.w3x	war3map.w3i	format:w3i
 blizzard/(2)Hammerfall_S3.w3x	war3map.w3r	format:regions
-blizzard/(2)Hammerfall_S3.w3x	war3map.wct	wct-text
-blizzard/(2)Hammerfall_S3.w3x	war3map.wtg	wtg-json
+blizzard/(2)Hammerfall_S3.w3x	war3map.wct	trigger-folders
+blizzard/(2)Hammerfall_S3.w3x	war3map.wtg	trigger-folders
 blizzard/(2)Hammerfall_S3.w3x	war3mapUnits.doo	format:units
 blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.doo	format:doodads
 blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.mmp	format:minimap
@@ -173,8 +173,8 @@ blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.w3c	format:cameras
 blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.w3e	w3e-text
 blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.w3i	format:w3i
 blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.w3r	format:regions
-blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.wct	wct-text
-blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.wtg	wtg-json
+blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.wct	trigger-folders
+blizzard/(2)LastRefuge_S2_v1.5.w3x	war3map.wtg	trigger-folders
 blizzard/(2)LastRefuge_S2_v1.5.w3x	war3mapUnits.doo	format:units
 blizzard/(2)NorthernIsles_S2.w3x	war3map.doo	format:doodads
 blizzard/(2)NorthernIsles_S2.w3x	war3map.mmp	format:minimap
@@ -182,8 +182,8 @@ blizzard/(2)NorthernIsles_S2.w3x	war3map.w3c	format:cameras
 blizzard/(2)NorthernIsles_S2.w3x	war3map.w3e	w3e-text
 blizzard/(2)NorthernIsles_S2.w3x	war3map.w3i	format:w3i
 blizzard/(2)NorthernIsles_S2.w3x	war3map.w3r	format:regions
-blizzard/(2)NorthernIsles_S2.w3x	war3map.wct	wct-text
-blizzard/(2)NorthernIsles_S2.w3x	war3map.wtg	wtg-json
+blizzard/(2)NorthernIsles_S2.w3x	war3map.wct	trigger-folders
+blizzard/(2)NorthernIsles_S2.w3x	war3map.wtg	trigger-folders
 blizzard/(2)NorthernIsles_S2.w3x	war3mapUnits.doo	format:units
 blizzard/(2)TerenasStand_LV.w3x	war3map.doo	format:doodads
 blizzard/(2)TerenasStand_LV.w3x	war3map.imp	format:imports
@@ -192,8 +192,8 @@ blizzard/(2)TerenasStand_LV.w3x	war3map.w3c	format:cameras
 blizzard/(2)TerenasStand_LV.w3x	war3map.w3e	w3e-text
 blizzard/(2)TerenasStand_LV.w3x	war3map.w3i	format:w3i
 blizzard/(2)TerenasStand_LV.w3x	war3map.w3r	format:regions
-blizzard/(2)TerenasStand_LV.w3x	war3map.wct	wct-text
-blizzard/(2)TerenasStand_LV.w3x	war3map.wtg	wtg-json
+blizzard/(2)TerenasStand_LV.w3x	war3map.wct	trigger-folders
+blizzard/(2)TerenasStand_LV.w3x	war3map.wtg	trigger-folders
 blizzard/(2)TerenasStand_LV.w3x	war3mapUnits.doo	format:units
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x	map project
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.doo	format:doodads
@@ -203,8 +203,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.w3e	w3e-text
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.w3i	format:w3i
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3mapSkin.w3u	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	TestMapOrcCampaign.w3x/war3mapUnits.doo	format:units
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x	map project
@@ -223,8 +223,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc01.w3x/war3mapSkin.w3d	objdata-json
@@ -249,8 +249,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc02.w3x/war3mapSkin.w3d	objdata-json
@@ -275,8 +275,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc03.w3x/war3mapSkin.w3d	objdata-json
@@ -301,8 +301,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc04.w3x/war3mapSkin.w3d	objdata-json
@@ -327,8 +327,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc05.w3x/war3mapSkin.w3d	objdata-json
@@ -353,8 +353,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06.w3x/war3mapSkin.w3d	objdata-json
@@ -379,8 +379,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc06S.w3x/war3mapSkin.w3d	objdata-json
@@ -405,8 +405,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc07.w3x/war3mapSkin.w3d	objdata-json
@@ -431,8 +431,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08.w3x/war3mapSkin.w3d	objdata-json
@@ -457,8 +457,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc08S.w3x/war3mapSkin.w3d	objdata-json
@@ -483,8 +483,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc09.w3x/war3mapSkin.w3d	objdata-json
@@ -509,8 +509,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc10.w3x/war3mapSkin.w3d	objdata-json
@@ -535,8 +535,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11.w3x/war3mapSkin.w3d	objdata-json
@@ -560,8 +560,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc11S.w3x/war3mapSkin.w3d	objdata-json
@@ -585,8 +585,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc12.w3x/war3mapSkin.w3d	objdata-json
@@ -611,8 +611,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc13.w3x/war3mapSkin.w3d	objdata-json
@@ -637,8 +637,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2Orc14.w3x/war3mapSkin.w3d	objdata-json
@@ -663,8 +663,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct1.w3x/war3mapSkin.w3d	objdata-json
@@ -687,8 +687,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct2.w3x/war3mapSkin.w3d	objdata-json
@@ -711,8 +711,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct3.w3x/war3mapSkin.w3d	objdata-json
@@ -735,8 +735,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcAct4.w3x/war3mapSkin.w3d	objdata-json
@@ -759,8 +759,8 @@ campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.w3r	format:regions
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.w3s	format:sounds
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.w3t	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.w3u	objdata-json
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.wct	wct-text
-campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.wtg	wtg-json
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.wct	trigger-folders
+campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3map.wtg	trigger-folders
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3mapSkin.w3a	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3mapSkin.w3b	objdata-json
 campaign/CSW_Tides_Of_Darkness.w3n	WC2OrcFinal.w3x/war3mapSkin.w3d	objdata-json
@@ -798,8 +798,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicInvasion.w3x/war3mapSkin.w3d	objdata-json
@@ -817,8 +817,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.w3i
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWotLK.w3x/war3mapSkin.w3d	objdata-json
@@ -837,8 +837,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	CinematicWrathgate.w3x/war3mapSkin.w3d	objdata-json
@@ -856,8 +856,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.w3i	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken02.w3x/war3mapSkin.w3u	objdata-json
@@ -877,8 +877,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.w3r	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken03.w3x/war3mapSkin.w3h	objdata-json
@@ -901,8 +901,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.w3q	obj
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04.w3x/war3mapSkin.w3d	objdata-json
@@ -923,8 +923,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3ma
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04Interlude.w3x/war3mapSkin.w3d	objdata-json
@@ -946,8 +946,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.w3r	fo
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken04x.w3x/war3mapSkin.w3d	objdata-json
@@ -970,8 +970,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.w3q	obj
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05.w3x/war3mapSkin.w3d	objdata-json
@@ -990,8 +990,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3ma
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken05Interlude.w3x/war3mapSkin.w3u	objdata-json
@@ -1010,8 +1010,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.w3r	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken06.w3x/war3mapSkin.w3q	objdata-json
@@ -1034,8 +1034,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.w3r	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07.w3x/war3mapSkin.w3d	objdata-json
@@ -1055,8 +1055,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3ma
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07Interlude.w3x/war3mapSkin.w3u	objdata-json
@@ -1077,8 +1077,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.w3r	fo
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07x.w3x/war3mapSkin.w3d	objdata-json
@@ -1099,8 +1099,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3m
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken07xInterlude.w3x/war3mapSkin.w3q	objdata-json
@@ -1120,8 +1120,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.w3l	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08.w3x/war3mapSkin.w3d	objdata-json
@@ -1140,8 +1140,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3ma
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken08Interlude.w3x/war3mapSkin.w3d	objdata-json
@@ -1161,8 +1161,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.w3q	obj
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken09.w3x/war3mapSkin.w3d	objdata-json
@@ -1185,8 +1185,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.w3r	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10.w3x/war3mapSkin.w3d	objdata-json
@@ -1206,8 +1206,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3ma
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken10Interlude.w3x/war3mapSkin.w3u	objdata-json
@@ -1228,8 +1228,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.w3r	for
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.w3t	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11.w3x/war3mapSkin.w3d	objdata-json
@@ -1250,8 +1250,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Epilogue.w3x/war3mapSkin.w3u	objdata-json
@@ -1267,8 +1267,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.w
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3mapSkin.w3u	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Forsaken11Finale.w3x/war3mapUnits.doo	format:units
@@ -1281,8 +1281,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.w3e	w3
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.w3i	format:w3i
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3mapSkin.w3u	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEnd.w3x/war3mapUnits.doo	format:units
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x	map project
@@ -1297,8 +1297,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3mapSkin.w3d	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenEpilogue02.w3x/war3mapSkin.w3u	objdata-json
@@ -1312,8 +1312,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.w3e	
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.w3i	format:w3i
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3mapSkin.w3u	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	ForsakenStart.w3x/war3mapUnits.doo	format:units
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x	map project
@@ -1331,8 +1331,8 @@ campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.w3q	objda
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.w3r	format:regions
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.w3s	format:sounds
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.w3u	objdata-json
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.wct	wct-text
-campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.wtg	wtg-json
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.wct	trigger-folders
+campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3map.wtg	trigger-folders
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3mapSkin.w3a	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3mapSkin.w3b	objdata-json
 campaign/Curse of the Forsaken Classic v4.0.1.w3n	Test map.w3x/war3mapSkin.w3d	objdata-json
@@ -1520,8 +1520,8 @@ cliff.w3m	war3map.w3e	w3e-text
 cliff.w3m	war3map.w3i	format:w3i
 cliff.w3m	war3map.w3l	format:lights
 cliff.w3m	war3map.w3r	format:regions
-cliff.w3m	war3map.wct	wct-text
-cliff.w3m	war3map.wtg	wtg-json
+cliff.w3m	war3map.wct	trigger-folders
+cliff.w3m	war3map.wtg	trigger-folders
 cliff.w3m	war3mapUnits.doo	format:units
 empty_map_on_newest_world_editor.w3m	war3map.doo	format:doodads
 empty_map_on_newest_world_editor.w3m	war3map.mmp	format:minimap
@@ -1530,8 +1530,8 @@ empty_map_on_newest_world_editor.w3m	war3map.w3e	w3e-text
 empty_map_on_newest_world_editor.w3m	war3map.w3i	format:w3i
 empty_map_on_newest_world_editor.w3m	war3map.w3l	format:lights
 empty_map_on_newest_world_editor.w3m	war3map.w3r	format:regions
-empty_map_on_newest_world_editor.w3m	war3map.wct	wct-text
-empty_map_on_newest_world_editor.w3m	war3map.wtg	wtg-json
+empty_map_on_newest_world_editor.w3m	war3map.wct	trigger-folders
+empty_map_on_newest_world_editor.w3m	war3map.wtg	trigger-folders
 empty_map_on_newest_world_editor.w3m	war3mapUnits.doo	format:units
 light_map - Kopie.w3m	war3map.doo	format:doodads
 light_map - Kopie.w3m	war3map.imp	format:imports
@@ -1541,8 +1541,8 @@ light_map - Kopie.w3m	war3map.w3e	w3e-text
 light_map - Kopie.w3m	war3map.w3i	format:w3i
 light_map - Kopie.w3m	war3map.w3l	format:lights
 light_map - Kopie.w3m	war3map.w3r	format:regions
-light_map - Kopie.w3m	war3map.wct	wct-text
-light_map - Kopie.w3m	war3map.wtg	wtg-json
+light_map - Kopie.w3m	war3map.wct	trigger-folders
+light_map - Kopie.w3m	war3map.wtg	trigger-folders
 light_map - Kopie.w3m	war3mapUnits.doo	format:units
 light_map.w3m	war3map.doo	format:doodads
 light_map.w3m	war3map.imp	format:imports
@@ -1552,8 +1552,8 @@ light_map.w3m	war3map.w3e	w3e-text
 light_map.w3m	war3map.w3i	format:w3i
 light_map.w3m	war3map.w3l	format:lights
 light_map.w3m	war3map.w3r	format:regions
-light_map.w3m	war3map.wct	wct-text
-light_map.w3m	war3map.wtg	wtg-json
+light_map.w3m	war3map.wct	trigger-folders
+light_map.w3m	war3map.wtg	trigger-folders
 light_map.w3m	war3mapUnits.doo	format:units
 new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.doo	format:doodads
 new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3a	objdata-json
@@ -1576,8 +1576,8 @@ new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3r	format:regions
 new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3s	format:sounds
 new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3t	objdata-json
 new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3u	objdata-json
-new(er)_maps/Firebrand Exarchate Race.w3x	war3map.wct	wct-text
-new(er)_maps/Firebrand Exarchate Race.w3x	war3map.wtg	wtg-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.wct	trigger-folders
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.wtg	trigger-folders
 new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3a	objdata-json
 new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3h	objdata-json
 new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3q	objdata-json
@@ -1598,8 +1598,8 @@ new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3q	objdata-json
 new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3r	format:regions
 new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3t	objdata-json
 new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3u	objdata-json
-new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.wct	raw
-new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.wtg	wtg-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.wct	trigger-folders
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.wtg	trigger-folders
 new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3a	objdata-json
 new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3b	objdata-json
 new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3h	objdata-json
@@ -1623,8 +1623,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.doo	format:doodads
@@ -1636,8 +1636,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.doo	format:doodads
@@ -1649,8 +1649,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.doo	format:doodads
@@ -1663,8 +1663,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.doo	format:doodads
@@ -1675,8 +1675,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.doo	format:doodads
@@ -1685,8 +1685,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3r	format:regions
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.doo	format:doodads
@@ -1697,8 +1697,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.doo	format:doodads
@@ -1711,8 +1711,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.doo	format:doodads
@@ -1723,8 +1723,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.doo	format:doodads
@@ -1735,8 +1735,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.doo	format:doodads
@@ -1748,8 +1748,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.doo	format:doodads
@@ -1760,8 +1760,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.doo	format:doodads
@@ -1773,8 +1773,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.doo	format:doodads
@@ -1785,8 +1785,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.doo	format:doodads
@@ -1799,8 +1799,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.doo	format:doodads
@@ -1812,8 +1812,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.doo	format:doodads
@@ -1822,8 +1822,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3r	format:regions
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.doo	format:doodads
@@ -1835,8 +1835,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.doo	format:doodads
@@ -1848,8 +1848,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.doo	format:doodads
@@ -1861,8 +1861,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.doo	format:doodads
@@ -1871,8 +1871,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3r	format:regions
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.imp	format:imports
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3a	objdata-json
@@ -1892,8 +1892,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.doo	format:doodads
@@ -1905,8 +1905,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.doo	format:doodads
@@ -1918,8 +1918,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.doo	format:doodads
@@ -1932,8 +1932,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.doo	format:doodads
@@ -1944,8 +1944,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.doo	format:doodads
@@ -1954,8 +1954,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3r	format:regions
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.doo	format:doodads
@@ -1966,8 +1966,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.doo	format:doodads
@@ -1980,8 +1980,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.doo	format:doodads
@@ -1992,8 +1992,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.doo	format:doodads
@@ -2004,8 +2004,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.doo	format:doodads
@@ -2017,8 +2017,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.doo	format:doodads
@@ -2029,8 +2029,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.doo	format:doodads
@@ -2042,8 +2042,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.doo	format:doodads
@@ -2054,8 +2054,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.doo	format:doodads
@@ -2068,8 +2068,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3t	objdata-json
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.doo	format:doodads
@@ -2081,8 +2081,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.doo	format:doodads
@@ -2091,8 +2091,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3r	format:regions
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.doo	format:doodads
@@ -2104,8 +2104,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.doo	format:doodads
@@ -2117,8 +2117,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.doo	format:doodads
@@ -2130,8 +2130,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3r	format:regions
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3s	format:sounds
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3u	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m	map project
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.doo	format:doodads
@@ -2140,8 +2140,8 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3r	format:regions
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.wct	wct-text
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.wct	trigger-folders
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.wtg	trigger-folders
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3mapUnits.doo	format:units
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.imp	format:imports
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3a	objdata-json
