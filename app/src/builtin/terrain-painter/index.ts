@@ -114,6 +114,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
    *  page pixel) and the pointer's newest place since (steppedTick). */
   let stroke: {
     s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; px?: [number, number];
+    /** The newest move that came inside the HEIGHT_TICK window and wasn't stamped: pointerUp stamps it, so a quick drag keeps its last column. */
+    held?: { g: [number, number]; px: [number, number] };
     stepped?: { at: [number, number]; px: [number, number]; next?: { g: [number, number]; px: [number, number] } };
     /** Takes the cliff type the stroke's start appended (claimDefaultCliffType) back out when the stroke changes nothing. */
     takeBack?: () => void;
@@ -368,9 +370,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const px: [number, number] = [p.event.clientX, p.event.clientY];
       const still = !!stroke?.px && stroke.px[0] === px[0] && stroke.px[1] === px[1];
       if (p.down && stroke?.stepped && p.ground) stroke.stepped.next = { g: [p.ground[0], p.ground[1]], px };
-      else if (p.down && stroke && p.ground && !still && performance.now() - stroke.last > HEIGHT_TICK) { stroke.px = px; applyAt(p.ground); }
+      else if (p.down && stroke && p.ground && !still) {
+        if (performance.now() - stroke.last > HEIGHT_TICK) { stroke.px = px; stroke.held = undefined; applyAt(p.ground); }
+        else stroke.held = { g: [p.ground[0], p.ground[1]], px };
+      }
     },
     pointerUp() {
+      // A last move that came too soon after the previous stamp is stamped now (a different pixel than the last stamp).
+      if (stroke?.held && !stroke.stepped) { const h = stroke.held; stroke.held = undefined; stroke.px = h.px; applyAt([h.g[0], h.g[1], 0]); }
       endStroke();
       rampDrag = false;
       // Only now: a press beside the cliff may have led to one on it.

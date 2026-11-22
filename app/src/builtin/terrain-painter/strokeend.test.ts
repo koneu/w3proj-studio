@@ -92,7 +92,7 @@ test("control: a drag whose last move comes after the tick raises the corners ro
   assert.ok(raised.includes(1) && raised.includes(5) && raised.includes(9), `raised ${raised}`);
 });
 
-test("a drag whose last move comes within 40 ms of the last stamp keeps its last column", { todo: "pointerUp doesn't stamp the release point; whether it should is open (bugs.md)" }, async () => {
+test("a drag whose last move comes within 40 ms of the last stamp keeps its last column", async () => {
   const raised = await drag(60);
   assert.ok(raised.includes(9), `raised ${raised}: corner 9, round the last move, isn't`);
 });
