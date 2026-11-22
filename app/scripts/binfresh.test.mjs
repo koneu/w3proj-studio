@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { checkFresh, newestSource, staleAllowed } from "../../tests/binfresh.mjs";
 import { scratchDir } from "../../tests/scratch.mjs";
@@ -67,6 +67,35 @@ test("the web page's sources make the app stale, not the CLI", () => {
   writeFileSync(join(shared.root, untracked), "");
   utimesSync(join(shared.root, untracked), 3000, 3000);
   assert.equal(checkFresh(shared.bin, { root: shared.root, kind: "app" }), shared.bin, "untracked file ignored");
+});
+
+// verify-build.mjs builds a commit into target/verify/<sha>/ (verify.json names it); a checkout made afterwards has newer
+// mtimes on every file, but the same sources.
+test("a verify build of the working tree's own sources is fresh whatever the mtimes; other sources make it stale", () => {
+  shared.resetTimes();
+  const { root, git } = shared;
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "one");
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const build = join(root, "verify-build");
+  const bin = join(build, "target", "release", "w3proj");
+  mkdirSync(dirname(bin), { recursive: true });
+  writeFileSync(bin, "");
+  utimesSync(bin, 500, 500);
+  // Control: without a record it is refused as before.
+  assert.throws(() => checkFresh(bin, { root }), /older than crates\/x\/lib\.rs/);
+  writeFileSync(join(build, "verify.json"), JSON.stringify({ commit }));
+  assert.equal(checkFresh(bin, { root }), bin);
+  assert.equal(checkFresh(bin, { root, kind: "app" }), bin);
+  // An uncommitted change of a source, or a commit this repository doesn't have, and it is stale again.
+  writeFileSync(join(root, "crates", "x", "lib.rs"), "changed");
+  try {
+    assert.throws(() => checkFresh(bin, { root }), /older than crates\/x\/lib\.rs/);
+  } finally {
+    writeFileSync(join(root, "crates", "x", "lib.rs"), "");
+  }
+  assert.equal(checkFresh(bin, { root }), bin);
+  writeFileSync(join(build, "verify.json"), JSON.stringify({ commit: "0".repeat(40) }));
+  assert.throws(() => checkFresh(bin, { root }), /older than/);
 });
 
 test("the override lets a stale binary through; a missing one is still refused", () => {
