@@ -164,6 +164,11 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (typeof input.map === "string") {
     if (input.new || input.steps) throw new Error(`${where}: "input" is a map or a new map, not both`);
     parsedInput = { map: expandPath(input.map, specDir, vars) };
+    // The generator of a missing input map: a make-*.mjs of tests/fixtures/we-specs taking <w3proj cli> <game folder>.
+    if (input.make !== undefined) {
+      if (typeof input.make !== "string" || !/^make-[\w.-]+\.mjs$/.test(input.make)) throw new Error(`${where}: input.make is the file name of a make-*.mjs in tests/fixtures/we-specs`);
+      parsedInput.make = input.make;
+    }
   } else if (isObject(input.new)) {
     const n = input.new;
     if (typeof n.name !== "string" || !Number.isInteger(n.width) || !Number.isInteger(n.height)) throw new Error(`${where}: input.new wants name, width and height`);

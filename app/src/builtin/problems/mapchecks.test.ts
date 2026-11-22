@@ -134,6 +134,17 @@ test("triggers nothing runs are a check of their own", async () => {
   assert.equal((await run({ ...files, [HEADER_FILE]: "call TriggerExecute(gg_trg_Other)\n" }, "triggerNoEvents")).length, 1);
 });
 
+test("printf conversions in the custom script header: a crash is an error, garbage a warning, by line; %% is nothing", async () => {
+  const files = { "map/triggers/triggers.json": wtg([]) };
+  const found = await run({ ...files, [HEADER_FILE]: "// 100%% done\n// %d left\n// 100% sure\n" }, "headerPrintf");
+  assert.deepEqual(found.map((p) => [p.severity, p.location]), [["warning", "triggers/header.j:2"], ["error", "triggers/header.j:3"]]);
+  assert.match(found[1].message, /"% s" \(line 3\): the World Editor's save crashes on it/);
+  assert.deepEqual(found[0].reveal, { command: "w3.problems.open", args: [HEADER_FILE] });
+  // Control: the same header with every % doubled, and none at all.
+  assert.deepEqual(await run({ ...files, [HEADER_FILE]: "// 100%% done\n// %%d left\n// 100%% sure\n" }, "headerPrintf"), []);
+  assert.deepEqual(await run(files, "headerPrintf"), []);
+});
+
 test("missing Map Properties art opens Map Properties at its section", async () => {
   const found = await run({ "map/war3map.w3i.json": JSON.stringify({ loadingScreen: { model: "UI\\Made\\Screen.mdx" }, prologue: { path: "UI\\Made\\Prologue.blp" } }) }, "interfaceArt");
   assert.deepEqual(found.map((p) => [p.location, p.reveal]), [

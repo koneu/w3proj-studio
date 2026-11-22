@@ -34,7 +34,8 @@
 //   serial      true: the World Editor part would be disturbed by another editor at the same time (it times something):
 //               run last, on slot 0, with every slot's lock held (runSerial)
 //   input       { "map": "path.w3x" } (copied: the original isn't touched; ${MAIN} is the main checkout, ${REPO} this one,
-//               a relative path is the spec file's folder's) or { "new": { name, width, height }, "steps": [studio steps] }:
+//               a relative path is the spec file's folder's; "make": "make-x.mjs" names its generator in
+//               tests/fixtures/we-specs, run as `node make-x.mjs <w3proj cli> <game folder>` when the map is missing) or { "new": { name, width, height }, "steps": [studio steps] }:
 //               Studio makes the map (new_map), runs the steps, packs it, and the World Editor opens that
 //               A file from the checkout: `${REPO_WE}` / `${MAIN_WE}` in a "--type" step's text are the checkouts as the
 //               editor's file dialogs take them (Z:\… on Linux), `${REPO}` / `${MAIN}` in an "eval" their paths.
@@ -424,6 +425,29 @@ export function runLines(command, args, options = {}) {
 
 // ---------------------------------------------------------------- reading and comparing
 
+/** The files of the map script and the triggers as an unpack lays them out now (`project`: the unpacked folder): the
+ *  triggers in map/triggers/ (war3map.wtg and war3map.wct are read as `w3proj triggers` gives them: its `file` and its
+ *  `custom`), a script the generator makes from them in .w3proj/derived/ instead of map/. `triggers`: runs the CLI. */
+export function projectForms(project, triggers) {
+  const derived = join(project, ".w3proj", "derived");
+  const derivedNames = new Set(existsSync(derived) ? readdirSync(derived) : []);
+  const layout = existsSync(join(project, "map", "triggers"));
+  let read = null;
+  const tree = () => (read ??= triggers());
+  const TRIGGER_FILES = { "war3map.wtg": "file", "war3map.wct": "custom" };
+  return {
+    /** "json" for war3map.wtg / war3map.wct of a project with trigger folders, else null. */
+    triggerForm: (f) => (layout && f.toLowerCase() in TRIGGER_FILES ? "json" : null),
+    triggerJson: (f) => {
+      const v = tree()[TRIGGER_FILES[f.toLowerCase()]];
+      if (v === undefined || v === null) throw new Error(`${f}: \`w3proj triggers\` gave no ${TRIGGER_FILES[f.toLowerCase()]} of map/triggers/`);
+      return v;
+    },
+    /** The path of a file the unpack put into .w3proj/derived/ (the generated war3map.j), else null. */
+    derivedPath: (f) => (derivedNames.has(f) ? join(derived, f) : null),
+  };
+}
+
 function makeReader(cli, project, mapFile, map) {
   const names = new Set(readdirSync(join(project, "map")));
   let listing = null;
@@ -433,11 +457,16 @@ function makeReader(cli, project, mapFile, map) {
     if (l.status !== 0) throw new Error(`w3proj ls ${map}: ${String(l.stderr || l.error?.message || "").trim()}`);
     return (listing = l.stdout.split("\n").map((x) => x.trim()));
   };
+  const forms = projectForms(project, () => {
+    const t = spawnSync(cli, ["triggers", project], { encoding: "utf8", maxBuffer: 1 << 29 });
+    if (t.status !== 0) throw new Error(`w3proj triggers of ${map}'s unpack: ${String(t.stderr || t.error?.message || "").trim()}`);
+    return JSON.parse(t.stdout);
+  });
   return {
-    has: (f) => names.has(f) || names.has(`${f}.json`) || names.has(`${f}.txt`),
-    unpackedAs: (f) => (names.has(`${f}.json`) ? "json" : names.has(`${f}.txt`) ? "text" : names.has(f) ? "raw" : null),
-    json: (f) => JSON.parse(readFileSync(join(project, "map", `${f}.json`), "utf8")),
-    text: (f) => readFileSync(join(project, "map", names.has(`${f}.txt`) ? `${f}.txt` : f), "utf8"),
+    has: (f) => names.has(f) || names.has(`${f}.json`) || names.has(`${f}.txt`) || forms.derivedPath(f) !== null,
+    unpackedAs: (f) => (names.has(`${f}.json`) ? "json" : names.has(`${f}.txt`) ? "text" : names.has(f) ? "raw" : forms.triggerForm(f) ?? (forms.derivedPath(f) ? "raw" : null)),
+    json: (f) => (forms.triggerForm(f) && !names.has(`${f}.json`) ? forms.triggerJson(f) : JSON.parse(readFileSync(join(project, "map", `${f}.json`), "utf8"))),
+    text: (f) => readFileSync(names.has(`${f}.txt`) ? join(project, "map", `${f}.txt`) : names.has(f) ? join(project, "map", f) : forms.derivedPath(f) ?? join(project, "map", f), "utf8"),
     bytes: (f) => {
       const c = spawnSync(cli, ["cat", mapFile, f], { maxBuffer: 1 << 29 });
       if (c.status !== 0) throw new Error(`w3proj cat ${map} ${f}: ${String(c.stderr).trim()}`);
@@ -578,12 +607,14 @@ async function main() {
   o.fullRun = isFullRun(o.files, readdirSync(join(repo, "tests", "we-compare")).filter((n) => n.endsWith(".json")).map((n) => join(repo, "tests", "we-compare", n)), o.shard);
   const dup = duplicateName(specs);
   if (dup) throw new Error(`two specs are named ${dup} (names are folders: any case)`);
+  const game = o.game ?? chosenGamePath() ?? gamePath(repo);
+  // A missing input whose spec names its generator (input.make) is made first, once per generator.
+  makeInputs(specs, game);
   // A missing input (most are made by a generator into target/) is that spec's error; the others still run.
-  for (const s of specs) if (s.input.map && !existsSync(s.input.map)) s.error = missingInput(s.input.map);
+  for (const s of specs) if (s.input.map && !existsSync(s.input.map)) s.error ??= missingInput(s.input.map);
   // So is a file of the checkout its "--type" texts or evals pick (an import's model): absent, both sides would import
   // nothing and match.
   for (const s of specs) if (!s.error) { const f = s.files.find((x) => !existsSync(x)); if (f) s.error = missingInput(f, repo, "file"); }
-  const game = o.game ?? chosenGamePath() ?? gamePath(repo);
   // The World Editor slot: --slot N waits for that slot, --slot auto takes the first free one of --slots. The run holds
   // the slot's lock throughout (its we-drive processes use it: W3PROJ_WE_LOCK_HOLDER), so no other run gets the slot
   // between them. Without --slot (and no W3PROJ_WE_SLOT) nothing changes: slot 0, and we-drive takes the lock itself.
@@ -641,6 +672,22 @@ export async function runSerial(specs, o, game, { takeAll = takeAllSlots, runGro
 /** One we-drive process per mode and set of accepted dialogs (both are options of the whole process). */
 async function runWorldEditorGroups(specs, o, game) {
   for (const k of [...new Set(specs.map(weGroupKey))]) await runWorldEditor(specs.filter((s) => weGroupKey(s) === k), o, game);
+}
+
+/** Runs the generator (input.make: `node tests/fixtures/we-specs/<make> <w3proj cli> <game folder>`) of every spec whose
+ *  input map is missing, once per generator. One that fails is the error of its specs. `run` and `cli`: for the tests. */
+export function makeInputs(specs, game, { repoDir = repo, cli = () => ensureCli(), run = (args) => spawnSync(process.execPath, args, { encoding: "utf8", timeout: 900000 }) } = {}) {
+  const due = specs.filter((s) => s.input.map && s.input.make && !existsSync(s.input.map));
+  const failed = new Map();
+  for (const make of new Set(due.map((s) => s.input.make))) {
+    say(`making the input maps of ${make}`);
+    try {
+      const r = run([join(repoDir, "tests", "fixtures", "we-specs", make), cli(), game]);
+      if (r.status !== 0) failed.set(make, `exit ${r.status ?? r.signal ?? r.error?.message}: ${String(r.stderr || r.stdout || "").trim().split("\n").pop()}`);
+    } catch (e) { failed.set(make, e.message); }
+  }
+  for (const s of due) if (failed.has(s.input.make)) s.error = `no input map at ${s.input.map}: node tests/fixtures/we-specs/${s.input.make} failed (${failed.get(s.input.make)})`;
+  return [...failed.keys()];
 }
 
 /** The error of a spec whose input map (or another file it names, `what`) isn't there: the generator that makes it

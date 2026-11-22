@@ -9,6 +9,7 @@ import { parseSlk } from "../formats/text";
 import { jassToLua, LF_BREAK, RAW } from "./lua";
 import { betterTriggersHelpers } from "./bthelpers";
 import { ident } from "./names";
+import { headerPrintf } from "./printf";
 import { nameDepthOfField } from "../terrain/cameras";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
@@ -268,11 +269,12 @@ export const HEADER_SECTION = "Custom Script Code (header)";
  *  (war3map.lua, World Editor 2026-11-12: "   " stays a line), and so is one of line breaks only: the World Editor
  *  wrote the banner, the two line breaks of a header "\n\n" and its own line break after them, in war3map.j and
  *  war3map.lua alike (we-compare header-newlines and header-newlines-lua, 2026-11-14, branch water-low-header-we;
- *  it keeps the header's own LF breaks: headerLines). */
+ *  it keeps the header's own LF breaks: headerLines). The World Editor writes the header through printf, JASS and Lua
+ *  alike: "%%" becomes "%", "7 % 3" "7 )" (printf.ts headerPrintf; we-compare header-printf, 2026-11-22). */
 export function mapHeader(i: ScriptInput): string {
   const text = i.custom?.header ?? "";
   if (!text) return "";
-  return banner("Custom Script Code").slice(0, -EOL.length) + headerLines(i, text);
+  return banner("Custom Script Code").slice(0, -EOL.length) + headerLines(i, headerPrintf(text));
 }
 
 /** The header's own line breaks stay as they are, LF or CRLF (the World Editor's, we-compare header-newlines:
