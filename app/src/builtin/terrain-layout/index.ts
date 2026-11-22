@@ -574,6 +574,8 @@ export async function setOpenSubterrains(w3: W3Api, names: string[]): Promise<Op
     throw new Error(`${what}: ${errorText(e).replace(/\.?$/, ".")} Nothing was changed.`);
   }
   if (w3.workspace.project()?.root !== root) return state;
+  // The view's next paint starts from the new choice, not the old one (see renderView).
+  if (state) viewState = { root, state };
   await w3.workspace.refresh();
   for (const p of w3.editors.openPaths().filter((p) => FLAT_FILES.includes(p.replace(/\\/g, "/").toLowerCase()))) await w3.editors.reopen(p);
   w3.views.refresh(SUBTERRAINS_VIEW);
@@ -622,9 +624,13 @@ function renderView(w3: W3Api, el: HTMLElement) {
     el.append(h("div.view-empty", {}, "The terrain isn't split into subterrains. ", h("button.link-inline", { onclick: () => void w3.commands.execute("w3.terrainLayout.edit").catch(() => {}) }, "Edit Terrain Layout…")));
     return;
   }
-  const body = h("div.tree", {}, h("div.muted", {}, "Reading the subterrains…"));
+  // The last state read paints at once: the view is cleared at every refresh (and a toggle refreshes it more than once),
+  // and an empty "Reading…" in between made the list collapse and pop back.
+  const root = w3.workspace.project()!.root;
+  const cached = viewState?.root === root ? viewState.state : undefined;
+  const body = h("div.tree", {}, ...(cached ? [] : [h("div.muted", {}, "Reading the subterrains…")]));
   el.append(body);
-  void openState(w3, "Subterrains").then((s) => {
+  const paint = (s: OpenState) => {
     const rows: HTMLElement[] = [];
     const summary = s.error ? `The choice can't be read: ${s.error}` : `${openSummary(s)}${s.partial ? " · closed ones aren't read, drawn or saved" : ""}`;
     rows.push(h("div.muted.subterrain-summary", {}, summary));
@@ -650,8 +656,13 @@ function renderView(w3: W3Api, el: HTMLElement) {
     rows.push(h("div.tree-row", {},
       h("button.link-inline", { title: "Edit Terrain Layout: draw, resize, rename, join, delete or cut into rows and columns", onclick: () => void w3.commands.execute("w3.terrainLayout.edit").catch((e) => w3.window.showError(errorText(e))) }, "Edit Terrain Layout…")));
     body.replaceChildren(...rows);
-  }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
+  };
+  if (cached) paint(cached);
+  void openState(w3, "Subterrains").then((s) => { viewState = { root, state: s }; paint(s); }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
 }
+
+/** What the subterrains view showed last, for the next paint to start from. */
+let viewState: { root: string; state: OpenState } | undefined;
 
 /** The Terrain Layout editor's id. */
 export const LAYOUT_EDITOR = "w3.terrainLayout.editor";
