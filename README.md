@@ -295,9 +295,37 @@ MPQ archive. The archive holds files like:
 | `war3map.w3e` | terrain | **text** (`war3map.w3e.txt`) |
 | `war3map.wpm`, `.shd` | pathing, shadows (the terrain editor regenerates both) | binary |
 | `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | **JSON** |
-| `war3map.wtg` | GUI triggers, variables, categories | **JSON** (`war3map.wtg.json`; unpacking needs the game's `UI\TriggerData.txt`, packing doesn't) |
-| `war3map.wct` | custom script: the map header and each trigger's text | **text** (`war3map.wct.txt`, one section per trigger) |
+| `war3map.wtg` + `war3map.wct` | the trigger tree (GUI triggers, variables, categories) and the custom script (the map header, each trigger's text) | **folders** (`map/triggers/`, one file per trigger, below; unpacking needs the game's `UI\TriggerData.txt`, packing doesn't) |
 | `war3map.imp`, `war3mapImported\*` | imports | as-is |
+
+The trigger tree is folders like the Trigger Editor's, so two people editing different triggers change different files
+and each script is a JASS or Lua file editors and linters can open:
+
+```text
+map/triggers/
+  triggers.json            format, war3map.wtg/.wct versions, the map item, "script": "generated" | "kept",
+                           and what an imported map keeps exactly (id counters, the variable table's order)
+  header.j                 the custom script header (header.lua in a Lua map; no file: no text)
+  order.txt                the order of the entries, one per line ($Name: where a variable sits)
+  variables.json           variables, one JSON object per line
+  Initialization/          a category (_category.json; a library folder too), with its own order.txt, variables.json
+    Melee_Initialization.gui.json   a GUI trigger
+    Setup_Players.j        a custom-text trigger or script item (.vjass, .lua): its first line is
+                           // @w3proj {"type":8,"name":…} (-- @w3proj in Lua), the rest is the text as stored
+    Section.comment.json   a comment
+```
+
+The order comes from `order.txt` (files it doesn't list follow alphabetically: a `.j` dropped in needs no edit; one
+without the first line is a custom-text trigger if it defines `InitTrig_<its name>`, else a script item), never from
+ids. File names are the display names made safe (`~2` for a second of the same name, any case), and a file keeps its
+name until the item is renamed. Texts keep their own line endings (`.gitattributes`: `map/triggers/** -text`); a zero
+byte inside a text is written as U+10FF00. Imported items keep their ids and the counters, so an unchanged project packs
+byte for byte (all 119 local maps with triggers, Classic ones too); new items get free ids when packed. Classic maps
+have no map item, ids or nesting, and pack refuses what they can't hold (a folder in a folder, comments, script items).
+A map whose triggers TriggerData can't read (or that has only one of the two files) keeps both raw. The map script stays
+a tracked `map/war3map.j` for a map Studio didn't write (`"kept"`); with `"generated"` it lives in `.w3proj/derived/`
+(git-ignored) and `w3proj pack` takes it only while `.w3proj/derived-from.json` says it follows its sources
+(`--allow-stale-script` packs it as it is, a missing one never).
 
 A large map's terrain can be split into named rectangles (**Split Terrain into Subterrains…**, `w3proj terrain split`):
 `map/terrain/terrain.json` and one folder per subterrain with its `terrain.txt`, `doodads.json`, `units.json`,
@@ -357,7 +385,7 @@ to raw instead of breaking the map.
 ```
 MyMap/
   w3proj.toml       map header + archive/pack settings
-  map/              one file per archive file (object data as *.json)
+  map/              one file per archive file (object data as *.json), the triggers as folders (map/triggers/)
   unnamed/          files of protected maps whose names can't be recovered (not packed)
   build/            pack output (git-ignored)
   build/checkpoints/  automatic packed copies (Restore Checkpoint…)
@@ -517,7 +545,10 @@ w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.
                                     # Studio, or `w3proj rebuild`); --allow-terrain-only-derived packs them as
                                     # they are / leaves missing ones out (not for a release); it also checks the
                                     # seams (`w3proj terrain seams`) and refuses on errors unless
-                                    # --allow-seam-issues
+                                    # --allow-seam-issues. A generated map script (map/triggers/triggers.json
+                                    # "script": "generated") comes from .w3proj/derived/ and is refused when stale
+                                    # (--allow-stale-script) or missing; the game's TriggerData checks the GUI
+                                    # functions of map/triggers/
 w3proj terrain seams MyMap/         # a split terrain's seams checked with the brushes' cliff, ramp and water
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
