@@ -5748,6 +5748,9 @@ async function resizeUndoChecks(page, found) {
   await tool("place_objects", { objects: [{ id: "LPwb", x: 1500, y: 1500 }], ignoreRoom: true });
   // The rebuild is due three seconds after the edit: Apply is pressed when it is about to start.
   await sleep(2700);
+  // The tool's edit brought the terrain editor forward: the Map Size tab is shown again (its typed side stays).
+  await run("w3.terrainMapSize.edit");
+  await until("the Map Size tab shown", () => page.evaluate(`!!document.querySelector(".mapsize-buttons button.primary")?.offsetParent`), 10000);
   await hands.click(".mapsize-buttons button.primary");
   await editorUp();
   const raced = await settledState();
@@ -17519,7 +17522,7 @@ async function mapSizeUi(page, found) {
     if (before.tiles[0] !== 64 || before.wpm[0] !== 256 || before.wpm[1] !== 256) return fail(`a new 64 x 64 map is ${lit(before)} (control)`);
     // The question before a resize is answered "Apply" (put back by the finally).
     await page.evaluate(`(() => { window.__sizeAsk = w3.window.showWarning; w3.window.showWarning = async () => "Apply"; })()`);
-    await k.tab("Map Size");
+    await page.evaluate(`w3.commands.execute("w3.terrainMapSize.edit")`);
     await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
     await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[0]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await settled(page);

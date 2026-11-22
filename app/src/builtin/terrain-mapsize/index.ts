@@ -249,7 +249,8 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
 /** The preview as a picture, north up: the resized map over the current one. */
 function drawPreview(canvas: HTMLCanvasElement, t: TerrainEditorHandle["terrain"], ch: Sides, co: Sides, w: number, hgt: number) {
   const W = t.width - 1, H = t.height - 1;
-  if (!Number.isFinite(w) || !Number.isFinite(hgt) || w <= 0 || hgt <= 0 || w * hgt > 1_000_000) { canvas.width = canvas.height = 0; return; }
+  // Typed sides that aren't whole numbers have no picture (the refusal in the panel says why); a fractional size would index past the image.
+  if (!ch.every(Number.isInteger) || !Number.isFinite(w) || !Number.isFinite(hgt) || w <= 0 || hgt <= 0 || w * hgt > 1_000_000) { canvas.width = canvas.height = 0; return; }
   const x0 = Math.min(0, ch[0]), x1 = Math.max(w, ch[0] + W), y0 = Math.min(0, ch[2]), y1 = Math.max(hgt, ch[2] + H);
   const cw = x1 - x0, chh = y1 - y0;
   if (cw * chh > 1_000_000) { canvas.width = canvas.height = 0; return; }
