@@ -140,9 +140,12 @@ fn disk(project: &Path) -> CmdResult<BTreeMap<String, Vec<u8>>> {
     tl::read_disk(&project.join(w3proj::project::MAP_DIR)).map_err(err)
 }
 
+/// A tree read from disk: the tree, what is worth a warning, and the files it was read from (keys relative to `map/`).
+type OnDisk = (Tree, Vec<String>, BTreeMap<String, Vec<u8>>);
+
 /// The tree on disk; None without `map/triggers/`. Files that are there but can't be read are an error (never "no
 /// triggers": a save would write over them).
-fn tree_on_disk(project: &Path) -> CmdResult<Option<(Tree, Vec<String>, BTreeMap<String, Vec<u8>>)>> {
+fn tree_on_disk(project: &Path) -> CmdResult<Option<OnDisk>> {
     let files = disk(project)?;
     if files.is_empty() {
         return Ok(None);
