@@ -6155,6 +6155,13 @@ async function subterrains(page, found) {
     const split = await run("w3.terrainLayout.split", { layout: "2x2", quiet: true });
     if (split) fail(`Split Terrain into Subterrains (2×2) failed: ${split}`);
     await settled(page);
+    // The editor the command opened again is at rest with its minimap panel drawn (the reload showed it black).
+    {
+      const lit_ = await page.evaluate(`(() => { const c = document.querySelector(".terrain-minimap-canvas"); if (!c || c.closest("[hidden]")) return -1;
+        const d = c.getContext("2d").getImageData(10, 10, c.width - 20, c.height - 20).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 30) n++; return n; })()`);
+      if (lit_ === -1) fail("after the split there is no shown minimap panel to check");
+      else if (lit_ < 100) fail(`after the split's reload and settled() the minimap panel is black (${lit_} lit pixels)`);
+    }
     for (const f of ["terrain/terrain.json", "terrain/ne/terrain.txt", "terrain/sw/units.json", "terrain/nw/doodads.json", "terrain/se/regions.json"]) {
       if (!existsSync(join(map, f))) fail(`the split wrote no map/${f}`);
     }
@@ -13748,9 +13755,9 @@ async function chapterObjects(page, found) {
       colour: [...document.querySelectorAll(".obj-detail tr")].find((r) => r.textContent.includes("utco"))?.querySelector(".obj-campaign-value")?.textContent,
       groups: [...document.querySelectorAll(".obj-list .obj-group > span:first-child")].map((e) => e.textContent.replace(/ \\(\\d+\\)$/, "")),
     }))()`);
-    // Between the map's own and the standard objects, as the World Editor's "Campaign Units" between its "Standard
-    // Units" and "Custom Units".
-    if (view.groups.join(", ") !== "Custom, Campaign, Modified standard") fail(`the chapter's Object Editor lists its groups as ${lit(view.groups)}`);
+    // After the standard objects and before the map's own, as the World Editor's "Campaign Units" after the standard
+    // races and before "Custom Units".
+    if (view.groups.join(", ") !== "Modified standard, Campaign, Custom") fail(`the chapter's Object Editor lists its groups as ${lit(view.groups)}`);
     if (!view.listed.some((t) => t.includes("c001") && t.includes("Campaign Grunt"))) fail(`the campaign group lists ${lit(view.listed)}`);
     if (view.heading !== "Campaign Grunt") fail(`the campaign object is headed ${lit(view.heading)}`);
     if (view.inputs) fail(`the campaign object has ${view.inputs} fields to edit in the chapter`);
@@ -13795,6 +13802,26 @@ async function chapterObjects(page, found) {
     await openProject(chapter);
     await until("the chapter's script made again", () => colourOf(script(), "c001") === "3", 30000)
       .catch(() => fail(`after the campaign changed, the chapter's script colours c001 ${colourOf(script(), "c001") ?? "not at all"}, not 3`));
+
+    // ---- a campaign object edited in the chapter is saved as a copy in the chapter; the campaign's file stays ----
+    {
+      const campaignFile = readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8");
+      const openErr2 = await run("w3.objectEditor.open", "w3u", "c001");
+      if (openErr2) return fail(`opening the Object Editor at c001 (copy): ${openErr2}`);
+      await until("the copy button", () => page.evaluate(`!!document.querySelector(".obj-copy-to-map")`), 30000)
+        .catch(() => fail("the campaign object has no Edit a Copy in This Map button"));
+      await page.evaluate(`document.querySelector(".obj-copy-to-map")?.click()`);
+      await until("the copy edited", () => page.evaluate(`!document.querySelector(".obj-copy-to-map") && !!document.querySelector(".obj-detail .obj-table input")`), 15000)
+        .catch(() => fail("after Edit a Copy the object isn't editable in the chapter"));
+      await page.evaluate(`w3.editors.saveAll()`);
+      await settled(page);
+      // The object's fields are in war3map.w3u, its name (a Skin field) in war3mapSkin.w3u; the campaign was renamed above.
+      const mine = json(join(chapter, "map", "war3map.w3u.json")).custom.find((o) => o.id === "c001");
+      const skin = json(join(chapter, "map", "war3mapSkin.w3u.json")).custom.find((o) => o.id === "c001");
+      if (mine?.mods.find((m) => m.field === "utco")?.value !== 3) fail(`the copy of c001 isn't in the chapter's war3map.w3u with the campaign's colour: ${lit(mine)}`);
+      else if (skin?.mods.find((m) => m.field === "unam")?.value !== "Campaign Warrior") fail(`the copy's name in war3mapSkin.w3u is ${lit(skin?.mods.find((m) => m.field === "unam")?.value)}, not the campaign's text`);
+      if (readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8") !== campaignFile) fail("Edit a Copy changed war3campaign.w3u");
+    }
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
