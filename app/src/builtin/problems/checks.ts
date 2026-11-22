@@ -58,13 +58,14 @@ const MODEL_READS = 6;
 const JASS_SCRIPT = "map/war3map.j", LUA_SCRIPT = "map/war3map.lua";
 
 /** The script files of the trigger folders as they are on disk: the header, each custom-text trigger (with its gg_trg_
- *  global) and script item. A file that isn't there any more is left out. */
+ *  global) and script item. A file that isn't there any more is left out, and so is a disabled trigger's: the editor
+ *  leaves its text out of the map script (a documentation text kept in a disabled custom-text trigger is no JASS). */
 export async function triggerTexts(w3: W3Api, layout: ProjectTriggers): Promise<TriggerText[]> {
   const wanted: { path: string; global: string | null }[] = [];
   if (layout.headerFile) wanted.push({ path: layout.headerFile, global: null });
   layout.file.items.forEach((item, i) => {
     const path = layout.files[i];
-    if (!path || !/\.(j|vjass|lua)$/i.test(path) || !("ecas" in item)) return;
+    if (!path || !/\.(j|vjass|lua)$/i.test(path) || !("ecas" in item) || item.enabled === false) return;
     wanted.push({ path, global: item.type === 8 ? `gg_trg_${ident(item.name)}` : null });
   });
   const read = await mapLimit(wanted, 8, async (w): Promise<TriggerText | null> => {
@@ -72,6 +73,12 @@ export async function triggerTexts(w3: W3Api, layout: ProjectTriggers): Promise<
     return text === null ? null : { ...w, text };
   });
   return read.filter((r): r is TriggerText => r !== null);
+}
+
+/** A parse error "CHUNK: N bytes needed, M left at P" says the file ends inside that chunk: said so, with the missing count. */
+export function cutOff(message: string): string {
+  const m = /^(\w+): (\d+) bytes needed, (\d+) left/.exec(message);
+  return m ? `${message} (the file is cut off inside ${m[1]}, ${Number(m[2]) - Number(m[3])} bytes short: damaged or only partly copied)` : message;
 }
 
 /** A folder the listing couldn't read: a campaign's chapter (`maps/<chapter>`) is named as such, with its path and why. */
@@ -219,7 +226,7 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         for (const [i, f] of models.entries()) {
           const { textures, error: e } = read[i];
           if (!textures) {
-            out.push({ severity: "warning", message: `can't be read: ${(e as Error).message ?? e}`, location: f.path, reveal: { command: "w3.problems.open", args: [f.path] } });
+            out.push({ severity: "warning", message: `can't be read: ${cutOff((e as Error).message ?? String(e))}`, location: f.path, reveal: { command: "w3.problems.open", args: [f.path] } });
             continue;
           }
           for (const t of textures) {
