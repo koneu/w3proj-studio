@@ -10,6 +10,8 @@ import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type C
   type TriggersService } from "../../extensions/services";
 import type { TriggerItem } from "../../lib/triggers/wtg";
 import { mapJass } from "../../lib/jass/env";
+import { withOwnCommon } from "../../lib/jass/owncommon";
+import { readImported } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
@@ -83,8 +85,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const nonce = Math.random().toString(36).slice(2);
     const texts = markTexts(ed.file, ed.customFile(), t, nonce);
     const languages = await w3.services.get<ScriptLanguagesService>(SCRIPT_LANGUAGES_SERVICE);
-    const [script, commonJ, blizzardJ] = await Promise.all([
-      languages.source({ triggers: texts.triggers, custom: texts.custom }), w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
+    const [script, gameCommon, blizzardJ, mapCommon] = await Promise.all([
+      languages.source({ triggers: texts.triggers, custom: texts.custom }), w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j"),
+      readImported(w3, "Scripts\\common.j")]);
+    // The map's own common.j declarations reach JassHelper too, as when the script is generated (map-script).
+    const commonJ = mapCommon === null ? gameCommon : withOwnCommon(gameCommon, new TextDecoder().decode(mapCommon));
     const r = await run(script, commonJ, blizzardJ);
     if ("output" in r) return "JassHelper: no errors (compiled in the map's script).";
     const { own, others } = checkMessages(placeErrors(r.log, script, r.current, nonce), texts);

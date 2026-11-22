@@ -480,6 +480,10 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 3, cameras: [] });
   // The trigger folders (map/triggers/), made here: the project has none yet. New items store no ids.
   await w3.workspace.writeTriggers({ file: defaultTriggerFile(o.name), custom: parseWct(defaultWct(), textTriggers(defaultTriggerFile(o.name)).length) }, { create: true });
+  // A map made here has a generated script (trigger-folders spec, section 5): out of git, in .w3proj/derived/, made from
+  // the map's data on saves and checked by `w3proj pack`. map/war3map.j below lands there. A backend that can't switch
+  // leaves it a tracked file, as before.
+  await w3.backend.invoke("script_set_mode", { root, mode: "generated" }).catch(() => {});
   await w3.workspace.writeText("map/war3map.wts", "\uFEFFSTRING 1\r\n{\r\nPlayer 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nForce 1\r\n}\r\n\r\n");
   await json("map/war3map.mmp.json", { format: "w3proj.minimap/1", version: 0, icons: [startIcon(t, sx, sy)] });
   await json("map/war3map.w3l.json", { format: "w3proj.lights/1", magic: "W3L!", version: 3, terrainModel: "", unitModel: "", terrainEnabled: 0, unitEnabled: 0, unknown: 0 });

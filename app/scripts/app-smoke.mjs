@@ -136,6 +136,17 @@ function fixtureTriggerData(root) {
   const chapters = existsSync(join(root, "maps")) ? readdirSync(join(root, "maps")).map((n) => join(root, "maps", n)) : [];
   return mini(root) || chapters.some(mini) ? ["--trigger-data", join(repo, "tests", "fixtures", "TriggerData.txt")] : [];
 }
+/** Where the map script of the project at `root` is on disk: map/war3map.j (`name`), or for a generated script
+ *  (map/triggers/triggers.json "script": "generated", as a new map has it) its file in .w3proj/derived/. A triggers.json
+ *  that is there but can't be read throws. */
+function scriptOnDisk(root, name = "war3map.j") {
+  const layout = join(root, "map", "triggers", "triggers.json");
+  const generated = existsSync(layout) && JSON.parse(readFileSync(layout, "utf8")).script === "generated";
+  return generated ? join(root, ".w3proj", "derived", name) : join(root, "map", name);
+}
+/** The project at `root` (the open one) with its map script as a tracked file (`kept`) or generated in .w3proj/derived/
+ *  (the backend's script_set_mode: the script moves as it is), for checks of what each mode does. */
+const setScriptMode = (page, root, mode) => page.evaluate(`w3.backend.invoke("script_set_mode", { root: ${lit(root)}, mode: ${lit(mode)} }).then(() => w3.workspace.refresh())`);
 /** The map/ files of the project at `root` by hash (snapshot), with its triggers as the map holds them: map/triggers/ or
  *  a raw war3map.wtg and war3map.wct give way to the war3map.wtg and war3map.wct the CLI packs from the project. So a
  *  project that keeps them in either form (an import is an import: its trigger files store ids, the fixture's don't)
@@ -244,7 +255,15 @@ async function newMaps(page, found) {
       const root = await page.evaluate(`w3.workspace.project()?.root`);
       const names = new Set(walk(join(root, "map")).map((p) => relative(join(root, "map"), p).replaceAll("\\", "/")));
       const scriptFile = args.script === "lua" ? "war3map.lua" : "war3map.j";
-      for (const n of [...NEW_MAP_FILES, scriptFile]) if (!names.has(n)) fail(`no ${n}`);
+      for (const n of NEW_MAP_FILES) if (!names.has(n)) fail(`no ${n}`);
+      // A new map's script is generated (trigger-folders spec, section 5): in .w3proj/derived/, out of git, recorded.
+      const mode = JSON.parse(readFileSync(join(root, "map", "triggers", "triggers.json"), "utf8")).script;
+      if (mode !== "generated") fail(`map/triggers/triggers.json says "script": ${lit(mode)}, not "generated"`);
+      if (names.has(scriptFile) || !existsSync(join(root, ".w3proj", "derived", scriptFile))) fail(`its ${scriptFile} isn't in .w3proj/derived/ alone (in map/: ${names.has(scriptFile)})`);
+      if (!/^\/\.w3proj\/derived\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/derived/");
+      await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+      const state = await page.evaluate(`w3.backend.invoke("script_state", { root: ${lit(root)} })`);
+      if (state?.freshness !== "fresh") fail(`the generated script doesn't follow its sources after New Map: ${lit(state)}`);
       const active = await page.evaluate(`w3.editors.activePath()`);
       if (active !== "map/war3map.w3e.txt") fail(`the terrain editor didn't open (active: ${active})`);
       // The World Editor's "Initial Tile: <tileset> - Dirt": the tileset's first ground tile, unless one is chosen.
@@ -2816,7 +2835,7 @@ async function techtreeRandomLevels(page, found) {
     if (saved.itemTables?.[0]?.sets?.[0]?.[0]?.id !== "YkI1") fail(`the saved item table: ${lit(saved.itemTables)}`);
     if (JSON.stringify(saved.techs) !== "[]") fail(`the saved techtree after the knight was made available to player 1: ${lit(saved.techs)}`);
     await page.evaluate(`w3.commands.execute("w3.script.settle")`);
-    const script = readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+    const script = readFileSync(scriptOnDisk(k.root), "utf8");
     for (const line of ["set gg_rg_000[0] = ChooseRandomCreep( 3 )", "ITEM_TYPE_PERMANENT, 2", "ITEM_TYPE_POWERUP, 1"]) {
       if (!script.includes(line)) fail(`war3map.j has no "${line}"`);
     }
@@ -3549,7 +3568,7 @@ async function itemDrops(page, found) {
   // The script: the trolls' own drop function with both items, the table's function.
   await k.save();
   await page.evaluate(`w3.commands.execute("w3.script.settle")`);
-  const script = readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  const script = readFileSync(scriptOnDisk(k.root), "utf8");
   if (!/function ItemTable000003_DropItems/.test(script)) fail("war3map.j has no function for the map's item table");
   if (!/RandomDistAddItem\( 'ankh', 30 \)/.test(script)) fail("war3map.j doesn't drop the ankh the troll was given");
   await k.verify(fail);
@@ -4789,7 +4808,7 @@ async function destructableFlags(page, found) {
   const fail = (what) => found.push(`destructable flags: ${what}`);
   const k = await heightKit(page, "DestFlags");
   const TXT = "map/war3map.w3e.txt";
-  const script = () => readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  const script = () => readFileSync(scriptOnDisk(k.root), "utf8");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 512, y: 0 }], ignoreRoom: true });
   await k.save();
   const trees = () => k.doodads().filter((d) => d.id === "LTlt");
@@ -9631,7 +9650,10 @@ async function rebuildCli(page, found) {
     await tool("rebuild_map");
     await settled(page);
     await page.evaluate(`w3.editors.closeAll()`);
-    const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", "map/war3map.j", "map/war3map.w3i.json", ".w3proj/derived-from.json", ".w3proj/generated-script"];
+    // A new map's script is generated: in .w3proj/derived/, never in map/.
+    if (existsSync(join(root, "map", "war3map.j"))) fail("the new map has a tracked map/war3map.j; its script should be generated (.w3proj/derived/)");
+    const SCRIPT = ".w3proj/derived/war3map.j";
+    const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", SCRIPT, "map/war3map.w3i.json", ".w3proj/derived-from.json", ".w3proj/generated-script"];
     const read = (r, f) => (existsSync(join(r, f)) ? readFileSync(join(r, f)) : null);
     const before = Object.fromEntries(FILES.map((f) => [f, read(root, f)]));
     // The edit outside the app (as an AI editing the text files would): the rock and the footman move.
@@ -9669,7 +9691,7 @@ async function rebuildCli(page, found) {
       if (!a || !b) fail(`${f}: ${!a ? "the app" : "the CLI"} left none`);
       else if (Buffer.compare(a, b) !== 0) fail(`${f} differs: the app wrote ${a.length} bytes, w3proj rebuild ${b.length}`);
     }
-    for (const f of ["map/war3map.wpm", "map/war3map.j"]) {
+    for (const f of ["map/war3map.wpm", SCRIPT]) {
       const now = read(root, f);
       if (before[f] && now && Buffer.compare(before[f], now) === 0) fail(`${f} didn't change with the edit: the comparison proves nothing`);
     }
@@ -14272,6 +14294,9 @@ async function vjassCheck(page, found) {
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   try {
     const k = await heightKit(page, "VjassCheck");
+    // A tracked script: a save compiles it with JassHelper (a generated vJASS script waits for pack or Regenerate Map
+    // Script…, which scriptGenerated covers).
+    await setScriptMode(page, k.root, "kept");
     // A save whose script JassHelper refuses says so once (Map Script): expected here while Lib A is broken.
     await page.evaluate(`(() => { window.__vjWarns = []; w3.window.showWarning = (m) => { window.__vjWarns.push(String(m)); }; })()`);
     await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
@@ -14285,7 +14310,7 @@ async function vjassCheck(page, found) {
     await k.tool("create_script_trigger", { name: "Uses A", script: usesA(" requires A") });
     await settled(page);
     // The map's own compile takes it: this is right code for this map.
-    const made = readFileSync(join(k.root, "map", "war3map.j"), "latin1");
+    const made = readFileSync(scriptOnDisk(k.root), "latin1");
     if (!/LIBRARY_B\s*=\s*true/.test(made) || !made.includes(global)) return fail(`the map's script wasn't compiled with the two libraries (control): ${lit(await page.evaluate(`window.__vjWarns`))}`);
 
     /** Shows a trigger in the Trigger Editor, presses Check with JassHelper and gives what it says. */
@@ -14365,7 +14390,7 @@ async function scriptGuard(page, found) {
   try {
   const fail = (what) => found.push(`script guard: ${what}`);
   const k = await heightKit(page, "ScriptGuard");
-  const script = () => readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  const script = () => readFileSync(scriptOnDisk(k.root), "utf8");
   const stampFile = join(k.root, ".w3proj", "generated-script");
   const settle = () => page.evaluate(`w3.commands.execute("w3.script.settle")`);
   /** Saves the regions file with one region of this name (as an editor's save does: through the workspace). */
@@ -14376,6 +14401,9 @@ async function scriptGuard(page, found) {
     await settle();
   };
   await settle();
+  // The guard is a tracked script's (a new map's is generated, in .w3proj/derived/, which nobody edits by hand).
+  await setScriptMode(page, k.root, "kept");
+  if (!existsSync(join(k.root, "map", "war3map.j"))) return fail("switched to a tracked script, map/war3map.j isn't there (control)");
   // The questions about a kept script come through notify (closed when another project opens).
   await page.evaluate(`(() => {
     window.__sg = { notify: w3.window.notify };
@@ -14502,6 +14530,8 @@ async function scriptQuestionsOnSwitch(page, found) {
   const asking = () => page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].filter((t) => /function that the map's triggers don't make/.test(t.textContent) && t.textContent.includes("Replace the script")).length`);
   try {
     await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+    // The question is a tracked script's (a new map's is generated: nobody's but the generator's).
+    await setScriptMode(page, k.root, "kept");
     const file = join(k.root, "map", "war3map.j");
     const made = readFileSync(file, "utf8");
     const at = made.indexOf("function main takes nothing returns nothing");
@@ -14521,6 +14551,97 @@ async function scriptQuestionsOnSwitch(page, found) {
     if (readFileSync(file, "utf8").includes("SmokeHandWritten") === false) fail("the first project's script was replaced");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
+/** The generated map script (trigger-folders spec, section 5; a new map has one): 1. it lives in .w3proj/derived/, never
+ *  in map/, and a save makes it again and records its sources, which `w3proj pack` accepts (and refuses once a source
+ *  changes outside the app). 2. Regenerate Map Script… on a tracked (kept) script names the function it would lose and
+ *  changes nothing on Cancel; agreed, a checkpoint first, then the script moves out of map/ into the store and is made
+ *  again. 3. A vJASS text: a save doesn't run JassHelper on a generated script (it says so, the script stays stale);
+ *  Regenerate Map Script… compiles it (with the game). */
+async function scriptGenerated(page, found) {
+  try {
+  const fail = (what) => found.push(`script generated: ${what}`);
+  const k = await heightKit(page, "ScriptGenerated");
+  const store = join(k.root, ".w3proj", "derived", "war3map.j"), tracked = join(k.root, "map", "war3map.j");
+  const settle = () => page.evaluate(`w3.commands.execute("w3.script.settle")`);
+  const state = () => page.evaluate(`w3.backend.invoke("script_state", { root: ${lit(k.root)} })`);
+  const log = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
+  const saveRegion = async (name) => {
+    const regions = k.read("war3map.w3r.json");
+    regions.regions = [{ left: -256, bottom: 256, right: 256, top: 640, name, index: 0, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) }];
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${lit(JSON.stringify(regions))})`);
+    await settle();
+  };
+  const pack = (label, extra = []) => spawnSync(cli, ["pack", k.root, "--game", "none", ...extra, "-o", join(k.root, "build", `${label}.w3x`)], { encoding: "utf8" });
+  await page.evaluate(`(() => { window.__sgWarn = w3.window.showWarning; window.__sgAnswer = null; window.__sgAsked = [];
+    w3.window.showWarning = (m, ...a) => { window.__sgAsked.push(String(m)); return Promise.resolve(window.__sgAnswer ?? undefined); }; })()`);
+  try {
+    await settle();
+    // ---- 1. In the store, made again on a save, recorded; the CLI's pack takes it, and refuses it once stale ------------
+    if (existsSync(tracked) || !existsSync(store)) return fail(`the new map's script: map/war3map.j ${existsSync(tracked) ? "is" : "isn't"} there, .w3proj/derived/war3map.j ${existsSync(store) ? "is" : "isn't"}`);
+    await saveRegion("Generated Region");
+    if (!/gg_rct_Generated_Region/.test(readFileSync(store, "utf8"))) fail("saving a region didn't make the generated script again");
+    if (existsSync(tracked)) fail("saving wrote map/war3map.j");
+    if ((await state())?.freshness !== "fresh") fail(`after the save the generated script doesn't follow its sources: ${lit(await state())}`);
+    const ok = pack("fresh");
+    if (ok.status !== 0) fail(`w3proj pack refused the generated script the app recorded: ${(ok.stdout + ok.stderr).trim().slice(-300)}`);
+    // A source changed outside the app: stale for the CLI until the app makes it again.
+    const regionsFile = join(k.root, "map", "war3map.w3r.json");
+    writeFileSync(regionsFile, readFileSync(regionsFile, "utf8").replace("Generated Region", "Outside Region"));
+    const stale = pack("stale");
+    if (stale.status === 0 || !/war3map\.w3r\.json changed/.test(stale.stderr)) fail(`w3proj pack took the script after its regions changed outside the app: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
+    await page.evaluate(`w3.workspace.refresh()`);
+    await saveRegion("Back Region");
+
+    // ---- 2. Regenerate Map Script… on a tracked script: what would be lost, Cancel, then the switch ----------------------
+    await setScriptMode(page, k.root, "kept");
+    if (!existsSync(tracked) || existsSync(store)) return fail("switched to a tracked script, it isn't in map/ alone (control)");
+    const made = readFileSync(tracked, "utf8");
+    const at = made.indexOf("function main takes nothing returns nothing");
+    if (at < 0) return fail("no main in the script (control)");
+    writeFileSync(tracked, `${made.slice(0, at)}function SmokeOwnCode takes nothing returns nothing\nendfunction\n\n${made.slice(at)}`);
+    await page.evaluate(`w3.workspace.refresh()`);
+    const regenerate = () => page.evaluate(`w3.commands.execute("w3.script.regenerate").then((r) => r ?? null, (e) => ({ error: String(e) }))`);
+    await page.evaluate(`window.__sgAnswer = "Cancel"`);
+    const cancelled = await regenerate();
+    const asked = await page.evaluate(`window.__sgAsked.slice(-1)[0] ?? ""`);
+    if (cancelled !== null) fail(`Cancel: ${lit(cancelled)}`);
+    if (!/SmokeOwnCode/.test(asked) || !/1 function/.test(asked)) fail(`Regenerate Map Script… didn't name the function it would lose: ${lit(asked)}`);
+    if (!readFileSync(tracked, "utf8").includes("SmokeOwnCode") || existsSync(store) || (await state())?.mode !== "kept") fail("Cancel changed the project");
+    const checkpoints = () => (existsSync(join(k.root, "build", "checkpoints")) ? readdirSync(join(k.root, "build", "checkpoints")).length : 0);
+    const before = checkpoints();
+    await page.evaluate(`window.__sgAnswer = "Switch to a Generated Script"`);
+    const switched = await regenerate();
+    if (switched?.mode !== "generated" || switched.written !== true || !switched.lost?.includes("SmokeOwnCode")) fail(`the switch: ${lit(switched)}`);
+    if (existsSync(tracked) || !existsSync(store)) fail("after the switch the script isn't in .w3proj/derived/ alone");
+    else if (/SmokeOwnCode/.test(readFileSync(store, "utf8")) || !/gg_rct_Back_Region/.test(readFileSync(store, "utf8"))) fail("the switched script wasn't made again from the map's data");
+    if ((await state())?.freshness !== "fresh") fail(`after the switch the script doesn't follow its sources: ${lit(await state())}`);
+    if (checkpoints() <= before) fail("the switch made no checkpoint first");
+
+    // ---- 3. vJASS: a save doesn't compile a generated script; Regenerate Map Script… does ------------------------------
+    const lib = "library SmokeGen initializer Init\r\n    private function Init takes nothing returns nothing\r\n    endfunction\r\nendlibrary\r\n";
+    const logged = (await log()).length;
+    await k.tool("create_script_trigger", { name: "Smoke Gen", script: lib });
+    await settled(page);
+    await settle();
+    const said = (await log()).slice(logged);
+    if (!/not made now: its triggers are compiled with vJASS/.test(said)) fail(`saving a vJASS text in a generated project: ${lit(said.slice(-400))}`);
+    if ((await state())?.freshness !== "stale") fail(`after a vJASS save the generated script follows its sources: ${lit(await state())}`);
+    if (game) {
+      await page.evaluate(`window.__sgAnswer = null`);
+      const r = await page.evaluate(`w3.commands.execute("w3.script.regenerate").then((r) => r ?? null, (e) => ({ error: String(e) }))`, { timeout: 300000 });
+      if (r?.written !== true) fail(`Regenerate Map Script… on the vJASS map: ${lit(r)} ${lit((await log()).slice(-300))}`);
+      else if (!/LIBRARY_SmokeGen\s*=\s*true/.test(readFileSync(store, "utf8"))) fail("the regenerated script wasn't compiled with JassHelper");
+      if ((await state())?.freshness !== "fresh") fail(`after Regenerate Map Script… the script doesn't follow its sources: ${lit(await state())}`);
+    }
+  } finally {
+    await page.evaluate(`(() => { if (window.__sgWarn) w3.window.showWarning = window.__sgWarn; delete window.__sgWarn; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
   } finally {
     await restoreWindow(page);
@@ -16312,7 +16433,7 @@ async function niceToHaves(page, found) {
     await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
     const cat = k.triggers().file.items.find((i) => i.type === 4 && i.name === "Initialization");
     if (cat?.isComment !== 1) fail(`Category is Comment saved ${lit(cat)}`);
-    if (!/InitTrig_Melee_Initialization/.test(readFileSync(join(k.root, "map", "war3map.j"), "utf8"))) fail("a trigger in a comment category left war3map.j (the World Editor keeps it)");
+    if (!/InitTrig_Melee_Initialization/.test(readFileSync(scriptOnDisk(k.root), "utf8"))) fail("a trigger in a comment category left war3map.j (the World Editor keeps it)");
     /** The caret of the tree's Initialization category: "▸" closed, "▾" open. */
     const initCaret = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.textContent ?? null`);
     const toggleInit = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.click()`);
@@ -16928,6 +17049,7 @@ async function run() {
         resizeRefusedShadows,
         resizeUndo,
         resizeUnreadable,
+        scriptGenerated,
         scriptGuard,
         scriptQuestionsOnSwitch,
         shadowLeftOut,
@@ -17209,6 +17331,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "worldEditorReal", found);
   await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
   await leftOpen(page, "scriptQuestionsOnSwitch", found);
+  await scriptGenerated(page, found).catch((e) => found.push(`script generated: ${e.message}`));
+  await leftOpen(page, "scriptGenerated", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
   await leftOpen(page, "resizeUndo", found);
   await resizeLimits(page, found).catch((e) => found.push(`resize limits: ${e.message}`));

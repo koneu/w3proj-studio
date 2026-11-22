@@ -4,7 +4,8 @@ import { soundDurationMs } from "../../lib/audio/duration";
 import { soundVariants } from "../../lib/audio/variants";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
-import { isScriptInput, KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash } from "../../lib/script/guard";
+import { isScriptInput, KEPT_SCRIPT_WORDS, lostFunctions, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash, staleScriptReason,
+  type ScriptState } from "../../lib/script/guard";
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -26,6 +27,8 @@ import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects
 import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
 import { readImported } from "../../lib/imports";
+import { withOwnCommon } from "../../lib/jass/owncommon";
+import { hasBetterTriggersHelpers } from "../../lib/script/bthelpers";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { MELEE_MAP, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeFiles, savedMelee } from "../../lib/terrain/meleesave";
@@ -134,6 +137,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return tables;
   };
 
+  /** A script file the map imports (Scripts\common.j), as text; null when the map has none. One that is there but can't
+   *  be read rejects: it is never taken for the game's. */
+  const ownScript = async (archive: string): Promise<string | null> => {
+    const bytes = await readImported(w3, archive);
+    return bytes === null ? null : new TextDecoder().decode(bytes);
+  };
+
   // Read directly rather than from the file list, which lags behind fresh saves (New Map).
   const json = async <T>(p: string): Promise<T | null> => {
     // Projects made before a format got its JSON form keep the raw file until they're re-synced.
@@ -173,8 +183,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
- *  script is what the data makes): nothing is written, not even the melee flag a save turns off. */
-  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }): Promise<{ path: string; text: string; vjass?: string; language?: string; flags?: FlagRule }> => {
+ *  script is what the data makes): nothing is written, not even the melee flag a save turns off. `compile: false`: a
+ *  map whose texts a language extension compiles (vJASS: JassHelper, seconds per run) isn't compiled; `deferred` names
+ *  the language instead (a generated script is made on pack and on request then, never on a save). */
+  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }, opts: { compile?: boolean } = {}): Promise<{ path: string; text: string; vjass?: string; language?: string; flags?: FlagRule; deferred?: string }> => {
     const root = w3.workspace.project()?.root;
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
@@ -206,7 +218,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const current = await w3.workspace.readText(path).catch(() => "");
     // `held`: the script before any language compiles it (ScriptLanguagesService.source).
     const language = info.scriptType === 1 || held ? undefined : languages.find((l) => l.detect({ texts: textList, script: current }));
-    if (!language && !held && (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current))) {
+    // Lua maps have no vJASS: their texts are Lua (FOE's has lines that read as vJASS, e.g. "module" tables).
+    if (!language && !held && info.scriptType !== 1 && (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current))) {
       return { path, text: "", vjass: VJASS_OUTPUT.test(current) ? "its script was compiled from vJASS" : "its triggers contain vJASS" };
     }
     const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
@@ -262,13 +275,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       regions: (await json<{ regions: ScriptInput["regions"] }>("map/war3map.w3r"))?.regions,
       cameras: (await json<{ cameras: ScriptInput["cameras"] }>("map/war3map.w3c"))?.cameras,
       sounds, soundDuration, soundLabel: (l) => g.soundLabels.get(l), string: (v) => wts?.resolve(v) ?? v,
+      // Helpers of a third-party trigger editor a Lua map's script has stay in it (lib/script/bthelpers).
+      betterTriggers: info.scriptType === 1 && hasBetterTriggersHelpers(current),
     });
     // The destructables' GAME_PLACED flag follows this script, as the World Editor's save sets it (followFlags).
     const customDestructables = customIdsOf(objectFiles.w3b);
     const flags: FlagRule = { rule: destructableRule({ info, triggers, custom }), destructable: (id) => g.destructables.has(id) || customDestructables.has(id) };
     if (!language) return { path, text: script, flags };
-    // The language's compiler gets the script as the World Editor hands it to JassHelper.
-    const [commonJ, blizzardJ] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
+    if (opts.compile === false) return { path, text: "", deferred: language.title, flags };
+    // The language's compiler gets the script as the World Editor hands it to JassHelper, with the map's own common.j
+    // declarations (an imported Scripts\common.j: the game reads the map's files first) added to the game's.
+    const [gameCommon, blizzardJ, ownCommon] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j"), ownScript("Scripts\\common.j")]);
+    const commonJ = ownCommon === null ? gameCommon : withOwnCommon(gameCommon, ownCommon);
     return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title, flags };
   };
 
@@ -341,6 +359,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return w3.workspace.project()?.root === root;
   };
 
+  /** How the project's map script is kept (the backend's script_state, crates/backend/src/script.rs): null when it can't
+   *  be told (no project, a backend without the command), taken as a tracked script. */
+  const scriptState = (root: string | undefined): Promise<ScriptState | null> =>
+    (root ? w3.backend.invoke<ScriptState>("script_state", { root }).catch(() => null) : Promise.resolve(null));
+
   let running: Promise<boolean> = Promise.resolve(true);
   /** Projects already told that their vJASS script isn't regenerated. */
   const warned = new Set<string>();
@@ -365,17 +388,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Asks what to do with a script that is kept (Replace, Show Difference, Keep), for the open project only. */
   const ask = (message: string) => w3.window.notify("warning", message, ["Replace the script", "Show Difference", "Keep it"], { signal: questions.signal });
   /** Writes the script; false when it stays as it is. `force`: also over a script that isn't the one this app
-   *  wrote last. `onlyFor`: only in that project (else nothing is written). */
-  const write = (reason: string, force = false, onlyFor?: string): Promise<boolean> => {
+   *  wrote last. `onlyFor`: only in that project (else nothing is written). `compile: false`: a generated script whose
+   *  texts a language extension compiles (vJASS) isn't made now (a save never waits for JassHelper); it stays stale.
+   *  A generated script (map/triggers/triggers.json "script": "generated", kept in .w3proj/derived/) is always the one
+   *  the data makes, and what it was made from is recorded (`w3proj pack` checks that record). */
+  const write = (reason: string, force = false, onlyFor?: string, opts: { compile?: boolean } = {}): Promise<boolean> => {
     // The queue goes on after a failed run (the caller of that run has its error).
     running = running.catch(() => true).then(async () => {
       try {
         const root = w3.workspace.project()?.root;
         if (onlyFor !== undefined && root !== onlyFor) { out.append(`${reason}: not written: another project is open now`); return false; }
-        const { path, text, vjass, language, flags } = await generate();
+        const generated = (await scriptState(root))?.mode === "generated";
+        // Taken before the generator reads anything: a file saved meanwhile shows as changed in the record.
+        const sources = generated && root ? await w3.backend.invoke<Record<string, string>>("script_sources", { root }) : null;
+        const { path, text, vjass, language, flags, deferred } = await generate(false, undefined, { compile: !generated || opts.compile !== false });
         const file = path.slice(4);
         // Generating can take a while: this script must not land in another project.
         if (w3.workspace.project()?.root !== root) { out.append(`${reason}: ${file} not written: the project was changed meanwhile`); return false; }
+        if (deferred) {
+          out.append(`${reason}: ${file} not made now: its triggers are compiled with ${deferred}, which runs on pack and on Regenerate Map Script…, never on a save; until then the generated script doesn't follow the triggers`);
+          return false;
+        }
+        /** The record of what the generated script was made from (nothing for a kept one). Not recorded: `w3proj pack`
+         *  takes it for outdated, said here. */
+        const record = async () => {
+          if (!generated || !sources || !root || w3.workspace.project()?.root !== root) return;
+          await w3.backend.invoke("script_record", { root, sources }).catch((e) => out.append(`${reason}: what ${file} was made from wasn't recorded (${e instanceof Error ? e.message : String(e)}): \`w3proj pack\` takes it for outdated`));
+        };
+        /** A generated script of the other language left in the store (the map's language changed): it goes, so the map
+         *  gets one script. */
+        const dropOther = async () => {
+          const other = scriptPath(path === scriptPath(false));
+          if (generated && w3.workspace.files().some((f) => f.path.toLowerCase() === other)) await w3.workspace.delete(other);
+        };
         if (vjass) {
           out.append(`${reason}: ${file} not written: ${vjass}, and no script language extension compiles it (vJASS: enable "vJASS (JassHelper)"); the script stays as it is.`);
           const root = w3.workspace.project()?.root ?? "";
@@ -388,7 +433,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const current = await readScript(path);
         const stamp = await w3.workspace.readText(STAMP).catch(() => null);
-        const decision = scriptDecision(current, text, stamp, force);
+        // A generated script is a build artifact out of git: nothing in it is anybody's but the generator's.
+        const decision = scriptDecision(current, text, stamp, force || generated);
         // The script this map runs is this one (written now or already there): the destructables' flags follow it first,
         // so the game places each one once, from war3map.doo or from the script. A kept script is left with them as they are.
         if (decision.action !== "keep" && flags) {
@@ -398,6 +444,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The data makes this very script (a fresh import, a script put back): it's this app's from now on.
           if (stamp?.trim() !== scriptHash(text)) await w3.workspace.writeText(STAMP, `${scriptHash(text)}
 `);
+          await dropOther();
+          await record();
           out.append(`${reason}: ${file} up to date`);
           return true;
         }
@@ -427,11 +475,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return false;
         }
         // Forced over a script that would have been kept: said, naming the file and what of it is gone.
-        const before = force && current !== null ? scriptDecision(current, text, stamp) : null;
+        const before = force && !generated && current !== null ? scriptDecision(current, text, stamp) : null;
         await w3.workspace.writeText(path, text);
         await w3.workspace.writeText(STAMP, `${scriptHash(text)}
 `);
-        const how = `${text.length} chars${language ? `, compiled with ${language}` : ""}`;
+        await dropOther();
+        await record();
+        const how = `${text.length} chars${language ? `, compiled with ${language}` : ""}${generated ? ", generated: in .w3proj/derived/, out of git" : ""}`;
         if (before?.action === "keep") {
           const n = before.lost.length;
           const lost = n ? `; its ${n} function${n === 1 ? "" : "s"} the triggers don't make (${before.lost.slice(0, 5).join(", ")}${n > 5 ? ", …" : ""}) ${n === 1 ? "is" : "are"} gone` : "";
@@ -452,7 +502,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** The file that started the waiting, while a run is due. */
   let pending: string | null = null;
-  const afterSave = (path: string) => write(`saved ${path}`).catch((e) => {
+  // A generated vJASS script isn't compiled on a save (`compile: false`): JassHelper takes seconds; pack and Regenerate
+  // Map Script… make it.
+  const afterSave = (path: string) => write(`saved ${path}`, false, undefined, { compile: false }).catch((e) => {
     // Nobody is watching a save's script run, and saving goes on working: say so once.
     const key = `failed:${w3.workspace.project()?.root ?? ""}`;
     if (warned.has(key)) return;
@@ -514,7 +566,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     openProject = project;
     questions.abort();
     questions = new AbortController();
-    if (project) void adopt("opened").then(() => refreshChapter(project.root));
+    if (project) void adopt("opened").then(() => refreshChapter(project.root)).then(() => refreshGenerated(project.root));
+  };
+  /** A generated script that doesn't follow its sources when the project opens (a fresh clone has none, a pull changed
+   *  the triggers) is made again, as a save would (vJASS isn't compiled: on pack and on request). Nothing for a kept
+   *  script; with script.generateOnSave off, nothing either. */
+  const refreshGenerated = async (root: string) => {
+    try {
+      if (!w3.settings.get<boolean>("script.generateOnSave") || w3.workspace.project()?.root !== root) return;
+      const state = await scriptState(root);
+      const why = staleScriptReason(state);
+      if (!why || w3.workspace.project()?.root !== root) return;
+      await write(`opened (${why})`, false, root, { compile: false });
+    } catch (e) {
+      out.append(`opened: the generated map script wasn't made again: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
   /** A chapter map's script that is this app's (stamped) is made again when the project opens: its campaign's object
    *  data may have changed while it was closed (edited in the campaign project), and no save in this project tells.
@@ -650,6 +716,54 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean; force?: boolean }) => {
       const written = await write("command", opts?.force === true);
       if (written && !opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
+    }),
+    // Regenerate Map Script…: a generated script made again now, vJASS compiled too. A kept one (a tracked map/war3map.j,
+    // the World Editor's or with code no trigger makes) is switched to generated only after saying which of its
+    // functions the generator doesn't make (lostFunctions, JassHelper's run-to-run naming aside) and the user agreeing;
+    // a checkpoint keeps it first. `yes`: agreed already (MCP, tests). What happened: the mode, the lost functions,
+    // whether the script was written; null when the user said no.
+    w3.commands.register("w3.script.regenerate", async (opts?: { yes?: boolean }) => {
+      const root = requireProject(w3).root;
+      const state = await scriptState(root);
+      if (state?.mode === "generated") {
+        const written = await write("Regenerate Map Script", true, root, { compile: true });
+        if (written) void w3.window.showInfo("Map script generated (see the Map Script output).");
+        return { mode: "generated", lost: [], written };
+      }
+      if (state?.mode !== "kept") {
+        throw new Error("This project's triggers aren't in map/triggers/ (they are kept raw, or the map has none), so its map script stays a tracked file: Generate Map Script replaces it in place.");
+      }
+      const made = await generate(true);
+      if (w3.workspace.project()?.root !== root) throw new Error("Another project is open now.");
+      const file = made.path.slice(4);
+      if (made.vjass) throw new Error(`${file} can't be generated: ${made.vjass}, and no script language extension compiles it (vJASS: enable "vJASS (JassHelper)").`);
+      const current = await readScript(made.path);
+      if (current === undefined) throw new Error(`${file} can't be read as text: delete it or make it readable first.`);
+      const lost = current === null ? [] : lostFunctions(current, made.text);
+      const what = lost.length
+        ? `${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} the map's triggers don't make (${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ", …" : ""}): a generated script doesn't have ${lost.length === 1 ? "it" : "them"}.`
+        : `The generator makes every function of ${file}${current === null ? " (there is none yet)" : ""}.`;
+      out.append(`Regenerate Map Script: ${what}${lost.length > 5 ? ` All of them: ${lost.join(", ")}` : ""}`);
+      const choice = opts?.yes ? "Switch to a Generated Script" : await w3.window.showWarning(
+        `${what} Switching makes the map script a build artifact: generated from the triggers and the map's data into .w3proj/derived/, out of git, and made again on saves; map/${file} is no longer tracked (a checkpoint keeps it).`,
+        "Switch to a Generated Script", "Show Difference", "Cancel");
+      if (choice === "Show Difference") { await showDifference(made.path); return null; }
+      if (choice !== "Switch to a Generated Script") return null;
+      if (w3.workspace.project()?.root !== root) throw new Error("Another project is open now.");
+      if (current !== null && !(await checkpointBefore(w3, `Switch ${file} to a generated script`))) return null;
+      await w3.backend.invoke("script_set_mode", { root, mode: "generated" });
+      await w3.workspace.refresh();
+      out.append(`Regenerate Map Script: map/triggers/triggers.json says "script": "generated"; ${file} moved into .w3proj/derived/`);
+      const written = await write("Regenerate Map Script", true, root, { compile: true });
+      if (written) void w3.window.showInfo(`${file} is generated now (see the Map Script output).`);
+      return { mode: "generated", lost, written };
+    }),
+    // Packing: a generated script that doesn't follow its sources (a vJASS one isn't made on saves, a fresh clone has
+    // none) is made now, compiled. Packing checks afterwards whether it follows (map-project).
+    w3.commands.register("w3.script.forPack", async () => {
+      const root = w3.workspace.project()?.root;
+      if (!root || !staleScriptReason(await scriptState(root))) return;
+      await write("packing", false, root, { compile: true }).catch(() => false);
     }),
     // Export Script: the map script as it stands (a script still due from the last save is written first) copied byte for
     // byte to a file the person picks. A map with a Lua script exports that; a missing script isn't an empty one.

@@ -345,6 +345,22 @@ pub fn script_sources(project: &Path) -> Result<Sources> {
     Ok(out)
 }
 
+/// The script's sources as the app records them before generating from what it has loaded: `script_sources`, and while
+/// subterrains are closed (`crate::terrain_open`) `CLOSED_KEY` with how many, so `check_script` takes the script for one
+/// made from part of the map (the placed objects of the closed ones are missing from it) whatever else matches.
+pub fn script_sources_open(project: &Path) -> Result<Sources> {
+    let mut out = script_sources(project)?;
+    let map = project.join(MAP_DIR);
+    if crate::terrain_layout::is_split_on_disk(&map)? {
+        let bytes = fs::read(map.join(crate::terrain_layout::DIR).join("terrain.json")).map_err(|e| Error::Project(format!("map/{} can't be read: {e}", crate::terrain_layout::LAYOUT_FILE)))?;
+        let layout = crate::terrain_layout::Layout::parse(&bytes)?;
+        if let Some(partial) = crate::terrain_open::of_map_dir(&map, &layout)? {
+            out.insert(CLOSED_KEY.to_string(), partial.closed_count().to_string());
+        }
+    }
+    Ok(out)
+}
+
 /// Records that the generated map script in the store follows `sources` (`script_sources`, taken before it was made);
 /// the record's other group stays.
 pub fn record_script(project: &Path, sources: &Sources) -> Result<()> {

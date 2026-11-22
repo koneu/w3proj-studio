@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { withOwnCommon } from "./owncommon";
 import { checkJass, envFrom } from "./check";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { gameFiles, mainCheckout } from "../testhelpers/gamefiles";
+import { skipOrFail } from "../testhelpers/testutil";
 
 const game = [
   "type agent extends handle",
@@ -57,6 +61,28 @@ test("a script using both files' declarations checks against the merged common.j
   assert.deepEqual(errors(withOwnCommon(game, own)), []);
   assert.ok(errors(game).length > 0, "control: the game's alone lacks the map's natives and constants");
   assert.ok(errors(own).length > 0, "control: the map's alone lacks the game's newer natives");
+});
+
+/** WoW Reforged (smoketest_maps/build_2/wowr4.6, a project: its own map/Scripts/common.j): what its war3map.j uses that
+ *  the game's common.j lacks is in the merged file (trigger-folders stage 0: 3,994 constants and 2 natives), and the
+ *  game's newer natives stay. Checked with the app's JASS checker: no undeclared names from either file are left. */
+test("WoW Reforged's script checks against the game's common.j plus its own", (ctx) => {
+  const where = mainCheckout();
+  const project = where ? join(process.env.W3PROJ_CORPUS ?? join(where.main, "smoketest_maps"), "build_2", "wowr4.6", "map") : "";
+  const [gameCommon, gameBlizzard] = gameFiles(["War3.w3mod:Scripts/common.j", "War3.w3mod:Scripts/Blizzard.j"]).map((f) => new TextDecoder().decode(f.bytes));
+  if (!gameBlizzard || !existsSync(join(project, "Scripts", "common.j"))) return skipOrFail(ctx, "no game or release CLI, or no smoketest_maps/build_2/wowr4.6");
+  const own = readFileSync(join(project, "Scripts", "common.j"), "utf8");
+  const merged = withOwnCommon(gameCommon, own);
+  for (const name of ["GetUnitGoldCost", "GetUnitWoodCost", "ITEM_VALUES_DUMMY_HERO"]) {
+    assert.ok(!new RegExp(`\\b${name}\\b`).test(gameCommon) && new RegExp(`\\b${name}\\b`).test(merged), `${name}: the map's, not the game's`);
+  }
+  const undeclared = (common: string) => {
+    const env = envFrom([gameBlizzard], envFrom([common]));
+    return checkJass(readFileSync(join(project, "war3map.j"), "utf8"), env).filter((d) => /undeclared|not declared|unknown/i.test(d.message)).length;
+  };
+  const [withGame, withMerged] = [undeclared(gameCommon), undeclared(merged)];
+  assert.ok(withGame > 100, `control: the game's common.j alone leaves ${withGame} names undeclared`);
+  assert.equal(withMerged, 0, "with the map's own declarations added none is left");
 });
 
 test("nothing to add: the game's file as it is", () => {

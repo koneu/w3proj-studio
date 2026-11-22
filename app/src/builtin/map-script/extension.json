@@ -12,6 +12,7 @@
     ],
     "editors": [{ "id": "w3.scriptDiff", "title": "Script Changes", "patterns": ["w3:script-diff:**/*", "w3:script-diff:*"] }],
     "commands": [{ "id": "w3.script.generate", "when": "project", "menu": "Tools:1:2", "title": "Generate Map Script", "category": "Project" },
+      { "id": "w3.script.regenerate", "when": "project", "title": "Regenerate Map Script…", "category": "Project" },
       { "id": "w3.script.export", "when": "project", "title": "Export Script…", "category": "Project" }
     ],
     "configuration": {

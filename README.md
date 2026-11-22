@@ -325,7 +325,11 @@ have no map item, ids or nesting, and pack refuses what they can't hold (a folde
 A map whose triggers TriggerData can't read (or that has only one of the two files) keeps both raw. The map script stays
 a tracked `map/war3map.j` for a map Studio didn't write (`"kept"`); with `"generated"` it lives in `.w3proj/derived/`
 (git-ignored) and `w3proj pack` takes it only while `.w3proj/derived-from.json` says it follows its sources
-(`--allow-stale-script` packs it as it is, a missing one never).
+(`--allow-stale-script` packs it as it is, a missing one never). A new map's script is generated; Studio makes it again
+on saves and when the project opens stale (a vJASS script only on pack and on **Regenerate Map Script…**: JassHelper
+takes seconds), and `w3proj pack` makes a stale or missing one again through the app's code when the game is there.
+**Regenerate Map Script…** switches a kept script to generated after naming the functions it would lose (JassHelper's
+run-to-run names aside); a checkpoint keeps the old one.
 
 In the app the folders are one document, `map/triggers`, for the Trigger Editor and every tool: the backend reads the
 whole tree in one call and saves it by writing only the files whose content changed (a renamed item's file is renamed,

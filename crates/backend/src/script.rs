@@ -49,10 +49,11 @@ pub fn state(root: &str) -> CmdResult<State> {
     Ok(State { mode: Some("generated"), freshness: Some(freshness), changed, why, stored })
 }
 
-/// "script_sources": the files the map script is made from, as they are now (`w3proj::derived::script_sources`), taken
-/// before the generator reads them: one written meanwhile shows as changed in the record.
+/// "script_sources": the files the map script is made from, as they are now, taken before the generator reads them: one
+/// written meanwhile shows as changed in the record. With subterrains closed the generator sees part of the map, and the
+/// record says so (`w3proj::derived::script_sources_open`).
 pub fn sources(root: &str) -> CmdResult<BTreeMap<String, String>> {
-    derived::script_sources(Path::new(root)).map_err(err)
+    derived::script_sources_open(Path::new(root)).map_err(err)
 }
 
 /// "script_record": records that the generated script in the store was made from `sources` (`sources`). Only for a
@@ -146,6 +147,26 @@ mod tests {
         assert!(!stored.exists() && crate::flatview::script_of(&j).unwrap().is_none());
         assert_eq!(state(&root).unwrap().mode, Some("kept"));
         assert!(set_mode(&root, "both").is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Generated while subterrains are closed (Open Subterrains…): the generator saw part of the map (the closed ones'
+    /// placed objects aren't in its flat files), so the record says partial and the script doesn't follow, whatever else
+    /// matches; with all open again the same recording is fresh (control).
+    #[test]
+    fn a_script_made_with_subterrains_closed_follows_part_of_the_map() {
+        let dir = mini("partial");
+        let root = dir.to_string_lossy().into_owned();
+        w3proj::terrain_layout::split_project(&dir, &w3proj::terrain_layout::grid_2x2(5, 3)).unwrap();
+        set_mode(&root, "generated").unwrap();
+        crate::flatview::set_open(&root, &["ne".into()]).unwrap();
+        record(&root, &sources(&root).unwrap()).unwrap();
+        let s = state(&root).unwrap();
+        assert_eq!(s.freshness, Some("partial"), "{s:?}");
+        assert!(s.why.unwrap_or_default().contains("3 subterrains were closed"));
+        crate::flatview::set_open(&root, &["sw".into(), "se".into(), "nw".into(), "ne".into()]).unwrap();
+        record(&root, &sources(&root).unwrap()).unwrap();
+        assert_eq!(state(&root).unwrap().freshness, Some("fresh"));
         let _ = fs::remove_dir_all(&dir);
     }
 
