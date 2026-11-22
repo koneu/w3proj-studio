@@ -27,6 +27,9 @@ export { LAYOUT_FILE };
 /** The flat files the split layout stands for (terrain_layout.rs FLAT_NAMES). */
 export const FLAT_FILES = ["map/war3map.w3e.txt", "map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json"];
 
+/** FLAT_FILES lowercased, to match the lowercased path in `affected` (the units file has a capital U). */
+const FLAT_LOWER = FLAT_FILES.map((f) => f.toLowerCase());
+
 /** What a conversion did (terrain_layout.rs Converted), relative to the project. */
 interface Converted { written: string[]; removed: string[] }
 
@@ -82,7 +85,7 @@ async function convert<T extends Converted>(w3: W3Api, what: string, run: (root:
   }
   if (w3.workspace.project()?.root !== root) return done;
   await w3.workspace.refresh();
-  const affected = (p: string) => { const k = p.replace(/\\/g, "/").toLowerCase(); return FLAT_FILES.includes(k) || k.startsWith("map/terrain/"); };
+  const affected = (p: string) => { const k = p.replace(/\\/g, "/").toLowerCase(); return FLAT_LOWER.includes(k) || k.startsWith("map/terrain/"); };
   for (const p of w3.editors.openPaths().filter(affected)) await w3.editors.reopen(p);
   if (!quiet) void w3.window.showInfo(`${what}: ${done.written.length} file${done.written.length === 1 ? "" : "s"} written, ${done.removed.length} removed.`);
   return done;
@@ -577,7 +580,7 @@ export async function setOpenSubterrains(w3: W3Api, names: string[]): Promise<Op
   // The view's next paint starts from the new choice, not the old one (see renderView).
   if (state) viewState = { root, state };
   await w3.workspace.refresh();
-  for (const p of w3.editors.openPaths().filter((p) => FLAT_FILES.includes(p.replace(/\\/g, "/").toLowerCase()))) await w3.editors.reopen(p);
+  for (const p of w3.editors.openPaths().filter((p) => FLAT_LOWER.includes(p.replace(/\\/g, "/").toLowerCase()))) await w3.editors.reopen(p);
   w3.views.refresh(SUBTERRAINS_VIEW);
   return state;
 }
