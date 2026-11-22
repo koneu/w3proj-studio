@@ -22,7 +22,8 @@ import { nextRegionIndex } from "../lib/terrain/regions";
 import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
-import { checkTerrainIds, checkTerrainSeams, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { MCP_EDITS_SERVICE } from "../extensions/services";
+import { checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
 
@@ -217,7 +218,52 @@ test("a new object in a split project is numbered from its subterrain's range an
   // The control: the flat project numbers one past the highest (the footman's 2).
   assert.deepEqual(await placeUnits(flat, [SW]), [3]);
   assert.equal((await loadPlacedFile(flat, "war3mapUnits.doo", "units"))!.idLayout, null);
-  await assert.rejects(checkTerrainIds(flat, { quiet: true }), /isn't split/);
+  // A flat project is checked too (numbers found twice; it has no ranges).
+  const flatCheck = await checkTerrainIds(flat, { quiet: true });
+  assert.equal(flatCheck.errors, false, flatCheck.lines.join("\n"));
+});
+
+test("Fix Duplicate Creation Numbers on a flat project (three stacked doodads share a number, the last an exact copy): listed, refused unsaved, renumbered as one edit, then it splits", async () => {
+  const root = project("fixids");
+  const path = join(root, "map", "war3map.doo.json");
+  const doo = JSON.parse(readFileSync(path, "utf8")) as { doodads: Record<string, unknown>[] };
+  const lt = { ...doo.doodads[1], position: [96, 96, 0], editorId: 581 };
+  doo.doodads.push({ ...lt, variation: 3 }, lt, { ...lt });
+  writeFileSync(path, JSON.stringify(doo, null, 2));
+  const w3 = await open(root);
+  const writes: string[] = [];
+  // The undoable edit as the MCP server provides it: here written through the workspace.
+  w3.services.provide(MCP_EDITS_SERVICE, { edit: async (_t: string, change: (read: (p: string) => Promise<string | null>) => Promise<{ path: string; text: string }[]>) => {
+    const files = await change((p) => w3.workspace.readText(p).catch(() => null));
+    for (const f of files) { writes.push(f.path); await w3.workspace.writeText(f.path, f.text); }
+    return files.length > 0;
+  } });
+  const check = await checkTerrainIds(w3, { quiet: true });
+  assert.equal(check.errors, true);
+  assert.deepEqual(check.duplicates.map((d) => [d.kind, d.number, d.members.map((m) => [m.index, m.id, m.copyOf ?? null])]), [["doodads", 581, [[2, "LOtr", null], [3, "LOtr", null], [4, "LOtr", 3]]]]);
+  await assert.rejects(splitTerrain(w3, { layout: "main", quiet: true }), /doodads\[2\], doodads\[3\] and doodads\[4\] have the same creation number 581.*fix-ids/);
+  // The plans, nothing written.
+  const before = snapshot(root);
+  const renumber = await fixCreationIds(w3, { mode: "renumber", dryRun: true, quiet: true });
+  assert.deepEqual(renumber?.groups[0].members.map((m) => [m.action, m.to ?? null]), [["keep", null], ["renumber", 582], ["renumber", 583]]);
+  const deleting = await fixCreationIds(w3, { mode: "deleteCopies", dryRun: true, quiet: true });
+  assert.deepEqual([deleting?.deleted, deleting?.stillTwice, deleting?.groups[0].members.map((m) => m.action)], [1, 2, ["keep", "stays", "delete"]]);
+  assert.deepEqual(changedFiles(before, snapshot(root)), [], "a plan writes nothing");
+  // Refused while something is unsaved.
+  const unsaved = w3.editors.unsavedPaths;
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = () => ["map/war3map.w3i.json"];
+  await assert.rejects(fixCreationIds(w3, { mode: "renumber", quiet: true }), /save or discard the changes in map\/war3map.w3i.json first/);
+  (w3.editors as { unsavedPaths: () => string[] }).unsavedPaths = unsaved;
+  assert.deepEqual(writes, []);
+  const done = await fixCreationIds(w3, { mode: "renumber", quiet: true });
+  assert.equal(done?.renumbered, 2);
+  assert.deepEqual(writes, ["map/war3map.doo.json"], "one edit of one file");
+  const after = JSON.parse(readFileSync(path, "utf8")) as { doodads: Record<string, unknown>[] };
+  assert.deepEqual(after.doodads.map((d) => d.editorId), [0, 1, 581, 582, 583]);
+  assert.deepEqual(after.doodads.map((d) => ({ ...d, editorId: 0 })), doo.doodads.map((d) => ({ ...d, editorId: 0 })), "nothing else changed");
+  assert.equal((await checkTerrainIds(w3, { quiet: true })).errors, false);
+  await splitTerrain(w3, { layout: "main", quiet: true });
+  assert.ok(isSplit(w3));
 });
 
 test("a full range: the next block above every range, recorded in terrain.json by the save", async () => {
@@ -256,7 +302,8 @@ test("two branches placing in different subterrains merge without a duplicate nu
   await assert.rejects(loadPlacedFile(a.w3, "war3mapUnits.doo", "units"), /creation number 10000 twice/);
   const report = await checkTerrainIds(a.w3, { quiet: true });
   assert.equal(report.errors, true);
-  assert.deepEqual(report.duplicates, [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"] }]);
+  assert.deepEqual(report.duplicates.map(({ members, ...d }) => ({ ...d, members: members.map((m) => [m.file, m.id]) })),
+    [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"], members: [["map/terrain/sw/units.json", "hfoo"], ["map/terrain/sw/units.json", "hfoo"]] }]);
 });
 
 // ---- stage 3: derived files in .w3proj/derived/, the Pathing tool's file in the subterrains' pathing.txt ----

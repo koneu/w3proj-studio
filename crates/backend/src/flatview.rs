@@ -463,6 +463,37 @@ pub fn check(root: &str) -> CmdResult<serde_json::Value> {
     Ok(v)
 }
 
+/// "Fix Duplicate Creation Numbers…" (`terrain_fix_ids`, as `w3proj terrain fix-ids`): every creation number found
+/// twice with all its members, and what `mode` ("renumber", "deleteCopies", or none: only list them) does. `files`: the
+/// new files (relative to the project) and their text; a flat project's object files in their codec's form (what a save
+/// writes), so a renumber changes nothing else of them. Nothing is written here: `write` writes them (the CLI), the app
+/// writes them as one undoable edit.
+pub fn fix_ids(root: &str, mode: Option<&str>, write: bool, formats: &[std::path::PathBuf]) -> CmdResult<serde_json::Value> {
+    use w3proj::terrain_ids::FixMode;
+    let mode = match mode {
+        None => None,
+        Some("renumber") => Some(FixMode::Renumber),
+        Some("deleteCopies") => Some(FixMode::DeleteCopies),
+        Some(m) => return Err(format!("mode must be \"renumber\" or \"deleteCopies\", not \"{m}\"")),
+    };
+    let mut plan = w3proj::terrain_ids::fix_plan(Path::new(root), mode).map_err(err)?;
+    let split = plan.files.keys().any(|p| p.starts_with("map/terrain/"));
+    let mut files = Vec::new();
+    for (path, bytes) in plan.files.iter_mut() {
+        let text = String::from_utf8(bytes.clone()).map_err(err)?;
+        // A flat object file as its codec writes it (what unpack and a save write).
+        let text = if split { text } else { crate::codec_canonicalize(root, path, &text, formats)? };
+        *bytes = text.clone().into_bytes();
+        files.push(serde_json::json!({ "path": path, "text": text }));
+    }
+    let written = if write { w3proj::terrain_ids::fix_write(Path::new(root), &plan).map_err(err)? } else { Vec::new() };
+    let mut v = serde_json::to_value(&plan).map_err(err)?;
+    v["files"] = files.into();
+    v["lines"] = plan.lines().into();
+    v["written"] = written.into();
+    Ok(v)
+}
+
 /// One subterrain's rectangle (`terrain_whole`).
 #[derive(Serialize, Debug, PartialEq)]
 pub struct SubterrainRect {

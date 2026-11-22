@@ -1249,7 +1249,7 @@ fn terrain_relayout_packs_the_same_map() {
 
 /// `w3proj terrain check`: a split project's creation numbers. Numbers outside a subterrain's range are information
 /// (exit 0); a number in two subterrains' files is an error naming both (exit 1), and the same duplicate stops a pack,
-/// naming both files. A flat project has nothing to check.
+/// naming both files. A flat project without numbers twice passes.
 #[test]
 fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     let dir = workdir("terrain_check");
@@ -1257,7 +1257,7 @@ fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     pack(&fixture(), &map);
     let project = dir.join("project");
     unpack(&map, &project);
-    assert!(!w3proj(&["terrain", "check", s(&project)]).status.success(), "flat: refused");
+    assert!(ok(&["terrain", "check", s(&project)]).contains("0 found twice"), "flat: checked, nothing twice");
     let mut args = vec!["terrain", "split", s(&project)];
     for r in ["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"] {
         args.extend(["--rect", r]);
@@ -1281,3 +1281,70 @@ fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     assert!(!o.status.success() && text(&o).contains("creation number 2 is in map/terrain/sw/units.json and in map/terrain/ne/units.json"), "{}", text(&o));
 }
 
+
+/// `w3proj terrain fix-ids` on the pattern of a real map that couldn't be split (wowr4.6: creation number 581 on three
+/// stacked doodads, the last an exact copy of the one before): `terrain check` lists all three in the flat project, the
+/// split names all three and points at the fix, fix-ids without --apply only prints the plan; --renumber --apply changes
+/// the two numbers and nothing else (the packed war3map.doo differs in their eight bytes only), and the map then splits,
+/// merges back and packs the same. --delete-copies takes only the copy.
+#[test]
+fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
+    let dir = workdir("fix_ids");
+    let map = dir.join("first.w3x");
+    pack(&fixture(), &map);
+    let project = dir.join("project");
+    unpack(&map, &project);
+    let doo_path = project.join("map/war3map.doo.json");
+    let mut doo: serde_json::Value = serde_json::from_slice(&fs::read(&doo_path).unwrap()).unwrap();
+    let list = doo["doodads"].as_array_mut().unwrap();
+    let mut lt = list[1].clone();
+    lt["position"] = serde_json::json!([96.0, 96.0, 0.0]);
+    lt["editorId"] = 581.into();
+    let mut other = lt.clone();
+    other["variation"] = 1.into();
+    list.extend([other, lt.clone(), lt]);
+    fs::write(&doo_path, serde_json::to_vec_pretty(&doo).unwrap()).unwrap();
+    // As unpack writes it, so the plan's file differs from it by the numbers only.
+    let twice = dir.join("twice.w3x");
+    ok(&["pack", s(&project), "-o", s(&twice), "--force-stale"]);
+    unpack(&twice, &project);
+    let o = w3proj(&["terrain", "check", s(&project)]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    for m in ["map/war3map.doo.json [2]", "map/war3map.doo.json [3]", "map/war3map.doo.json [4]", "an exact copy of [3]", "fix-ids"] {
+        assert!(text(&o).contains(m), "{m}: {}", text(&o));
+    }
+    let o = w3proj(&["terrain", "split", s(&project)]);
+    assert!(!o.status.success() && text(&o).contains("doodads[2], doodads[3] and doodads[4] have the same creation number 581") && text(&o).contains("fix-ids"), "{}", text(&o));
+    let before = files(&project);
+    let plan = ok(&["terrain", "fix-ids", s(&project), "--renumber"]);
+    assert!(plan.contains("[3] ") && plan.contains("gets 582") && plan.contains("gets 583") && plan.contains("--apply"), "{plan}");
+    assert_eq!(files(&project), before, "a plan wrote something");
+    let said = ok(&["terrain", "fix-ids", s(&project), "--renumber", "--apply"]);
+    assert!(said.contains("wrote map/war3map.doo.json"), "{said}");
+    let after = files(&project);
+    let changed: Vec<&String> = after.keys().filter(|k| before.get(*k) != after.get(*k)).collect();
+    assert_eq!(changed, ["map/war3map.doo.json"]);
+    let fixed = dir.join("fixed.w3x");
+    ok(&["pack", s(&project), "-o", s(&fixed), "--force-stale"]);
+    let (a, b) = (w3proj(&["cat", s(&twice), "war3map.doo"]).stdout, w3proj(&["cat", s(&fixed), "war3map.doo"]).stdout);
+    assert_eq!(a.len(), b.len());
+    let differ: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+    // 581, 582 and 583 differ in their lowest byte only (0x45, 0x46, 0x47; little-endian u32).
+    let got: Vec<(u8, u8)> = differ.iter().map(|&i| (a[i], b[i])).collect();
+    assert_eq!(got, [(0x45, 0x46), (0x45, 0x47)], "only the two numbers' bytes differ: at {differ:?}");
+    ok(&["terrain", "check", s(&project)]);
+    ok(&["terrain", "split", s(&project)]);
+    ok(&["terrain", "merge", s(&project)]);
+    let again = dir.join("again.w3x");
+    ok(&["pack", s(&project), "-o", s(&again), "--force-stale"]);
+    assert_eq!(w3proj(&["cat", s(&again), "war3map.doo"]).stdout, b, "split and merged back, the same doodads");
+
+    // Delete Copies on the map as it was: only the copy goes, the one that differs stays and is said.
+    let project = dir.join("project2");
+    unpack(&twice, &project);
+    let said = ok(&["terrain", "fix-ids", s(&project), "--delete-copies", "--apply"]);
+    assert!(said.contains("deleted") && said.contains("stays (not an exact copy)") && said.contains("1 deleted, 2 still sharing a number"), "{said}");
+    let doo: serde_json::Value = serde_json::from_slice(&fs::read(project.join("map/war3map.doo.json")).unwrap()).unwrap();
+    assert_eq!(doo["doodads"].as_array().unwrap().len(), 4);
+    assert!(!w3proj(&["terrain", "split", s(&project)]).status.success(), "two that differ still share 581");
+}

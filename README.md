@@ -330,6 +330,12 @@ while anything is unsaved, when one would be cut in pieces, or when a corner lef
 **Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. A split terrain still can't
 change its map size (Map Size refuses at the save): merge it first.
 
+A creation number (the number scripts name objects by, `gg_dest_LT04_0581`) found on more than one doodad, unit or
+region stops a split and a pack; **Check Terrain IDs** (`w3proj terrain check`, flat projects too) lists every object
+holding one, and **Fix Duplicate Creation Numbers…** (`w3proj terrain fix-ids`, MCP `fix_creation_ids`) shows the plan
+and then, by choice, renumbers every one but the first (in its subterrain's range; a flat map above the highest number)
+or deletes exact copies only. Nothing is renumbered on its own.
+
 Every codec is checked on unpack: a file is only stored as JSON or text if
 `encode(decode(file))` gives back the original bytes. If not, it stays raw, so packing doesn't
 lose anything. This was run over 676 local maps without a mismatch.
@@ -522,6 +528,8 @@ w3proj terrain seams MyMap/         # a split terrain's seams checked with the b
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
                                     # new set of subterrains (joined, renamed, resized, new); the map stays the same
+w3proj terrain fix-ids MyMap/ --renumber   # creation numbers found twice (flat or split): the plan; --apply writes
+                                    # it; --delete-copies removes exact copies only (those that differ stay)
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
                                     # --mode sd|hd|de; --force also makes fresh ones and replaces a script

@@ -419,6 +419,32 @@ fn flat_err(kind: Kind, m: impl std::fmt::Display) -> Error {
     Error::Format(format!("map/{} can't go into map/{}/: {m}", kind.flat(), tl::DIR))
 }
 
+/// What a creation number found twice says, wherever it stops the work: how to fix it.
+pub const FIX_HINT: &str = "creation numbers are never renumbered on their own: Fix Duplicate Creation Numbers… (or `w3proj terrain fix-ids`) renumbers them or deletes exact copies";
+
+/// "a", "a and b", "a, b and c".
+fn and_list(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The error for the creation numbers of a flat file's list found more than once (`numbers`: number → indices): every
+/// member of every such number, and how to fix them. None when every number is there once.
+fn twice_err(kind: Kind, key: &str, numbers: &BTreeMap<u32, Vec<usize>>) -> Option<Error> {
+    let groups: Vec<String> = numbers
+        .iter()
+        .filter(|(_, v)| v.len() > 1)
+        .map(|(n, v)| format!("{} have the same creation number {n}", and_list(&v.iter().map(|i| format!("{key}[{i}]")).collect::<Vec<_>>())))
+        .collect();
+    if groups.is_empty() {
+        return None;
+    }
+    Some(flat_err(kind, format!("{} ({FIX_HINT})", groups.join("; "))))
+}
+
 fn u32_of(v: Option<&Value>) -> Option<u32> {
     v.and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok())
 }
@@ -492,19 +518,20 @@ pub(crate) fn slice(flats: &Flats, subs: &[Subterrain], offset: [f32; 2]) -> Res
             let key = list_key(kind, list);
             let mut keys = Vec::with_capacity(entries.len());
             let mut owners = Vec::with_capacity(entries.len());
-            let mut seen: HashMap<u32, usize> = HashMap::new();
+            let mut seen: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
             for (i, e) in entries.iter().enumerate() {
                 let k = sort_key(kind, list, version, e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 if let SortKey::Number(n) = k {
                     if assigned(kind, n) {
-                        if let Some(first) = seen.insert(n, i) {
-                            return Err(flat_err(kind, format!("{key}[{first}] and {key}[{i}] have the same creation number {n} (creation numbers are never renumbered: change one by hand)")));
-                        }
+                        seen.entry(n).or_default().push(i);
                     }
                 }
                 keys.push(k);
                 let (x, y) = position(kind, list, e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 owners.push(owner(subs, offset, x, y));
+            }
+            if let Some(e) = twice_err(kind, key, &seen) {
+                return Err(e);
             }
             // The sorted order merging gives the entries without `order`: by key, entries with equal keys (unassigned
             // numbers) in subterrain order, then in their file's order (the flat order).
@@ -626,6 +653,23 @@ pub(crate) fn assemble_with(
     near: &dyn Fn([f64; 4]) -> bool,
     get: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Flats> {
+    assemble_inner(heads, subs, offset, take, near, get, false)
+}
+
+/// `assemble` of every subterrain that lets creation numbers found twice through (what fixing them reads).
+pub(crate) fn assemble_twice_ok(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Flats> {
+    assemble_inner(heads, subs, [0.0, 0.0], &|_| Some(true), &|_| true, get, true)
+}
+
+fn assemble_inner(
+    heads: &Heads,
+    subs: &[Subterrain],
+    offset: [f32; 2],
+    take: &dyn Fn(usize) -> Option<bool>,
+    near: &dyn Fn([f64; 4]) -> bool,
+    get: &dyn Fn(&str) -> Option<Vec<u8>>,
+    twice_ok: bool,
+) -> Result<Flats> {
     let mut out = BTreeMap::new();
     let version = doodads_version(heads);
     for kind in KINDS.into_iter().filter(|k| heads.has(*k)) {
@@ -642,14 +686,14 @@ pub(crate) fn assemble_with(
                 }
                 for item in &items {
                     if let SortKey::Number(n) = item.key {
-                        if !assigned(kind, n) {
+                        if !assigned(kind, n) || twice_ok {
                             continue;
                         }
                         if let Some(other) = seen.insert(n, path.clone()) {
                             return Err(Error::Format(if other == path {
-                                format!("map/{path} holds creation number {n} twice (creation numbers are never renumbered: change one by hand)")
+                                format!("map/{path} holds creation number {n} twice ({FIX_HINT})")
                             } else {
-                                format!("creation number {n} is in map/{other} and in map/{path} (creation numbers are never renumbered: change one by hand)")
+                                format!("creation number {n} is in map/{other} and in map/{path} ({FIX_HINT})")
                             }));
                         }
                     }
@@ -796,16 +840,19 @@ pub(crate) fn write_partial(
                 }
             }
         }
-        let mut seen: HashMap<u32, usize> = HashMap::new();
-        for (i, e) in entries.into_iter().enumerate() {
-            let k = sort_key(kind, list, version, &e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
-            if let SortKey::Number(n) = k {
+        let mut seen: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+        for (i, e) in entries.iter().enumerate() {
+            if let Ok(SortKey::Number(n)) = sort_key(kind, list, version, e) {
                 if assigned(kind, n) {
-                    if let Some(first) = seen.insert(n, i) {
-                        return Err(flat_err(kind, format!("{key}[{first}] and {key}[{i}] have the same creation number {n} (creation numbers are never renumbered: change one by hand)")));
-                    }
+                    seen.entry(n).or_default().push(i);
                 }
             }
+        }
+        if let Some(e) = twice_err(kind, key, &seen) {
+            return Err(e);
+        }
+        for (i, e) in entries.into_iter().enumerate() {
+            let k = sort_key(kind, list, version, &e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
             let (x, y) = position(kind, list, &e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
             let o = owner(subs, offset, x, y);
             match kept.get_mut(&canon(&e)).and_then(Vec::pop) {
@@ -890,6 +937,118 @@ pub(crate) fn sub_numbers(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str)
         }
     }
     Ok(out)
+}
+
+// ---- creation numbers found twice (crate::terrain_ids::fix_plan) ----
+
+/// One of the objects of a flat file's list that share a creation number.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Twin {
+    /// Its index in the flat file's list.
+    pub index: usize,
+    /// Its type (a region: its name).
+    pub id: String,
+    /// Where it stands (a region: its minimum corner); null when that isn't a number.
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    /// The index of an earlier member it is an exact copy of: every field alike but the creation number.
+    #[serde(rename = "copyOf", skip_serializing_if = "Option::is_none")]
+    pub copy_of: Option<usize>,
+}
+
+/// The objects of a flat file's list sharing one assigned creation number, in their flat order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Twins {
+    pub number: u32,
+    pub members: Vec<Twin>,
+}
+
+/// The field holding an entry's creation number (`sort_key`): a version-13 doodad's `trailer[0]`, else `editorId`, a
+/// region's `index`.
+fn number_field(kind: Kind, version: u32) -> &'static str {
+    match kind {
+        Kind::Doodads if version >= 13 => "trailer",
+        Kind::Doodads | Kind::Units => "editorId",
+        Kind::Regions => "index",
+    }
+}
+
+/// An entry's text without its creation number, for telling exact copies.
+fn text_without_number(kind: Kind, version: u32, e: &Entry) -> String {
+    let mut e = e.clone();
+    match number_field(kind, version) {
+        "trailer" => {
+            if let Some(first) = e.get_mut("trailer").and_then(Value::as_array_mut).and_then(|t| t.first_mut()) {
+                *first = Value::from(0);
+            }
+        }
+        f => {
+            e.shift_remove(f);
+        }
+    }
+    canonical(&Value::Object(e))
+}
+
+/// Every assigned creation number (`assigned`) of a flat object file's own list found more than once, with all its
+/// members.
+pub fn flat_twins(kind: Kind, bytes: &[u8]) -> Result<Vec<Twins>> {
+    let (head, lists) = read_flat(kind, bytes)?;
+    let version = doodads_version(&head);
+    let key = list_key(kind, List::Main);
+    let entries = lists.into_iter().next().unwrap_or_default();
+    let mut by: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        if let SortKey::Number(n) = sort_key(kind, List::Main, version, e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))? {
+            if assigned(kind, n) {
+                by.entry(n).or_default().push(i);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (number, at) in by.into_iter().filter(|(_, v)| v.len() > 1) {
+        let texts: Vec<String> = at.iter().map(|&i| text_without_number(kind, version, &entries[i])).collect();
+        let members = at
+            .iter()
+            .enumerate()
+            .map(|(m, &i)| {
+                let e = &entries[i];
+                let p = position(kind, List::Main, e, [0.0, 0.0]).ok();
+                let id = e.get(if kind == Kind::Regions { "name" } else { "id" }).and_then(Value::as_str).unwrap_or_default().to_string();
+                Twin { index: i, id, x: p.map(|p| p.0), y: p.map(|p| p.1), copy_of: (0..m).find(|&j| texts[j] == texts[m]).map(|j| at[j]) }
+            })
+            .collect();
+        out.push(Twins { number, members });
+    }
+    Ok(out)
+}
+
+/// The flat object file with new creation numbers (`renumber`: index in its list → number) and entries taken out
+/// (`delete`: indices), as JSON (the caller writes it in the codec's form). An index past the list is an error.
+pub fn flat_fixed(kind: Kind, bytes: &[u8], renumber: &[(usize, u32)], delete: &[usize]) -> Result<Vec<u8>> {
+    let (head, _) = read_flat(kind, bytes)?;
+    let field = number_field(kind, doodads_version(&head));
+    let mut doc: Value = serde_json::from_slice(bytes).map_err(|e| flat_err(kind, format!("it isn't JSON ({e})")))?;
+    let key = list_key(kind, List::Main);
+    let list = doc.get_mut(key).and_then(Value::as_array_mut).ok_or_else(|| flat_err(kind, format!("its {key} isn't a list")))?;
+    for &(i, n) in renumber {
+        let e = list.get_mut(i).and_then(Value::as_object_mut).ok_or_else(|| flat_err(kind, format!("{key}[{i}] isn't there")))?;
+        match field {
+            "trailer" => *e.get_mut("trailer").and_then(Value::as_array_mut).and_then(|t| t.first_mut()).ok_or_else(|| flat_err(kind, format!("{key}[{i}] has no trailer")))? = n.into(),
+            f => {
+                e.insert(f.into(), n.into());
+            }
+        }
+    }
+    let mut gone = delete.to_vec();
+    gone.sort_unstable();
+    gone.dedup();
+    for &i in gone.iter().rev() {
+        if i >= list.len() {
+            return Err(flat_err(kind, format!("{key}[{i}] isn't there")));
+        }
+        list.remove(i);
+    }
+    Ok(pretty(&doc))
 }
 
 /// Whether two flat object files hold the same (as JSON: they pack into the same bytes).
