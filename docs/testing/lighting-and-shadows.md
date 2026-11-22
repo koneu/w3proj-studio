@@ -153,3 +153,10 @@ largest (0.573 against 0.635; that core is the smallest, 2778 pixels). Left: 8 d
 its blue reflection there, the editor's doesn't), and the shadow's shape on deep water: the editor's is longer than
 Studio's (80 deep, scale 1: from the tree's top 148 pixels along against Studio's 120, land shadows alike at 233), as if
 the editor looked the shadow up below the surface.
+
+**Calculate Shadows in DE** (branch fix-water-shadow-de, 2026-11-22; `de-ruins.w3x`, `make-shadow-probes.mjs de-ruins`,
+we-drive `--mode de --save-shadows` against Studio with `game.graphicsMode` de): the editor's DE and HD shadow maps are the
+same bytes; EW00, ET00, LRrk and the plateau match Studio's; EMt0 (ExteriorMainTower, at -3072, -1024, 270°) has 5 cells
+more in Studio: row 95 (16 units south of the tower's centre), cells 24..26 and 38..39, the west and east rims of its
+footprint, which the editor leaves lit. A footprint-edge case of the doodad rule like the boxes' 8 edge cells above:
+not found.
