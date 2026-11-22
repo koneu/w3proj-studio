@@ -367,25 +367,94 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
 /// `sw`, `se`, `nw`, `ne`), or one subterrain `main` over the canvas when there are none. The files written and
 /// removed, relative to the project; the refusal's reason as the error, nothing written then.
 pub fn split(root: &str, rects: &[String]) -> CmdResult<layout::Converted> {
+    let rects = split_rects(root, rects)?;
+    layout::split_project(Path::new(root), &rects).map_err(err)
+}
+
+/// A split's rectangles as given (`split`): `2x2` the grid over the flat canvas.
+fn split_rects(root: &str, rects: &[String]) -> CmdResult<Vec<layout::Rect>> {
     let map_dir = Path::new(root).join(w3proj::project::MAP_DIR);
     if layout::is_split_on_disk(&map_dir).map_err(err)? {
         return Err("the terrain is split already".into());
     }
-    let rects = if rects.len() == 1 && rects[0] == "2x2" {
+    if rects.len() == 1 && rects[0] == "2x2" {
         let [w, h] = layout::flat_canvas(&map_dir).map_err(err)?;
-        layout::grid_2x2(w, h)
-    } else {
-        rects.iter().map(|r| r.parse::<layout::Rect>()).collect::<Result<Vec<_>, _>>()?
-    };
-    layout::split_project(Path::new(root), &rects).map_err(err)
+        return Ok(layout::grid_2x2(w, h));
+    }
+    rects.iter().map(|r| r.parse::<layout::Rect>()).collect()
+}
+
+/// "terrain_split_preview" (the layout editor's Split Terrain): what `split` would write, every subterrain with its
+/// objects; nothing written. The refusal's reason as the error.
+pub fn split_preview(root: &str, rects: &[String]) -> CmdResult<layout::Preview> {
+    let rects = split_rects(root, rects)?;
+    layout::split_preview(Path::new(root), &rects).map_err(err)
 }
 
 /// New, resized, renamed and joined subterrains (`terrain_relayout`, as `w3proj terrain relayout`): `plan` is the new
 /// set, each `NAME[=OLD+OLD]:x,y,w,h` (`w3proj::terrain_layout::Planned`). The files written and removed; the refusal's
 /// reason as the error, nothing written then.
 pub fn relayout(root: &str, plan: &[String]) -> CmdResult<layout::Converted> {
-    let plan = plan.iter().map(|p| p.parse::<layout::Planned>()).collect::<Result<Vec<_>, _>>()?;
-    layout::relayout_project(Path::new(root), &plan).map_err(err)
+    layout::relayout_project(Path::new(root), &parse_plan(plan)?).map_err(err)
+}
+
+fn parse_plan(plan: &[String]) -> CmdResult<Vec<layout::Planned>> {
+    plan.iter().map(|p| p.parse::<layout::Planned>()).collect()
+}
+
+/// "terrain_relayout_preview" (the layout editor's live preview): what `relayout` would do with `plan`, nothing
+/// written; the refusal's reason as the error.
+pub fn relayout_preview(root: &str, plan: &[String]) -> CmdResult<layout::Preview> {
+    layout::relayout_preview(Path::new(root), &parse_plan(plan)?).map_err(err)
+}
+
+/// A change of the subterrains that can be taken back (`relayout_undoable`): the project, its layout before and after.
+struct UndoEntry {
+    id: u64,
+    root: String,
+    before: layout::LayoutState,
+    after: layout::LayoutState,
+}
+
+/// The changes `relayout_undo` can take back, the newest last: at most `UNDO_KEEP`, fewer while they hold more than
+/// `UNDO_BYTES` (the newest always stays).
+static UNDO: std::sync::Mutex<Vec<UndoEntry>> = std::sync::Mutex::new(Vec::new());
+static NEXT_UNDO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+const UNDO_KEEP: usize = 16;
+const UNDO_BYTES: usize = 512 << 20;
+
+/// What `relayout_undoable` did: the files written and removed, and the change's number for `relayout_undo`.
+#[derive(Serialize, Debug)]
+pub struct Applied {
+    pub written: Vec<String>,
+    pub removed: Vec<String>,
+    pub undo: u64,
+}
+
+/// "terrain_relayout" with `undoable`: `relayout`, the layout before and after kept so `relayout_undo` can take it back
+/// (the layout editor's Apply).
+pub fn relayout_undoable(root: &str, plan: &[String]) -> CmdResult<Applied> {
+    let (done, before, after) = layout::relayout_project_undoable(Path::new(root), &parse_plan(plan)?).map_err(err)?;
+    let id = NEXT_UNDO.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut list = UNDO.lock().unwrap_or_else(|e| e.into_inner());
+    list.push(UndoEntry { id, root: root.to_string(), before, after });
+    while list.len() > UNDO_KEEP || (list.len() > 1 && list.iter().map(|e| e.before.size() + e.after.size()).sum::<usize>() > UNDO_BYTES) {
+        list.remove(0);
+    }
+    Ok(Applied { written: done.written, removed: done.removed, undo: id })
+}
+
+/// "terrain_relayout_undo": takes the change `id` of `relayout_undoable` back (`redo`: makes it again), only while the
+/// layout's files are as that change left them (as they were before it, for `redo`): anything saved since refuses it.
+pub fn relayout_undo(root: &str, id: u64, redo: bool) -> CmdResult<layout::Converted> {
+    let list = UNDO.lock().unwrap_or_else(|e| e.into_inner());
+    let e = list
+        .iter()
+        .find(|e| e.id == id && e.root == root)
+        .ok_or_else(|| format!("that change of the subterrains can't be {} any more (only the last {UNDO_KEEP} are kept, while the app runs)", if redo { "made again" } else { "taken back" }))?;
+    // Undo: on disk as after the change, back to before it; redo the other way.
+    let (now, to) = if redo { (&e.before, &e.after) } else { (&e.after, &e.before) };
+    layout::restore_layout(Path::new(root), now, to).map_err(err)
 }
 
 /// "Merge Subterrains" (`terrain_merge`): the split terrain back into `map/war3map.w3e.txt` and the flat object files.
