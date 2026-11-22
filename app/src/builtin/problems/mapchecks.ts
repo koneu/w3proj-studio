@@ -10,9 +10,26 @@ import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { errorText } from "../../lib/oserror";
 import { missingRefs, triggerRefs } from "../../lib/triggers/refs";
 import type { TriggerIssue } from "../../lib/triggers/validate";
-import { wtgPath } from "../../lib/triggers/project";
+import { TRIGGERS_ROOT, wtgPath } from "../../lib/triggers/project";
 import type { FileKind } from "./lookup";
 import { RunScope } from "./runscope";
+
+const GITATTRIBUTES = ".gitattributes";
+/** The rule a project with trigger folders needs (written by a new project, crates/w3proj/src/project.rs GITATTRIBUTES). */
+export const TRIGGERS_GIT_RULE = "map/triggers/** -text";
+
+/** Whether a .gitattributes has a rule that keeps Git off the trigger texts' line endings: `map/triggers/**` (or a
+ *  pattern covering every file) with `-text` or `binary`, the last matching line deciding as Git reads it. */
+export function hasTriggerTextRule(text: string): boolean {
+  let off: boolean | null = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const [pattern, ...attrs] = raw.trim().split(/\s+/);
+    if (!pattern || pattern.startsWith("#") || !["map/triggers/**", "map/triggers/", "/map/triggers/**", "*", "**"].includes(pattern)) continue;
+    if (attrs.includes("-text") || attrs.includes("binary")) off = true;
+    else if (attrs.some((a) => a === "text" || a.startsWith("text=") || a.startsWith("eol="))) off = false;
+  }
+  return off === true;
+}
 
 /** At most this many problems per check (the rest is summarised). */
 const LIMIT = 200;
@@ -93,6 +110,44 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         // A trigger file that can't be read is the Trigger validation's to report.
         const issues = await scope().triggerIssues().catch(() => null);
         return triggerProblems((issues ?? []).filter((i) => i.kind === "noEvents"), "triggers nothing runs", 5000, true);
+      },
+    },
+    {
+      // What the trigger folders' read says is worth a look: an order.txt entry with no file, a variable defined twice
+      // alike (one kept). A tree that can't be read is Trigger validation's error.
+      id: "triggerFolders",
+      title: "Trigger folders",
+      async run() {
+        if (!w3.workspace.files().some((f) => f.path.toLowerCase() === TRIGGERS_ROOT)) return [];
+        const read = await scope().triggersAndTexts().catch(() => null);
+        return (read?.layout?.warnings ?? []).slice(0, LIMIT).map((w): Problem => {
+          // "map/triggers/<file>:<line>: what": the file and line are the location, a click opens the file.
+          const m = /^(map\/triggers\/[^:]+)(?::(\d+))?:\s*/.exec(w);
+          if (!m) return { severity: "warning", message: w, location: "map/triggers" };
+          return { severity: "warning", message: w.slice(m[0].length), location: m[2] ? `${m[1]}:${m[2]}` : m[1], reveal: { command: "w3.problems.open", args: [m[1]] } };
+        });
+      },
+    },
+    {
+      // The trigger folders keep each text's own line endings (CRLF in one file, LF in the next): Git must not convert
+      // them, or a checkout on another system changes the map's texts (openpoints spec, section 3B).
+      id: "triggerFoldersGit",
+      title: "Trigger folders and Git",
+      async run() {
+        if (!w3.workspace.files().some((f) => f.path.toLowerCase() === TRIGGERS_ROOT)) return [];
+        const text = await w3.workspace.readText(GITATTRIBUTES).catch(async (e) => {
+          // Absent is a warning of its own; there and unreadable is not "no rule".
+          if (!(await w3.workspace.exists(GITATTRIBUTES).catch(() => true))) return null;
+          throw e;
+        }).catch((e) => e as Error);
+        if (text instanceof Error) return [{ severity: "error", message: `.gitattributes can't be read (${errorText(text)}), so whether Git keeps the trigger texts' line endings can't be told`, location: GITATTRIBUTES, reveal: { command: "w3.problems.open", args: [GITATTRIBUTES] } }];
+        if (text !== null && hasTriggerTextRule(text)) return [];
+        return [{
+          severity: "warning",
+          message: `${text === null ? "The project has no .gitattributes" : ".gitattributes has no rule for map/triggers/"}: add the line "${TRIGGERS_GIT_RULE}", or Git may change the line endings of the trigger texts (map/triggers/) on another system`,
+          location: GITATTRIBUTES,
+          ...(text === null ? {} : { reveal: { command: "w3.problems.open", args: [GITATTRIBUTES] } }),
+        }];
       },
     },
     {

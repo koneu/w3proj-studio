@@ -623,6 +623,10 @@ enum Cmd {
     },
     /// List the files in a map.
     Ls { map: PathBuf },
+    /// Print a project's trigger tree (map/triggers/) as JSON, as W3Proj Studio reads it: `file` (the tree, every
+    /// item with an id, given in memory where the files store none), `custom` (the header and texts), `files` (each
+    /// item's file). Exit 1 when the folders can't be read; `null` without them.
+    Triggers { project: PathBuf },
     /// MCP server over stdin and stdout: AI clients start this to use the running W3Proj Studio.
     Mcp,
     /// The app's backend commands over stdin and stdout, framed as `w3proj rebuild` answers them: for the app's
@@ -1072,6 +1076,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  removed {f}");
             }
             println!("terrain {what}: {} written, {} removed", r.written.len(), r.removed.len());
+        }
+        Cmd::Triggers { project } => {
+            let read = backend::triggers::read(&project.to_string_lossy(), &extra).map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string(&read)?);
         }
         Cmd::Ls { map } => {
             let archive = mpq::Archive::open(&map)?;

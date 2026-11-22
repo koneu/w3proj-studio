@@ -42,7 +42,9 @@ running programs, native dialogs, and the title bar's window buttons.
 - `src/demo/gamedata/`: made-up trigger definitions (`TriggerData.txt`, `TriggerStrings.txt`, `WorldEditStrings.txt`: a
   few categories, about 25 events, conditions, actions and calls, types, presets and strings, with invented names such as
   "Demo Action - Show message") in the same file format the Trigger Editor's parser reads for the game's files.
-  `game_read` answers those three `UI/` paths and refuses every other game file. The sample `war3map.wtg.json` uses them.
+  `game_read` answers those three `UI/` paths and refuses every other game file. The sample's triggers use them: the
+  demo keeps the tree as the app holds it in one made-up file, `map/triggers/triggers.json` (`triggers_read`,
+  `triggers_write` in `src/demo/tauri.ts`), not in the trigger folders' own format, which only the Rust backend reads.
 - The empty editor area shows `src/demo/terrain-preview.svg` (drawn for the demo) where the terrain would be.
 
 What the demo shows: the layout, side bar views, tabs, menus, command palette, panels, status bar, themes, the extension

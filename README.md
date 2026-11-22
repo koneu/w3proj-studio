@@ -327,6 +327,16 @@ a tracked `map/war3map.j` for a map Studio didn't write (`"kept"`); with `"gener
 (git-ignored) and `w3proj pack` takes it only while `.w3proj/derived-from.json` says it follows its sources
 (`--allow-stale-script` packs it as it is, a missing one never).
 
+In the app the folders are one document, `map/triggers`, for the Trigger Editor and every tool: the backend reads the
+whole tree in one call and saves it by writing only the files whose content changed (a renamed item's file is renamed,
+a deleted one's removed, an `order.txt` only when the order changed; a variable added, removed or renamed drops the
+imported table order). A custom text or script item opens in the text editor as its own file. When files under
+`map/triggers/` change outside the app (a checkout, a pull, another editor), the Trigger Editor takes them in place: a
+trigger with an unsaved change keeps it and is flagged when the files changed it too, the others reload; a save also
+takes in what changed on disk since it read and asks before writing over an item changed on both sides. Problems warns
+when `.gitattributes` lacks `map/triggers/** -text`. `w3proj triggers <project>` prints the tree as the app reads it
+(JSON); `w3proj rebuild` and `w3proj check` read the triggers from the folders as the app does.
+
 A large map's terrain can be split into named rectangles (**Split Terrain into Subterrains…**, `w3proj terrain split`):
 `map/terrain/terrain.json` and one folder per subterrain with its `terrain.txt`, `doodads.json`, `units.json`,
 `regions.json` and `pathing.txt`, so people working on different parts merge in git without conflicts. **Open

@@ -102,8 +102,84 @@ const installArgs = game ? ["--install", game] : [];
 const REAL_WE = process.argv.includes("--only=worldEditorReal");
 const WE_REAL = { dir: join(work, "we-real"), ctl: join(work, "we-real", "ctl"), wrapper: join(work, "we-real", "we-launch.sh"), launcher: join(app, "scripts", "we-launch.mjs") };
 
+/** Writes a trigger tree (a TriggerFile; `texts`: custom texts by trigger name, `header`) into the open project's trigger
+ *  folders (map/triggers/) through the app, as the Trigger Editor saves: the folders are made when the project has none,
+ *  and a raw war3map.wtg / war3map.wct goes first. A Reforged tree without the map item gets one (id 0). */
+const writeTriggerTree = (page, file, texts = {}) => page.evaluate(`(async () => {
+  const f = ${lit(file)}, given = ${lit(texts)};
+  if (f.reforged && f.items[0]?.type !== 1) f.items.unshift({ type: 1, id: 0, name: "Map", isComment: 0, expanded: 1, parent: -1 });
+  const slots = f.items.filter((i) => i.type === 8 || i.type === 32);
+  const custom = { reforged: f.reforged, version: 1, comment: "", header: given.header ?? null, texts: slots.map((t) => given[t.name] ?? (t.type === 32 || t.isCustom ? "" : null)) };
+  for (const raw of ["map/war3map.wtg", "map/war3map.wct"]) if (w3.workspace.files().some((x) => x.path.toLowerCase() === raw)) await w3.workspace.delete(raw);
+  await w3.workspace.writeTriggers({ file: f, custom }, { create: true });
+  await w3.workspace.refresh();
+})()`);
+/** The open project's trigger tree as the app reads it (w3.workspace.readTriggers): { file, custom, files, … } or null. */
+const readTriggerTree = (page) => page.evaluate(`w3.workspace.readTriggers()`);
+/** Changes the open project's trigger tree through the app and saves it as the Trigger Editor does: `js` runs in the
+ *  page with `file` (the TriggerFile) and `custom` (its texts) to change. */
+const editTriggerTree = (page, js) => page.evaluate(`(async () => {
+  const read__ = await w3.workspace.readTriggers();
+  if (!read__) throw new Error("the project has no map/triggers/");
+  const file = read__.file, custom = read__.custom;
+  {
+    ${js};
+  }
+  // The backend's refusal is a string: as an Error, WebDriver passes its message on.
+  await w3.workspace.writeTriggers({ file, custom, stored: read__.stored }).catch((e) => { throw new Error(String(e?.message ?? e)); });
+})()`);
+/** The map/ files of the project at `root` by hash (snapshot), with its triggers as the map holds them: map/triggers/ or
+ *  a raw war3map.wtg and war3map.wct give way to the war3map.wtg and war3map.wct the CLI packs from the project. So a
+ *  project that keeps them in either form (an import is an import: its trigger files store ids, the fixture's don't)
+ *  compares with another by what goes into the map. */
+function triggersAsPacked(root) {
+  const files = snapshot(join(root, "map"));
+  for (const f of [...files.keys()]) if (f.startsWith("triggers/") || f === "war3map.wtg" || f === "war3map.wct") files.delete(f);
+  const out = join(work, `triggers-as-packed-${createHash("sha256").update(root).digest("hex").slice(0, 8)}.w3x`);
+  const packed = spawnSync(cli, ["pack", root, "-o", out, "--game", "none"], { encoding: "utf8" });
+  if (packed.status !== 0) throw new Error(`the CLI can't pack ${root}: ${packed.stderr}`);
+  for (const f of ["war3map.wtg", "war3map.wct"]) {
+    const r = spawnSync(cli, ["cat", out, f]);
+    if (r.status === 0) files.set(f, createHash("sha256").update(r.stdout).digest("hex"));
+  }
+  rmSync(out, { force: true });
+  return files;
+}
+/** The trigger folders of the project at `root` as the app reads them, read by the CLI from the disk (`w3proj triggers`,
+ *  the backend's own read): { file, custom, files, … }; null without them. Throws when they can't be read. */
+function cliTriggers(root) {
+  const r = spawnSync(cli, ["triggers", root], { encoding: "utf8", maxBuffer: 1 << 28 });
+  if (r.status !== 0) throw new Error(`w3proj triggers ${root}: ${r.stderr || r.error}`);
+  return JSON.parse(r.stdout);
+}
+/** Saves a tree read before (readTriggerTree) back into the trigger folders, as the Trigger Editor saves: puts them back. */
+const restoreTriggerTree = (page, kept) => page.evaluate(`(async () => {
+  const t = ${lit(kept)};
+  if (t) await w3.workspace.writeTriggers({ file: t.file, custom: t.custom, stored: t.stored });
+})()`);
+/** The trigger folders of the project at `root` as they are on disk, read here without the app, for checks that only
+ *  look: every item file's JSON (a script file's frontmatter: its text isn't in it), the variables, and every text
+ *  joined, the header first (`text`). Null without map/triggers/. */
+function triggersOnDisk(root) {
+  const dir = join(root, "map", "triggers");
+  if (!existsSync(dir)) return null;
+  const items = [], variables = [], texts = [];
+  for (const p of walk(dir).sort()) {
+    const rel = relative(dir, p).replaceAll("\\", "/"), body = readFileSync(p, "utf8");
+    if (/(\.gui\.json|\.comment\.json|_category\.json)$/.test(rel)) items.push(JSON.parse(body));
+    else if (rel.endsWith("variables.json")) variables.push(...body.split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+    else if (/^header\.(j|lua)$/.test(rel)) texts.unshift(body);
+    else if (/\.(j|vjass|lua)$/.test(rel)) {
+      const m = /^(?:\/\/|--) @w3proj (.*)\r?\n/.exec(body), text = m ? body.slice(m[0].length) : body;
+      items.push(m ? JSON.parse(m[1]) : { name: rel });
+      texts.push(text);
+    }
+  }
+  return { items, variables, text: texts.join("\n") };
+}
+
 /** What World Editor 3.0.1 writes for a new map, by project file. */
-const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.w3c.json", "war3map.wtg.json", "war3map.wct.txt",
+const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.w3c.json", "triggers/triggers.json",
   "war3map.wts", "war3map.mmp.json", "war3map.w3l.json", "war3map.w3grp", "conversation.json", "war3map.w3e.txt", "war3map.shd", "war3map.wpm", "war3mapMap.blp"];
 
 const NEW_MAPS = [
@@ -1050,6 +1126,8 @@ async function heightKit(page, name) {
     /** The app at rest first (an edit by a click or key may still be landing), then saved, then at rest again. */
     save: async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); },
     read: (file) => JSON.parse(readFileSync(join(root, "map", file), "utf8")),
+    /** The trigger folders as the app reads them (`w3proj triggers`: { file, custom, files, … }), from the disk. */
+    triggers: () => cliTriggers(root),
     doodads: () => kit.read("war3map.doo.json").doodads,
     units: () => kit.read("war3mapUnits.doo.json").units,
     look: async (x, y, ref) => {
@@ -2528,8 +2606,7 @@ async function problemsIgnore(page, found) {
   const check = async () => { await page.evaluate(`w3.commands.execute("w3.problems.run")`); await settled(page); };
   const names = ["Quest Smoke Completed", "Quest Smoke Update1", "Orphan Smoke"];
   try {
-    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify({
-      reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: names.map((n, i) => trigger(50331649 + i, n)) }))}); await w3.workspace.refresh(); })()`);
+    await writeTriggerTree(page, { reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: names.map((n, i) => trigger(50331649 + i, n)) });
     await page.evaluate(`w3.views.show("problems")`);
     await check();
     for (const n of names) await until(`a report of ${n}`, () => has(n), 30000).catch(() => fail(`no "Triggers nothing runs" report for ${n}`));
@@ -4711,7 +4788,7 @@ async function destructableFlags(page, found) {
 
   // An unsaved edit in the editor: the trigger's script run doesn't save it (the flag waits in the editor); the edit
   // undone, the editor is clean with the file behind the script, and packing follows the flags. The trigger is made
-  // disabled first (MCP tools refuse while an editor has unsaved changes) and enabled in war3map.wtg.json, as a
+  // disabled first (MCP tools refuse while an editor has unsaved changes) and enabled in its file of map/triggers/, as a
   // Trigger Editor's save would write it.
   await k.tool("create_script_trigger", { name: "Names Tree", script: `function InitTrig_Names_Tree takes nothing returns nothing\n    call KillDestructable( ${global} )\nendfunction\n` });
   await k.tool("set_trigger_enabled", { name: "Names Tree", enabled: false });
@@ -4720,11 +4797,11 @@ async function destructableFlags(page, found) {
   const edit = await k.run("w3.terrain.adjustCliffLevels", 1);
   if (edit) return fail(`Adjust Cliff Levels (unsaved): ${edit}`);
   await page.evaluate(`(async () => {
-    const wtg = JSON.parse(await w3.workspace.readText("map/war3map.wtg.json"));
-    const t = wtg.items.find((i) => i.name === "Names Tree");
-    if (!t) throw new Error("no trigger Names Tree in war3map.wtg.json");
-    t.enabled = true;
-    await w3.workspace.writeText("map/war3map.wtg.json", JSON.stringify(wtg, null, 2));
+    const t = await w3.workspace.readTriggers();
+    const item = t?.file.items.find((i) => i.name === "Names Tree");
+    if (!item) throw new Error("no trigger Names Tree in map/triggers/");
+    item.enabled = true;
+    await w3.workspace.writeTriggers({ file: t.file, custom: t.custom, stored: t.stored });
   })()`);
   await settled(page);
   await until("the script again", () => script().includes(`set ${global} = BlzCreateDestructable`), 20000).catch(() => fail(`the script doesn't create ${global} again`));
@@ -6765,8 +6842,9 @@ async function workbenchState(page, found) {
     }
 
     // ---- 2. The Trigger Editor's sash ----
-    const wtg = await page.evaluate(`w3.workspace.files().map((f) => f.path).find((p) => /war3map\\.wtg(\\.json)?$/i.test(p)) ?? null`);
-    if (!wtg) fail("the new map has no trigger file");
+    // The Trigger Editor's document: the trigger folders (a new map has them).
+    const wtg = await page.evaluate(`w3.workspace.files().some((f) => f.path === "map/triggers/triggers.json") ? "map/triggers" : null`);
+    if (!wtg) fail("the new map has no trigger folders");
     else {
       const width = `(document.querySelector(".editor-pane:not([hidden]) .trig-tree")?.getBoundingClientRect().width ?? -1)`;
       const sash = `document.querySelector(".editor-pane:not([hidden]) .trig-tree .sash")`;
@@ -7976,7 +8054,7 @@ async function speedLimits(page, hands, fail) {
 /** The Trigger Editor: renames the map's trigger, switches it off, and Build carries both. */
 async function triggerByHand(page, hands, root, fail) {
   await page.evaluate(`w3.editors.closeAll()`);
-  await page.evaluate(`w3.editors.open("map/war3map.wtg.json")`);
+  await page.evaluate(`w3.editors.open("map/triggers")`);
   await until("the trigger tree", () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].some((e) => e.textContent === "Initialization")`), 20000);
   // The category starts closed, so its arrow comes first.
   await page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization").parentElement.querySelector(".trig-caret").setAttribute("data-smoke", "caret")`);
@@ -7999,9 +8077,8 @@ async function triggerByHand(page, hands, root, fail) {
 
   // Convert to Custom Text: asked first (No leaves it), then the trigger is the script the map script had for it, so the
   // packed war3map.j stays the same; one undo turns it back.
-  const wtgFile = join(root, "map", "war3map.wtg.json");
-  const typed = () => JSON.parse(readFileSync(wtgFile, "utf8")).items.find((i) => i.name === "Typed Trigger");
-  const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
+  const typed = async () => (await readTriggerTree(page))?.file.items.find((i) => i.name === "Typed Trigger");
+  const dirty = () => page.evaluate(`w3.editors.isDirty("map/triggers")`);
   await page.evaluate(`(() => { window.__asked = []; w3.window.confirm = async (m) => { window.__asked.push(m); return false; }; })()`);
   await hands.click("button.trig-convert");
   // The question asked, and what the No brings ended.
@@ -8016,7 +8093,7 @@ async function triggerByHand(page, hands, root, fail) {
   if (!(await dirty())) fail("converting didn't mark the trigger file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
   await settled(page);
-  const t = typed();
+  const t = await typed();
   if (!t?.isCustom || t.ecas.length || !t.runOnInit) fail(`the converted trigger is ${lit(t)?.slice(0, 300)}`);
   rmSync(map, { force: true });
   await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
@@ -8030,7 +8107,8 @@ async function triggerByHand(page, hands, root, fail) {
   await settled(page);
   await page.evaluate(`w3.editors.saveAll()`);
   await settled(page);
-  if (typed()?.isCustom !== false || !typed()?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
+  const back = await typed();
+  if (back?.isCustom !== false || !back?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
 }
 
 /** The Sound Editor's own keys with real key presses: Ctrl+Up/Down (Move Sound Variable), Ctrl+R (Sort), Ctrl+PageUp/Down
@@ -8296,9 +8374,11 @@ async function typedFieldSave(page, found) {
     // ---- The Trigger Editor: a trigger's name and a variable's name ----
     // Its flush leaves names out (a rename can ask about custom script), so the text typed there was neither saved nor
     // counted as unsaved. The save commits it now, waiting for the rename's question (answered a moment later here).
-    const wtgPath = "map/war3map.wtg.json";
-    const wtgFile = () => JSON.parse(readFileSync(join(root, "map", "war3map.wtg.json"), "utf8"));
-    const wctText = () => readFileSync(join(root, "map", "war3map.wct.txt"), "utf8");
+    // The Trigger Editor's document is the trigger folders (map/triggers), read through the app.
+    const wtgPath = "map/triggers";
+    const wtgFile = async () => (await readTriggerTree(page)).file;
+    const header = async () => (await readTriggerTree(page)).custom.header ?? "";
+    const triggerFiles = () => JSON.stringify([...snapshot(join(root, "map", "triggers"))]);
     await page.evaluate(`w3.editors.closeAll()`);
     await k.tool("create_script_trigger", { name: "Typed Trigger", script: "" });
     await k.tool("set_script_header", { script: "// gg_trg_Typed_Trigger\n" });
@@ -8314,23 +8394,23 @@ async function typedFieldSave(page, found) {
     try {
       await page.evaluate(`w3.commands.execute("w3.triggers.reveal", "Typed Trigger")`);
       await typeAndSave("the trigger's name", `(() => { const e = document.querySelector("input.trig-name"); return e?.value === "Typed Trigger" ? e : null; })()`, "Saved Trigger", wtgPath);
-      await until("the typed trigger name saved", () => wtgFile().items.some((i) => i.name === "Saved Trigger"), 8000)
-        .catch(() => fail(`Ctrl+S right after typing a trigger's name saved the names ${lit(wtgFile().items.map((i) => i.name))}`));
+      await until("the typed trigger name saved", async () => (await wtgFile()).items.some((i) => i.name === "Saved Trigger"), 8000)
+        .catch(async () => fail(`Ctrl+S right after typing a trigger's name saved the names ${lit((await wtgFile()).items.map((i) => i.name))}`));
       await settled(page);
       const asked = await page.evaluate(`window.__typedWarn.asked`);
       if (!asked.some((m) => /gg_trg_Typed_Trigger.* in custom script/.test(m))) fail(`the save's rename didn't ask about the name in custom script: ${lit(asked)}`);
-      if (!wctText().includes("gg_trg_Saved_Trigger")) fail("the save's rename, answered \"Rename in script too\", didn't rename the trigger in the map script header");
+      if (!(await header()).includes("gg_trg_Saved_Trigger")) fail("the save's rename, answered \"Rename in script too\", didn't rename the trigger in the map script header");
       if (await dirty(wtgPath)) fail("Ctrl+S right after typing a trigger's name left the Trigger Editor unsaved");
 
       await page.evaluate(`w3.commands.execute("w3.triggers.variables")`);
       await typeAndSave("the variable's name", `[...document.querySelectorAll("input.trig-var-name")].find((e) => e.value === "TypedVar")`, "SavedVar", wtgPath);
-      await until("the typed variable name saved", () => wtgFile().variables.some((v) => v.name === "SavedVar"), 8000)
-        .catch(() => fail(`Ctrl+S right after typing a variable's name saved the variables ${lit(wtgFile().variables.map((v) => v.name))}`));
+      await until("the typed variable name saved", async () => (await wtgFile()).variables.some((v) => v.name === "SavedVar"), 8000)
+        .catch(async () => fail(`Ctrl+S right after typing a variable's name saved the variables ${lit((await wtgFile()).variables.map((v) => v.name))}`));
       await settled(page);
       if (await dirty(wtgPath)) fail("Ctrl+S right after typing a variable's name left the Trigger Editor unsaved");
       // An initial value the script can't hold is refused with why, the box shows the value kept, no edit (literals.ts);
       // the same for add_trigger_variable's size and initial value.
-      const wtgBefore = readFileSync(join(root, "map", "war3map.wtg.json"), "utf8");
+      const wtgBefore = triggerFiles();
       await k.clearToasts();
       const shown = await page.evaluate(`(() => { const row = [...document.querySelectorAll("input.trig-var-name")].find((e) => e.value === "SavedVar")?.closest("tr");
         const i = row?.querySelector("input.trig-var-value"); if (!i) return null; const was = i.value; i.value = "2147483648"; i.dispatchEvent(new Event("change", { bubbles: true })); return [was, i.value]; })()`);
@@ -8343,7 +8423,7 @@ async function typedFieldSave(page, found) {
         if (!/size must be a whole number from 1 to 32768|initialValue: An integer is from/.test(r)) fail(`add_trigger_variable ${lit(args)} wasn't refused with why: ${r}`);
       }
       await k.save();
-      if (readFileSync(join(root, "map", "war3map.wtg.json"), "utf8") !== wtgBefore) fail("the refused initial values changed war3map.wtg.json");
+      if (triggerFiles() !== wtgBefore) fail("the refused initial values changed the trigger files");
     } finally {
       await page.evaluate(`(() => { if (window.__typedWarn) w3.window.showWarning = window.__typedWarn.kept; delete window.__typedWarn; })()`);
     }
@@ -9468,8 +9548,8 @@ async function cliCheck(page, found) {
     await tool("place_line", { kind: "doodads", id: "LTlt", from: [-1024, -1024], to: [1024, -1024], ignoreRoom: true });
     const trigger = (id, name) => ({ type: 8, name, description: "", isComment: 0, id, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0,
       ecas: [{ kind: 2, name: "PauseGame", enabled: true, params: [{ type: 0, value: "ConvertBoolean" }], children: [] }] });
-    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify({
-      reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: [trigger(50331649, "Kept Smoke"), trigger(50331650, "Ignored Smoke")] }))});
+    await writeTriggerTree(page, { reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: [trigger(50331649, "Kept Smoke"), trigger(50331650, "Ignored Smoke")] });
+    await page.evaluate(`(async () => {
       await w3.workspace.writeText(".w3proj/problems-ignore.json", ${lit(JSON.stringify({ version: 1, rules: [], items: [{ check: "triggerNoEvents", about: "Ignored Smoke" }] }))});
       await w3.workspace.refresh(); })()`);
     await page.evaluate(`w3.editors.saveAll()`);
@@ -11502,7 +11582,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
 
 /** Move Texts run right after a project opens, while its file list is still read (the listing held back here): the
  *  command waits for the whole list, so a string only war3map.j refers to stays (openpoints bugs.md, movetexts-
- *  triggers: war3map.wtg.json wasn't listed yet). Without the wait the list is empty and every string goes. */
+ *  triggers: the trigger file wasn't listed yet). Without the wait the list is empty and every string goes. */
 async function stringsBeforeListing(page, found) {
   const fail = (what) => found.push(`strings before the file list: ${what}`);
   const dir = join(work, "strings-before-listing"), wtsFile = join(dir, "map", "war3map.wts"), script = join(dir, "map", "war3map.j");
@@ -11552,14 +11632,121 @@ async function stringsBeforeListing(page, found) {
  *  be stored over the remembered tabs while the list is read; once it's read the remembered tabs come back, but not the
  *  one closed meanwhile nor one whose file is really gone. Without the wait every tab was dropped as "not there" and
  *  closing the welcome page stored `{"tabs":[]}`. */
+/** The trigger folders (map/triggers/) in the app: one document for the Trigger Editor; a GUI trigger and a custom text
+ *  edited and saved write only their two files; files changed outside the app (a checkout) reload while a trigger with
+ *  an unsaved edit keeps it, flagged where the files changed it too, and its save writes over nothing else; a category
+ *  sharing another's id (as World Editor maps have them) deleted takes only its own contents. */
+async function triggerFolders(page, found) {
+  try {
+  const fail = (what) => found.push(`trigger folders: ${what}`);
+  // The mini map with the trigger-folders fixture's tree (imported ids, a library folder with a folder in it, a custom
+  // text, a script item, a comment, variables in two folders) and a category "Events" that shares Initialization's id,
+  // as World Editor maps have them.
+  const dir = join(work, "trigger-folders"), trig = join(dir, "map", "triggers");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  rmSync(trig, { recursive: true, force: true });
+  cpSync(join(repo, "tests", "fixtures", "trigger-folders", "map", "triggers"), trig, { recursive: true });
+  const initId = JSON.parse(readFileSync(join(trig, "Initialization", "_category.json"), "utf8")).id;
+  mkdirSync(join(trig, "Events"), { recursive: true });
+  writeFileSync(join(trig, "Events", "_category.json"), `${JSON.stringify({ type: 4, id: initId, name: "Events", isComment: 0, expanded: 1 })}\n`);
+  writeFileSync(join(trig, "Events", "Boss_Dies.gui.json"), `${JSON.stringify({ type: 8, name: "Boss Dies", description: "", isComment: 0, enabled: true, initiallyOff: false, runOnInit: false, ecas: [] }, null, 2)}\n`);
+  writeFileSync(join(trig, "order.txt"), readFileSync(join(trig, "order.txt"), "utf8").replace("Systems\n", "Systems\nEvents\n"));
+  const mtimes = () => new Map(walk(trig).map((p) => [relative(trig, p).replaceAll("\\", "/"), statSync(p).mtimeMs]));
+  const rows = () => page.evaluate(`(() => { document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+    return [...document.querySelectorAll(".trig-row .trig-label")].map((e) => e.textContent.trim()); })()`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty("map/triggers")`);
+  const save = async () => { await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
+  /** Changes written since `before` (mtimes), as paths below map/triggers/: written or added, and removed. */
+  const changedSince = (before) => {
+    const now = mtimes();
+    return { written: [...now].filter(([f, t]) => before.get(f) !== t).map(([f]) => f).sort(), removed: [...before.keys()].filter((f) => !now.has(f)).sort() };
+  };
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(dir)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(dir)}`));
+  try {
+    // ---- Open: one document, the whole tree ----
+    await page.evaluate(`w3.commands.execute("w3.triggers.open")`);
+    await until("the trigger tree", async () => (await rows()).includes("Nested"), 20000).catch(async () => fail(`the tree shows ${lit(await rows())}`));
+    if (await page.evaluate(`w3.editors.activePath()`) !== "map/triggers") fail(`the Trigger Editor's document is ${await page.evaluate(`w3.editors.activePath()`)}, not map/triggers`);
+    for (const name of ["Initialization", "Melee Initialization", "Setup Players", "Systems", "Damage Engine", "Sub", "Padded", "Events", "Boss Dies"]) {
+      if (!(await rows()).includes(name)) fail(`the tree lacks ${name}`);
+    }
+    // ---- A GUI trigger and a custom text edited, saved: only their files are written ----
+    let before = mtimes();
+    await new Promise((r) => setTimeout(r, 20));
+    await page.evaluate(`(async () => { await w3.commands.execute("w3.triggers.reveal", "Melee Initialization"); await w3.commands.execute("w3.triggers.toggleTriggerEnabled"); })()`);
+    await page.evaluate(`w3.commands.execute("w3.triggers.reveal", "Setup Players")`);
+    await until("the custom text's code editor", () => page.evaluate(`document.querySelector("input.trig-name")?.value === "Setup Players" && !!document.querySelector(".trig-code .cm-content")`), 20000);
+    const hands = new Hands(page);
+    await hands.click(".trig-code .cm-content");
+    await hands.chord("Ctrl+End");
+    await hands.type("// typed in the trigger folders");
+    await save();
+    let w = changedSince(before);
+    if (JSON.stringify(w) !== JSON.stringify({ written: ["Initialization/Melee_Initialization.gui.json", "Initialization/Setup_Players.j"], removed: [] })) fail(`the save wrote ${lit(w)}, not the two edited triggers' files`);
+    const setupText = readFileSync(join(trig, "Initialization", "Setup_Players.j"), "utf8");
+    if (!setupText.startsWith("// @w3proj {") || !setupText.includes("// typed in the trigger folders")) fail(`the custom text's file is ${lit(setupText.slice(0, 200))}`);
+    if (!/"enabled": false/.test(readFileSync(join(trig, "Initialization", "Melee_Initialization.gui.json"), "utf8"))) fail("the GUI trigger's file doesn't say it is disabled");
+    if (await dirty()) fail("the save left the Trigger Editor unsaved");
+    // ---- Changed outside the app (a checkout) while a trigger has an unsaved edit: that edit stays (flagged where
+    // the files changed it too), the others reload in place ----
+    await page.evaluate(`(async () => { await w3.commands.execute("w3.triggers.reveal", "Nested"); await w3.commands.execute("w3.triggers.toggleTriggerEnabled"); })()`);
+    if (!(await dirty())) fail("disabling Nested left the Trigger Editor saved (control)");
+    const comment = join(trig, "Systems", "comment.comment.json");
+    writeFileSync(comment, readFileSync(comment, "utf8").replace('"description":"About -----.\\nSecond line."', '"description":"From outside."'));
+    const melee = join(trig, "Initialization", "Melee_Initialization.gui.json");
+    writeFileSync(melee, readFileSync(melee, "utf8").replace('"name": "Melee Initialization"', '"name": "Melee From Git"'));
+    const nested = join(trig, "Systems", "Sub", "Nested.gui.json");
+    writeFileSync(nested, readFileSync(nested, "utf8").replace('"description": "About Nested.\\nSecond line."', '"description": "Changed outside too."'));
+    // The window gets the focus back: the workbench looks for changes outside the app.
+    await page.evaluate(`window.dispatchEvent(new Event("focus"))`);
+    await until("the outside changes taken in", async () => (await rows()).includes("Melee From Git"), 20000).catch(async () => fail(`after the outside change the tree shows ${lit(await rows())}`));
+    await settled(page);
+    const held = await page.evaluate(`(async () => { const f = (await w3.services.get("w3.triggers")).liveTriggers(); const by = (n) => f.items.find((i) => i.name === n);
+      return { nested: by("Nested")?.enabled, comment: by("-----")?.description, conflict: [...document.querySelectorAll(".trig-row.trig-conflict .trig-label")].map((e) => e.textContent.trim()) }; })()`);
+    if (held.nested !== false) fail("the unsaved edit of Nested was lost by the reload");
+    if (held.comment !== "From outside.") fail(`the comment changed outside shows ${lit(held.comment)}`);
+    if (JSON.stringify(held.conflict) !== JSON.stringify(["Nested"])) fail(`the conflict flags are on ${lit(held.conflict)}, not on Nested (changed outside too)`);
+    if (!(await dirty())) fail("after the reload the kept edit isn't unsaved any more");
+    before = mtimes();
+    await new Promise((r) => setTimeout(r, 20));
+    await save();
+    w = changedSince(before);
+    if (JSON.stringify(w) !== JSON.stringify({ written: ["Systems/Sub/Nested.gui.json"], removed: [] })) fail(`saving the kept edit wrote ${lit(w)}`);
+    if (!/"name": "Melee From Git"/.test(readFileSync(melee, "utf8"))) fail("the save wrote over the trigger changed outside");
+    // ---- A category sharing another's id deleted: only its own contents go, the other keeps its id and triggers ----
+    await page.evaluate(`(async () => { document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+      [...document.querySelectorAll(".trig-row.trig-cat")].find((r) => r.querySelector(".trig-label")?.textContent.trim() === "Events")?.click(); })()`);
+    await until("Events selected", () => page.evaluate(`document.querySelector("input.trig-name")?.value === "Events"`), 5000).catch(() => fail("Events can't be selected"));
+    await page.evaluate(`document.querySelector(".trig-toolbar button[title^='Delete']").click()`);
+    await settled(page);
+    const after = await rows();
+    if (after.includes("Events") || after.includes("Boss Dies")) fail(`Events is still there: ${lit(after)}`);
+    for (const name of ["Initialization", "Melee From Git", "Setup Players"]) if (!after.includes(name)) fail(`deleting Events took ${name} along`);
+    before = mtimes();
+    await save();
+    w = changedSince(before);
+    if (JSON.stringify(w.removed) !== JSON.stringify(["Events/Boss_Dies.gui.json", "Events/_category.json"]) || JSON.stringify(w.written) !== JSON.stringify(["order.txt"])) fail(`deleting Events saved ${lit(w)}`);
+    if (existsSync(join(trig, "Events"))) fail("the deleted category's folder is still there");
+    if (JSON.parse(readFileSync(join(trig, "Initialization", "_category.json"), "utf8")).id !== initId) fail("Initialization lost its id");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 async function tabsBeforeListing(page, found) {
   const fail = (what) => found.push(`tabs before the file list: ${what}`);
   const dir = join(work, "tabs-before-listing");
   rmSync(dir, { recursive: true, force: true });
   cpSync(FIXTURE, dir, { recursive: true });
-  const kept = ["map/war3map.w3i.json", "map/war3map.wts", "map/war3map.j"], closed = "map/war3map.wtg.json", gone = "map/gone.txt";
+  // The Trigger Editor's document is the trigger folders.
+  const kept = ["map/war3map.w3i.json", "map/war3map.wts", "map/war3map.j"], closed = "map/triggers", gone = "map/gone.txt";
   for (const p of [...kept, closed]) if (!existsSync(join(dir, ...p.split("/")))) return fail(`the mini map has no ${p} (the check needs it)`);
-  const remembered = { tabs: [...kept, closed, gone].map((path) => ({ path, editor: path.endsWith(".wtg.json") ? "w3.triggerEditor" : "w3.textEditor" })), active: kept[1] };
+  const remembered = { tabs: [...kept, closed, gone].map((path) => ({ path, editor: path === closed ? "w3.triggerEditor" : "w3.textEditor" })), active: kept[1] };
   const storeKey = `(() => { const r = ${lit(dir)}.replace(/[\\\\/]+$/, ""); return "w3.openEditors:" + (/^[A-Za-z]:/.test(r) ? r.toLowerCase() : r); })()`;
   const stored = async () => JSON.parse(await page.evaluate(`localStorage.getItem(${storeKey}) ?? "null"`));
   const open = () => page.evaluate(`w3Workbench.editors.tabs.map((t) => t.path)`);
@@ -11780,52 +11967,44 @@ async function moveTextsToTable(page, found) {
     const filesSecond = snapshot(mapDir);
     for (const f of new Set([...files1.keys(), ...filesSecond.keys()])) if (files1.get(f) !== filesSecond.get(f)) fail(`the second run changed ${f}`);
 
-    // Triggers (lib/formats/movetexts, "Triggers"): a GUI trigger with literals, written in the codec's layout (the
-    // command leaves a file laid out otherwise alone). Its StringExt texts move, after the strings there are; a string
-    // comparison's text and a file path stay; the generated script refers to the new strings. The smoke app unpacks
-    // with made-up trigger data (tests/fixtures/TriggerData.txt), which leaves cliff.w3m's war3map.wtg raw: its JSON
-    // comes from the CLI with the game's.
+    // Triggers (lib/formats/movetexts, "Triggers"): a GUI trigger with literals in the trigger folders (map/triggers/).
+    // Its StringExt texts move, after the strings there are; a string comparison's text and a file path stay; the
+    // generated script refers to the new strings; only the trigger's own file changes. The smoke app unpacks with
+    // made-up trigger data (tests/fixtures/TriggerData.txt), which leaves cliff.w3m's war3map.wtg and war3map.wct raw:
+    // its folders come from the CLI with the game's.
     const cliDir = join(work, "move-texts-cli");
     rmSync(cliDir, { recursive: true, force: true });
     spawnSync(cli, ["unpack", map, cliDir, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
-    if (!existsSync(join(cliDir, "map", "war3map.wtg.json"))) {
+    if (!existsSync(join(cliDir, "map", "triggers", "triggers.json"))) {
       if (game) fail("the CLI couldn't unpack cliff.w3m's triggers although W3PROJ_GAME is set (the trigger part didn't run)");
       else console.log("move texts to string table: the trigger part skipped, the CLI couldn't read cliff.w3m's triggers (needs W3PROJ_GAME)");
       return;
     }
-    const wtgPath = "map/war3map.wtg.json", wctPath = "map/war3map.wct.txt";
-    const wtgBefore = readFileSync(join(cliDir, "map", "war3map.wtg.json"), "utf8"), wctBefore = readFileSync(join(cliDir, "map", "war3map.wct.txt"), "utf8");
+    // The project's raw files give way to the CLI's folders.
+    await page.evaluate(`(async () => { await w3.workspace.delete("map/war3map.wtg").catch(() => {}); await w3.workspace.delete("map/war3map.wct").catch(() => {}); })()`);
+    cpSync(join(cliDir, "map", "triggers"), join(mapDir, "triggers"), { recursive: true });
+    await page.evaluate(`w3.workspace.refresh()`);
     const call = (name, params = []) => ({ type: 2, value: name, call: { kind: 3, name, hasParams: true, params, trailer: 0 } });
     const str = (value) => ({ type: 3, value }), pre = (value) => ({ type: 0, value });
-    const eca = (kind, name, params) => [
-      "        {", `          "kind": ${kind},`, `          "name": ${lit(name)},`, `          "enabled": true,`,
-      params.length ? `          "params": [\n${params.map((p) => `            ${lit(p)}`).join(",\n")}\n          ],` : `          "params": [],`,
-      `          "children": []`, "        }",
-    ].join("\n");
-    const trigger = [
-      "    {", `      "type": 8,`, `      "name": "Lit Trigger",`, `      "description": "",`, `      "isComment": 0,`, `      "id": 50331649,`,
-      `      "enabled": true,`, `      "isCustom": false,`, `      "initiallyOff": false,`, `      "runOnInit": false,`, `      "parent": 33554432,`,
-      `      "ecas": [`,
-      [
-        eca(0, "MapInitializationEvent", []),
-        eca(1, "OperatorCompareString", [call("GetPlayerName", [pre("Player00")]), pre("OperatorEqualENE"), str("lit cond")]),
-        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), str("Lit Message")]),
-        eca(2, "CreateQuestBJ", [pre("QuestTypeReqDiscovered"), str("Lit Quest"), str("Lit Quest Text"), str("ReplaceableTextures\\CommandButtons\\BTNFootman.blp")]),
-        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), call("StringCase", [str("Lit Case"), pre("StringCaseUpper")])]),
-      ].join(",\n"),
-      "      ]", "    }",
-    ].join("\n");
-    if (!wtgBefore.endsWith("\n    }\n  ]\n}\n") || !/"count":1,/.test(wtgBefore)) return fail(`cliff.w3m's war3map.wtg.json isn't laid out as the test knows it (control): ${lit(wtgBefore.slice(-40))}`);
-    // One more trigger in the counts (the fourth entry), one more custom text slot.
-    let nth = 0;
-    const wtgLit = wtgBefore.replace(/\{"count":(\d+),/g, (m, n) => (++nth === 4 ? `{"count":${Number(n) + 1},` : m))
-      .replace(/\n  \]\n\}\n$/, `,\n${trigger}\n  ]\n}\n`);
-    const eol = wctBefore.includes("\r\n") ? "\r\n" : "\n";
-    await page.evaluate(`(async () => {
-      await w3.workspace.writeText(${lit(wtgPath)}, ${lit(wtgLit)});
-      await w3.workspace.delete("map/war3map.wtg").catch(() => {});
-      await w3.workspace.writeText(${lit(wctPath)}, ${lit(wctBefore + `//== trigger 1 (no text): Lit Trigger ==${eol}`)});
+    const eca = (kind, name, params) => ({ kind, name, enabled: true, params, children: [] });
+    const ecas = [
+      eca(0, "MapInitializationEvent", []),
+      eca(1, "OperatorCompareString", [call("GetPlayerName", [pre("Player00")]), pre("OperatorEqualENE"), str("lit cond")]),
+      eca(2, "DisplayTextToForce", [call("GetPlayersAll"), str("Lit Message")]),
+      eca(2, "CreateQuestBJ", [pre("QuestTypeReqDiscovered"), str("Lit Quest"), str("Lit Quest Text"), str("ReplaceableTextures\\CommandButtons\\BTNFootman.blp")]),
+      eca(2, "DisplayTextToForce", [call("GetPlayersAll"), call("StringCase", [str("Lit Case"), pre("StringCaseUpper")])]),
+    ];
+    // Added at the end of the tree (in the map's root), with a text slot of its own, saved as the Trigger Editor saves.
+    const added = await page.evaluate(`(async () => {
+      const t = await w3.workspace.readTriggers();
+      if (!t || t.file.items[0]?.type !== 1) return "cliff.w3m's trigger tree isn't as the test knows it (a Reforged tree)";
+      t.file.items.push({ type: 8, name: "Lit Trigger", description: "", isComment: 0, id: 0x3fff000, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: t.file.items[0].id, ecas: ${lit(ecas)} });
+      t.custom.texts.push(null);
+      const w = await w3.workspace.writeTriggers({ file: t.file, custom: t.custom, stored: t.stored });
+      return w.written.join(",");
     })()`);
+    if (added !== "map/triggers/Lit_Trigger.gui.json,map/triggers/order.txt") return fail(`adding the trigger wrote ${lit(added)}, not its file and the root's order.txt`);
+    const litFile = join(mapDir, "triggers", "Lit_Trigger.gui.json"), litBefore = readFileSync(litFile, "utf8");
     await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
     await settled(page);
     if (!/DisplayTextToForce\( GetPlayersAll\(\), "Lit Message" \)/.test(readFileSync(file("war3map.j"), "utf8"))) fail("the script made from the trigger doesn't show its literal (control)");
@@ -11839,12 +12018,15 @@ async function moveTextsToTable(page, found) {
     if (readFileSync(join(dir, DE), "utf8") !== deWts + trigBlocks) fail("the German table didn't get the trigger's strings");
     const lits = [];
     const walk = (p) => { if (p.type === 3) lits.push(p.value); p.call?.params.forEach(walk); };
-    const wtgAfter = readFileSync(file("war3map.wtg.json"), "utf8");
-    JSON.parse(wtgAfter).items.find((i) => i.name === "Lit Trigger")?.ecas.forEach((e) => e.params.forEach(walk));
+    const litAfter = readFileSync(litFile, "utf8");
+    JSON.parse(litAfter).ecas.forEach((e) => e.params.forEach(walk));
     if (JSON.stringify(lits) !== JSON.stringify(["lit cond", "TRIGSTR_015", "TRIGSTR_016", "TRIGSTR_017", "ReplaceableTextures\\CommandButtons\\BTNFootman.blp", "TRIGSTR_018"])) fail(`the trigger's literals after the move: ${lit(lits)}`);
-    // Nothing else in war3map.wtg.json changed: with the four values put back it is the file written.
-    const back = wtgAfter.replace('"TRIGSTR_015"', '"Lit Message"').replace('"TRIGSTR_016"', '"Lit Quest"').replace('"TRIGSTR_017"', '"Lit Quest Text"').replace('"TRIGSTR_018"', '"Lit Case"');
-    if (back !== wtgLit) fail("the move changed more of war3map.wtg.json than the four texts");
+    // Nothing else of the trigger folders changed: only the trigger's file, and with the four values put back it is the
+    // file written.
+    const triggersChanged = [...snapshot(mapDir)].filter(([f, h]) => f.startsWith("triggers/") && files3.get(f) !== h).map(([f]) => f);
+    if (JSON.stringify(triggersChanged) !== JSON.stringify(["triggers/Lit_Trigger.gui.json"])) fail(`the move wrote these trigger files: ${lit(triggersChanged)}`);
+    const back = litAfter.replace('"TRIGSTR_015"', '"Lit Message"').replace('"TRIGSTR_016"', '"Lit Quest"').replace('"TRIGSTR_017"', '"Lit Quest Text"').replace('"TRIGSTR_018"', '"Lit Case"');
+    if (back !== litBefore) fail("the move changed more of the trigger's file than the four texts");
     const script = readFileSync(file("war3map.j"), "utf8");
     for (const line of ['DisplayTextToForce( GetPlayersAll(), "TRIGSTR_015" )', 'CreateQuestBJ( bj_QUESTTYPE_REQ_DISCOVERED, "TRIGSTR_016", "TRIGSTR_017", "ReplaceableTextures\\\\CommandButtons\\\\BTNFootman.blp" )',
       'StringCase("TRIGSTR_018", true)', 'GetPlayerName(Player(0)) == "lit cond"']) {
@@ -13252,8 +13434,6 @@ async function chapterObjects(page, found) {
   const placed = json(join(chapter, "map", "war3mapUnits.doo.json"));
   placed.units.push({ ...placed.units[0], id: "c001", skinId: "c001", editorId: 7, position: [256, 256, 0] });
   put(join(chapter, "map", "war3mapUnits.doo.json"), placed);
-  // Trigger texts as a project keeps them (the mini map has none): the MCP tools add a script trigger below.
-  put(join(chapter, "map", "war3map.wct.txt"), "//== war3map.wct: version 1, reforged, comment \"\" ==\n//== header ==\n\n//== trigger 0: Foo Init ==\n\n//== trigger 1: Foo Branch ==\n\n");
   const script = () => (existsSync(join(chapter, "map", "war3map.j")) ? readFileSync(join(chapter, "map", "war3map.j"), "utf8") : "");
   const colourOf = (text, id) => new RegExp(`'${id}'[^\\n]*\\n\\s*call SetUnitColor\\( \\w+, ConvertPlayerColor\\((\\d+)\\) \\)`).exec(text)?.[1];
   try {
@@ -13423,8 +13603,9 @@ async function triggersAndAi(page, found) {
   const listProblems = () => page.evaluate(`(async () => { const s = await w3.services.get("w3.problems"); await s.run();
     return s.problems().map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", reveal: p.reveal ?? null })); })()`);
   const refsProblems = (list) => list.filter((p) => /doesn't exist in this map/.test(p.message));
-  const wtgFile = () => k.read("war3map.wtg.json");
-  const wct = () => readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8");
+  // The trigger folders as they are on disk: their items, and all their texts as one (header first).
+  const wtgFile = () => { const t = triggersOnDisk(k.root); return t && { items: t.items, variables: t.variables }; };
+  const wct = () => triggersOnDisk(k.root)?.text ?? "";
   /** Clicks the Problems row whose text has `text`, then waits until `shown` (a page expression: where the row goes)
    *  comes true and the app is at rest. False: no such row. */
   const clickProblem = async (text, shown) => {
@@ -13462,13 +13643,14 @@ async function triggersAndAi(page, found) {
     await k.tool("create_script_trigger", { name: "Gate Watch", script: "" });
     await k.tool("create_script_trigger", { name: "Broken Kill", script: "" });
     await k.tool("set_script_header", { script: "// gg_rct_Smoke_Gate and gg_trg_Gate_Watch\n" });
-    const wtg = wtgFile();
     const p1 = (value) => ({ type: 1, value });
     const line = (kind, name, params) => ({ kind, name, enabled: true, params, children: [] });
-    const gui = (name, ecas) => { const t = wtg.items.find((i) => i.name === name); t.isCustom = false; t.ecas = ecas; };
-    gui("Gate Watch", [line(0, "TriggerRegisterEnterRectSimple", [p1("gg_rct_Smoke_Gate")]), line(2, "TriggerExecute", [p1("gg_trg_Gate_Script")]), line(2, "RemoveRect", [p1("gg_rct_Smoke_Gate")])]);
-    gui("Broken Kill", [line(0, "MapInitializationEvent", []), line(2, "KillUnit", [{ type: 0, value: "PlayerNA" }])]);
-    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(wtg, null, 2))})`);
+    const guis = {
+      "Gate Watch": [line(0, "TriggerRegisterEnterRectSimple", [p1("gg_rct_Smoke_Gate")]), line(2, "TriggerExecute", [p1("gg_trg_Gate_Script")]), line(2, "RemoveRect", [p1("gg_rct_Smoke_Gate")])],
+      "Broken Kill": [line(0, "MapInitializationEvent", []), line(2, "KillUnit", [{ type: 0, value: "PlayerNA" }])],
+    };
+    // Made GUI triggers, their text slots left as they are.
+    await editTriggerTree(page, `for (const [name, ecas] of Object.entries(${lit(guis)})) { const t = file.items.find((i) => i.name === name); t.isCustom = false; t.ecas = ecas; }`);
 
     // ---- Validate Map Triggers ---------------------------------------------------------------------------------------
     let list = await listProblems();
@@ -13478,11 +13660,11 @@ async function triggersAndAi(page, found) {
     // Control: the map's own trigger, Gate Watch and the script triggers are valid, and their references exist.
     const others = flagged.filter((p) => p.location !== "Broken Kill");
     if (others.length) fail(`valid triggers are reported: ${others.map((p) => `${p.location}: ${p.message}`).join(" | ").slice(0, 400)}`);
-    if (!(await clickProblem("is Player, not Unit", `w3.editors.activePath() === "map/war3map.wtg.json" && !!document.querySelector(".trig-eca.active .trig-param.trig-flagged")`))) fail("the Problems view has no row to click for Broken Kill");
+    if (!(await clickProblem("is Player, not Unit", `w3.editors.activePath() === "map/triggers" && !!document.querySelector(".trig-eca.active .trig-param.trig-flagged")`))) fail("the Problems view has no row to click for Broken Kill");
     else {
       const shown = await page.evaluate(`({ active: w3.editors.activePath(), tree: document.querySelector(".trig-row.active")?.textContent ?? null,
         marked: !!document.querySelector(".trig-eca.active .trig-param.trig-flagged"), text: document.querySelector(".trig-eca.active .trig-flagged")?.textContent ?? null })`);
-      if (shown.active !== "map/war3map.wtg.json" || !/Broken Kill/.test(shown.tree ?? "") || !shown.marked) fail(`a click on the problem shows ${lit(shown)}, not Broken Kill with its parameter marked`);
+      if (shown.active !== "map/triggers" || !/Broken Kill/.test(shown.tree ?? "") || !shown.marked) fail(`a click on the problem shows ${lit(shown)}, not Broken Kill with its parameter marked`);
     }
 
     // ---- Renaming a trigger: its references, its InitTrig_ after the question, one undo step ---------------------------
@@ -13496,7 +13678,7 @@ async function triggersAndAi(page, found) {
     if (!/InitTrig_Gate_Runner/.test(wct()) || /InitTrig_Gate_Script/.test(wct())) fail("the trigger's own InitTrig_ didn't follow its new name");
     list = await listProblems();
     if (refsProblems(list).length) fail(`after renaming the trigger, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
-    await page.evaluate(`w3.editors.open("map/war3map.wtg.json")`);
+    await page.evaluate(`w3.editors.open("map/triggers")`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
     const undone = JSON.stringify(wtgFile());
@@ -13507,24 +13689,22 @@ async function triggersAndAi(page, found) {
       await renameTrigger("Gate Guard");
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
       await settled(page);
-      if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("undoing the rename of Gate Watch left unsaved changes");
+      if (await page.evaluate(`w3.editors.isDirty("map/triggers")`)) fail("undoing the rename of Gate Watch left unsaved changes");
     }
     const askedGui = await warned();
     if (askedGui.length !== 1 || askedGui[0] !== "gg_trg_Gate_Watch appears 1 time in custom script. Rename it there too?") fail(`renaming a GUI trigger asked ${lit(askedGui)}`);
     // A parameter without a value (a variable of no name, as Validate reports "isn't set") shows its argument in red.
-    const keptWtg = readFileSync(join(k.root, "map", "war3map.wtg.json"), "utf8");
-    const noValue = JSON.parse(keptWtg);
-    noValue.items.find((i) => i.name === "Broken Kill").ecas[1].params[0] = { type: 1, value: "" };
-    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(noValue, null, 2))})`);
+    const killParam = `file.items.find((i) => i.name === "Broken Kill").ecas[1].params`;
+    await editTriggerTree(page, `window.__keptParam = ${killParam}[0]; ${killParam}[0] = { type: 1, value: "" }`);
     // The open Trigger Editor read the file again (a reload after a write is part of settled()).
     await settled(page);
     const unsetShown = (await selectTrigger("Broken Kill", true)) ? await page.evaluate(`[...document.querySelectorAll(".trig-eca .trig-param.unset")].map((e) => e.textContent)`) : null;
     if (!unsetShown?.length || unsetShown.some((t) => !/^<.+>$/.test(t))) fail(`a parameter without a value shows as ${lit(unsetShown)}, not its argument's name`);
-    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(keptWtg)})`);
+    await editTriggerTree(page, `${killParam}[0] = window.__keptParam; delete window.__keptParam`);
     await settled(page);
 
     // ---- Renaming a region with the Trigger Editor closed: the files follow ---------------------------------------------
-    await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);
+    await page.evaluate(`w3.editors.close("map/triggers")`);
     /** Renames the region in the Regions tab's name box, then saves the terrain editor unless `save` is false. */
     const renameRegion = async (from, to, save = true) => {
       await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
@@ -13552,7 +13732,7 @@ async function triggersAndAi(page, found) {
     const askedRegion = await warned();
     if (askedRegion.length !== 1 || !/gg_rct_Smoke_Gate appears 2 times in custom script/.test(askedRegion[0] ?? "")) fail(`renaming the region asked ${lit(askedRegion)}`);
     const doorWtg = JSON.stringify(wtgFile());
-    if ((doorWtg.match(/gg_rct_Smoke_Door/g) ?? []).length !== 2 || doorWtg.includes("gg_rct_Smoke_Gate")) fail("the region's GUI parameters didn't follow its new name (Trigger Editor closed)");
+    if ((doorWtg.match(/gg_rct_Smoke_Door/g) ?? []).length !== 2 || doorWtg.includes("gg_rct_Smoke_Gate")) fail(`the region's GUI parameters didn't follow its new name (Trigger Editor closed): ${(doorWtg.match(/gg_rct_Smoke_\w+/g) ?? []).join(" ")}`);
     if (!/RemoveRect\(gg_rct_Smoke_Door\)/.test(wct()) || !/\/\/ gg_rct_Smoke_Door and/.test(wct())) fail("the region's script uses didn't follow its new name (Trigger Editor closed)");
     list = await listProblems();
     if (refsProblems(list).length) fail(`after renaming the region, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
@@ -13563,7 +13743,7 @@ async function triggersAndAi(page, found) {
     const held = () => page.evaluate(`(async () => JSON.stringify((await w3.services.get("w3.triggers")).liveTriggers()))()`);
     // The Trigger Editor open with the triggers it holds.
     await until("the Trigger Editor's triggers", async () => (await held()) !== "null", 20000);
-    const trigDirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
+    const trigDirty = () => page.evaluate(`w3.editors.isDirty("map/triggers")`);
     const holds = async (name, when) => {
       const now = await held();
       const other = name === "Smoke_Arch" ? "Smoke_Door" : "Smoke_Arch";
@@ -13606,9 +13786,7 @@ async function triggersAndAi(page, found) {
     };
     await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.w3s.json", ${lit(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [bell] }))}); await w3.workspace.refresh(); })()`);
     await k.tool("create_script_trigger", { name: "Bell Script", script: "function InitTrig_Bell_Script takes nothing returns nothing\n    call StartSound(gg_snd_Smoke_Bell)\nendfunction\n" });
-    const bellWtg = wtgFile();
-    bellWtg.items.find((i) => i.name === "Gate Watch").ecas.push(line(2, "PlaySoundBJ", [p1("gg_snd_Smoke_Bell")]));
-    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(bellWtg, null, 2))})`);
+    await editTriggerTree(page, `file.items.find((i) => i.name === "Gate Watch").ecas.push(${lit(line(2, "PlaySoundBJ", [p1("gg_snd_Smoke_Bell")]))})`);
     const soundRenamed = await page.evaluate(`(async () => {
       const done = await w3.commands.execute("w3.sounds.soundAction", "gg_snd_Smoke_Bell", "rename", "Smoke_Gong");
       if (done !== true) return "the Sound Editor didn't rename gg_snd_Smoke_Bell";
@@ -13688,19 +13866,19 @@ async function triggersAndAi(page, found) {
     await settled(page);
     if (!readFileSync(wai).includes(Buffer.from("units.w3u"))) fail("the saved AI doesn't carry the custom data");
 
-    // ---- war3map.wct.txt as text in a Lua map: Lua, its functions listed (it was always JASS) -----------------------------
+    // ---- A Lua trigger file as text: Lua, its functions listed (it was always JASS) ------------------------------------
+    // Its own file in the trigger folders (a Lua map's custom text), opened in the text editor; removed again after.
     await page.evaluate(`w3.editors.closeAll()`);
-    const infoNow = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+    const probe = "map/triggers/Lua_Probe.lua";
     try {
-      await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...JSON.parse(infoNow), scriptType: 1 }, null, 2))})`);
-      await k.tool("create_script_trigger", { name: "Lua Probe", script: "function Lua_Probe_Actions()\n  print(\"probe\")\nend\n" });
-      await page.evaluate(`w3.editors.open("map/war3map.wct.txt", "w3.textEditor")`);
+      await page.evaluate(`(async () => { await w3.workspace.writeText(${lit(probe)}, ${lit("function Lua_Probe_Actions()\n  print(\"probe\")\nend\n")}); await w3.workspace.refresh(); })()`);
+      await page.evaluate(`w3.editors.open(${lit(probe)}, "w3.textEditor")`);
       const outline = () => page.evaluate(`(() => { const s = document.querySelector("select.cm-outline"); return s ? [...s.options].map((o) => o.textContent.trim()) : null; })()`);
       await until("the text's functions", async () => (await outline())?.includes("Lua_Probe_Actions"), 10000)
-        .catch(async () => fail(`war3map.wct.txt of a Lua map lists ${lit(await outline())}, not its Lua function`));
+        .catch(async () => fail(`a Lua trigger file lists ${lit(await outline())}, not its Lua function`));
     } finally {
       await page.evaluate(`w3.editors.closeAll()`);
-      await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(infoNow)})`);
+      await page.evaluate(`w3.workspace.delete(${lit(probe)})`).catch(() => {});
     }
   } finally {
     await page.evaluate(`(() => { const k = window.__kept; if (k) { w3.window.showWarning = k.warn; w3.window.pickFile = k.pick; w3.window.pickSaveFile = k.save; } })()`);
@@ -14017,8 +14195,8 @@ async function vjassCheck(page, found) {
     await k.hands.type("//! runtextmacro SmokeNoSuchMacro()");
     const typed = await pressCheck();
     if (!/^JassHelper: Line 6: Unable to find textmacro/.test(typed)) fail(`with a line typed and not saved, the check says: ${typed}`);
-    if (readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8").includes("SmokeNoSuchMacro")) fail("the check saved the typed line");
-    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`))) fail("the typed line isn't an unsaved change (control)");
+    if (triggersOnDisk(k.root)?.text.includes("SmokeNoSuchMacro")) fail("the check saved the typed line");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/triggers")`))) fail("the typed line isn't an unsaved change (control)");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     await restoreWindow(page);
@@ -14199,16 +14377,19 @@ async function scriptQuestionsOnSwitch(page, found) {
 /** An editor doesn't save over what was saved after it read the file. Round 4 lost a trigger that way: an AI tool created
  *  it right after the project opened, while the Trigger Editor of the last session was coming back, and the editor's next
  *  save deleted it. 1. A tool's save while the editor loads: it opens again once it's there. 2. The triggers' texts
- *  (war3map.wct.txt) saved by a tool while it's open: it opens again. 3. Its file changed on disk without the app
+ *  (map/triggers/) saved by a tool while it's open: it opens again. 3. Its files changed on disk without the app
  *  hearing of it: saving asks, Cancel writes nothing. 4. A tab that couldn't open (its file wasn't there yet, a tab of
  *  the last session) opens once the file is written (the AI Editor's New), and Add To Map works. */
 async function staleEditors(page, found) {
   try {
   const fail = (what) => found.push(`stale editors: ${what}`);
   const k = await heightKit(page, "StaleEditors");
-  const WTG = "map/war3map.wtg.json";
-  const wtgText = () => readFileSync(join(k.root, "map", "war3map.wtg.json"), "utf8");
-  const wct = () => readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8");
+  const WTG = "map/triggers";
+  // The trigger folders on disk, as the app reads them: the tree as JSON, the texts as one.
+  const wtgText = () => JSON.stringify(k.triggers().file);
+  const wct = () => { const c = k.triggers().custom; return [c.header ?? "", ...c.texts.map((t) => t ?? "")].join("\n"); };
+  /** The file of the item named `name` on disk (a project path), from the backend's read. */
+  const fileOf = (name) => { const t = k.triggers(); return t.files[t.file.items.findIndex((i) => i.name === name)]; };
   const rows = () => page.evaluate(`(() => {
     document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
     return [...document.querySelectorAll(".trig-row")].map((r) => r.textContent.trim());
@@ -14278,51 +14459,42 @@ async function staleEditors(page, found) {
     await k.save();
     if (!/text probe two/.test(wct())) fail("the Trigger Editor's save put back the script a tool had changed while it was open");
 
-    // ---- 3. Its file changed on disk, unheard of: the save asks; Cancel writes nothing, Overwrite saves ---------------
+    // ---- 3. Its files changed on disk, unheard of (no focus change): the save keeps the change of an item the editor
+    // didn't change and asks nothing; an item both changed is asked about, Cancel writes nothing, Overwrite saves -------
     const r3 = await rename("Melee Begin", "Melee Opening");
     if (r3) fail(r3);
-    const onDisk = wtgText().replace('"Text Probe"', '"Changed On Disk"');
-    if (onDisk === wtgText()) fail("no Text Probe in the file to change on disk");
-    writeFileSync(join(k.root, "map", "war3map.wtg.json"), onDisk);
-    await page.evaluate(`(() => { window.__asked = []; window.__answer = "Cancel"; w3Workbench.editors.confirm = async (m, ...a) => { window.__asked.push(m); return window.__answer; }; })()`);
+    const probeFile = join(k.root, ...(fileOf("Text Probe") ?? "map/triggers/none").split("/"));
+    const probeBefore = existsSync(probeFile) ? readFileSync(probeFile, "utf8") : "";
+    if (!probeBefore.includes('"name":"Text Probe"')) fail(`no Text Probe file to change on disk: ${probeFile}`);
+    writeFileSync(probeFile, probeBefore.replace('"name":"Text Probe"', '"name":"Changed On Disk"'));
+    await page.evaluate(`(() => { window.__asked = []; window.__answer = false; w3.window.confirm = async (m) => { window.__asked.push(m); return window.__answer; }; w3Workbench.editors.confirm = async (m) => { window.__asked.push(m); return "Cancel"; }; })()`);
     await page.evaluate(`w3.editors.saveAll()`);
     let asked = await page.evaluate(`window.__asked.splice(0)`);
-    if (asked.length !== 1 || !/changed on disk/.test(asked[0])) fail(`saving over a file changed on disk asked ${lit(asked)}`);
-    if (wtgText() !== onDisk) fail("Cancel on the question still wrote over the file changed on disk");
-    if (!(await page.evaluate(`w3.editors.isDirty(${lit(WTG)})`))) fail("after Cancel the Trigger Editor isn't unsaved any more");
-    await page.evaluate(`window.__answer = "Overwrite"`);
-    await page.evaluate(`w3.editors.saveAll()`);
-    asked = await page.evaluate(`window.__asked.splice(0)`);
-    if (asked.length !== 1 || !/"Melee Opening"/.test(wtgText())) fail(`Overwrite didn't save (asked ${asked.length} times)`);
-    // Control: a save with nothing changed on disk doesn't ask.
+    if (asked.length) fail(`saving with another item changed on disk asked ${lit(asked)}`);
+    if (!/"Changed On Disk"/.test(wtgText()) || /"Text Probe"/.test(wtgText()) || !/"Melee Opening"/.test(wtgText())) fail("the save wrote over the change on disk of an item the editor hadn't changed, or didn't save its own");
+    if (await page.evaluate(`w3.editors.isDirty(${lit(WTG)})`)) fail("the save that took the change on disk in left the Trigger Editor unsaved");
+    // Both changed the same trigger: asked; Cancel writes nothing and leaves the editor unsaved.
     const r4 = await rename("Melee Opening", "Melee Again");
     if (r4) fail(r4);
+    const meleeFile = join(k.root, ...(fileOf("Melee Opening") ?? "map/triggers/none").split("/"));
+    const meleeOnDisk = readFileSync(meleeFile, "utf8").replace('"name": "Melee Opening"', '"name": "Melee Elsewhere"');
+    writeFileSync(meleeFile, meleeOnDisk);
     await page.evaluate(`w3.editors.saveAll()`);
     asked = await page.evaluate(`window.__asked.splice(0)`);
-    if (asked.length || !/"Melee Again"/.test(wtgText())) fail(`a save of a file nothing else changed asked ${lit(asked)}`);
-    // A change of the same size in the same millisecond: size and time are as the editor left them, the contents
-    // aren't. (The time is put back by hand, as such a write leaves it.)
+    if (asked.length !== 1 || !/changed on disk too/.test(asked[0])) fail(`saving over a trigger changed on disk too asked ${lit(asked)}`);
+    if (readFileSync(meleeFile, "utf8") !== meleeOnDisk) fail("Cancel on the question still wrote over the trigger changed on disk");
+    if (!(await page.evaluate(`w3.editors.isDirty(${lit(WTG)})`))) fail("after Cancel the Trigger Editor isn't unsaved any more");
+    await page.evaluate(`window.__answer = true`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    asked = await page.evaluate(`window.__asked.splice(0)`);
+    if (asked.length !== 1 || !/"Melee Again"/.test(wtgText()) || /"Melee Elsewhere"/.test(wtgText())) fail(`Overwrite didn't save (asked ${asked.length} times)`);
+    // Control: a save with nothing changed on disk doesn't ask.
     const r5 = await rename("Melee Again", "Melee Once More");
     if (r5) fail(r5);
-    const wtgFile = join(k.root, "map", "war3map.wtg.json");
-    const was = statSync(wtgFile);
-    const sameSize = wtgText().replace('"Text Probe"', '"Text Prxbe"');
-    if (sameSize === wtgText() || sameSize.length !== wtgText().length) fail("no Text Probe in the file for a same-size change");
-    writeFileSync(wtgFile, sameSize);
-    // The middle of its millisecond: a time given at the millisecond's start can land a hair before it (seconds as a
-    // double), which reads as the millisecond before.
-    utimesSync(wtgFile, was.atime, (Math.floor(was.mtimeMs) + 0.5) / 1000);
-    if (statSync(wtgFile).size !== was.size || Math.floor(statSync(wtgFile).mtimeMs) !== Math.floor(was.mtimeMs)) fail("the same-size change didn't keep the size and time");
-    await page.evaluate(`window.__answer = "Cancel"`);
     await page.evaluate(`w3.editors.saveAll()`);
     asked = await page.evaluate(`window.__asked.splice(0)`);
-    if (asked.length !== 1 || !/changed on disk/.test(asked[0])) fail(`saving over a same-size change in the same millisecond asked ${lit(asked)}`);
-    if (wtgText() !== sameSize) fail("Cancel still wrote over the same-size change");
-    await page.evaluate(`window.__answer = "Overwrite"`);
-    await page.evaluate(`w3.editors.saveAll()`);
-    asked = await page.evaluate(`window.__asked.splice(0)`);
-    if (asked.length !== 1 || !/"Melee Once More"/.test(wtgText())) fail(`Overwrite of the same-size change didn't save (asked ${asked.length} times)`);
-    await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; ed.confirm = kept.confirm; delete ed.resolveTab; })()`);
+    if (asked.length || !/"Melee Once More"/.test(wtgText())) fail(`a save with nothing changed on disk asked ${lit(asked)}`);
+    await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; ed.confirm = kept.confirm; w3.window.confirm = window.__w3WindowOrig.confirm; delete ed.resolveTab; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- 4. A tab of the last session whose file isn't there yet, then the AI Editor's New writes it -------------------
@@ -14585,21 +14757,18 @@ async function triggerMultiSelect(page, found) {
   try {
   const fail = (what) => found.push(`trigger multi-select: ${what}`);
   const k = await heightKit(page, "TrigMulti");
-  const WTG = "map/war3map.wtg.json";
+  const WTG = "map/triggers";
   await page.evaluate(`(() => { window.__mw = { warn: w3.window.showWarning, info: w3.window.showInfo, said: [] };
     w3.window.showWarning = async (m) => { window.__mw.said.push(String(m)); }; w3.window.showInfo = async (m) => { window.__mw.said.push(String(m)); }; })()`);
   try {
     await k.tool("add_trigger_variable", { name: "score", type: "integer", initialValue: "5" });
     await k.tool("add_trigger_variable", { name: "marks", type: "real", array: true, size: 4 });
     await k.tool("create_script_trigger", { name: "Multi", script: "" });
-    const wtg = k.read("war3map.wtg.json");
-    const t = wtg.items.find((i) => i.name === "Multi");
-    t.isCustom = false;
     const nothing = (n) => ({ kind: 2, name: "DoNothing", enabled: true, params: [], children: [] });
-    t.ecas = [{ kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "score" }, { type: 3, value: "1" }], children: [] },
+    const multiEcas = [{ kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "score" }, { type: 3, value: "1" }], children: [] },
       { kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "marks", index: { type: 3, value: "2" } }, { type: 3, value: "1.5" }], children: [] },
       nothing(), nothing(), nothing()];
-    await page.evaluate(`w3.workspace.writeText(${lit(WTG)}, ${lit(JSON.stringify(wtg, null, 2))})`);
+    await editTriggerTree(page, `const t = file.items.find((i) => i.name === "Multi"); t.isCustom = false; t.ecas = ${lit(multiEcas)}`);
     await k.run("w3.triggers.reveal", "Multi");
     await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 5`), 20000).catch(() => fail("the editor doesn't show Multi's five lines"));
     const count = (sel) => page.evaluate(`document.querySelectorAll(${lit(sel)}).length`);
@@ -14612,7 +14781,7 @@ async function triggerMultiSelect(page, found) {
     const lines = () => count(".trig-eca");
     const said = () => page.evaluate(`window.__mw.said.splice(0)`);
     // The map's variables as saved (the tool reads the file).
-    const vars = async () => { await k.save(); return k.read("war3map.wtg.json").variables.map((v) => v.name); };
+    const vars = async () => { await k.save(); return k.triggers().file.variables.map((v) => v.name); };
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const expectActive = async (what, want) => { const got = await active(); if (!same(got, want)) fail(`${what}: selected lines ${lit(got)}, not ${lit(want)}`); };
 
@@ -14664,7 +14833,7 @@ async function triggerMultiSelect(page, found) {
     const have = await vars();
     if (!have?.includes("score") || !have.includes("marks")) fail(`pasting didn't create the variables the lines use: ${lit(have)}`);
     await k.save();
-    const made = k.read("war3map.wtg.json").variables;
+    const made = k.triggers().file.variables;
     const score = made.find((v) => v.name === "score"), marks = made.find((v) => v.name === "marks");
     if (score?.type !== "integer" || score.initialValue !== "5") fail(`the created score is ${lit(score)}`);
     if (marks?.type !== "real" || marks.isArray !== true || marks.arraySize !== 4) fail(`the created marks is ${lit(marks)}`);
@@ -15190,7 +15359,7 @@ async function objectManagerLive(page, found) {
       const delVar = await run("w3.triggers.itemAction", "variable", "OmLiveVar", "delete");
       if (delVar.e || delVar.r !== true) fail(`deleting the variable in the Trigger Editor: ${lit(delVar)}`);
       await rows("OmLiveVar", "OmLiveVar", false, "after the variable was deleted in the Trigger Editor (unsaved) the Object Manager still lists it");
-      await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);
+      await page.evaluate(`w3.editors.close("map/triggers")`);
       await rows("Om Live", "Om Live Trigger", true, "after the Trigger Editor closed unsaved the Object Manager doesn't show the saved trigger");
       await rows("OmLiveVar", "OmLiveVar", true, "after the Trigger Editor closed unsaved the Object Manager doesn't list the saved variable");
     }
@@ -15321,12 +15490,9 @@ async function editorExtras(page, found) {
   try {
     // ---- Trigger Editor: Copy As Text / Copy As Script ------------------------------------------------------------------
     await k.tool("create_script_trigger", { name: "Copy Me", script: "" });
-    const wtg = k.read("war3map.wtg.json");
-    const t = wtg.items.find((i) => i.name === "Copy Me");
-    t.isCustom = false;
     // An event that registers in InitTrig_ (so the whole trigger's script has more than its action line's).
-    t.ecas = [{ kind: 0, name: "TriggerRegisterTimerEventSingle", enabled: true, params: [{ type: 3, value: "2.00" }], children: [] }, { kind: 2, name: "DoNothing", enabled: true, params: [], children: [] }];
-    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(wtg, null, 2))})`);
+    const copyEcas = [{ kind: 0, name: "TriggerRegisterTimerEventSingle", enabled: true, params: [{ type: 3, value: "2.00" }], children: [] }, { kind: 2, name: "DoNothing", enabled: true, params: [], children: [] }];
+    await editTriggerTree(page, `const t = file.items.find((i) => i.name === "Copy Me"); t.isCustom = false; t.ecas = ${lit(copyEcas)}`);
     await run("w3.triggers.reveal", "Copy Me");
     if (!(await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 2`), 20000).then(() => true, () => { fail("the trigger editor doesn't show Copy Me's two lines"); return false; }))) return;
     const lines = await page.evaluate(`[...document.querySelectorAll(".trig-eca > span")].map((s) => s.textContent)`);
@@ -15359,7 +15525,7 @@ async function editorExtras(page, found) {
     const conditions = await run("w3.triggers.copyAsText");
     if (conditions.r !== "Conditions\n") fail(`Copy As Text of the empty Conditions heading gave ${lit(conditions)}`);
     await clip();
-    if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("copying made the trigger file unsaved");
+    if (await page.evaluate(`w3.editors.isDirty("map/triggers")`)) fail("copying made the trigger file unsaved");
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Editor: Allow negative real values -------------------------------------------------------------------
@@ -15585,7 +15751,7 @@ async function editorExtras(page, found) {
     await page.evaluate(`w3.views.show("objectManager")`);
     const summary = await run("w3.objectManager.summary");
     const rows = new Map(summary.r ?? []);
-    const triggers = k.read("war3map.wtg.json").items.filter((i) => "ecas" in i && i.type !== 16 && !i.isComment).length;
+    const triggers = k.triggers().file.items.filter((i) => "ecas" in i && i.type !== 16 && !i.isComment).length;
     if (rows.get("Custom Units") !== "1" || rows.get("Triggers") !== String(triggers) || rows.get("Sounds") !== "1") fail(`the Map Summary says ${lit(summary)}`);
     await page.evaluate(`document.querySelector(".om-summary-button")?.click()`);
     const shownRows = await page.evaluate(`document.querySelectorAll(".om-summary tr").length`);
@@ -15622,7 +15788,7 @@ async function editorExtras(page, found) {
     else {
       await step("Rename Object (trigger)", () => menu(".om-row", "Copy Me", "Rename Object"));
       await k.save();
-      const names = () => k.read("war3map.wtg.json").items.map((i) => i.name);
+      const names = () => k.triggers().file.items.map((i) => i.name);
       if (!names().includes("Copied Me") || names().includes("Copy Me")) fail(`after Rename Object the triggers are ${lit(names())}`);
       await page.evaluate(`w3.views.show("objectManager")`);
       await omRefresh();
@@ -15902,10 +16068,9 @@ async function niceToHaves(page, found) {
     const imported = await run("w3.project.importMapFolder", folder);
     if (imported.e) fail(`Import Map Folder: ${imported.e}`);
     await until("the folder's project", () => page.evaluate(`w3.workspace.project()?.root?.endsWith("from-folder") ?? false`), 20000).catch(() => fail("Import Map Folder didn't open the project"));
-    const fromFolder = snapshot(join(dir, "from-folder", "map"));
-    // The fixture's war3map.wtg.json (the layout before map/triggers/, no war3map.wct) comes back as the raw war3map.wtg.
-    const fixtureFiles = snapshot(join(FIXTURE, "map"));
-    if (fixtureFiles.delete("war3map.wtg.json")) fixtureFiles.set("war3map.wtg", createHash("sha256").update(spawnSync(cli, ["cat", packed, "war3map.wtg"]).stdout).digest("hex"));
+    // The triggers compare by what they pack to: the folder's project keeps them as an import does (or raw).
+    const fromFolder = triggersAsPacked(join(dir, "from-folder"));
+    const fixtureFiles = triggersAsPacked(FIXTURE);
     for (const [f, h] of fixtureFiles) if (fromFolder.get(f) !== h) fail(`the folder's project has ${f} ${fromFolder.has(f) ? "different" : "missing"}`);
     if (fromFolder.size !== fixtureFiles.size) fail(`the folder's project has ${fromFolder.size} files, the fixture ${fixtureFiles.size}`);
     await page.evaluate(`(() => { const k = window.__niceKept; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`);
@@ -15992,14 +16157,14 @@ async function niceToHaves(page, found) {
     if (!/Ask the user to save or discard/.test(refusedForAi ?? "")) fail(`an AI tool with unsaved triggers was told ${lit(refusedForAi)}`);
     await k.save();
     await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
-    const cat = k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization");
+    const cat = k.triggers().file.items.find((i) => i.type === 4 && i.name === "Initialization");
     if (cat?.isComment !== 1) fail(`Category is Comment saved ${lit(cat)}`);
     if (!/InitTrig_Melee_Initialization/.test(readFileSync(join(k.root, "map", "war3map.j"), "utf8"))) fail("a trigger in a comment category left war3map.j (the World Editor keeps it)");
     /** The caret of the tree's Initialization category: "▸" closed, "▾" open. */
     const initCaret = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.textContent ?? null`);
     const toggleInit = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.click()`);
-    const initExpanded = () => k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization")?.expanded;
-    const wtgDirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
+    const initExpanded = () => k.triggers().file.items.find((i) => i.type === 4 && i.name === "Initialization")?.expanded;
+    const wtgDirty = () => page.evaluate(`w3.editors.isDirty("map/triggers")`);
     // Opening or closing a category is saved (the World Editor's `expanded`): unsaved, but not an undo step of its own.
     if (await initCaret() !== "▸" || initExpanded() !== 0) fail(`a new map's Initialization shows ${await initCaret()}, saved ${initExpanded()} (collapsed)`);
     await toggleInit();
@@ -16011,7 +16176,7 @@ async function niceToHaves(page, found) {
     if (await initCaret() !== "▾") fail(`undo of Category is Comment closed the category opened after it (${await initCaret()})`);
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
     await k.save();
-    if (initExpanded() !== 1 || k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization")?.isComment !== 1) fail(`opened Initialization saved ${lit(k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization"))}`);
+    if (initExpanded() !== 1 || k.triggers().file.items.find((i) => i.type === 4 && i.name === "Initialization")?.isComment !== 1) fail(`opened Initialization saved ${lit(k.triggers().file.items.find((i) => i.type === 4 && i.name === "Initialization"))}`);
     if (await wtgDirty()) fail("the Trigger Editor is unsaved after saving an opened category");
     // Collapse, save, reopen: still collapsed.
     await toggleInit();
@@ -16021,7 +16186,7 @@ async function niceToHaves(page, found) {
     await run("w3.triggers.open");
     await until("the trigger tree after reopening", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
     if (await initCaret() !== "▸") fail(`collapsed, saved and reopened, Initialization shows ${await initCaret()}`);
-    const before = k.read("war3map.wtg.json");
+    const before = k.triggers().file;
     // A new map's Initialization is saved collapsed (the control); Reset Triggers saves it expanded, and the tree follows.
     if (await initCaret() !== "▸") fail(`a new map's Initialization shows ${await initCaret()} (saved collapsed)`);
     const resetT = await run("w3.triggers.reset");
@@ -16029,7 +16194,7 @@ async function niceToHaves(page, found) {
     if (!(await asked()).some((m) => /Clear all triggers and reset to default/.test(m))) fail("Reset Triggers didn't ask first");
     if (await initCaret() !== "▾") fail(`after Reset Triggers Initialization shows ${await initCaret()} (the reset saves it expanded)`);
     await k.save();
-    const after = k.read("war3map.wtg.json");
+    const after = k.triggers().file;
     if (after.items.find((i) => i.type === 4 && i.name === "Initialization")?.expanded !== 1) fail("Reset Triggers didn't save Initialization expanded");
     const names2 = (f) => f.items.filter((i) => i.type === 8 || i.type === 32).map((i) => i.name);
     if (JSON.stringify(names2(after)) !== JSON.stringify(["Melee Initialization"])) fail(`after Reset Triggers: ${names2(after).join(", ")}`);
@@ -16040,7 +16205,7 @@ async function niceToHaves(page, found) {
     if (await initCaret() !== "▾") fail(`redo of Reset Triggers shows Initialization ${await initCaret()}`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
-    if (JSON.stringify(names2(k.read("war3map.wtg.json"))) !== JSON.stringify(names2(before))) fail(`one undo of Reset Triggers gave ${names2(k.read("war3map.wtg.json")).join(", ")}`);
+    if (JSON.stringify(names2(k.triggers().file)) !== JSON.stringify(names2(before))) fail(`one undo of Reset Triggers gave ${names2(k.triggers().file).join(", ")}`);
     if (initExpanded() !== 0) fail(`undone Reset Triggers saved Initialization expanded ${initExpanded()}`);
     // Reset again, save and reopen: the saved expanded Initialization opens expanded.
     await run("w3.triggers.reset");
@@ -16051,7 +16216,7 @@ async function niceToHaves(page, found) {
     if (await initCaret() !== "▾") fail(`reopened after Reset Triggers, Initialization shows ${await initCaret()}`);
     // Ctrl+S right after typing (within the code editor's pause before it commits, and in a text box that commits when
     // it loses the focus): the save has the text and leaves the tab saved. It used to save without it and stay unsaved.
-    const wctPath = join(k.root, "map", "war3map.wct.txt");
+    const savedHeader = () => k.triggers().custom.header ?? "";
     await k.hands.click(".trig-row.trig-map");
     await until("the map header's code editor", () => page.evaluate(`!!document.querySelector(".trig-code .cm-content")`), 10000)
       .then(async () => {
@@ -16059,7 +16224,7 @@ async function niceToHaves(page, found) {
         await k.hands.chord("Ctrl+End");
         await k.hands.type("// nice typed header");
         await k.hands.chord("Ctrl+S");
-        await until("the typed header saved", () => readFileSync(wctPath, "utf8").includes("// nice typed header"), 5000)
+        await until("the typed header saved", () => savedHeader().includes("// nice typed header"), 5000)
           .catch(() => fail("Ctrl+S right after typing in the map header saved without the typed text"));
         // The code editor's pause before it commits ended now (settled() flushes the editors): a late commit that
         // marked the tab unsaved again would show.
@@ -16073,7 +16238,7 @@ async function niceToHaves(page, found) {
         await k.hands.chord("Ctrl+End");
         await k.hands.type(" nice typed comment");
         await k.hands.chord("Ctrl+S");
-        await until("the typed comment saved", () => k.read("war3map.wtg.json").items.some((i) => i.name === "Melee Initialization" && i.description?.endsWith(" nice typed comment")), 5000)
+        await until("the typed comment saved", () => k.triggers().file.items.some((i) => i.name === "Melee Initialization" && i.description?.endsWith(" nice typed comment")), 5000)
           .catch(() => fail("Ctrl+S right after typing a trigger's comment saved without the typed text"));
         await settled(page);
         if (await wtgDirty()) fail("Ctrl+S right after typing a trigger's comment left the Trigger Editor unsaved");
@@ -16081,7 +16246,7 @@ async function niceToHaves(page, found) {
     // Only a folded category unsaved: Adjust Map String IDs (and so every action that refuses on unsaved changes) saves it
     // first and goes on; with a real edit besides, it refuses as before.
     await settled(page);
-    const wtgPath = join(k.root, "map", "war3map.wtg.json");
+    const triggerFilesNow = () => JSON.stringify([...snapshot(join(k.root, "map", "triggers"))]);
     const foldedBefore = initExpanded();
     await toggleInit();
     if (!(await wtgDirty())) fail("folding a category left the Trigger Editor saved (control)");
@@ -16091,11 +16256,11 @@ async function niceToHaves(page, found) {
     if (initExpanded() === foldedBefore) fail("Adjust Map String IDs didn't save the folded category first");
     if (await wtgDirty()) fail("after Adjust Map String IDs the folded category is still unsaved");
     // Byte-identical to saving by hand: the same fold, put back and forth and saved by hand.
-    const foldBytes = readFileSync(wtgPath, "utf8");
+    const foldBytes = triggerFilesNow();
     await toggleInit();
     await toggleInit();
     await k.save();
-    if (readFileSync(wtgPath, "utf8") !== foldBytes) fail("the fold saved before Adjust differs from the same fold saved by hand");
+    if (triggerFilesNow() !== foldBytes) fail("the fold saved before Adjust differs from the same fold saved by hand");
     await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
     await settled(page);
     // A real edit besides the fold: it refuses, and the fold stays unsaved.
@@ -16190,16 +16355,15 @@ async function niceToHaves(page, found) {
         // The Trigger Editor, the second editor of war3map.wts, shows the string in a GUI action's text parameter. The Object
         // Editor saves another text for it: the Trigger Editor shows that without reopening, stays saved and keeps its selection.
         {
-          const wtgText = readFileSync(join(mapDir, "war3map.wtg.json"), "utf8");
+          const keptTree = await readTriggerTree(page);
+          const triggerFilesNow = () => JSON.stringify([...snapshot(join(mapDir, "triggers"))]);
+          const triggerFilesBefore = triggerFilesNow();
           const trigName = "Nice Text";
           try {
             await k.tool("create_script_trigger", { name: trigName, script: "" });
-            const wtg = k.read("war3map.wtg.json");
-            const t = wtg.items.find((i) => i.name === trigName);
-            t.isCustom = false;
-            t.ecas = [{ kind: 2, name: "DisplayTextToPlayer", enabled: true, children: [], params: [{ type: 0, value: "PlayerNA" },
+            const ecas = [{ kind: 2, name: "DisplayTextToPlayer", enabled: true, children: [], params: [{ type: 0, value: "PlayerNA" },
               { type: 3, value: "0" }, { type: 3, value: "0" }, { type: 3, value: "TRIGSTR_007" }] }];
-            await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(wtg, null, 2))})`);
+            await editTriggerTree(page, `const t = file.items.find((i) => i.name === ${lit(trigName)}); t.isCustom = false; t.ecas = ${lit(ecas)}`);
             await page.evaluate(`w3.workspace.refresh()`);
             await run("w3.triggers.open");
             await until("the trigger's row", () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].some((e) => e.textContent.trim() === ${lit(trigName)})`), 20000);
@@ -16216,13 +16380,13 @@ async function niceToHaves(page, found) {
               await k.save();
               if (strings().get(7) !== "Seen Elsewhere") fail(`the Object Editor saved string 7 as ${lit(strings().get(7))} (control)`);
               if (!(await soon(async () => (await shown()).includes("Seen Elsewhere"), 8000))) fail("the Trigger Editor still shows the old text of string 7 after another editor saved it");
-              if (await page.evaluate(tab("map/war3map.wtg.json"))) fail("the Trigger Editor is unsaved after it showed a changed string");
+              if (await page.evaluate(tab("map/triggers"))) fail("the Trigger Editor is unsaved after it showed a changed string");
               if (await page.evaluate(`document.querySelector("input.trig-name")?.value`) !== trigName) fail("the Trigger Editor lost its selection when a string changed");
-              if (readFileSync(join(mapDir, "war3map.wtg.json"), "utf8") === wtgText) fail("(control) the trigger file wasn't changed by the test");
+              if (triggerFilesNow() === triggerFilesBefore) fail("(control) the trigger files weren't changed by the test");
             }
           } finally {
             await page.evaluate(`w3.editors.closeAll()`);
-            await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(wtgText)})`);
+            await restoreTriggerTree(page, keptTree);
             await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${lit(keep.wts)})`);
             await page.evaluate(`w3.workspace.refresh()`);
           }
@@ -16284,10 +16448,11 @@ async function niceToHaves(page, found) {
     // reference to change. An undo in the Trigger Editor afterwards must not bring back TRIGSTR_007, a number no string
     // has now (or another string's, after a renumbering of all).
     {
-      const wtsFile = join(mapDir, "war3map.wts"), wctFile = join(mapDir, "war3map.wct.txt");
-      const keep = { wts: readFileSync(wtsFile, "utf8"), wct: existsSync(wctFile) ? readFileSync(wctFile, "utf8") : null };
+      const wtsFile = join(mapDir, "war3map.wts");
+      const keep = { wts: readFileSync(wtsFile, "utf8"), tree: await readTriggerTree(page) };
       const eol = keep.wts.includes("\r\n") ? "\r\n" : "\n";
-      const header = () => (existsSync(wctFile) ? readFileSync(wctFile, "utf8") : "");
+      // The custom scripts as saved: the header and every text (map/triggers/).
+      const header = () => { const c = k.triggers()?.custom; return c ? [c.header ?? "", ...c.texts.map((t) => t ?? "")].join("\n") : ""; };
       const hasString = (n) => new RegExp(`STRING ${n}\\r?\\n`).test(readFileSync(wtsFile, "utf8"));
       try {
         await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${lit(`${keep.wts.replace(/(\r?\n)*$/, "")}${eol}${eol}STRING 7${eol}{${eol}Header Text${eol}}${eol}`)})`);
@@ -16316,14 +16481,14 @@ async function niceToHaves(page, found) {
         if (header() !== headerBefore) fail("Adjust changed the custom scripts, which name no moved string (control)");
         await page.evaluate(`w3.commands.execute("workbench.undo")`);
         await settled(page);
-        if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) await k.save();
+        if (await page.evaluate(`w3.editors.isDirty("map/triggers")`)) await k.save();
         if (header().includes("TRIGSTR_007")) fail("an undo in the Trigger Editor after Adjust Map String IDs brought back TRIGSTR_007, a string that moved to 20");
       } catch (e) {
         fail(`Adjust with the Trigger Editor's undo history: ${e?.message ?? e}`);
       } finally {
         await page.evaluate(`w3.editors.closeAll()`);
         await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${lit(keep.wts)})`);
-        if (keep.wct !== null) await page.evaluate(`w3.workspace.writeText("map/war3map.wct.txt", ${lit(keep.wct)})`);
+        await restoreTriggerTree(page, keep.tree);
         await page.evaluate(`w3.workspace.refresh()`);
         await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
         await settled(page);
@@ -16646,6 +16811,7 @@ async function run() {
         tileTemplate,
         toggleGroups,
         toolbarNarrow,
+        triggerFolders,
         triggerMultiSelect,
         triggerParamColorTools,
         triggersAndAi,
@@ -16769,14 +16935,10 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   // The app unpacks a map into what it came from.
   const unpacked = join(work, "unpacked");
   await page.evaluate(`w3.backend.invoke("project_unpack", { map: ${lit(wanted)}, dir: ${lit(unpacked)}, allowIncomplete: false, install: "none" })`);
-  const again = snapshot(join(unpacked, "map"));
-  // The fixture keeps its triggers in the layout before map/triggers/ (war3map.wtg.json and no war3map.wct): without
-  // war3map.wct an unpack keeps that war3map.wtg raw (crates/w3proj trigger_layout), as the CLI's tests expect too.
-  const expected = snapshot(join(FIXTURE, "map"));
-  if (expected.delete("war3map.wtg.json")) {
-    const raw = spawnSync(cli, ["cat", wanted, "war3map.wtg"]);
-    expected.set("war3map.wtg", raw.status === 0 ? createHash("sha256").update(raw.stdout).digest("hex") : "(not in the map)");
-  }
+  // The triggers compare by what they pack to: unpacked without the game's TriggerData they stay raw, the fixture has
+  // the trigger folders.
+  const again = triggersAsPacked(unpacked);
+  const expected = triggersAsPacked(FIXTURE);
   for (const [f, h] of expected) if (again.get(f) !== h) found.push(`unpacking changed ${f}`);
 
   const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
@@ -16935,6 +17097,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectValueRange", found);
   await triggerMultiSelect(page, found).catch((e) => found.push(`trigger multi-select: ${e.message}`));
   await leftOpen(page, "triggerMultiSelect", found);
+  await triggerFolders(page, found).catch((e) => found.push(`trigger folders: ${e.message}`));
+  await leftOpen(page, "triggerFolders", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));

@@ -220,6 +220,10 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     assert!(o.status.success() && text(&o).contains("written    map/war3map.j"), "{}", text(&o));
     let studios = fs::read_to_string(&script).unwrap();
     assert!(!studios.contains("SetStartLocPrio("), "one player has no priorities: {studios}");
+    // The triggers come from map/triggers/: the custom script header, the custom text and the GUI triggers.
+    for made in ["function FooHelper takes nothing returns integer", "function InitTrig_Foo_Script takes nothing returns nothing", "call InitTrig_Foo_Init(", "gg_trg_Foo_Branch"] {
+        assert!(studios.contains(made), "no {made:?} in the script made from map/triggers/: {studios}");
+    }
 
     // Nothing changed: the pack makes the same script and writes nothing.
     let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("same.w3x"))], &game);

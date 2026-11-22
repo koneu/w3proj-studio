@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { textTriggers, type Item, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
-import { mergeReload, type ReloadSide } from "./reload";
+import { mergeReload, sameTree, type ReloadSide } from "./reload";
 
 const trig = (name: string, id: number, parent: number, over: Partial<TriggerItem> = {}): TriggerItem =>
   ({ type: 8, name, description: "", isComment: 0, id, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent, ecas: [], ...over });
@@ -83,6 +83,22 @@ test("added and removed items: the files' new trigger appears, mine stays where 
   const r2 = mergeReload(b, mine, theirs2);
   assert.ok(named(r2, "Fight"));
   assert.deepEqual(r2.conflicts, ["map/triggers/Combat/Fight.gui.json"]);
+});
+
+test("sameTree: the same files whatever ids memory gave; a change of any item, text, header or variable is another", () => {
+  const b = base(), other = clone(b);
+  for (const it of other.file.items) if (it.type === 8) it.id += 0x100;
+  assert.equal(sameTree(b, other), true);
+  for (const change of [
+    (s: ReloadSide) => { named(s, "Fight").enabled = false; },
+    (s: ReloadSide) => { s.texts[1] = "// other"; },
+    (s: ReloadSide) => { s.header = null; },
+    (s: ReloadSide) => { s.file.variables[0].initialValue = "1"; },
+  ]) {
+    const c = clone(b);
+    change(c);
+    assert.equal(sameTree(b, c), false);
+  }
 });
 
 test("variables: one added here comes along with its node, one removed in the files goes, a both-sides change keeps mine", () => {

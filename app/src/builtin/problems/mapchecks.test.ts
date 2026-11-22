@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { mapChecks } from "./mapchecks";
+import { hasTriggerTextRule, mapChecks, TRIGGERS_GIT_RULE } from "./mapchecks";
 import { RunScope } from "./runscope";
 import { fakeReadTriggers, HEADER_FILE } from "../../lib/testhelpers/triggers";
 
@@ -38,6 +38,7 @@ function app(files: Record<string, string>): W3Api {
       readText: async (p: string) => { if (p in files) return files[p]; throw new Error(`no ${p}`); },
       readBytes: async (p: string) => { if (p in files) return new TextEncoder().encode(files[p]); throw new Error(`no ${p}`); },
       readTriggers: fakeReadTriggers((p) => files[p]),
+      exists: async (p: string) => p in files,
     },
     game: {
       readText: async (p: string) => { if (p === "UI\\TriggerData.txt") return TRIGGER_DATA; throw new Error(`no ${p}`); },
@@ -74,6 +75,34 @@ test("a trigger file that can't be read is an error; no trigger file is nothing"
   // The other trigger checks don't report the unreadable file again.
   assert.deepEqual(await run({ "map/triggers/triggers.json": "{ not json" }, "triggerNoEvents"), []);
   assert.deepEqual(await run({ "map/triggers/triggers.json": "{ not json" }, "triggerRefs"), []);
+});
+
+test("what the trigger folders' read warns about is listed by file and line", async () => {
+  const w3 = app({ "map/triggers/triggers.json": wtg([]) }) as unknown as { workspace: Record<string, unknown> };
+  const read = w3.workspace.readTriggers as () => Promise<{ warnings: string[] }>;
+  w3.workspace.readTriggers = async () => ({ ...(await read()), warnings: ["map/triggers/Setup/order.txt:3: Gone.j isn't there", "something else"] });
+  const scope = new RunScope(w3 as unknown as W3Api);
+  const found = await mapChecks(w3 as unknown as W3Api, () => scope).find((c) => c.id === "triggerFolders")!.run();
+  assert.deepEqual(found.map((p) => [p.message, p.location]), [["Gone.j isn't there", "map/triggers/Setup/order.txt:3"], ["something else", "map/triggers"]]);
+  assert.deepEqual(found[0].reveal, { command: "w3.problems.open", args: ["map/triggers/Setup/order.txt"] });
+});
+
+test("a project with trigger folders and no .gitattributes rule for them is warned about", async () => {
+  const tree = { "map/triggers/triggers.json": wtg([]) };
+  const none = await run(tree, "triggerFoldersGit");
+  assert.deepEqual(none.map((p) => p.severity), ["warning"]);
+  assert.match(none[0].message, /^The project has no \.gitattributes: add the line "map\/triggers\/\*\* -text"/);
+  const without = await run({ ...tree, ".gitattributes": "*.blp binary\n" }, "triggerFoldersGit");
+  assert.match(without[0]?.message ?? "", /^\.gitattributes has no rule for map\/triggers\//);
+  assert.deepEqual(without[0]?.reveal, { command: "w3.problems.open", args: [".gitattributes"] });
+  assert.deepEqual(await run({ ...tree, ".gitattributes": `# texts\n${TRIGGERS_GIT_RULE}\n` }, "triggerFoldersGit"), []);
+  // Control: no trigger folders, nothing to say.
+  assert.deepEqual(await run({ "map/war3map.w3i.json": "{}" }, "triggerFoldersGit"), []);
+  // The rule as Git reads it: the last matching line decides.
+  assert.equal(hasTriggerTextRule("* -text\n"), true);
+  assert.equal(hasTriggerTextRule("map/triggers/** -text\n* text=auto\n"), false);
+  assert.equal(hasTriggerTextRule("* text=auto\nmap/triggers/** -text\n"), true);
+  assert.equal(hasTriggerTextRule("# map/triggers/** -text\n"), false);
 });
 
 test("triggers nothing runs are a check of their own", async () => {

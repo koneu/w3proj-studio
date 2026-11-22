@@ -28,7 +28,7 @@ import {
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { isTriggerLayoutPath, readTriggerFiles, TRIGGERS_DIR, TRIGGERS_ROOT, WCT_RAW, writeTriggerFiles, wtgPath, type ProjectTriggers } from "../../lib/triggers/project";
-import { idKey, mergeReload, type Merged, type ReloadSide } from "./reload";
+import { idKey, mergeReload, sameTree, type Merged, type ReloadSide } from "./reload";
 import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
@@ -422,6 +422,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         if (layout) known(layout, { file: layout.file, texts: layout.custom.texts, header: layout.custom.header }, layout.files);
         const write = async () => {
+          // The trigger folders changed since the editor read them, without it hearing of it (another program, no focus
+          // change since): those changes are taken in first (reload.ts), so the save doesn't write over items the editor
+          // didn't change; items both changed are asked about. A tree that can't be read now isn't written over.
+          if (layout && base) {
+            const theirs = await w3.workspace.readTriggers();
+            if (!theirs) throw new Error(`The triggers weren't saved: ${TRIGGERS_DIR}/ is gone.`);
+            const theirSide: ReloadSide = { file: theirs.file, texts: theirs.custom.texts, header: theirs.custom.header, files: theirs.files };
+            if (view.closed) throw new Error("The Trigger Editor was closed before it saved.");
+            if (!sameTree(base, theirSide)) {
+              const merged = mergeReload(base, view.side(), theirSide);
+              if (merged.conflicts.length && !(await w3.window.confirm(`${merged.conflicts.length} trigger item${merged.conflicts.length === 1 ? "" : "s"} you changed ${merged.conflicts.length === 1 ? "was" : "were"} changed on disk too since the Trigger Editor read the files. Saving writes your version over ${merged.conflicts.length === 1 ? "that change" : "those changes"}; the other changes on disk are kept.`, "Overwrite", 60_000))) {
+                // Not saved, as a Cancel on the workbench's own question: the editor stays unsaved, nothing is written.
+                return;
+              }
+              if (view.closed) throw new Error("The Trigger Editor was closed before it saved.");
+              layout = theirs;
+              view.takeFromDisk(theirs.file, theirs.custom, theirs.files, merged);
+              known(theirs, theirSide, theirs.files);
+            }
+          }
           // What is saved is the state at the start; an edit made meanwhile stays unsaved.
           const at = view.mark();
           if (layout) {
@@ -450,6 +470,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return view.dirty;
             }
             const theirSide: ReloadSide = { file: theirs.file, texts: theirs.custom.texts, header: theirs.custom.header, files: theirs.files };
+            // What it read last, the files have (a write that came back, a touch): nothing to take in.
+            if (base && sameTree(base, theirSide)) return true;
             const merged = view.dirty && base ? mergeReload(base, view.side(), theirSide) : null;
             layout = theirs;
             view.takeFromDisk(theirs.file, theirs.custom, theirs.files, merged);
@@ -587,9 +609,11 @@ const TERRAIN_FILE = /^map\/war3map\.w3e(\.txt)?$/i;
  *  named. Editors of a file Adjust changed or watching war3map.wts may have opened again already: once more is safe. */
 async function forgetStringHistory(w3: W3Api) {
   const kept: string[] = [];
-  for (const f of w3.workspace.files()) {
-    if (!(TEXT_FILE.test(f.path) || RAW_MAP_FILE.test(f.path)) || TERRAIN_FILE.test(f.path)) continue;
-    if ((await w3.editors.reopen(f.path)) > 0) kept.push(f.path);
+  // The trigger folders are one document, the Trigger Editor's (no file of the list is its path).
+  const paths = w3.workspace.files().map((f) => f.path).filter((p) => (TEXT_FILE.test(p) || RAW_MAP_FILE.test(p)) && !TERRAIN_FILE.test(p));
+  if (w3.workspace.files().some((f) => f.path.toLowerCase() === TRIGGERS_ROOT)) paths.push(TRIGGERS_DIR);
+  for (const p of paths) {
+    if ((await w3.editors.reopen(p)) > 0) kept.push(p);
   }
   if (kept.length) {
     void w3.window.showWarning(`${kept.join(", ")} ${kept.length === 1 ? "was" : "were"} changed during Adjust Map String IDs and kept ${kept.length === 1 ? "its" : "their"} undo history: an undo there can bring back a string ID that names another string now.`);

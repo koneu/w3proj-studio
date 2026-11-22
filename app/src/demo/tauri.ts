@@ -109,6 +109,22 @@ const handlers: Record<string, Handler> = {
     put(b, e.text);
   },
   fs_copy: ({ from, to }) => { const e = files.get(norm(from)); if (!e) throw `${from}: no such file`; put(norm(to), e.text); },
+  // The trigger folders (map/triggers/): the demo keeps the tree as the app holds it, in one made-up file
+  // (map/triggers/triggers.json: the TriggerFile with its texts in `custom`), not in the folders' own format, which the
+  // Rust backend reads and writes (crates/backend/src/triggers.rs). The demo never packs.
+  triggers_read: ({ root }) => {
+    const e = files.get(`${norm(String(root))}/map/triggers/triggers.json`);
+    if (!e) return null;
+    const { file, custom } = JSON.parse(e.text);
+    return { file, custom, files: file.items.map(() => null), headerFile: null, stored: {}, language: "jass", script: "kept", warnings: [] };
+  },
+  triggers_write: ({ root, save }) => {
+    const path = `${norm(String(root))}/map/triggers/triggers.json`, { file, custom } = save as { file: unknown; custom: unknown };
+    put(path, JSON.stringify({ file, custom }, null, 2));
+    const s = stamp(files.get(path)!);
+    return { also: [{ path, ...s }], written: ["map/triggers/triggers.json"], deleted: [], files: (file as { items: unknown[] }).items.map(() => null), headerFile: null };
+  },
+  triggers_plan: ({ save }) => ({ write: [{ path: "map/triggers/triggers.json", text: JSON.stringify(save, null, 2) }], delete: [] }),
   "plugin:event|listen": () => 1,
   "plugin:event|unlisten": () => undefined,
   "plugin:dialog|open": () => null,

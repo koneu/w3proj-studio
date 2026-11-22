@@ -1,7 +1,8 @@
 // Checks the TypeScript copies of the Rust codecs against the Rust ones on real maps:
-// terrain (war3map.w3e.txt), custom script texts (war3map.wct.txt) and GUI triggers
-// (war3map.wtg.json). For each map, `w3proj unpack` writes the Rust text; the TypeScript side
-// must produce the same text from the archive file and the same bytes from the text.
+// terrain (war3map.w3e.txt), and the triggers (map/triggers/, as the backend reads them for the
+// app, against war3map.wtg and war3map.wct read by the TypeScript). For each map, `w3proj unpack`
+// writes the Rust side; the TypeScript side must produce the same from the archive files and the
+// same bytes back.
 // Then each map's whole ground goes through a fragment (lib/terrain/fragment, what the clipboard
 // holds) and JSON onto a blanked copy, and has to come out as the same file.
 //
@@ -108,13 +109,22 @@ for (const [n, map] of maps.entries()) {
       }
     } else problems.push("war3map.w3e: parsing and writing changes the file");
   }
-  const wtgJson = text("war3map.wtg.json");
-  check("war3map.wtg", wtgJson, (b) => ts.writeWtgJson(ts.parseWtg(b, data)), (t) => ts.writeWtg(ts.parseWtgJson(t)));
-  // Section names come from the triggers (comments only), as in the Rust unpack.
-  const triggers = wtgJson === null ? null : ts.textTriggers(ts.parseWtgJson(wtgJson));
-  check("war3map.wct", text("war3map.wct.txt"),
-    (b) => ts.writeWctText(ts.parseWct(b, triggers?.length ?? 0), triggers?.map((t) => t.name) ?? []),
-    (t) => ts.writeWct(ts.parseWctText(t)));
+  // The triggers: where the unpack split them into map/triggers/, the backend's read of the folders (`w3proj triggers`,
+  // what the app gets) is the tree the TypeScript reads from the map's war3map.wtg and war3map.wct, and both write those
+  // files back byte for byte. (A tree whose read gave some items other ids in memory, World Editor maps' categories
+  // that share one, compares by its bytes only.)
+  if (text("triggers/triggers.json") !== null) {
+    const wtgBytes = raw("war3map.wtg"), wctBytes = raw("war3map.wct");
+    const file = ts.parseWtg(wtgBytes, data), custom = ts.parseWct(wctBytes, ts.textTriggers(file).length);
+    const read = JSON.parse(execFileSync(bin, ["triggers", dir], { encoding: "utf8", maxBuffer: 1 << 30 }));
+    const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
+    if (!sameBytes(ts.writeWtg(file), wtgBytes)) problems.push("war3map.wtg: the TypeScript doesn't write the bytes it read");
+    else if (!sameBytes(ts.writeWct(custom), wctBytes)) problems.push("war3map.wct: the TypeScript doesn't write the bytes it read");
+    else if (Object.keys(read.stored).length === 0 && canon(read.file) !== canon(file)) problems.push("map/triggers/: the backend's read isn't the tree the TypeScript reads from war3map.wtg");
+    else if (Object.keys(read.stored).length === 0 && canon(read.custom) !== canon(custom)) problems.push("map/triggers/: the backend's texts aren't the ones the TypeScript reads from war3map.wct");
+    else if (!sameBytes(ts.writeWtg(read.file), wtgBytes) && Object.keys(read.stored).length === 0) problems.push("map/triggers/: the backend's tree doesn't write war3map.wtg back");
+    else checked++;
+  }
   if (problems.length) { failed++; problems.forEach((p) => console.log(`FAIL ${map} — ${p}`)); }
   rmSync(dir, { recursive: true, force: true });
 }

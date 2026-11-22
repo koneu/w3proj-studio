@@ -76,7 +76,7 @@ try {
 
   // Editors that run on the sample's own files.
   const opened = {};
-  for (const path of ["map/war3map.wtg.json", "map/war3map.w3u.json", "map/war3map.j", "notes.txt", "README.md", "map/war3map.w3i.json"]) {
+  for (const path of ["map/triggers", "map/war3map.w3u.json", "map/war3map.j", "notes.txt", "README.md", "map/war3map.w3i.json"]) {
     try {
       await page.evaluate(`w3Workbench.editors.open(${JSON.stringify(path)})`);
       await until(`tab for ${path}`, () => page.evaluate(`w3Workbench.editors.activePath() === ${JSON.stringify(path)} && !!document.querySelector(".tab.active")`), 10_000);
@@ -87,7 +87,7 @@ try {
   }
   // The Trigger Editor, on the made-up trigger definitions the demo serves: the tree, a trigger's parts and its folding.
   try {
-    await page.evaluate(`w3Workbench.editors.open("map/war3map.wtg.json")`);
+    await page.evaluate(`w3Workbench.editors.open("map/triggers")`);
     const click = (label) => page.evaluate(`(() => { const el = [...document.querySelectorAll(".editor-area *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(label)}); if (el) el.click(); return !!el; })()`);
     await until("the trigger tree", () => page.evaluate(`document.body.innerText.includes("Demo Timers")`), 10_000);
     const tree = await page.evaluate(`document.body.innerText`);

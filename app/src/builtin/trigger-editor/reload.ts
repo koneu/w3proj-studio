@@ -51,6 +51,16 @@ function content(e: Entry): string {
 
 const varContent = (v: Variable) => JSON.stringify({ ...v, id: 0, parent: 0 });
 
+/** Whether two states hold the same tree, whatever ids memory gave their items: items by their files, with what they
+ *  are and where, the texts, the header and the variables. */
+export function sameTree(a: ReloadSide, b: ReloadSide): boolean {
+  const flat = (s: ReloadSide) => {
+    const e = entries(s);
+    return JSON.stringify([[...e.keys()].map((k) => [k, content(e.get(k)!)]), s.header, s.file.variables.map(varContent), s.file.items.length]);
+  };
+  return flat(a) === flat(b);
+}
+
 /** See the top. `mine`: the editor's state now (its items' files from what it read or saved last). */
 export function mergeReload(base: ReloadSide, mine: ReloadSide, theirs: ReloadSide): Merged {
   const file = structuredClone(theirs.file);

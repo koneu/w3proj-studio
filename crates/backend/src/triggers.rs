@@ -163,7 +163,8 @@ fn item_files(tree: &Tree) -> Vec<Option<String>> {
     for n in &tree.nodes {
         out.push(match n.kind {
             Kind::Var { .. } => None,
-            _ => n.file.as_ref().map(|f| format!("{PREFIX}{f}")),
+            // A node's file is below map/triggers/.
+            _ => n.file.as_ref().map(|f| format!("{PREFIX}{}/{f}", tl::DIR)),
         });
     }
     out
@@ -389,10 +390,46 @@ pub fn plan(root: &str, formats: &[PathBuf], save: &Save, create: bool) -> CmdRe
         after.insert(p[PREFIX.len()..].to_string(), b.clone());
     }
     if let Ok((t, _)) = tl::from_files(&after) {
-        plan.files_after = item_files(&t);
+        // Read back, the tree has the saved one's nodes in the same order; they go back to the items of the file saved.
+        let nodes = node_items(&save.file);
+        if t.nodes.len() == nodes.len() {
+            let files = item_files(&t);
+            let offset = usize::from(t.reforged);
+            plan.files_after = vec![None; save.file.items.len()];
+            for (n, &item) in nodes.iter().enumerate() {
+                plan.files_after[item] = files[offset + n].clone();
+            }
+        }
         plan.header_after = t.header_file.map(|h| format!("{PREFIX}triggers/{h}"));
     }
     Ok(plan)
+}
+
+/// For each node of the tree `trigger_layout::from_binary` makes of `tf`, the index of its item in `tf.items`: a Reforged
+/// file's nodes are its items after the map item; a Classic file's categories come each with their triggers.
+fn node_items(tf: &TriggerFile) -> Vec<usize> {
+    if tf.reforged {
+        return (1..tf.items.len()).collect();
+    }
+    let mut cats: Vec<usize> = Vec::new();
+    let mut first: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+    let mut in_cat: Vec<Vec<usize>> = Vec::new();
+    for (i, it) in tf.items.iter().enumerate() {
+        match it {
+            Item::Category(c) => {
+                first.entry(c.id as i32).or_insert(cats.len());
+                cats.push(i);
+                in_cat.push(Vec::new());
+            }
+            Item::Trigger(t) => {
+                if let Some(&k) = first.get(&t.parent) {
+                    in_cat[k].push(i);
+                }
+            }
+            Item::Element(_) => {}
+        }
+    }
+    cats.into_iter().zip(in_cat).flat_map(|(c, ts)| std::iter::once(c).chain(ts)).collect()
 }
 
 /// A plan as the app takes it: `{ write: [{ path, text }], delete: [path] }` (the layout's files are UTF-8 text: a
@@ -514,6 +551,35 @@ mod tests {
         assert_eq!(again, lay, "the fixture is what the layout writes");
         let plan = plan(&root, &[], &save_of(&r), false).unwrap();
         assert!(plan.write.is_empty() && plan.delete.is_empty(), "{:?} {:?}", plan.write.keys(), plan.delete);
+    }
+
+    /// A Classic tree held as the app's own parser lists it (its categories first, then the triggers): saved unchanged
+    /// it writes nothing, and the files a save gives back follow its items, not the folders' order.
+    #[test]
+    fn a_classic_trees_files_follow_its_items() {
+        let dir = Scratch::new();
+        let data = w3proj::triggerdata::TriggerData::parse(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/TriggerData.txt")).unwrap());
+        let (wtg, wct) = tl::sample_map(true);
+        for (rel, bytes) in tl::split_map(&wtg, &wct, &data, Lang::Jass).unwrap() {
+            let to = w3proj::paths::join_rel(&dir.path().join("map"), &rel);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::write(to, bytes).unwrap();
+        }
+        let root = dir.path().to_string_lossy().to_string();
+        let r = read(&root, &[]).unwrap().unwrap();
+        let mut s = save_of(&r);
+        s.file.items.sort_by_key(|i| !matches!(i, Item::Category(_)));
+        let w = write(&root, &[], &s, false).unwrap();
+        assert!(w.written.is_empty() && w.deleted.is_empty(), "{:?} {:?}", w.written, w.deleted);
+        let names: Vec<(String, Option<String>)> = s.file.items.iter().zip(&w.files).map(|(i, f)| (match i {
+            Item::Category(c) => c.name.clone(),
+            Item::Trigger(t) => t.name.clone(),
+            Item::Element(e) => e.name.clone(),
+        }, f.clone())).collect();
+        for (name, file) in &names {
+            let file = file.as_deref().unwrap_or_default();
+            assert!(file.starts_with("map/triggers/") && file.ends_with(&tl::slug(name, "x")) || file.contains(&format!("/{}.", tl::slug(name, "x"))), "{names:?}");
+        }
     }
 
     /// Read and saved again unchanged: nothing is written or removed.
