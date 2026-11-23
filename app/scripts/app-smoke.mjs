@@ -6474,9 +6474,32 @@ async function subterrains(page, found) {
     // the project packs; Undo Resize puts every file back as it was. (Before, the save refused the new size.)
     {
       const layoutNow = () => JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
+      // The old terrain editor stays open while the resize writes the new files, and the Map Script extension may have it
+      // take the destructables' flags then (a script run started by those writes; in the user's report the map stayed at
+      // its size because that editor saved its old terrain over the new one). Here it is asked to, at a fixed point in
+      // the middle of the writes (the w3i's, after the terrain's): a tree to flip the flag of, and the flags' command.
+      await tool("place_objects", { objects: [{ id: "LTlt", x: layout.offset[0] + 128 * 8, y: layout.offset[1] + 128 * 8 }], ignoreRoom: true });
+      await tool("save_project");
+      await settled(page);
+      await page.evaluate(`(() => {
+        const ws = w3.workspace, write = ws.writeText.bind(ws), root = w3.workspace.project().root;
+        window.__subFollow = { asked: false, held: null, restore: () => { ws.writeText = write; } };
+        ws.writeText = async (p, text) => {
+          const r = await write(p, text);
+          if (p === "map/war3map.w3i.json" && !window.__subFollow.asked) {
+            window.__subFollow.asked = true;
+            const flip = (list) => list.length ? [{ index: 0, flags: (list[0].flags ?? 0) ^ 1 }] : [];
+            window.__subFollow.held = await w3.commands.execute("w3.terrain.followDestructableFlags", flip, root).catch((e) => String(e?.message ?? e));
+          }
+          return r;
+        };
+      })()`);
       const was = layoutNow();
       const before = snapshot(map);
-      const grown = await tool("resize_map", { right: 32, top: 32 }).then(() => null, (e) => String(e.message ?? e));
+      const grown = await tool("resize_map", { right: 32, top: 32 }).then(() => null, (e) => String(e.message ?? e)).finally(() => page.evaluate(`window.__subFollow?.restore()`));
+      const follow = await page.evaluate(`({ asked: window.__subFollow?.asked, held: window.__subFollow?.held })`);
+      if (!follow.asked) fail("the resize wrote no war3map.w3i.json, so the old editor was never asked for the flags (control)");
+      else if (follow.held !== false) fail(`the terrain editor being resized took the destructables' flags in the middle of the resize: ${lit(follow.held)} (its save writes the old terrain)`);
       if (grown) fail(`resize_map on the split terrain: ${grown}`);
       else {
         await editorUp();
