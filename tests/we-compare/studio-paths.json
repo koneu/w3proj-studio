@@ -549,7 +549,7 @@
   },
   {
     "name": "studio-paths-nowts-text",
-    "description": "(3) variant: the same map without war3map.wts, Studio's set_map_text writes the name inline (no table to write); the editor opens it and re-saves; names and strings as the editor reads them. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match. neither save has a war3map.wts (Studio doesn't make one from nothing, nor does the editor), so it isn't compared; the player and force names the w3i gives as TRIGSTR_001..003 have no string left: the editor writes them as \"\", Studio keeps the TRIGSTR_ text (bugs.md)",
+    "description": "(3) variant: the same map without war3map.wts, Studio's set_map_text writes a new table as the editor's Map Properties OK does (since branch fix/wts-missing-we, wts-missing.json: the name a string, the stringless names \"\"); the editor opens it and re-saves; names and strings as the editor reads them: the same w3i and war3map.wts. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match.",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
     },
@@ -590,12 +590,11 @@
           "playerHudSkins",
           "players[].hudSkin"
         ],
-        "tolerance": 0.01,
-        "expect": "differs",
-        "expectPaths": [
-          "players[].name",
-          "forces[].name"
-        ]
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wts",
+        "as": "bytes"
       },
       {
         "file": "war3map.doo",
