@@ -51,11 +51,6 @@
         "file": "war3mapUnits.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "units[].preFlags",
-          "units[].trailer",
-          "units[].extras",
           "units[].position"
         ],
         "tolerance": 0.01,
@@ -120,11 +115,6 @@
         "file": "war3mapUnits.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "units[].preFlags",
-          "units[].trailer",
-          "units[].extras",
           "units[].position"
         ],
         "tolerance": 0.01,
@@ -191,11 +181,6 @@
         "file": "war3mapUnits.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "units[].preFlags",
-          "units[].trailer",
-          "units[].extras",
           "units[].position"
         ],
         "tolerance": 0.01,
@@ -262,11 +247,6 @@
         "file": "war3mapUnits.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "units[].preFlags",
-          "units[].trailer",
-          "units[].extras",
           "units[].position"
         ],
         "tolerance": 0.01,
@@ -327,11 +307,6 @@
         "file": "war3mapUnits.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "units[].preFlags",
-          "units[].trailer",
-          "units[].extras",
           "units[].position"
         ],
         "tolerance": 0.01
@@ -398,11 +373,6 @@
         "file": "war3mapUnits.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "units[].preFlags",
-          "units[].trailer",
-          "units[].extras",
           "units[].position"
         ],
         "tolerance": 0.01,
