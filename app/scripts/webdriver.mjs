@@ -86,6 +86,8 @@ export class WebDriverPage {
   callTimeout = 0;
   /** The session's script timeout as last set (launch sets it). */
   scriptTimeout = null;
+  /** The wheel sources used so far (mouse). */
+  wheels = 0;
   constructor(base, session) {
     this.base = base;
     this.session = session;
@@ -138,7 +140,9 @@ export class WebDriverPage {
   mouse(params) {
     if (params.type === "mouseWheel") {
       const scroll = { type: "scroll", origin: "viewport", x: Math.round(params.x), y: Math.round(params.y), deltaX: Math.round(params.deltaX ?? 0), deltaY: Math.round(params.deltaY ?? 0), duration: 0 };
-      return this.actions([{ type: "wheel", id: "wheel", actions: [scroll] }]);
+      // A wheel of its own each time: WebKitWebDriver keeps a wheel source's last delta and sends the next one less that
+      // (one id: Wheel Up after Wheel Up reached the page as nothing, Wheel Down after Wheel Up as twice its delta).
+      return this.actions([{ type: "wheel", id: `wheel${++this.wheels}`, actions: [scroll] }]);
     }
     const move ={ type: "pointerMove", origin: "viewport", x: Math.round(params.x), y: Math.round(params.y), duration: 0 };
     const steps = params.type === "mousePressed" ? [move, { type: "pointerDown", button: 0 }]
