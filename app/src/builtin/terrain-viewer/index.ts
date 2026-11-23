@@ -60,6 +60,7 @@ import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
+import { editorDooVersion, UPGRADED_DOO_VERSIONS } from "../../lib/terrain/dooversion";
 import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -3035,6 +3036,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // A file of version 7 or 8 too: the World Editor's save writes it as version 13 (unitsversion.ts), so the next save does.
             const anglesFixed = !!uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(partial ? uf.list.filter(inOpenArea) : uf.list) > 0;
             if (uf && unitsFile === uf && (anglesFixed || unitsUpgradeDue(uf))) objectsTouched = unitAnglesUnsaved = true;
+            // A doodads file of version 7, 8 or 12 the same (dooversion.ts): not an edit, the next save writes it as 13.
+            if (df && dooFile === df && dooUpgradeDue(df)) objectsTouched = true;
             // Auto Cycle Random Groups: a group's objects are drawn as one of its lines from the start, a random one.
             if (autoCycleOn()) {
               const g = await readRandomGroups();
@@ -3054,6 +3057,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The units file in the World Editor's version, where a save may change it (unitsUpgradeDue); an entry an undo
          *  put back after an earlier save upgraded the file gets the fields too. */
         const upgradeUnits = (f: PlacedFile) => { if (!partial) editorUnitsVersion(f.doc); };
+        /** A doodads file the save gives the World Editor's version 13 (dooversion.ts): version 7, 8 or 12, and the
+         *  whole map loaded, as unitsUpgradeDue. */
+        const dooUpgradeDue = (f: PlacedFile) => !partial && UPGRADED_DOO_VERSIONS.includes(Number(f.doc.version));
+        /** The doodads file in the World Editor's version, where a save may change it (dooUpgradeDue); a doodad an
+         *  undo put back after an earlier save upgraded the file gets the fields too. */
+        const upgradeDoodads = (f: PlacedFile) => { if (!partial) editorDooVersion(f.doc); };
         /** Units on the Ground on Save (objheights.ts savedUnitZ; setting terrain.units.groundOnSave): every object of
          *  war3mapUnits.doo goes to the height the World Editor's save writes for it, a ship in water to the surface,
          *  anything else to the ground the editor works out for its type (unitGround: a building on the highest of the
@@ -6550,7 +6559,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // The file as it is now, under the rules opening it would apply (an AI tool's undo writes back the stored
               // places): not an edit, and the next save writes them, as after the open. Only the doodads' changes from
               // the open are what a clean editor holds besides the files, so units read again leave them to be saved.
-              objectsTouched = unitAnglesUnsaved;
+              objectsTouched = unitAnglesUnsaved || dooUpgradeDue(f);
               if (snapsDoodads()) await snapOnOpen(f, true);
               if (!disposed && fixesDoodads()) await fixOnOpen(f, scalesKnown, true);
               if (disposed) return true;
@@ -6678,9 +6687,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 // With the flag 0 the tileset's own list, and the cliffs' ground tiles the list lacks, as the World
                 // Editor's save writes it (the terrain kept).
                 w3e: writeW3e(savedTerrain(terrain, ownTiles?.get(terrain.tileset), cliffGroundOf(terrain))),
-                // The units file in the World Editor's version 13 (upgradeUnits), here where it is taken.
+                // The placement files in the World Editor's version 13 (upgradeUnits, upgradeDoodads), here where they are taken.
                 placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => {
                   if (f === unitsFile) upgradeUnits(f);
+                  if (f === dooFile) upgradeDoodads(f);
                   return { f, text: placedText(f.doc) };
                 }) : [],
                 starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,

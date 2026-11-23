@@ -8,6 +8,7 @@ import { errorText } from "../../lib/oserror";
 import { NEUTRAL_PASSIVE } from "../../lib/terrain/owner";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { allocateNumber, loadIdLayout, type IdLayout, type IssuedNumbers } from "../../lib/terrain/creationids";
+import { doodadNumber } from "../../lib/terrain/dooversion";
 import type { Placed } from "./objects";
 
 /** First World Editor build whose version-8 placement files (war3map.doo, war3mapUnits.doo)
@@ -108,8 +109,10 @@ export interface PlacedFile {
   json: boolean;
   dirty: boolean;
   /** The numbers newEntry has handed out (editorId, a v13 doodad's first trailer value): entries made before any
-   *  of them is put into `list` (a scatter fill makes them all, then inserts) still get one number each. */
-  issued?: { editorId?: IssuedNumbers; trailer?: IssuedNumbers };
+   *  of them is put into `list` (a scatter fill makes them all, then inserts) still get one number each. One set for
+   *  the file, a namespace of its own: a save may move the doodads' numbers from editorId into the trailer between two
+   *  placements (dooversion.ts). */
+  issued?: IssuedNumbers;
   /** The split terrain's subterrains and id ranges new numbers come from (lib/terrain/creationids.ts); null in a flat
    *  project. loadPlacedFile sets it; a file made without it numbers as a flat project's. */
   idLayout?: IdLayout | null;
@@ -223,15 +226,19 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   // A number no object in the file has and none handed out before (not inserted yet, or taken out again by an undo):
   // two objects with one number would share a gg_unit_ global and an Object Manager reference. Flat: above all of them;
   // split terrain: from the subterrain at `position` (allocateNumber).
-  const issued = (f.issued ??= {});
-  const nextOf = (get: (x: Entry) => unknown, key: "editorId" | "trailer") => {
-    const n = allocateNumber(f.key, list.map(get), (issued[key] ??= {}), f.idLayout ?? null, [position[0], position[1]]);
+  // A doodad's number is in editorId or (version 13) trailer[0] (doodadNumber: also one an undo put back into a file a
+  // save has upgraded since); a unit's in editorId (its trailer has two values). One number for the entry, in both
+  // fields where it has both.
+  let number: number | undefined;
+  const nextOf = () => {
+    if (number !== undefined) return number;
+    const n = allocateNumber(f.key, list.map(doodadNumber), (f.issued ??= {}), f.idLayout ?? null, [position[0], position[1]]);
     if (n === null) throw new Error(`No ${f.key === "units" ? "unit" : "doodad"} creation number is free any more.`);
-    return n;
+    return (number = n);
   };
   Object.assign(e, { id, variation: 0, position, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });
   if ("skinId" in e) e.skinId = id;
-  if ("editorId" in e && e.editorId !== UNSET) e.editorId = nextOf((x) => x.editorId, "editorId");
+  if ("editorId" in e && e.editorId !== UNSET) e.editorId = nextOf();
   if ("itemTable" in e) e.itemTable = -1;
   if ("itemSets" in e) e.itemSets = [];
   if (f.key === "doodads") {
@@ -239,7 +246,7 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
     if ("flags" in e) e.flags = 2;
     // v13: the first trailer dword is a sequential placement id.
     if (Array.isArray(e.trailer) && Number(f.doc.version) >= 13) {
-      e.trailer = [nextOf((x) => (x.trailer as number[] | undefined)?.[0], "trailer"), ...(e.trailer as number[]).slice(1)];
+      e.trailer = [nextOf(), ...(e.trailer as number[]).slice(1)];
     }
   } else {
     Object.assign(e, { hp: -1, mana: -1, color: -1, waygate: -1, inventory: [], abilities: [] });

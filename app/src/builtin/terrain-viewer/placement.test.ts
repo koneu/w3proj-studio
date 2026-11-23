@@ -4,6 +4,7 @@ import type { W3Api } from "../../extensions/api";
 import * as placement from "./placement";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, startGoldOf, unitGridCells, type PlacedFile } from "./placement";
 import { fragmentOf } from "../../lib/terrain/fragment";
+import { editorDooVersion } from "../../lib/terrain/dooversion";
 import { doodadOnGrid } from "./doodadgrid";
 import type { Placed } from "./objects";
 
@@ -45,6 +46,21 @@ test("entries made before any is inserted get one number each (a scatter fill), 
   // A number already in the file above what was handed out still counts.
   units.list.push({ ...(newEntry(units, "hfoo", [0, 0, 0], 0, "w3u") as object), editorId: 40 } as unknown as Placed);
   assert.equal((newEntry(units, "hfoo", [0, 0, 0], 0, "w3u") as unknown as { editorId: number }).editorId, 41);
+});
+
+test("a save that upgrades the doodads file to version 13 between two placements doesn't give a number twice", () => {
+  const doodads = file("doodads", 8, 11, { skinIds: false });
+  doodads.list.push(newEntry(doodads, "LTlt", [0, 0, 0]));
+  // Handed out and not inserted (an undone placement): its number stays taken.
+  const undone = newEntry(doodads, "LTlt", [64, 0, 0]) as unknown as Record<string, unknown>;
+  assert.deepEqual([(doodads.list[0] as unknown as { editorId: number }).editorId, undone.editorId], [0, 1]);
+  assert.equal(editorDooVersion(doodads.doc), true);
+  assert.deepEqual((doodads.list[0] as unknown as { trailer: number[] }).trailer, [0, 0, 0]);
+  const next = newEntry(doodads, "LTlt", [128, 0, 0]) as unknown as { trailer: number[]; editorId: number };
+  assert.deepEqual([next.trailer, next.editorId], [[2, 0, 0], 0xffffffff]);
+  // The undone one put back by a redo, its number still in editorId: the next one doesn't take it either.
+  doodads.list.push({ ...structuredClone(undone), editorId: 9 } as unknown as Placed);
+  assert.equal((newEntry(doodads, "LTlt", [0, 64, 0]) as unknown as { trailer: number[] }).trailer[0], 10);
 });
 
 test("in a split terrain a new object's number comes from the range of the subterrain at its position, per kind namespace", () => {
