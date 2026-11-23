@@ -3,7 +3,7 @@
 // (trees) cast no baked shadows.
 
 import { decodeImage } from "../../lib/image/index.ts";
-import { modelCandidates, parseModel, readModel } from "../../lib/model/mdl";
+import { mdlCandidates, parseModel, readModel } from "../../lib/model/mdl";
 import type { Model } from "../../lib/model/mdx";
 import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
@@ -40,22 +40,33 @@ async function alphaMap(path: string, readFile: (path: string) => Promise<Uint8A
   return null;
 }
 
+/** modelMesh's key in `failed` for a model file that was there (read) but couldn't be used. */
+const thereKey = (artMode: () => string, path: string) => `${artMode()}|${path.toLowerCase()}|there`;
+/** A model file that was read but couldn't be parsed. */
+class Unparsable extends Error {}
+
 /** A model's casting triangles; NO_FACES when it was read and casts nothing; null when it can't be read. A failed read
  *  isn't kept for the session (the next prediction tries again); within one prediction, or a set of them sharing
- *  `failed`, it's tried once. */
+ *  `failed`, it's tried once. A file that was there but couldn't be parsed is in `failed` under thereKey as well. */
 function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string, failed: Set<string>): Promise<ShadowMesh | typeof NO_FACES | null> {
   const key = `${artMode()}|${path.toLowerCase()}`;
   if (failed.has(key)) return Promise.resolve(null);
   return meshes.get(artMode, path.toLowerCase(), async () => {
-    // Exactly this file, either form (predictShadows asks for the .mdl names after all the .mdx ones: modelCandidates).
-    const model = parseModel(await readFile(path));
+    // Exactly this file, either form (predictShadows asks for the .mdl names after the .mdx ones, as readModel).
+    const bytes = await readFile(path);
+    let model;
+    try { model = parseModel(bytes); } catch (e) { throw new Unparsable(String(e)); }
     const maps = new Map<string, AlphaMap | null>();
     // Classic art: the editor casts alpha-tested geosets whole, their textures' holes included (we-drive, branch
     // we-shadow-3, SD: LRrk's ten variations and eight turns, 984 cells; whole quads 983 of them and 5 more, with the
     // alpha test 659 and 3 more).
     if (artMode() !== "sd") for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
     return shadowMesh(model, (p) => maps.get(p) ?? null) ?? NO_FACES;
-  }).catch(() => { failed.add(key); return null; });
+  }).catch((e: unknown) => {
+    failed.add(key);
+    if (e instanceof Unparsable) failed.add(thereKey(artMode, path));
+    return null;
+  });
 }
 
 /** Cliff models' heights for the shadows (shadows.ts cliffCellHeights) by graphics mode and model path; null when the
@@ -272,9 +283,17 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     let mesh: ShadowMesh | typeof NO_FACES | null = null;
-    for (const path of modelCandidates(shadowPaths(skin, d.variation))) {
+    const paths = shadowPaths(skin, d.variation);
+    for (const path of paths) {
       mesh = await modelMesh(path, readFile, artMode, failed);
       if (mesh !== null) break;
+    }
+    // A model the map only has as MDL text: its .mdl names, when none of the .mdx files is there (readModel).
+    if (mesh === null && !paths.some((p) => failed.has(thereKey(artMode, p)))) {
+      for (const path of mdlCandidates(paths)) {
+        mesh = await modelMesh(path, readFile, artMode, failed);
+        if (mesh !== null) break;
+      }
     }
     // Only a model that couldn't be read is unreadable; one read with nothing to cast is used (as nothing).
     if (stats) { stats.wanted++; if (mesh === null) stats.unreadable++; }

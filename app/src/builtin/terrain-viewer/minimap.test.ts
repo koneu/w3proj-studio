@@ -693,6 +693,9 @@ test("modelTextureColor: a model the map only has as .mdl gives the colour the s
   }
   // Control: with neither, no colour.
   assert.equal(await modelTextureColor(skin, reader(new Map(textures))), null);
+  // A broken .mdx that is there isn't stood in for by the .mdl name (the game's storage answers it with its own .mdx).
+  const broken = reader(new Map([["Doodads\\Imp\\Imp0.mdx", new TextEncoder().encode("MDLXbroken")], ["Doodads\\Imp\\Imp0.mdl", mdx], ...textures]));
+  assert.equal(await modelTextureColor(skin, broken), null);
 });
 
 test("modelTextureColor and minimapBase in DE fall back to the HD model when the plain Classic file isn't stored (EW00, ET00, EMt0)", async () => {

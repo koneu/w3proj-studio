@@ -465,6 +465,16 @@ test("a doodad and a special doodad the map only has as .mdl cast the shadow of 
   const rock = asked.filter((p) => /Rock/.test(p));
   assert.equal(rock[0], "Doodads\\Imp\\Rock1.mdx", "the .mdx first");
   assert.ok(rock.indexOf("Doodads\\Imp\\Rock1.mdl") > rock.indexOf("Doodads\\Imp\\Rock.mdx"), "the .mdl names after all the .mdx ones");
+  // A map's broken .mdx isn't stood in for by its .mdl name, which the game's storage answers with its own .mdx (the CLI's
+  // rebuild test shadows_whose_models_are_all_unreadable_keep_the_stored_file).
+  const brokenStats: ShadowStats = { wanted: 0, unreadable: 0 };
+  const broken = await predictShadows(terrain, placed, skins, () => undefined, async (p) => {
+    if (/Rock1\.mdx$/i.test(p)) return new TextEncoder().encode("MDLXbroken-not-a-model");
+    if (/\.mdl$/i.test(p)) return TOWER_OPAQUE;
+    throw new Error(`not found: ${p}`);
+  }, undefined, undefined, () => `${mode}-broken`, brokenStats);
+  assert.deepEqual(brokenStats, { wanted: 1, unreadable: 1 });
+  assert.equal(shadowed(broken), 0);
   // Control: with neither form, nothing is cast.
   assert.equal(shadowed(await predictShadows(terrain, placed, skins, () => undefined, async (p) => { throw new Error(`not found: ${p}`); },
     undefined, undefined, () => `${mode}-none`, undefined, specials)), 0);

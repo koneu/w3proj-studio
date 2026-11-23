@@ -51,20 +51,32 @@ export function parseModel(buf: Uint8Array): Model {
 /** The MDL text file of a model path (the same name, `.mdl`). */
 export const mdlPath = (path: string): string => path.replace(/\.mdx$/i, ".mdl");
 
-/** The files readModel tries, in order: the `.mdx` paths, then the same names as `.mdl`. */
-export function modelCandidates(paths: readonly (string | undefined)[]): string[] {
-  const mdx = paths.filter((p): p is string => !!p);
-  return [...new Set([...mdx, ...mdx.map(mdlPath)])];
+/** The `.mdl` names readModel tries after `paths` (the `.mdx` ones): those not among them already. */
+export function mdlCandidates(paths: readonly string[]): string[] {
+  const tried = new Set(paths);
+  return [...new Set(paths.map(mdlPath))].filter((p) => !tried.has(p));
 }
 
 /** Reads a model by its `.mdx` paths, in order, then by the same names as `.mdl`: a map can hold a model only as MDL
- *  text (imported next to its object data). The first one read and parsed wins (parseModel: either form); when none
- *  is, the first failure is thrown. The terrain view's objects, the baked shadows and the minimap read models so. */
+ *  text (imported next to its object data). The first one read and parsed wins (parseModel: either form). The `.mdl`
+ *  names are tried only when none of the `.mdx` files is there: one that is there but can't be parsed (a map's broken
+ *  import) isn't stood in for by the `.mdl` name, which the game's storage answers with its own `.mdx` (casc
+ *  game.rs resolve). When none is read, the first failure is thrown. The terrain view's objects, the baked shadows
+ *  and the minimap read models so. */
 export async function readModel(paths: readonly (string | undefined)[], readFile: (path: string) => Promise<Uint8Array>): Promise<Model> {
-  let failure: { error: unknown } | undefined;
-  for (const p of modelCandidates(paths)) {
-    try { return parseModel(await readFile(p)); } catch (error) { failure ??= { error }; }
-  }
+  const mdx = paths.filter((p): p is string => !!p);
+  let failure: { error: unknown } | undefined, there = false;
+  const tryAll = async (list: readonly string[]): Promise<Model | undefined> => {
+    for (const p of list) {
+      let bytes: Uint8Array;
+      try { bytes = await readFile(p); } catch (error) { failure ??= { error }; continue; }
+      there = true;
+      try { return parseModel(bytes); } catch (error) { failure ??= { error }; }
+    }
+    return undefined;
+  };
+  const model = await tryAll(mdx) ?? (there ? undefined : await tryAll(mdlCandidates(mdx)));
+  if (model) return model;
   throw failure ? failure.error : new Error("no model path");
 }
 
