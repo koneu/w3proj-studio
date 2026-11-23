@@ -27,7 +27,7 @@ import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects
 import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
 import { readImported } from "../../lib/imports";
-import { withOwnCommon } from "../../lib/jass/owncommon";
+import { commonJFor } from "../../lib/jass/owncommon";
 import { hasBetterTriggersHelpers } from "../../lib/script/bthelpers";
 import { headerPrintfIssues, printfIssuesText, type PrintfIssue } from "../../lib/script/printf";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
@@ -187,7 +187,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
  *  script is what the data makes): nothing is written, not even the melee flag a save turns off. `compile: false`: a
  *  map whose texts a language extension compiles (vJASS: JassHelper, seconds per run) isn't compiled; `deferred` names
  *  the language instead (a generated script is made on pack and on request then, never on a save). */
-  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }, opts: { compile?: boolean } = {}): Promise<{ path: string; text: string; vjass?: string; language?: string; flags?: FlagRule; deferred?: string; printf?: PrintfIssue[] }> => {
+  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }, opts: { compile?: boolean } = {}): Promise<{ path: string; text: string; vjass?: string; language?: string; flags?: FlagRule; deferred?: string; printf?: PrintfIssue[]; commonWarning?: string }> => {
     const root = w3.workspace.project()?.root;
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
@@ -287,10 +287,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!language) return { path, text: script, flags, printf };
     if (opts.compile === false) return { path, text: "", deferred: language.title, flags };
     // The language's compiler gets the script as the World Editor hands it to JassHelper, with the map's own common.j
-    // declarations (an imported Scripts\common.j: the game reads the map's files first) added to the game's.
+    // (an imported Scripts\common.j) instead of the game's, as the editor does, where it is compatible (owncommon.ts).
     const [gameCommon, blizzardJ, ownCommon] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j"), ownScript("Scripts\\common.j")]);
-    const commonJ = ownCommon === null ? gameCommon : withOwnCommon(gameCommon, ownCommon);
-    return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title, flags, printf };
+    const common = commonJFor(gameCommon, ownCommon);
+    // A failed compile names the map's file it didn't use: the errors may come from that.
+    const text = await language.compile({ script, commonJ: common.text, blizzardJ })
+      .catch((e: unknown) => { throw common.warning ? new Error(`${e instanceof Error ? e.message : String(e)} · ${common.warning}`) : e; });
+    return { path, text, language: language.title, flags, printf, commonWarning: common.warning };
   };
 
   /** Sound lengths in ms, by file and sound name: imported files (a chapter map's, else its campaign's, as the game
@@ -408,11 +411,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const generated = (await scriptState(root))?.mode === "generated";
         // Taken before the generator reads anything: a file saved meanwhile shows as changed in the record.
         const sources = generated && root ? await w3.backend.invoke<Record<string, string>>("script_sources", { root }) : null;
-        const { path, text, vjass, language, flags, deferred, printf } = await generate(false, undefined, { compile: opts.compile !== false });
+        const { path, text, vjass, language, flags, deferred, printf, commonWarning } = await generate(false, undefined, { compile: opts.compile !== false });
         const file = path.slice(4);
         // Generating can take a while: this script must not land in another project.
         if (w3.workspace.project()?.root !== root) { out.append(`${reason}: ${file} not written: the project was changed meanwhile`); return false; }
         if (printf?.length) out.append(`${reason}: ${file}: ${printfIssuesText(printf)}`);
+        if (commonWarning) out.append(`${reason}: ${file}: ${commonWarning}`);
         if (deferred) {
           out.append(generated
             ? `${reason}: ${file} not made now: its triggers are compiled with ${deferred}, which runs on pack and on Regenerate Map Script…, never on a save; until then the generated script doesn't follow the triggers`

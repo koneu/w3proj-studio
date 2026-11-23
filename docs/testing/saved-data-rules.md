@@ -93,6 +93,7 @@ own file). With JassHelper on (war3mapExtra.txt) its pjass does the same ("Synta
 GetUnitGoldCost", "Undeclared variable W3PROJ_MAP_ONLY"; "Undeclared function BlzGetUnitArmor" with the trimmed file);
 the vJASS library using the extra names compiles and is inlined into the saved war3map.j. So the editor never merges
 the two files. Not measured: an own `Scripts\Blizzard.j`, and what the save writes after a refusal (Return doesn't close
-these dialogs). Studio: the Problems view's check matches (lib/jass/env.ts `mapScriptJassEnv` takes the map's file
-instead); the vJASS compile and map-script pass the game's file plus the map's extra declarations
-(lib/jass/owncommon.ts `withOwnCommon`), which accepts all the editor accepts but also natives the map's file lacks.
+these dialogs). Studio (user's decision): the Problems check, the vJASS compile and map-script take the map's file
+instead of the game's where it declares all the game's does with the same signatures (extra declarations are fine);
+otherwise the game's file alone, with a warning naming what the map's lacks or changes (lib/jass/owncommon.ts
+`commonJFor`; WoW Reforged 4.6's own file lacks newer natives and falls back).

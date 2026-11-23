@@ -3,6 +3,7 @@
 // Also the symbols code editors offer (completion, hover, go to definition).
 
 import { declarations, envFrom, envWithout, sigText, type JassEnv } from "./check";
+import { commonJFor } from "./owncommon";
 
 let game: Promise<JassEnv> | null = null;
 const COMMON_J = "Scripts\\common.j", BLIZZARD_J = "Scripts\\Blizzard.j";
@@ -19,11 +20,18 @@ export function gameJassEnv(read: (path: string) => Promise<string>): Promise<Ja
 }
 
 /** What a map's war3map.j is checked against: the game's common.j and Blizzard.j, except where the map imports its own
- *  copy (Scripts\common.j, Scripts\Blizzard.j; the game reads the map's files before its own). WoW Reforged's script
- *  uses about 160 constants its own common.j declares and the game's doesn't. `own(path)`: the map's file's text, null
- *  when the map has none (a file that is there but can't be read rejects: it is never taken for the game's). */
-export async function mapScriptJassEnv(read: (path: string) => Promise<string>, own: (path: string) => Promise<string | null>): Promise<JassEnv> {
-  const [ownCommon, ownBlizzard] = await Promise.all([own(COMMON_J), own(BLIZZARD_J)]);
+ *  copy (Scripts\common.j, Scripts\Blizzard.j; the World Editor takes the map's files instead of the game's). The map's
+ *  common.j only where it is compatible with the game's, as the vJASS compile and map-script take it (owncommon.ts);
+ *  else the game's, and `warn` gets what the map's lacks or changes. `own(path)`: the map's file's text, null when the
+ *  map has none (a file that is there but can't be read rejects: it is never taken for the game's). */
+export async function mapScriptJassEnv(read: (path: string) => Promise<string>, own: (path: string) => Promise<string | null>, warn?: (message: string) => void): Promise<JassEnv> {
+  const [mapCommon, ownBlizzard] = await Promise.all([own(COMMON_J), own(BLIZZARD_J)]);
+  let ownCommon = mapCommon;
+  if (mapCommon !== null) {
+    const chosen = commonJFor(await read(COMMON_J), mapCommon);
+    if (chosen.warning) warn?.(chosen.warning);
+    if (chosen.from === "game") ownCommon = null;
+  }
   if (ownCommon === null && ownBlizzard === null) return gameJassEnv(read);
   const label = (mine: string | null, path: string) => `${mine === null ? "game" : "map"}:${path}`;
   const common = envFrom([ownCommon ?? await read(COMMON_J)], undefined, [label(ownCommon, COMMON_J)]);

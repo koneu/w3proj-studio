@@ -140,18 +140,20 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
           return capped(told(luaSrc ?? "", LUA_SCRIPT, diags, perFile), "script problems");
         }
         if (src === null && !texts.length) return [];
-        // The map's own Scripts\common.j or Blizzard.j, where it imports one, stands in for the game's.
+        // The map's own Scripts\common.j or Blizzard.j, where it imports one, stands in for the game's (its common.j only
+        // where it is compatible with the game's: else a warning says what it lacks or changes).
         const files = shared.lookup();
+        const commonWarnings: Problem[] = [];
         const env = await mapScriptJassEnv((p) => w3.game.readText(p), async (p) => {
           const bytes = await files.read(p);
           return bytes === null ? null : new TextDecoder().decode(bytes);
-        });
+        }, (message) => commonWarnings.push({ severity: "warning", message, location: "Scripts\\common.j", about: "map:Scripts\\common.j" }));
         // A file's text is checked against the map script's declarations and the other files'. Its udg_ and gg_ names
         // are the whole script's to judge (a kept script may not follow the triggers): what that check finds in the
         // file's text is moved to the file's line below.
         const declared = envFrom([...(src !== null ? [src] : []), ...texts.map((t) => t.text)], env, ["map"]);
         const perFile = lintTexts(texts, "jass", declared, false);
-        return capped(told(src ?? "", JASS_SCRIPT, src === null ? [] : checkJass(src, env), perFile), "script problems");
+        return [...commonWarnings, ...capped(told(src ?? "", JASS_SCRIPT, src === null ? [] : checkJass(src, env), perFile), "script problems")];
       },
     },
     {

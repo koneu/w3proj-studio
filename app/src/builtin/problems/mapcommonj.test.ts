@@ -64,6 +64,15 @@ test("a map's common.j that is there but can't be read fails the check instead o
   await assert.rejects(project({ "map/Scripts/common.j": new Error("Permission denied (os error 13)") }).run(), /Permission denied/);
 });
 
+test("a map's common.j lacking a game native isn't used: the game's is, and a warning names what it lacks", async () => {
+  // An older copy: the map's constant, but not the game's KillUnit.
+  const older = "type agent extends handle\ntype unit extends agent\nglobals\n    constant integer MY_HERO = 'H000'\nendglobals\n";
+  const problems = await project({ "map/Scripts/common.j": older }).run();
+  assert.deepEqual(problems.map((p) => [p.severity, p.location]), [["warning", "Scripts\\common.j"], ["error", "war3map.j:2"]]);
+  assert.match(problems[0].message, /lacks 1 of the game's declarations \(native KillUnit\)/);
+  assert.equal(problems[1].message, "Unknown variable MY_HERO", "checked against the game's common.j, nothing of the map's merged in");
+});
+
 test("mapScriptJassEnv: the map's Blizzard.j alone replaces the game's Blizzard.j, the game's common.j stays", async () => {
   const read = async (p: string) => (p === "Scripts\\common.j" ? GAME_COMMON : GAME_BLIZZARD);
   const env = await mapScriptJassEnv(read, async (p) => (p === "Scripts\\Blizzard.j" ? "function MyBj takes nothing returns nothing\nendfunction\n" : null));

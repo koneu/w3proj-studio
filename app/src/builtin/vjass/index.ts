@@ -10,7 +10,7 @@ import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type C
   type TriggersService } from "../../extensions/services";
 import type { TriggerItem } from "../../lib/triggers/wtg";
 import { mapJass } from "../../lib/jass/env";
-import { withOwnCommon } from "../../lib/jass/owncommon";
+import { commonJFor } from "../../lib/jass/owncommon";
 import { readImported } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
@@ -88,14 +88,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const [script, gameCommon, blizzardJ, mapCommon] = await Promise.all([
       languages.source({ triggers: texts.triggers, custom: texts.custom }), w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j"),
       readImported(w3, "Scripts\\common.j")]);
-    // The map's own common.j declarations reach JassHelper too, as when the script is generated (map-script).
-    const commonJ = mapCommon === null ? gameCommon : withOwnCommon(gameCommon, new TextDecoder().decode(mapCommon));
-    const r = await run(script, commonJ, blizzardJ);
-    if ("output" in r) return "JassHelper: no errors (compiled in the map's script).";
+    // The map's own common.j instead of the game's where it is compatible, as when the script is generated (map-script).
+    const common = commonJFor(gameCommon, mapCommon === null ? null : new TextDecoder().decode(mapCommon));
+    const r = await run(script, common.text, blizzardJ);
+    const warn = common.warning ? ` · ${common.warning}` : "";
+    if ("output" in r) return `JassHelper: no errors (compiled in the map's script).${warn}`;
     const { own, others } = checkMessages(placeErrors(r.log, script, r.current, nonce), texts);
     const list = (lines: string[]) => `${lines.slice(0, 8).join(" · ")}${lines.length > 8 ? ` · and ${lines.length - 8} more` : ""}`;
-    if (own.length) return `JassHelper: ${list(own)}${others.length ? ` · Also outside this text: ${list(others)}` : ""}`;
-    return `JassHelper stopped at errors outside this text, before it was through with this one: ${list(others)} (files in ${r.dir})`;
+    if (own.length) return `JassHelper: ${list(own)}${others.length ? ` · Also outside this text: ${list(others)}` : ""}${warn}`;
+    return `JassHelper stopped at errors outside this text, before it was through with this one: ${list(others)} (files in ${r.dir})${warn}`;
   };
 
   void w3.services.get<ScriptLanguagesService>(SCRIPT_LANGUAGES_SERVICE).then((s) => {
