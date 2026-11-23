@@ -9,18 +9,34 @@
   },
   {
     "name": "special-paint-level",
-    "description": "lone-LCc0.w3x, the cliff brush Level (1473,282) with Grass Cliff (1409,367) at size 3 on the cave (771,379): the editor takes the cave out of war3map.doo's specials (none left; the view shows the ground and the start location under it at once), and types the corners Grass Cliff; Studio keeps it (known difference, bugs.md 'A cliff brush takes specials out in the editor'). On this made-up map a Level click anywhere (300,800, far from the cave) takes every special out, also all 25 of specials-look.w3x; on AutumnLeaves only those whose corners changed (branch we-batch-4, 2026-11-20)",
+    "description": "lone-LCc0.w3x, the cliff brush Level (1473,282) with Grass Cliff (1409,367) at size 3 on the cave (771,379): the editor takes the cave out of war3map.doo's specials (none left; the view shows the ground and the start location under it at once), and types the corners Grass Cliff. A special stays only where the cliff layers under its footprint are those its pathing texture's alpha draws (0 low, 127 one layer up, 255 two), checked for every special of the map after each cliff brush stroke; this made-up cave on flat ground never fit, so any cliff stroke takes it (lib/terrain/specialfit.ts; branch we-batch-4, 2026-11-20; the rule from branch fix/cliff-level-removes-specials, 2026-11-23)",
     "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "771,379"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 3], ["click", 771, 379]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["specials[]"] }, { "file": "war3map.w3e", "as": "w3e" }]
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }, { "file": "war3map.w3e", "as": "w3e" }]
   },
   {
     "name": "special-paint-up1",
-    "description": "lone-LCc0.w3x, Increase One (1505,282) with Grass Cliff at size 3 on the cave (771,379): a grass plateau, and the cave taken out of the specials as by Level; Studio keeps it (known difference, as special-paint-level) (branch we-batch-4, 2026-11-20)",
+    "description": "lone-LCc0.w3x, Increase One (1505,282) with Grass Cliff at size 3 on the cave (771,379): a grass plateau, and the cave taken out of the specials as by Level (special-paint-level's rule) (branch we-batch-4, 2026-11-20; branch fix/cliff-level-removes-specials)",
     "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1409,367"], ["--click", "771,379"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["cliff", "Grass"], ["tool", "+1:"], ["size", 3], ["click", 771, 379]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["specials[]"] }, { "file": "war3map.w3e", "as": "w3e" }]
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }, { "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "special-paint-level-far",
+    "description": "lone-LCc0.w3x, Level with Grass Cliff at size 3 at 1150,200, far from the cave (its corners stay as they are): the editor takes the cave out all the same, as every special that doesn't fit its cliff goes on any cliff brush stroke (special-paint-level's rule); also all 25 of specials-look.w3x (a click at 300,800 painted nothing in Studio, not looked into) (branch fix/cliff-level-removes-specials, 2026-11-23)",
+    "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "1150,200"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 3], ["click", 1150, 200]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }, { "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "special-paint-level-real",
+    "description": "smoketest_maps (2)AutumnLeaves_S2_v2.0.w3x, Level with Grass Cliff at size 2 at 748,500 at the opening camera (corners 62..66 x 65..67, no special near): all 55 specials stay in the editor, each placed by the editor on the cliff its pathing texture draws (special-paint-level's rule must keep them all). On a Level or Increase One on its cave (tile 108,55) the editor took out 4 and 8 specials, those the rule says (we-drive --look 5824,-960,1500, branch fix/cliff-level-removes-specials, 2026-11-23). Only the specials are compared: the editor's save writes the doodads in its own format 13 (Studio keeps 8 with its skin ids), and its w3e as version 12 with 8 corners of the stroke dry where Studio keeps them wet",
+    "input": { "map": "${MAIN}/smoketest_maps/blizzard/(2)AutumnLeaves_S2_v2.0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "1424,569"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Thick Grass"], ["tool", "Level:"], ["size", 2], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["version", "skinIds", "doodads"] }]
   }
 ]
