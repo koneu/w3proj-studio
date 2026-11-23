@@ -6,7 +6,7 @@
 //   node scripts/check-scripts.mjs
 
 import { spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -214,6 +214,14 @@ export function smokeRunProblems(source) {
   return problems;
 }
 
+/** Messages for the built-in extension folders (app/src/builtin/*) of `repo` that have no README.md. */
+export function readmeProblems(repo) {
+  const dir = join(repo, "app", "src", "builtin");
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !existsSync(join(dir, e.name, "README.md")))
+    .map((e) => `app/src/builtin/${e.name}: no README.md (purpose, data it reads and writes, what it contributes)`);
+}
+
 /** Every problem of the repository's scripts, as messages. */
 export async function checkScripts(repo) {
   const files = scriptFiles(repo);
@@ -223,6 +231,7 @@ export async function checkScripts(repo) {
   problems.push(...smokeListProblems(smokeSource), ...smokeRunProblems(smokeSource));
   const specs = join(repo, "tests", "fixtures", "we-specs");
   problems.push(...generatorProblems(Object.fromEntries(readdirSync(specs).filter((f) => /^make-.*\.mjs$/.test(f)).map((f) => [`tests/fixtures/we-specs/${f}`, readFileSync(join(specs, f), "utf8")]))));
+  problems.push(...readmeProblems(repo));
   return { files, problems };
 }
 
