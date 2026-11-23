@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { clampInfoNumber, INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
+import { clampInfoNumber, filterInfoTyping, INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
 import { repoPath } from "../../lib/testhelpers/testutil";
 
 const repoFile = (...parts: string[]): string => readFileSync(repoPath(...parts), "utf8");
@@ -76,7 +76,7 @@ test("every Map Properties number field refuses values past its stored type and 
       const r = setInfoNumber(info, key, plainText(edge), player);
       const kept = clampInfoNumber(key, edge);
       assert.deepEqual(r, { value: kept });
-      assert.equal(infoNumber(info, key, player), kept);
+      assert.equal(infoNumber(info, key, player), kept, key);
     }
   }
 });
@@ -89,14 +89,90 @@ test("a field the map's file doesn't have (a v31 file's camera zoom) is refused,
   assert.equal(JSON.stringify(info), before);
 });
 
-test("typed values of some fields are pulled in as the World Editor does (verify round 3); the rest are untouched", () => {
+/** Types `text` into `key` as the editor's box lets it through, then takes it; the values of `keys` after. */
+const typeInto = (info: object, key: InfoNumberKey, text: string): void => {
+  const r = setInfoNumber(info, key, filterInfoTyping(key, text));
+  assert.ok("value" in r, `${key} ${text}`);
+};
+const read = (info: object, ...keys: InfoNumberKey[]) => keys.map((k) => infoNumber(info, k));
+
+test("water fields: 0..100, '-' and '.' dropped as typed, Max below Min pulls Min down (ya.md)", () => {
+  const water = WATER_NUMBERS.filter((k) => k !== "waterOverrideColor" && k !== "waterUnknown");
+  assert.equal(water.length, 8);
+  for (const key of water) {
+    const info = fixture();
+    for (const [t, want] of [["-5", 5], ["1.5", 15], ["12.5", 100], ["150", 100], ["0", 0], ["50", 50]] as const) {
+      typeInto(info, key, t);
+      assert.equal(infoNumber(info, key), want, `${key} ${t}`);
+    }
+  }
   const info = fixture();
-  const typed = (key: InfoNumberKey, text: string) => { const r = setInfoNumber(info, key, text); assert.ok("value" in r, text); return infoNumber(info, key); };
-  for (const [t, want] of [["99999", 100], ["-5", 5], ["0", 0], ["50", 50]] as const) assert.equal(typed("waterMinOpacity", t), want, `min opacity ${t}`);
-  for (const [t, want] of [["99999", 100], ["0", 0], ["50", 50]] as const) assert.equal(typed("waterWavesVertexDisplacement", t), want, `displacement ${t}`);
-  for (const [t, want] of [["99999", 1], ["12.5", 1], ["-5", 0], ["0.25", 0.25]] as const) assert.equal(typed("terrainFogMaxOpacity", t), want, `fog opacity ${t}`);
-  for (const [t, want] of [["99999", 99999], ["12.5", 12.5], ["-5", 0]] as const) assert.equal(typed("terrainFogLinearStart", t), want, `fog start ${t}`);
-  for (const k of ["zoomMin", "zoomMax"] as const) { assert.equal(typed(k, "99999"), 3000, k); assert.equal(typed(k, "1500"), 1500, k); }
-  assert.equal(typed("zoomDefault", "99999"), 99999, "default zoom is left alone (unmeasured)");
-  assert.equal(typed("terrainFogLinearEnd", "99999"), 99999);
+  typeInto(info, "waterMinOpacity", "60"); typeInto(info, "waterMaxOpacity", "80");
+  assert.deepEqual(read(info, "waterMinOpacity", "waterMaxOpacity"), [60, 80]);
+  typeInto(info, "waterMaxOpacity", "30");
+  assert.deepEqual(read(info, "waterMinOpacity", "waterMaxOpacity"), [30, 30], "Max below Min pulls Min down");
+  assert.equal(filterInfoTyping("waterEmissivity", "-1.5"), "15");
+  assert.equal(filterInfoTyping("fogStart", "-1.5"), "-1.5", "fog boxes keep what is typed (the value is clamped)");
+});
+
+test("fog: Z and Linear 0..100000, Height keeps negatives, Density 0..100, two decimals, End/Start ordered (ya.md)", () => {
+  for (const [a, b] of [["fogStart", "fogEnd"], ["terrainFogLinearStart", "terrainFogLinearEnd"]] as const) {
+    const info = fixture();
+    for (const k of [a, b]) for (const [t, want] of [["-5", 0], ["12.345", 12.35], ["0.005", 0], ["100000", 100000], ["999999", 100000]] as const) {
+      typeInto(info, k, t);
+      assert.equal(infoNumber(info, k), want, `${k} ${t}`);
+    }
+    typeInto(info, a, "100"); typeInto(info, b, "500");
+    typeInto(info, b, "50");
+    assert.deepEqual(read(info, a, b), [50, 50], "End below Start pulls Start down");
+    typeInto(info, a, "900");
+    assert.deepEqual(read(info, a, b), [900, 900], "Start above End pushes End up");
+  }
+  const info = fixture();
+  for (const [t, want] of [["-5", -5], ["12.345", 12.35], ["999999", 100000], ["-999999", -100000]] as const) { typeInto(info, "terrainFogHeight", t); assert.equal(infoNumber(info, "terrainFogHeight"), want, `height ${t}`); }
+  for (const [t, want] of [["-5", 0], ["12.345", 12.35], ["101", 100], ["0.005", 0], ["100", 100]] as const) { typeInto(info, "fogDensity", t); assert.equal(infoNumber(info, "fogDensity"), want, `density ${t}`); }
+  for (const [t, want] of [["99999", 1], ["12.5", 1], ["-5", 0], ["0.25", 0.25]] as const) { typeInto(info, "terrainFogMaxOpacity", t); assert.equal(infoNumber(info, "terrainFogMaxOpacity"), want, `fog opacity ${t}`); }
+});
+
+test("zoom: box holds 4 characters, 1250..3000, min <= default <= max with every edit pushing the others (ya.md)", () => {
+  assert.equal(filterInfoTyping("zoomMax", "12345"), "1234");
+  assert.equal(filterInfoTyping("zoomDefault", "2147483647"), "2147");
+  assert.equal(filterInfoTyping("zoomMin", "99999"), "9999");
+  const all = ["zoomMin", "zoomDefault", "zoomMax"] as const;
+  const start = () => { const i = fixture(); i.cameraZoom = { min: 1250, default: 1250, max: 1250 }; return i; };
+  for (const k of all) for (const [t, want] of [["1249", 1250], ["99", 1250], ["-5", 1250], ["12.5", 1250], ["3001", 3000], ["99999", 3000], ["12345", 1250]] as const) {
+    const info = start();
+    typeInto(info, "zoomMax", "3000"); typeInto(info, "zoomMin", "1250"); typeInto(info, "zoomDefault", "2000");
+    typeInto(info, k, t);
+    assert.equal(infoNumber(info, k), k === "zoomDefault" && want > 3000 ? 3000 : want, `${k} ${t}`);
+  }
+  let info = start();
+  typeInto(info, "zoomMax", "3000"); typeInto(info, "zoomDefault", "2000");
+  typeInto(info, "zoomDefault", "3000"); typeInto(info, "zoomMax", "2500");
+  assert.deepEqual(read(info, ...all), [1250, 2500, 2500], "max below default pulls default down");
+  typeInto(info, "zoomMax", "1500"); typeInto(info, "zoomMin", "1400");
+  assert.deepEqual(read(info, ...all), [1400, 1500, 1500]);
+  typeInto(info, "zoomMax", "1300");
+  assert.deepEqual(read(info, ...all), [1300, 1300, 1300], "max below default and min pulls both down");
+  info = start();
+  typeInto(info, "zoomMax", "3000"); typeInto(info, "zoomDefault", "2000");
+  typeInto(info, "zoomDefault", "3000");
+  typeInto(info, "zoomDefault", "9999");
+  assert.deepEqual(read(info, ...all), [1250, 3000, 3000], "default above max is max");
+  typeInto(info, "zoomMin", "2999");
+  assert.deepEqual(read(info, ...all), [2999, 3000, 3000]);
+  typeInto(info, "zoomMax", "2999"); typeInto(info, "zoomMin", "2999");
+  assert.deepEqual(read(info, ...all), [2999, 2999, 2999]);
+  info = start();
+  typeInto(info, "zoomMax", "3000"); typeInto(info, "zoomMin", "1250"); typeInto(info, "zoomDefault", "1250");
+  typeInto(info, "zoomMin", "2999");
+  assert.deepEqual(read(info, ...all), [2999, 2999, 3000], "min above the others pushes default and max up");
+});
+
+test("typed clamps leave stored values alone: a map's own value past the limits loads and saves as it is", () => {
+  const info = fixture();
+  info.water.minOpacity = 500; info.fog.start = -3; info.cameraZoom = { min: 100, default: 50, max: 9000 };
+  assert.deepEqual(read(info, "waterMinOpacity", "fogStart", "zoomMin", "zoomDefault", "zoomMax"), [500, -3, 100, 50, 9000]);
+  typeInto(info, "fogDensity", "5"); // an edit of another field changes none of them
+  assert.deepEqual(read(info, "waterMinOpacity", "fogStart", "zoomMin", "zoomDefault", "zoomMax"), [500, -3, 100, 50, 9000]);
 });

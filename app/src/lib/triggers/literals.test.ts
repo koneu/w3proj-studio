@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isTypedCode, literalProblem, realText, typedInitialValue } from "./literals";
+import { filterTriggerTyping, isTypedCode, literalProblem, realText, typedInitialValue, typedTriggerNumber } from "./literals";
 
 test("an integer parameter value the script can't hold (past 32 bits, not whole, an exponent) is refused; its edges are taken", () => {
   for (const typed of ["2147483648", "-2147483649", "99999999999", "0x80000000", "0xFFFFFFFF", "1.5", "1e5", "", "abc", "+5", "Infinity"]) {
@@ -41,4 +41,32 @@ test("a 4-character code typed for a code type is taken as it is, not read as a 
   assert.equal(isTypedCode("unitcode", "hfoo"), true);
   assert.equal(isTypedCode("abilcode", " AHbz "), true);
   for (const [type, typed] of [["unitcode", "hfo"], ["unitcode", "hfooo"], ["integer", "hfoo"], ["unitcode", "'hfo'"], ["unitcode", "h\\oo"]]) assert.equal(isTypedCode(type, typed), false, `${type} ${typed}`);
+});
+
+/** What the World Editor's Integer / Real box keeps for text typed into it (ya.md 2026-11-22). */
+const typedIn = (base: "integer" | "real", text: string) => { const r = typedTriggerNumber(base, filterTriggerTyping(base, text)); return "value" in r ? r.value : `refused: ${r.refused}`; };
+
+test("a typed Integer value goes through wrap, float32 and the 1e9 limit as the World Editor does (ya.md)", () => {
+  for (const [typed, want] of [["123456789", "123456792"], ["999999999", "1000000000"], ["12.5", "125"], ["2147483648", "-1000000000"],
+    ["3000000000", "-1000000000"], ["4294967297", "1"], ["99999999999", "1000000000"], ["-99999999999", "-1000000000"], ["-5", "-5"],
+    ["0", "0"], ["-0", "0"], ["1000000000", "1000000000"], ["1000000001", "1000000000"], ["", null]] as const) {
+    assert.equal(typedIn("integer", typed), want, typed);
+  }
+  assert.match(typedIn("integer", "-")!, /^refused/);
+  assert.equal(filterTriggerTyping("integer", "1.5e3"), "153");
+  assert.equal(filterTriggerTyping("string", "1.5e3"), "1.5e3");
+});
+
+test("a typed Real value is limited to 1e9 with two decimals as the World Editor does (ya.md)", () => {
+  for (const [typed, want] of [["-5", "-5.00"], ["12.5", "12.50"], ["12.345", "12.35"], ["100000", "100000.00"], ["1.5e3", "1.53"],
+    ["99999999999", "1000000000.00"], ["-99999999999", "-1000000000.00"], ["0.001", "0.00"], ["0.005", "0.00"], ["-0.001", "0.00"], [".5", "0.50"]] as const) {
+    assert.equal(typedIn("real", typed), want, typed);
+  }
+  assert.match(typedIn("real", "-")!, /^refused/);
+  assert.match(typedIn("real", "1-2")!, /^refused/);
+});
+
+test("the MCP path still refuses what the box would wrap or clamp (a typed edit is the only one that is pulled in)", () => {
+  assert.ok("refused" in typedInitialValue("integer", "integer", "2147483648"));
+  assert.deepEqual(typedInitialValue("integer", "integer", "1500000000"), { value: "1500000000" });
 });

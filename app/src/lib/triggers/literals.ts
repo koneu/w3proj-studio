@@ -57,3 +57,33 @@ export function typedInitialValue(base: string, type: string, typed: string): { 
 export function realText(n: number): string {
   return Math.abs(n) < 1e21 ? n.toFixed(2) : `${BigInt(n)}.00`;
 }
+
+/** The World Editor's limit on a typed Integer or Real value in the trigger editor (a parameter's Value, a variable's
+ *  initial value), measured 2026-11-22 (verify ya.md). */
+export const TRIGGER_NUMBER_LIMIT = 1e9;
+
+/** What a trigger value box lets through as it is typed: an Integer box takes digits and "-" (so 12.5 is 125), a Real
+ *  box digits, "-" and "." (so 1.5e3 is 1.53). Other types: the text as it is. */
+export function filterTriggerTyping(base: string, text: string): string {
+  if (base === "integer") return text.replace(/[^0-9-]/g, "");
+  if (base === "real") return text.replace(/[^0-9.-]/g, "");
+  return text;
+}
+
+/** The value the World Editor keeps for `typed` in an Integer or Real box (after `filterTriggerTyping`), as the text
+ *  war3map.wtg stores: an Integer wraps to 32 bits first, goes through a 32-bit float (123456789 is 123456792) and is
+ *  pulled into -1e9..1e9; a Real is pulled into -1e9..1e9 and kept with two decimals (of the float, so 0.005 is 0.00).
+ *  Only for what is typed in the editor: a value already in a map is kept as it is, and the MCP tools refuse such values
+ *  (typedInitialValue). An empty box is null (the default); text that isn't a number is refused. */
+export function typedTriggerNumber(base: "integer" | "real", typed: string): { value: string | null } | { refused: string } {
+  const raw = typed.trim();
+  if (raw === "") return { value: null };
+  const clamp = (n: number) => Math.min(TRIGGER_NUMBER_LIMIT, Math.max(-TRIGGER_NUMBER_LIMIT, n));
+  if (base === "integer") {
+    if (!/^-?\d+$/.test(raw)) return { refused: "Enter a whole number, like 12 or -3." };
+    const wrapped = Number(BigInt.asIntN(32, BigInt(raw)));
+    return { value: String(clamp(Math.fround(wrapped)) + 0) };
+  }
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(raw)) return { refused: "Enter a number, like 1.5." };
+  return { value: Math.fround(clamp(Number(raw))).toFixed(2).replace(/^-0\.00$/, "0.00") };
+}

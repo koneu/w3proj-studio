@@ -5,7 +5,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import type { TriggerEditorHandle } from "../../extensions/services";
-import { typedInitialValue } from "../../lib/triggers/literals";
+import { filterTriggerTyping, typedInitialValue, typedTriggerNumber } from "../../lib/triggers/literals";
 import type { TriggerData } from "../../lib/triggers/triggerdata";
 import type { Item, Param, TriggerFile, Variable } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -260,8 +260,11 @@ function initialValue(w3: W3Api, host: VariableHost, data: TriggerData, v: Varia
   const typed = TYPED.includes(base) || /code$/.test(v.type);
   if (!typed) return h("span.muted", {}, "default");
   // A value the variable can't hold (literals.ts) is refused with a word, and the box shows the value kept.
-  const input = h("input.trig-var-value", { type: "text", value: v.initialized ? v.initialValue : "", placeholder: "default", onchange: () => {
-    const r = typedInitialValue(base, v.type, input.value);
+  const input = h("input.trig-var-value", { type: "text", value: v.initialized ? v.initialValue : "", placeholder: "default",
+    oninput: () => { const f = filterTriggerTyping(/code$/.test(v.type) ? "" : base, input.value); if (f !== input.value) input.value = f; },
+    onchange: () => {
+    // Integer and Real boxes take the World Editor's limits (±1e9, float32, wrap); the rest as before.
+    const r = (base === "integer" || base === "real") && !/code$/.test(v.type) ? typedTriggerNumber(base, input.value) : typedInitialValue(base, v.type, input.value);
     if ("refused" in r) {
       void w3.window.showError(`Initial value of ${v.name}: ${r.refused}`);
       input.value = v.initialized ? v.initialValue : "";
