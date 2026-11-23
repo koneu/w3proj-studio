@@ -11112,10 +11112,16 @@ async function keybindings(page, found) {
     await k.hands.wheel(view.x, view.y, -120);
     await settled(page);
     const up = await state();
+    // A second notch the same way goes round once more: the wheel a check turned before isn't taken off this one
+    // (webdriver.mjs gives each turn a wheel of its own; with one, Wheel Up after viewModes' Wheel Up reached nothing).
+    await k.hands.wheel(view.x, view.y, -120);
+    await settled(page);
+    const up2 = await state();
     await k.hands.wheel(view.x, view.y, 120);
     await settled(page);
     const down = await state();
     if (up.grid === before.grid || up.camera.distance !== before.camera.distance) fail(`Wheel Up bound to Grid Display: grid ${before.grid} → ${up.grid}, distance ${before.camera.distance} → ${up.camera.distance}`);
+    if (up2.grid === up.grid || up2.camera.distance !== up.camera.distance) fail(`a second Wheel Up: grid ${up.grid} → ${up2.grid}, distance ${up.camera.distance} → ${up2.camera.distance}`);
     if (!(down.camera.distance > up.camera.distance)) fail(`Wheel Down didn't zoom out: ${up.camera.distance} → ${down.camera.distance}`);
 
     // The shared click (cdp.mjs Hands.reach): a toast that only tells something over the target is closed and the click
