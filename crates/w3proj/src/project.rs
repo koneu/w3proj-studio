@@ -1130,6 +1130,7 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
             }
         }
     }
+    let has_chapters = !ex.nested.is_empty();
     for (dir, inner) in std::mem::take(&mut ex.nested) {
         let r = write_project(&maps_dir.join(&dir), inner, false, overwrite_mdl_headers)?;
         report.written += r.written;
@@ -1140,6 +1141,10 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
         report.kept_mdl.extend(r.kept_mdl.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
     }
     remove_empty_dirs(&maps_dir);
+    // The chapters' stores and records are local too (their projects have no `.gitignore`: the campaign's covers them).
+    if top && has_chapters {
+        crate::derived::ensure_lines(project, &crate::derived::CHAPTERS_IGNORED)?;
+    }
     // What couldn't be named: replaced as a whole (not counted), strays aside.
     let unnamed_dir = project.join(UNNAMED_DIR);
     let mut scratch = UnpackReport::default();

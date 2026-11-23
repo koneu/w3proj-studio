@@ -403,6 +403,9 @@ const REQUIRED: [&[&str]; 4] = [&["war3map.wpm"], &["war3map.shd"], &["war3mapMa
 /// The `.gitignore` lines a split project needs: the store and the record are local, never committed.
 pub const IGNORED: [&str; 2] = ["/.w3proj/derived/", "/.w3proj/derived-from.json"];
 
+/// The same for a campaign's chapter maps (`maps/<chapter>/`), which are projects of their own with no `.gitignore`.
+pub const CHAPTERS_IGNORED: [&str; 2] = ["/maps/*/.w3proj/derived/", "/maps/*/.w3proj/derived-from.json"];
+
 /// Whether a file name under `map/` is a derived file's (`FILES`, any case): the name as `FILES` has it.
 pub fn derived_name(name: &str) -> Option<&'static str> {
     FILES.iter().copied().find(|f| f.eq_ignore_ascii_case(name))
