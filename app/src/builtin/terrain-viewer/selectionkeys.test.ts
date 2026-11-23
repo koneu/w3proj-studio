@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, FACE_COMMAND, HELD_COMMANDS, joinSteps, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, mouseChord, mouseCommandsFor, primaryKey, UNDO_BINDINGS, UNDO_CONTEXT } from "../../lib/keybindings";
 import { repoPath } from "../../lib/testhelpers/testutil";
+import { CAMERA_STEPS, cameraMoveOf } from "./viewmodes";
 
 // The selection's keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
 // what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then what those commands do.
@@ -156,13 +157,19 @@ test("mouse controls by default: the middle button pans, the right turns, Alt an
   assert.equal(control(0, { altKey: true }, false), null, "nothing selected: the left button's own (select, box)");
   for (const mods of [{}, { shiftKey: true }] as M[]) assert.equal(control(0, mods), null, JSON.stringify(mods));
   assert.equal(control(3), null, "back and forward do nothing");
-  // The wheel zooms, with or without modifiers; Wheel Up comes nearer.
+  // The wheel zooms, with or without Shift or Alt; Wheel Up comes nearer. With Ctrl it is the World Editor's Adjust
+  // Clipping (we-drive 2026-11-23: Ctrl and the wheel left the distance at 3000), which wins over the zoom.
   const wheel = (deltaY: number, mods: M = {}) => {
     const chord = mouseChord({ type: "wheel", button: 0, deltaY, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
     return chord ? mouseCommandsFor(bindings, chord, { terrainFocus: true }) : [];
   };
   assert.deepEqual(wheel(-100), ["w3.terrain.camera.zoomIn"]);
-  assert.deepEqual(wheel(100, { ctrlKey: true }), ["w3.terrain.camera.zoomOut"]);
+  assert.deepEqual(wheel(100, { shiftKey: true }), ["w3.terrain.camera.zoomOut"]);
+  assert.deepEqual(cameraMoveOf(wheel(100, { ctrlKey: true })), { clip: { farther: true } });
+  assert.deepEqual(cameraMoveOf(wheel(-100, { ctrlKey: true })), { clip: { farther: false } });
+  assert.deepEqual(cameraMoveOf(wheel(-100, { metaKey: true })), { clip: { farther: false } }, "Cmd counts as Ctrl");
+  // Control: the plain wheel is still the zoom.
+  assert.deepEqual(cameraMoveOf(wheel(100)), { zoom: CAMERA_STEPS.zoom });
   // Their commands are held, not run, and declared.
   const declared = new Set((manifest as unknown as { contributes: { commands: { id: string }[] } }).contributes.commands.map((c) => c.id));
   for (const id of [...Object.values(MOUSE_CONTROLS), AREA_COMMAND]) { assert.ok(HELD_COMMANDS.has(id), id); assert.ok(declared.has(id), id); assert.equal(runsAsCommand(id), false, id); }

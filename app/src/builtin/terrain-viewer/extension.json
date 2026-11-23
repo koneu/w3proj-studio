@@ -131,6 +131,8 @@
       { "id": "w3.terrain.camera.panRightFast", "hidden": true, "title": "Camera - Translate Right Fast", "category": "Terrain" },
       { "id": "w3.terrain.camera.zoomIn", "hidden": true, "title": "Camera - Zoom In", "category": "Terrain" },
       { "id": "w3.terrain.camera.zoomOut", "hidden": true, "title": "Camera - Zoom Out", "category": "Terrain" },
+      { "id": "w3.terrain.camera.clipNearer", "hidden": true, "title": "Camera - Adjust Clipping Nearer", "category": "Terrain" },
+      { "id": "w3.terrain.camera.clipFarther", "hidden": true, "title": "Camera - Adjust Clipping Farther", "category": "Terrain" },
       { "id": "w3.terrain.camera.rotateLeft", "hidden": true, "title": "Camera - Rotate Left", "category": "Terrain" },
       { "id": "w3.terrain.camera.rotateRight", "hidden": true, "title": "Camera - Rotate Right", "category": "Terrain" },
       { "id": "w3.terrain.camera.translate", "hidden": true, "title": "Camera - Translate (Mouse Button Held)", "category": "Terrain" },
@@ -285,6 +287,8 @@
       { "key": "rightbutton", "command": "w3.terrain.camera.rotate", "when": "terrainFocus" },
       { "key": "wheelup", "command": "w3.terrain.camera.zoomIn", "when": "terrainFocus" },
       { "key": "wheeldown", "command": "w3.terrain.camera.zoomOut", "when": "terrainFocus" },
+      { "key": "ctrl+wheelup", "command": "w3.terrain.camera.clipNearer", "when": "terrainFocus" },
+      { "key": "ctrl+wheeldown", "command": "w3.terrain.camera.clipFarther", "when": "terrainFocus" },
       { "key": "ctrl+leftbutton", "command": "w3.terrain.selection.rotateToPointer", "when": "terrainFocus" },
       { "key": "alt+leftbutton", "command": "w3.terrain.selection.moveToPointer", "when": "terrainFocus" }
     ],

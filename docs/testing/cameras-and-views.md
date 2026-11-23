@@ -49,6 +49,22 @@ Camera bounds, the default camera, camera objects, zoom and the View menu. Part 
   gives it that camera's, which stay through wheel zoom (x1.1 a notch) and arrow-key panning. Studio:
   lib/terrain/cameras.ts `ViewClipping`, set by the Cameras tab's View button.
 
+- **Adjust Clipping, Ctrl and the wheel** (branch feat/camera-cutoff, 2026-11-23, SD, camera-farz.w3m and
+  HillsbradCreek; spec `tests/we-compare/camera-cutoff.json`, `we-drive --wheel N+ctrl`): a notch of Wheel Down
+  multiplies the view's far clipping by 1.1, Wheel Up divides it, in single precision (50000 → 45454.543), within 101
+  and 100000 (also with the near clipping at 100); near clipping, distance and target stay, plain wheel notches leave
+  the far one. Nothing shows the value; a map opened again (`--open`) starts at 50000 again. The far plane is a depth
+  from the camera's own eye (distance d at the angle of attack), not a radius: a straight line across flat ground, 28
+  notches nearer from the opening view (3467.6) cut camera-farz.w3m at row 102 of 844, where that depth meets the
+  ground through the editor's projection (vertical focal about 1116 px, principal point at row 325.5; the grid's yellow
+  lines at rows 180, 324, 499, 715). Black beyond it (game view: white), higher ground past it still drawn. Studio with
+  the same eye (`app-drive --view-size 1184x1037 --camera x=0,y=0,distance=3000,pitch=56,yaw=-90,fov=49.84`, rows
+  193 on as the editor's off-centre view) cut at row 101 to 102, its grid on the same rows; the we-compare picture camera
+  (`we:`, a fitted stand-in with another eye) would put the cut 49 px off at far 3415, so pictures are compared this way.
+  View Entire Map sets the far clipping to twice its distance (HillsbradCreek: 20480, far 40960); zoomed out to the
+  wheel's end (100000) the picture is all black. Studio: cameras.ts `stepFarClip`, `viewDepthRange`, the terrain view's
+  `w3.terrain.camera.clipNearer` / `clipFarther` (Ctrl+Wheel Up / Down).
+
 - **Applying a camera object**: `--key m` (camera layer), `--click 1396,177` (the first camera in the palette's list,
   13 px per row), `--click 1476,119` (View Selected Camera). Three runs gave the same picture. `--look` does this:
   its cameras go into we-drive's copy of the map before the start (unpacked with the release CLI, war3map.w3c.json,

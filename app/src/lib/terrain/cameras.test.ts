@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFixture } from "../testhelpers/testutil";
-import { CAMERA_FIELDS, CAMERA_RANGES, type CameraField, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
+import { CAMERA_FIELDS, CAMERA_RANGES, type CameraField, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, FAR_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, stepFarClip, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewDepthRange, viewInCameraBounds } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
 const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
@@ -154,6 +154,54 @@ test("ViewClipping: a camera from the view takes the view's clipping, the World 
   assert.equal(clip.current().farZ, 9000);
   // Each view starts with the editor's own clipping.
   assert.deepEqual(new ViewClipping().current(), { farZ: 50000, nearZ: 16 });
+});
+
+test("stepFarClip: Adjust Clipping steps the far clipping by 1.1 a notch in single precision, within 101 and 100000", () => {
+  // we-drive 2026-11-23 (branch feat/camera-cutoff): Create Camera after each run of Ctrl+wheel notches from the
+  // opening view (far 50000), the cameras' far as saved (war3map.w3c floats). Negative: Wheel Down (farther).
+  const run = (start: number, notches: number[]) => {
+    const out: number[] = [];
+    let far = start;
+    for (const n of notches) {
+      for (let i = 0; i < Math.abs(n); i++) far = stepFarClip(far, n < 0);
+      out.push(far);
+    }
+    return out;
+  };
+  const seen = [55000, 60500, 80525.5, 50000, 45454.543, 34150.67, 100000, 101].map(Math.fround);
+  assert.deepEqual(run(50000, [-1, -1, -3, 5, 1, 3, -60, 120]), seen);
+  // From a looked-through camera's far 5000 (near 100): two notches nearer 4132.23, two more 3415.07, six farther
+  // 6050, sixty nearer 101 (the floor doesn't follow the near clipping), then one farther 111.100006.
+  assert.deepEqual(run(5000, [2, 2, -6, 60, -1]), [4132.2314, 3415.0671, 6050, 101, 111.100006].map(Math.fround));
+  assert.deepEqual(FAR_CLIP, { step: 1.1, min: 101, max: 100000 });
+  // The ends hold: a step past either stays there, and a far beyond them comes back within at the next step.
+  assert.equal(stepFarClip(100000, true), 100000);
+  assert.equal(stepFarClip(101, false), 101);
+  assert.equal(stepFarClip(1e9, false), 100000);
+  assert.equal(stepFarClip(1, true), 101);
+  assert.equal(stepFarClip(NaN, true), Math.fround(55000));
+  // Control: plain double arithmetic gives another 50000 / 1.1 (the editor's is the float's).
+  assert.notEqual(Math.fround(50000 / 1.1), stepFarClip(50000, false));
+  // ViewClipping keeps the near clipping and a camera made afterwards takes the stepped far.
+  const clip = new ViewClipping();
+  clip.lookThrough({ farZ: 5000, nearZ: 100 });
+  clip.stepFar(false);
+  clip.stepFar(false);
+  assert.deepEqual(clip.current(), { farZ: Math.fround(4132.2314), nearZ: 100 });
+});
+
+test("viewDepthRange: the far plane is the view's far clipping whatever the zoom, the near one stays short of it", () => {
+  // The World Editor zoomed out to 100000 with far 40960 shows nothing: the far plane doesn't follow the distance.
+  assert.deepEqual(viewDepthRange(3000, 50000), { near: 60, far: 50000 });
+  assert.deepEqual(viewDepthRange(100000, 40960), { near: 2000, far: 40960 });
+  assert.deepEqual(viewDepthRange(200, 3415), { near: 10, far: 3415 });
+  // At the floor (101) from far out the near plane comes in to keep the projection whole.
+  const low = viewDepthRange(20000, 101);
+  assert.ok(low.near > 0 && low.near < low.far, JSON.stringify(low));
+  // A camera's far that is no use (0, negative, not a number) draws with the editor's own.
+  for (const bad of [0, -5, NaN, Infinity]) assert.equal(viewDepthRange(3000, bad).far, 50000, String(bad));
+  // Control: the old rule followed the zoom (ten times the distance).
+  assert.notEqual(viewDepthRange(3000, 50000).far, 3000 * 10);
 });
 
 test("typedCameraValue: a value war3map.w3c's float can't hold is refused for every field, and the cameras stay as they were", () => {

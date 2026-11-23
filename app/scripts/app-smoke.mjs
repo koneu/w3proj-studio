@@ -2111,6 +2111,30 @@ async function viewModes(page, found) {
     const wheeled = await cam();
     if (Math.abs(wheeled.distance - c1.distance) > 1e-6 * c1.distance || Math.hypot(wheeled.target[0] - c1.target[0], wheeled.target[1] - c1.target[1]) > 0.01) fail(`a wheel notch in isn't Ctrl+Up: ${lit(wheeled)} vs ${lit(c1)}`);
     await key("ArrowDown", "ArrowDown", 40, CTRL);
+    // Ctrl and the wheel are the World Editor's Adjust Clipping (cameras.ts stepFarClip): the far plane a notch nearer
+    // (50000 → 45454.543) and back, the camera left where it was; the picture's top goes black at a far of 101
+    // (seventy notches nearer: the floor) and comes back (control: the same view before). The wheel with Ctrl is a
+    // page event: WebKitWebDriver's wheel actions arrive without the keyboard's Ctrl (ctrlKey false, 2026-11-23).
+    const before = await cam();
+    if (before.farZ !== 50000) fail(`the view's far clipping is ${before.farZ} when the map opens, not the World Editor's 50000`);
+    const open = await settledMapPicture(page);
+    const ctrlWheel = (deltaY) => page.evaluate(`document.querySelector(".model-stage canvas").dispatchEvent(new WheelEvent("wheel", { deltaY: ${deltaY}, ctrlKey: true, clientX: ${where.x + 50}, clientY: ${where.y + 50}, bubbles: true, cancelable: true }))`);
+    await ctrlWheel(-120);
+    await settled(page);
+    const nearer = await cam();
+    if (Math.abs(nearer.farZ - 45454.54296875) > 1e-3 || nearer.distance !== before.distance || nearer.target.join() !== before.target.join()) fail(`Ctrl+Wheel Up: far ${before.farZ} → ${nearer.farZ}, distance ${before.distance} → ${nearer.distance}`);
+    await ctrlWheel(120);
+    await settled(page);
+    if ((await cam()).farZ !== 50000) fail(`Ctrl+Wheel Down after Up gives far ${(await cam()).farZ}, not 50000`);
+    for (let i = 0; i < 70; i++) await page.evaluate(`w3.commands.execute("w3.terrain.camera.clipNearer")`);
+    await settled(page);
+    if ((await cam()).farZ !== 101) fail(`seventy notches nearer leave far ${(await cam()).farZ}, not the floor 101`);
+    const clipped = await settledMapPicture(page);
+    const gone = await pixelsApart(page, open, clipped);
+    if (!(gone > 5000)) fail(`the far clipping at 101 changed only ${gone} pixels of the picture`);
+    for (let i = 0; i < 80; i++) await page.evaluate(`w3.commands.execute("w3.terrain.camera.clipFarther")`);
+    await settled(page);
+    if ((await cam()).farZ !== 100000) fail(`eighty notches farther leave far ${(await cam()).farZ}, not the ceiling 100000`);
   }
   await key("ArrowLeft", "ArrowLeft", 37, CTRL);
   if (!((await cam()).yaw > c0.yaw)) fail("Ctrl+Left didn't turn the view");

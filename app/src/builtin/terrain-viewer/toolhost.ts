@@ -54,7 +54,7 @@ export interface ViewCommands {
   keyCommand(id: string): boolean;
   /** What is chosen and what is shown (game view sets the choice aside), for the status line and tests; `sunShadows`
    *  the last frame's real shadows (HD: cast or not, the shadow map's texel on the ground, how many objects cast). */
-  state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number; pitch: number; fov: number; aspect: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;
+  state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number; pitch: number; fov: number; aspect: number; farZ: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;
     /** Whether shadows are drawn: View > Shadows, or game view (which draws them whatever that says). */
     shadowsDrawn: boolean;
     /** The minimap panel: shown, its picture in, the view's outline on it (picture pixels). */

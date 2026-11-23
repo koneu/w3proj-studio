@@ -203,8 +203,9 @@ export function lightRings(world: ArrayLike<number>, pivot: readonly number[], l
 // ---- camera keys -------------------------------------------------------------------------------
 
 /** What a camera key does: pan by a share of the view's height (x right, y up on the screen), zoom (distance times
- *  `zoom`) or turn (radians, positive turns the view's left side away). */
-export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: number };
+ *  `zoom`), turn (radians, positive turns the view's left side away) or move the far clipping (`farther`: one notch of
+ *  lib/terrain/cameras.ts stepFarClip). */
+export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: number } | { clip: { farther: boolean } };
 
 /**
  * The World Editor's camera keys in its terrain view (we-drive, one press each on map 03 at distance 2200 with nothing
@@ -240,6 +241,9 @@ export const CAMERA_COMMANDS: Readonly<Record<string, CameraMove>> = {
   "w3.terrain.camera.zoomOut": { zoom: CAMERA_STEPS.zoom },
   "w3.terrain.camera.rotateLeft": { turn: CAMERA_STEPS.turn },
   "w3.terrain.camera.rotateRight": { turn: -CAMERA_STEPS.turn },
+  // The World Editor's Camera - Adjust Clipping, Ctrl and the wheel (cameras.ts FAR_CLIP): not a zoom.
+  "w3.terrain.camera.clipNearer": { clip: { farther: false } },
+  "w3.terrain.camera.clipFarther": { clip: { farther: true } },
 };
 
 /** The camera move of the first camera command among `commands` (what a key is bound to, the winner first), or null. */
