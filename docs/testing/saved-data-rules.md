@@ -80,3 +80,19 @@ the file when it opens a map (the menu shows a map's debug mode ticked) and writ
 build the switches hardly reach the script: JassHelper on reformats it and inlines (with or without the optimizer),
 `debug call` lines are dropped with debug mode on too (from the file and toggled in the menu), the optimizer changed
 nothing on a small map, and vJass off left the editor's formatting with the inlining.
+
+**Which common.j the editor checks against** (branch fix/we-common-j-experiment, 2026-11-23, SD; `node
+tests/we-compare/common-j-we.mjs`, inputs `tests/fixtures/we-specs/make-common-j.mjs`: flat.w3x with a custom text
+trigger, 7 maps, all as expected): a map that imports its own `Scripts\common.j` is checked against that file
+**instead of** the game's, at both steps of the save. Without JassHelper the editor's own check: the trigger calling
+`GetUnitGoldCost('hfoo') + W3PROJ_MAP_ONLY` (a native and a constant only the map's file declares) saves with the
+map's file and stops without it at "Script Errors" ("Symbol not declared - encountered undeclared identifier
+'GetUnitGoldCost'", "Trigger 'UseExtra' has been disabled due to errors"); a map's file that is the game's without
+`native BlzGetUnitArmor` refuses a trigger calling it, though the game's declares it (the same trigger saves without an
+own file). With JassHelper on (war3mapExtra.txt) its pjass does the same ("Syntax Errors", "Undeclared function
+GetUnitGoldCost", "Undeclared variable W3PROJ_MAP_ONLY"; "Undeclared function BlzGetUnitArmor" with the trimmed file);
+the vJASS library using the extra names compiles and is inlined into the saved war3map.j. So the editor never merges
+the two files. Not measured: an own `Scripts\Blizzard.j`, and what the save writes after a refusal (Return doesn't close
+these dialogs). Studio: the Problems view's check matches (lib/jass/env.ts `mapScriptJassEnv` takes the map's file
+instead); the vJASS compile and map-script pass the game's file plus the map's extra declarations
+(lib/jass/owncommon.ts `withOwnCommon`), which accepts all the editor accepts but also natives the map's file lacks.
