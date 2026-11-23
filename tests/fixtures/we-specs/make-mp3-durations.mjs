@@ -9,7 +9,7 @@
 //   node tests/fixtures/we-specs/make-mp3-durations.mjs <w3proj cli> <game folder> <CSW project folder> [--out DIR]
 //        [--only N] [--allow-stale]
 //   (the project folder is `w3proj unpack` of the campaign: map/ holds its imports, maps/<chapter>/map/war3map.j the
-//   chapters' scripts; smoketest_maps/build_1/CSW_Tides_Of_Darkness here)
+//   chapters' scripts; `w3proj unpack` of smoketest_maps/campaign/CSW_Tides_Of_Darkness.w3n here)
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
