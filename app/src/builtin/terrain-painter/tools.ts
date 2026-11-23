@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
-import { cliffSlope, cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
+import { cliffSlope, cliffTypeStencil, dropBrokenRamps, dryAboveWater, matchCliffTypes } from "../../lib/terrain/cliffs";
 import { liftToFloor, waterBasin } from "../../lib/terrain/waterrim";
 import { rampLift, randomVariation, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
@@ -410,6 +410,8 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
       stroke.cover(y * t.width + x);
       stroke.own.add(y * t.width + x);
     }
+    // The editor checks the water flags in the blocks round the stamp: wet corners above their surface turn dry.
+    if (dryAboveWater(t, cx, cy, b.radius, !!b.square, (i) => stroke.touch(t, i)).length) changed = true;
   }
   const level = target.waterLevel;
   if (water && !wetOnly && enforceWater && level !== undefined) {

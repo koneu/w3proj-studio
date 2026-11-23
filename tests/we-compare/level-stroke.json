@@ -1,0 +1,66 @@
+[
+  {
+    "name": "level-stroke-water",
+    "description": "bugs.md 'A Level stroke over water dries corners': smoketest_maps (2)AutumnLeaves_S2_v2.0.w3x, Level with Grass Cliff at size 2 at 748,500 at the opening camera, the w3e compared corner by corner (special-paint-level-real compares only the specials): the editor dried the 8 wet corners above the lake's surface in the 4 x 4-tile blocks its stencil is inside, corners 60..68 x 60..64 (lib/terrain/cliffs.ts dryAboveWater; branch fix/level-stroke-we, 2026-11-23). The editor writes its w3e as version 12",
+    "input": { "map": "${MAIN}/smoketest_maps/blizzard/(2)AutumnLeaves_S2_v2.0.w3x" },
+    "we": { "mode": "sd", "freshEditor": true, "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "1424,569"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Thick Grass"], ["tool", "Level:"], ["size", 2], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.version"] }]
+  },
+  {
+    "name": "level-stroke-far-corner",
+    "description": "bugs.md 'A Level click at 300,800 in the \"we\" view of lone-LCc0.w3x paints nothing in Studio': Level with Grass Cliff at size 3 at 300,800 types the stencil round corner 24,23 and takes the cave out. Studio's click there landed on its minimap in the view's lower left (the editor's view has none): we-compare-ui hides it and refuses a press something of Studio's covers (branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
+    "we": { "mode": "sd", "freshEditor": true, "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "300,800"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 3], ["click", 300, 800]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }, { "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "level-wet-size1-edge",
+    "description": "level-wet-low.w3x (make-level-wet.mjs: flat.w3x, every corner wet, the surface 89.6 below the ground), Level size 1 on corner 35,30 (905,487): only block 8,7 dries (corners 32..36 x 28..32); the stencil's corner 36 on the block edge line counts for neither block (dryAboveWater; branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level-wet-low.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "905,487"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 1], ["click", 905, 487]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "level-wet-size2",
+    "description": "level-wet-low.w3x, Level size 2 at 900,350 (corner 35,33): blocks 8,8 and 9,8 dry (corners 32..40 x 32..36), not the blocks below the stencil's row 32 (dryAboveWater; branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level-wet-low.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1424,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "900,350"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 2], ["click", 900, 350]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "level-wet-size5",
+    "description": "level-wet-low.w3x, Level size 5 at 600,600 (corner 29,28): the six blocks its irregular stencil is inside dry, not 8,6, 6,8 or 8,8 (dryAboveWater; branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level-wet-low.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1488,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "600,600"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 5], ["click", 600, 600]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "level-wet-up1",
+    "description": "level-wet-low.w3x, Increase One size 2 at 748,500 (corner 32,30): the raised cross and the blocks 7,7 and 8,7 round it dry, as Level's (dryAboveWater; branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level-wet-low.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1424,569"], ["--click", "1505,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["cliff", "Grass"], ["tool", "+1:"], ["size", 2], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "level-wet-steps",
+    "description": "level-wet-steps.w3x (every corner wet, the surface at 38.4, the ground in columns from 2 below to 64 above it), Level size 8 at 748,500: in the blocks round the stencil the corners 0.1 and more above the surface dry, those 0.15 and more below stay wet (dryAboveWater; branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level-wet-steps.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1520,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 8], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "level-dry-high",
+    "description": "level-dry-high.w3x (every corner dry, the surface 38.4 above the ground), Level size 2 at 748,500: no corner turns wet (dryAboveWater only dries; branch fix/level-stroke-we, 2026-11-23)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level-dry-high.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1424,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 2], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  }
+]

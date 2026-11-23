@@ -25,7 +25,7 @@
   },
   {
     "name": "special-paint-level-far",
-    "description": "lone-LCc0.w3x, Level with Grass Cliff at size 3 at 1150,200, far from the cave (its corners stay as they are): the editor takes the cave out all the same, as every special that doesn't fit its cliff goes on any cliff brush stroke (special-paint-level's rule); also all 25 of specials-look.w3x (a click at 300,800 painted nothing in Studio, not looked into) (branch fix/cliff-level-removes-specials, 2026-11-23)",
+    "description": "lone-LCc0.w3x, Level with Grass Cliff at size 3 at 1150,200, far from the cave (its corners stay as they are): the editor takes the cave out all the same, as every special that doesn't fit its cliff goes on any cliff brush stroke (special-paint-level's rule); also all 25 of specials-look.w3x (a click at 300,800 painted nothing in Studio: it landed on Studio's minimap, which we-compare-ui now hides; level-stroke-far-corner) (branch fix/cliff-level-removes-specials, 2026-11-23)",
     "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "1150,200"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 3], ["click", 1150, 200]] }, { "sleep": 1000 }] },
