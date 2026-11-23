@@ -375,8 +375,10 @@ renamed (its folder is renamed), a joined one gets all of theirs, a new one the 
 while anything is unsaved, when one would be cut in pieces, or when a corner left out differs from the default corner.
 **Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. **Map Size** works on a split
 terrain with every subterrain open: the subterrains keep their ground, those on an edge that grows reach the new edge
-(the ground Map Size adds copies that edge), what is cut off goes as in a flat map (a subterrain cut off entirely with
-its folder), pathing overrides move with their ground; Undo Resize puts the files back.
+(the ground Map Size adds copies that edge; each takes the strip along its own span, and a corner region added on two
+sides goes to the subterrain in that corner, so the rectangles stay rectangles and still cover the map), what is cut off
+goes as in a flat map (a subterrain cut off entirely with its folder; the checkpoint made first keeps it), pathing
+overrides move with their ground; Undo Resize puts the files back.
 
 A creation number (the number scripts name objects by, `gg_dest_LT04_0581`) found on more than one doodad, unit or
 region stops a split and a pack; **Check Terrain IDs** (`w3proj terrain check`, flat projects too) lists every object

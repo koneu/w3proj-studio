@@ -145,6 +145,44 @@ test("Map Size on a split terrain: the app's resized terrain saves, the canvas a
   assert.deepEqual(changedFiles(before, snapshot(root)), []);
 });
 
+test("Map Size on a split terrain, each side and every side at once, 2×2 and main: the subterrains on a grown side take the new strip (a corner region the corner one's), the layout still covers the canvas; shrunk back, every file as it was", async () => {
+  for (const layout of ["2x2", "main"] as const) {
+    const root = project(`mapsize-sides-${layout}`);
+    const w3 = await open(root);
+    await splitTerrain(w3, { layout, quiet: true });
+    const path = terrainPath(w3.workspace.files().map((f) => f.path))!;
+    const io = { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path), writeText: (t: string) => w3.workspace.writeText(path, t), writeBytes: (b: Uint8Array) => w3.workspace.writeBytes(path, b) };
+    const t = parseW3e(await readTerrainBytes(path, io));
+    type Sub = { name: string; x: number; y: number; w: number; h: number };
+    const layoutOf = () => JSON.parse(readFileSync(join(root, "map", "terrain", "terrain.json"), "utf8")) as { corners: [number, number]; subterrains: Sub[] };
+    const was = layoutOf();
+    const before = snapshot(root);
+    // [left, right, bottom, top] in tiles, as Map Size takes them.
+    for (const change of [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 2], [1, 2, 3, 4]] as [number, number, number, number][]) {
+      const [l, r, b, n] = change;
+      await writeTerrainBytes(path, writeW3e(resizeTerrain(t, change)), io);
+      await w3.workspace.refresh();
+      const now = layoutOf();
+      const [W, H] = [was.corners[0] + l + r, was.corners[1] + b + n];
+      assert.deepEqual(now.corners, [W, H], `${layout} ${change}`);
+      // The rule (terrain_layout.rs resized_canvas), worked out here from the old rectangles.
+      const want = was.subterrains.map((s) => ({
+        ...s,
+        x: s.x === 0 ? 0 : s.x + l, w: s.w + (s.x === 0 ? l : 0) + (s.x + s.w === was.corners[0] ? r : 0),
+        y: s.y === 0 ? 0 : s.y + b, h: s.h + (s.y === 0 ? b : 0) + (s.y + s.h === was.corners[1] ? n : 0),
+      }));
+      assert.deepEqual(now.subterrains, want, `${layout} ${change}`);
+      const cover = new Uint8Array(W * H);
+      for (const s of now.subterrains) for (let y = s.y; y < s.y + s.h; y++) for (let x = s.x; x < s.x + s.w; x++) cover[y * W + x]++;
+      assert.ok(cover.every((c) => c === 1), `${layout} ${change}: every corner in one subterrain`);
+      // Shrunk back (what Undo Resize writes): the split files byte for byte.
+      await writeTerrainBytes(path, writeW3e(t), io);
+      await w3.workspace.refresh();
+      assert.deepEqual(changedFiles(before, snapshot(root)), [], `${layout} ${change} shrunk back`);
+    }
+  }
+});
+
 /** The first unit moved east of the 2×2 grid's seam (corner 2: world x 128), saved as the terrain editor saves it. */
 async function moveUnit(w3: W3Api) {
   const f = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!;

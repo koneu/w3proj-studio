@@ -1656,6 +1656,12 @@ fn canvas_shift(layout: &Layout, t: &Terrain) -> Result<[i64; 2]> {
 /// copies the edge, so it is the edge subterrain's), what lies past the new canvas is cut off, and a subterrain cut
 /// off entirely goes (its objects went with the resize, as in a flat map). Names, folders and id ranges stay. Refused
 /// when none is left.
+///
+/// The rule for growth, per axis: the strip added on a side joins every subterrain that reached that side, each over
+/// its own span along it, so the rectangles stay rectangles and still tile the canvas; a corner region (two sides grown)
+/// joins the subterrain that held that corner, as it reached both sides. A layout covering the whole canvas therefore
+/// covers the new one; a strip beside the default corner (no subterrain on that edge) is refused when written, as the
+/// new ground's variations make it differ from the default corner.
 pub fn resized_canvas(subs: &[Subterrain], old: [usize; 2], new: [usize; 2], shift: [i64; 2]) -> Result<Vec<Subterrain>> {
     let span = |at: usize, len: usize, old_n: usize, new_n: usize, d: i64| -> Option<(usize, usize)> {
         let (mut a, mut b) = (at as i64 + d, (at + len) as i64 + d);
@@ -2824,6 +2830,67 @@ mod tests {
         assert_eq!(layout.subterrains.iter().map(|s| (s.name.as_str(), s.w)).collect::<Vec<_>>(), [("sw", 9), ("nw", 9)]);
         assert_eq!(read_flat(&map_dir, FLAT_FILE).unwrap(), w3e::terrain_text(&grown).unwrap());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The growth rule of `resized_canvas` side by side, on a 65×65 canvas split 2×2 and into one `main`: the strip added
+    /// on a side joins the subterrains on that side (each over its span), a corner region the corner one; the others
+    /// only move with their ground. The layout still tiles the canvas. A cut takes rows off the edge ones, and one cut
+    /// off entirely goes.
+    #[test]
+    fn map_size_grows_and_cuts_the_edge_subterrains() {
+        let sub = |r: &Rect| Subterrain { name: r.name.clone(), folder: r.name.clone(), x: r.x, y: r.y, w: r.w, h: r.h, id_ranges: vec![[1, 2]] };
+        let grid: Vec<Subterrain> = grid_2x2(65, 65).iter().map(sub).collect();
+        let main = vec![sub(&Rect { name: "main".into(), x: 0, y: 0, w: 65, h: 65 })];
+        let rects = |subs: &[Subterrain]| subs.iter().map(|s| (s.name.clone(), s.x, s.y, s.w, s.h)).collect::<Vec<_>>();
+        // [west, east, south, north] in corners: the canvas and the shift resized_canvas is given (as canvas_shift makes it).
+        let resized = |subs: &[Subterrain], c: [i64; 4]| {
+            let new = [(65 + c[0] + c[1]) as usize, (65 + c[2] + c[3]) as usize];
+            resized_canvas(subs, [65, 65], new, [c[0], c[2]]).map(|s| rects(&s))
+        };
+        let tiles = |subs: &[(String, usize, usize, usize, usize)], w: usize, h: usize| {
+            let mut n = vec![0u8; w * h];
+            for (_, x, y, sw, sh) in subs {
+                for yy in *y..y + sh {
+                    for xx in *x..x + sw {
+                        n[yy * w + xx] += 1;
+                    }
+                }
+            }
+            n.iter().all(|&k| k == 1)
+        };
+        let r = |n: &str, x, y, w, h| (n.to_string(), x, y, w, h);
+        // 2×2 (sw 0,0 32×32; se 32,0 33×32; nw 0,32 32×33; ne 32,32 33×33), one side at a time.
+        type Want<'a> = [(&'a str, usize, usize, usize, usize); 4];
+        let cases: [([i64; 4], Want); 6] = [
+            ([4, 0, 0, 0], [("sw", 0, 0, 36, 32), ("se", 36, 0, 33, 32), ("nw", 0, 32, 36, 33), ("ne", 36, 32, 33, 33)]),
+            ([0, 4, 0, 0], [("sw", 0, 0, 32, 32), ("se", 32, 0, 37, 32), ("nw", 0, 32, 32, 33), ("ne", 32, 32, 37, 33)]),
+            ([0, 0, 4, 0], [("sw", 0, 0, 32, 36), ("se", 32, 0, 33, 36), ("nw", 0, 36, 32, 33), ("ne", 32, 36, 33, 33)]),
+            ([0, 0, 0, 4], [("sw", 0, 0, 32, 32), ("se", 32, 0, 33, 32), ("nw", 0, 32, 32, 37), ("ne", 32, 32, 33, 37)]),
+            // Two sides at once: the corner region (west and north) is nw's, the one subterrain on both sides.
+            ([8, 0, 0, 4], [("sw", 0, 0, 40, 32), ("se", 40, 0, 33, 32), ("nw", 0, 32, 40, 37), ("ne", 40, 32, 33, 37)]),
+            // Every side: each corner region to its corner subterrain.
+            ([4, 4, 4, 4], [("sw", 0, 0, 36, 36), ("se", 36, 0, 37, 36), ("nw", 0, 36, 36, 37), ("ne", 36, 36, 37, 37)]),
+        ];
+        for (c, want) in cases {
+            let got = resized(&grid, c).unwrap();
+            assert_eq!(got, want.iter().map(|&(n, x, y, w, h)| r(n, x, y, w, h)).collect::<Vec<_>>(), "2×2 grown by {c:?}");
+            assert!(tiles(&got, (65 + c[0] + c[1]) as usize, (65 + c[2] + c[3]) as usize), "2×2 grown by {c:?} tiles the canvas");
+            // `main` covers the whole new canvas.
+            assert_eq!(resized(&main, c).unwrap(), vec![r("main", 0, 0, (65 + c[0] + c[1]) as usize, (65 + c[2] + c[3]) as usize)], "main grown by {c:?}");
+        }
+        // Cuts: 8 off the west and 4 off the north take them off the edge subterrains; the others keep their size.
+        let got = resized(&grid, [-8, 0, 0, -4]).unwrap();
+        assert_eq!(got, vec![r("sw", 0, 0, 24, 32), r("se", 24, 0, 33, 32), r("nw", 0, 32, 24, 29), r("ne", 24, 32, 33, 29)]);
+        assert!(tiles(&got, 57, 61));
+        // 36 off the west: the west column (32 wide) is gone entirely, the east one is the canvas's west edge now.
+        let got = resized(&grid, [-36, 0, 0, 0]).unwrap();
+        assert_eq!(got, vec![r("se", 0, 0, 29, 32), r("ne", 0, 32, 29, 33)]);
+        assert!(tiles(&got, 29, 65));
+        // Cut and grown at once (west cut, east grown): the east column takes the new strip.
+        assert_eq!(resized(&grid, [-4, 8, 0, 0]).unwrap(), vec![r("sw", 0, 0, 28, 32), r("se", 28, 0, 41, 32), r("nw", 0, 32, 28, 33), r("ne", 28, 32, 41, 33)]);
+        assert_eq!(resized(&main, [-8, 0, -4, 0]).unwrap(), vec![r("main", 0, 0, 57, 61)]);
+        // Nothing left is refused (control: a canvas of 0 corners leaves no rectangle).
+        assert!(resized_canvas(&grid, [65, 65], [0, 65], [-65, 0]).is_err());
     }
 
     #[test]
