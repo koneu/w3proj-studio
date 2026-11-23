@@ -373,6 +373,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The script's text; null when there is none, undefined when it's there but can't be read (not taken for none). */
   const readScript = (path: string): Promise<string | null | undefined> =>
     w3.workspace.readText(path).then((t) => t, (e) => (isNotFoundError(e) ? null : undefined));
+  /** No tracked map script at all: neither war3map.j nor war3map.lua is in map/ (one that is there but can't be read
+   *  counts as there). */
+  const noTrackedScript = async () => (await Promise.all(SCRIPT_FILES.map(readScript))).every((t) => t === null);
   /** The script as the map's data makes it now, replacing what is there, for the project at `root` only (a question
    *  answered after switching projects must not reach the next one). A checkpoint first: what it replaces exists
    *  nowhere else (where they're enabled; a failed one asks before going on). */
@@ -739,6 +742,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return { mode: "generated", lost: [], written };
       }
       if (state?.mode !== "kept") {
+        // Triggers kept raw (or none) and no script: one is made in map/, as Generate Map Script would; nothing is lost.
+        if (await noTrackedScript()) {
+          const written = await write("Regenerate Map Script", false, root, { compile: true });
+          if (written) void w3.window.showInfo("Map script generated (see the Map Script output).");
+          return { mode: null, lost: [], written };
+        }
         throw new Error("This project's triggers aren't in map/triggers/ (they are kept raw, or the map has none), so its map script stays a tracked file: Generate Map Script replaces it in place.");
       }
       const made = await generate(true);
@@ -774,11 +783,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { mode: "generated", lost, written };
     }),
     // Packing: a generated script that doesn't follow its sources (a vJASS one isn't made on saves, a fresh clone has
-    // none) is made now, compiled. Packing checks afterwards whether it follows (map-project).
+    // none) is made now, compiled. Packing checks afterwards whether it follows (map-project). A map with no script at
+    // all (made without one, a map whose script was deleted) gets one in map/, whatever script.generateOnSave says: the
+    // game can't run a map without one, and the World Editor's save always writes it.
     w3.commands.register("w3.script.forPack", async () => {
       const root = w3.workspace.project()?.root;
-      if (!root || !staleScriptReason(await scriptState(root))) return;
-      await write("packing", false, root, { compile: true }).catch(() => false);
+      if (!root) return;
+      const state = await scriptState(root);
+      if (staleScriptReason(state)) {
+        await write("packing", false, root, { compile: true }).catch(() => false);
+      } else if (state?.mode !== "generated" && (await noTrackedScript()) && w3.workspace.project()?.root === root) {
+        await write("packing (the map has no script)", false, root, { compile: true }).catch(() => false);
+      }
     }),
     // Export Script: the map script as it stands (a script still due from the last save is written first) copied byte for
     // byte to a file the person picks. A map with a Lua script exports that; a missing script isn't an empty one.
