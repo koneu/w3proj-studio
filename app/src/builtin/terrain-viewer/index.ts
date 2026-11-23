@@ -20,7 +20,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
 import { toolWaterRefusal } from "./toollimits";
 import { givenNumber, placedValueProblem } from "./values";
-import { doodadGround, dropToGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitGround, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { doodadGround, dropToGround, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitGround, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -54,6 +54,7 @@ import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGri
 import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgrid";
 import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
+import { applyOpenRulesToProject, openRuleSourceOf } from "./openrules";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
@@ -395,6 +396,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const doodads = before ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch((e) => { throw rebuildFailed(e); }))?.list ?? [];
         await deriveSaved(root, path, { terrain: due?.terrain, doodads });
       });
+    }),
+    // Not in the manifest: packing (map-project prepare), once everything is saved. Snap and Fix Doodads on Load, which
+    // the World Editor applies whenever it opens a map and its save writes, applied to the placement files as stored
+    // (openrules.ts): a project the terrain view never opened gets them too. Not an edit. A terrain editor with unsaved
+    // edits (made while packing) is left to save its own. Pathing, shadows and the minimap follow the moved doodads.
+    w3.commands.register("w3.terrain.openRulesForPack", async () => {
+      const root = w3.workspace.project()?.root;
+      if (!root) return null;
+      const rules = {
+        snap: switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"]),
+        fix: switchedOn(w3, "terrain.doodads.fixOnLoad", SWITCH_DEFAULTS["terrain.doodads.fixOnLoad"]),
+      };
+      if (w3.editors.unsavedPaths().some((p) => TERRAIN_PATHS.includes(p.toLowerCase()))) {
+        return { snapped: 0, fixed: 0, units: 0, doodadsBefore: null, unitsWritten: false, notes: ["the terrain editor has unsaved edits: its save writes its doodads"] };
+      }
+      const done = await applyOpenRulesToProject(w3, root, rules);
+      if (done.doodadsBefore && w3.workspace.project()?.root === root) await w3.commands.execute("w3.terrain.rebuildFromFiles", done.doodadsBefore, root);
+      return { ...done, doodadsBefore: null };
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
@@ -3170,29 +3189,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         /** What Snap and Fix Doodads on Load go by now (doodadedit.ts). A fixed rotation the map's own data may change
          *  isn't known while that data can't be read: angles only come into 0..360 then. */
-        const openRuleSource = (edge: Area | null, scales = scalesKnown): OpenRuleSource => {
-          const skins = objCtx?.skins;
-          return {
-            sizeOf: (id) => doodadCells.get(id) ?? null,
-            fixedRot: (id) => (scalesKnown ? destructableFixedRot(id) : null),
-            scaleRule: (id) => {
-              const skin = scales ? skins?.get(id) : undefined, range = skin ? savedScaleRange(skin) : undefined;
-              return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
-            },
-            outside: edge ? (x, y) => !inArea(x, y, edge) : null,
-            kindOf: (id) => skins?.get(id)?.kind,
-            ground: (x, y) => heightAt(terrain, x, y),
-            // A map's own doodad data that can't be read may make a type float: heights stay then. Whether one floats
-            // goes by the skin it is drawn as (LWw0 drawn as the lily pad NWfp floats: SnowareBay, doodad-open-z), its
-            // sample radius by its type; one whose radius samples wider than known keeps its height.
-            restingZ: scales && skins ? (id, x, y, skinId) => {
-              const radius = elevRadiusOf(id);
-              if (radius >= ELEVATION_RADIUS_UNKNOWN) return Number.NaN;
-              const s = (skinId !== undefined ? skins.get(skinId) : undefined) ?? skinById(id);
-              return doodadGround(terrain, x, y, s?.kind === "w3d" && !!s.floats, radius);
-            } : undefined,
-          };
-        };
+        const openRuleSource = (edge: Area | null, scales = scalesKnown): OpenRuleSource => openRuleSourceOf({
+          terrain, skins: objCtx?.skins, bases: objCtx?.bases, sizeOf: (id) => doodadCells.get(id) ?? null, fixedRotKnown: scalesKnown, scales, edge,
+        });
         /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
          *  (doodadrules.ts; setting terrain.doodads.fixOnLoad): the scale in its type's range, the outside flag from
          *  the playable area, the solid flag set. Not an edit, as the snap: no undo step, the map isn't marked as
