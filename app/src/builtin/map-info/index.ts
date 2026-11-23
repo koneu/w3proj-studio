@@ -6,10 +6,12 @@ import { importStrings, StringTable, WtsCutError, wtsCutLines } from "../../lib/
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
-import { jsonPathOf, mapStrings, projectWithFiles, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, projectWithFiles, readMapDoc, requireProject, stringNumbersTaken, stringRefsInMap, terrainFacts } from "../../lib/formats/mapdoc";
+import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
+import { SCRIPT_FILES } from "../../lib/script/guard";
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
-import { setMapText } from "./summary";
+import { mapTextEdit } from "./textedit";
 import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
@@ -197,16 +199,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (typeof text !== "string") throw new Error("text must be text.");
     const path = jsonPathOf(w3, "war3map.w3i");
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    // The string numbers taken are searched in the listed files: only once every file is listed.
+    await w3.workspace.filesReady();
+    const moved = () => { if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed."); };
+    moved();
+    // As the World Editor's Map Properties OK writes the map info (textedit.ts): its plain texts become strings.
     const changed = await edits.edit(`Change the map's ${String(field)}`, async (read) => {
-      const info = await read(path), wts = await read("map/war3map.wts");
+      moved();
+      // Absent is null; there but unreadable throws (read), so a table that can't be read is never taken for none.
+      const info = await read(path), wts = await read(STRINGS);
       if (info === null) throw new Error("This map has no war3map.w3i.");
       const doc = JSON.parse(info);
-      const table = wts === null ? null : new StringTable(wts);
-      setMapText(doc, String(field), text, table);
-      return [
-        { path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) },
-        ...(table ? [{ path: "map/war3map.wts", text: table.serialize() }] : []),
-      ];
+      const files = w3.workspace.files().map((f) => f.path);
+      const isInfo = (p: string) => /^map\/war3map\.w3i(\.json)?$/i.test(p);
+      const isScript = (p: string) => SCRIPT_FILES.includes(p.toLowerCase());
+      const taken = await stringNumbersTaken(w3, files.filter((p) => !isInfo(p) && !isScript(p)));
+      const scriptRefs = await stringRefsInMap(w3, files.filter(isScript));
+      moved();
+      const result = mapTextEdit(doc, String(field), text, wts, { taken, scriptRefs });
+      // The languages' tables and war3map.wts first, then the file that refers to their new strings.
+      const out: { path: string; text: string }[] = [];
+      for (const p of files.filter(isLocaleWts)) {
+        const table = await read(p);
+        if (table === null) continue;
+        const next = addLocaleStrings(p, table, result.added);
+        if (next !== table) out.push({ path: p, text: next });
+      }
+      if (result.wts !== null) out.push({ path: STRINGS, text: result.wts });
+      out.push({ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) });
+      moved();
+      return out;
     });
     return changed ? `Changed ${String(field)}.` : "It already said that.";
   }));

@@ -126,6 +126,8 @@ export const CASES = {
   "category-off": off({ category: "Setup" }),
   // tests/we-compare/wts-missing.json: no string table, then Scenario > Map Description's name changed.
   "nowts": { noWts: true },
+  // ...and wts-present-map-name: the same with the table.
+  "plain": {},
 };
 
 const run = (...args) => {

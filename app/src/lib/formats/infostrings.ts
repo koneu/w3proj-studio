@@ -63,6 +63,52 @@ export function namesToStrings(info: Record<string, unknown>, first: number, tab
   return textsToStrings([...players.map((p) => [p, "name"] as const), ...forces.map((f) => [f, "name"] as const)], first, reuse, keepPlain);
 }
 
+/** war3map.w3i's texts the World Editor turns into strings when its Map Size or its Map Properties' OK writes the map
+ *  info, in the order they are numbered: the map's name, suggested players, description, author, then the loading
+ *  screen's title, subtitle and text. The prologue's texts aren't among them (they stayed plain after Map Size). */
+const MAP_TEXTS = [[[], "name"], [[], "suggestedPlayers"], [[], "description"], [[], "author"],
+  [["loadingScreen"], "title"], [["loadingScreen"], "subtitle"], [["loadingScreen"], "text"]] as const;
+
+/** The `[owner, key]` pairs of MAP_TEXTS in `info`. */
+function mapTextFields(info: Record<string, unknown>): (readonly [unknown, string])[] {
+  return MAP_TEXTS.map(([path, key]) => [path.reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined), info), key] as const);
+}
+
+/** The map's texts (MAP_TEXTS) that are plain become strings numbered on from `first` (textsToStrings); one a string
+ *  table can't hold stays plain (tableCantHold). Changes `info` in place; gives the new strings. */
+export function mapTextsToStrings(info: Record<string, unknown>, first: number): InfoString[] {
+  return textsToStrings(mapTextFields(info), first, undefined, tableCantHold);
+}
+
+/** The texts of war3map.w3i the World Editor reads when it opens a map: MAP_TEXTS, the players' and the forces' names. A
+ *  TRIGSTR_ reference among them whose string `has` says the table lacks is read as no text, and its save writes it
+ *  as "" (studio-paths-nowts: the names; wts-missing: the names, with the map's texts written by Map Properties' OK).
+ *  Sets those to "" in `info`; gives the numbers they referred to. The prologue's texts and anything else stay. */
+export function blankStringlessTexts(info: Record<string, unknown>, has: (num: number) => boolean): number[] {
+  const players = Array.isArray(info.players) ? info.players : [];
+  const forces = Array.isArray(info.forces) ? info.forces : [];
+  const blanked: number[] = [];
+  for (const [owner, key] of [...mapTextFields(info), ...players.map((p) => [p, "name"] as const), ...forces.map((f) => [f, "name"] as const)]) {
+    if (!owner || typeof owner !== "object") continue;
+    const o = owner as Record<string, unknown>, text = o[key];
+    if (typeof text !== "string" || !REF.test(text)) continue;
+    const num = Number(text.slice("TRIGSTR_".length));
+    if (has(num)) continue;
+    o[key] = "";
+    blanked.push(num);
+  }
+  return blanked;
+}
+
+/** The loading screen's crest race and the game data set as the World Editor's Map Size and Map Properties' OK write
+ *  them: the crest race becomes 128 (64 and 3 did), a game data set of -1 becomes 0 (1 stayed) (resize-strings-border,
+ *  wts-missing). Changes `info` in place. */
+export function editorInfoDefaults(info: Record<string, unknown>): void {
+  const screen = info.loadingScreen as Record<string, unknown> | undefined;
+  if (screen && typeof screen.crestRace === "number") screen.crestRace = 128;
+  if (typeof info.gameDataSet === "number" && info.gameDataSet >>> 0 === 0xffffffff) info.gameDataSet = 0;
+}
+
 /** Whether a string table can't hold `text`: the game and the World Editor end a string at its first `}` (wts
  *  wtsCutLines: there is no way to keep one), so such a name stays plain in war3map.w3i, where it is read whole. */
 export const tableCantHold = (text: string): boolean => wtsCutLines(text).length > 0;
