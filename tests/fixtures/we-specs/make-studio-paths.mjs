@@ -19,7 +19,7 @@ import { copyTriggers } from "./trigger-folder.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const main = mainCheckout();
-// This checkout's release CLI when it has one (a worktree's), else the main checkout's, as make-open-paths.mjs.
+// This checkout's release CLI when it has one (a worktree's), else the main checkout's, as the other make-*.mjs.
 const exe = process.platform === "win32" ? "w3proj.exe" : "w3proj";
 const cli = existsSync(join(repo, "target", "release", exe)) ? join(repo, "target", "release", exe) : join(main, "target", "release", exe);
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)

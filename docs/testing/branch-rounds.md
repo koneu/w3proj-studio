@@ -195,7 +195,7 @@ Droppable, 0x5a914909 Head and any tag, 0x5a33490a any and Droppable, 0x5a6a490c
 level 3 None and Undefined (drop-random-4.w3x); the script has ChooseRandomItemExWithFilter with them; with both any the
 "Y" id stays. The units file came back as subversion 9. Studio wrote the 'Z' id as a quoted raw id: drops.ts and
 randomids.ts read it now (MATCH); Studio's random item picker has no equipment type or tag. (6) **SetSoundDuration of
-mp3s** (`mp3-durations.json`, input `make-mp3-durations.mjs` with smoketest_maps/build_1/CSW_Tides_Of_Darkness: the 867
+mp3s** (`mp3-durations.json`, input `make-mp3-durations.mjs` with the CSW_Tides_Of_Darkness project (unpacked from smoketest_maps/campaign/CSW_Tides_Of_Darkness.w3n): the 867
 mp3s the chapter scripts give a length, one sound each, 287 MB; we-drive --null-audio, the save about 26 s): the editor
 wrote the chapters' own values for all 867. Studio's (rebuild --only script) matched 774; all 39 MPEG-2 (22050 Hz) files
 with a Xing header were at half the editor's value (Ability_EarthShield 4075 against 8150, Naval_Rowboat_Loop_1 8515
