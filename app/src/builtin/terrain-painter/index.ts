@@ -213,7 +213,9 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const chosen = isLayerTool(s.label as Tool) ? chosenCliffType() : undefined;
     const retyped = retypeCliffs(terrain, s, ed.cliffGroundTiles(), chosen);
     if (!s.finish(terrain)) { takeBack?.(); return; }
-    ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
+    // A cliff brush stroke (Level, ±1, ±2, the water tools) takes out the special doodads left without their cliff,
+    // anywhere on the map, as the World Editor's does (lib/terrain/specialfit.ts); a ground tile stroke keeps them.
+    ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp", specials: isLayerTool(s.label as Tool) });
   };
 
   // ---- toolbar -----------------------------------------------------------------------

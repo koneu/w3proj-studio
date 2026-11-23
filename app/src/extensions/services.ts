@@ -242,9 +242,10 @@ export interface TerrainEditorHandle {
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
    *  the corners; objects standing on the changed `corners` (indices) follow the
-   *  ground; `cliffs` re-plans cliff and ramp models. */
+   *  ground; `cliffs` re-plans cliff and ramp models; `specials` (a cliff brush stroke) takes the special doodads
+   *  that no longer fit their cliff out of war3map.doo in the same step, as the World Editor does. */
   /** Puts a finished stroke on the undo stack. False when it was refused (Enforce Water Height Limits): the ground is as it was. */
-  commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean;
+  commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean; specials?: boolean }): boolean;
   /** The ground tile of each cliff type number a corner can have, by the w3e's cliff list ("" for a cliff type the game
    *  doesn't define; empty until the game's cliff types are read). */
   cliffGroundTiles(): string[];

@@ -6,7 +6,7 @@ import type { Terrain } from "../../lib/terrain/w3e";
 import { cliffRetexture, type CliffList, type CliffType } from "./cliffs";
 import { cliffSlot } from "../../lib/terrain/cliffs";
 import type { Placed, PlacedTextures, Skin } from "./objects";
-import { loadPathingData, type SpecialDoodad } from "./pathmap";
+import { loadPathingData, type PathImage, type SpecialDoodad } from "./pathmap";
 
 /** The facing a special doodad stands at: the one its pathing texture is drawn for (pathmap's stamp, 270°). */
 export const SPECIAL_FACING = -Math.PI / 2;
@@ -91,18 +91,18 @@ export function specialTextures(type: Pick<CliffType, "texDir" | "texFile">): Pl
   return { key: texture, replaceable: { 11: texture }, retexture: (p, slot) => cliffRetexture(p, type, slot) };
 }
 
-/** The pathing texture sizes of the specials' types, as buildPathingMap reads them (`readFile`: the map's imports,
- *  then the game); a type whose texture can't be read isn't in the result. */
+/** The pathing textures of the specials' types, as buildPathingMap reads them (`readFile`: the map's imports, then the
+ *  game); a type whose texture can't be read isn't in the result. Their sizes are the footprints. */
 export async function specialFootprints(w3: W3Api, specials: readonly SpecialDoodad[],
-  readFile: (path: string) => Promise<Uint8Array>): Promise<Map<string, Footprint>> {
-  const out = new Map<string, Footprint>();
+  readFile: (path: string) => Promise<Uint8Array>): Promise<Map<string, PathImage>> {
+  const out = new Map<string, PathImage>();
   if (!specials.length) return out;
   const data = await loadPathingData(w3, readFile);
   for (const id of new Set(specials.map((s) => s.id))) {
     const info = data.placedTex(id);
     if (!info?.path || info.dest) continue;
     const { image } = await data.placedImage(info);
-    if (image) out.set(id, { width: image.width, height: image.height });
+    if (image) out.set(id, image);
   }
   return out;
 }

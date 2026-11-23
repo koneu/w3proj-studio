@@ -46,8 +46,8 @@ import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMap
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy, roomShape, type RoomShape } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
-import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
-import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTileCliffType, specialTiles, type Footprint, type TileRect } from "./specials";
+import { buildPathingMap, loadPathingData, specialsOf, type PathImage, type PathingData } from "./pathmap";
+import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTileCliffType, specialTiles, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import type { FollowFlags } from "../../lib/script/destructables";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, resolveV8SkinIds, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
@@ -99,6 +99,7 @@ import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { cornersOpen, DERIVED_CLOSED_KEY, editableAt, loadOpenState, notOpenText, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
+import { specialsAfterCliffs } from "../../lib/terrain/specialfit";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
@@ -2025,7 +2026,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The tile lists as they were before the first tile an edit added under custom-tilesets 0 (ensureTile); the
          *  commit that follows takes it, so its undo puts the lists back (the flag, and the list drawn). */
         let pendingTiles: ReturnType<typeof tileSnapshot> | null = null;
-        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }, pasted = false): boolean => {
+        /** `specials`: a cliff brush stroke, after which the special doodads that no longer fit their cliff leave
+         *  war3map.doo in the same undo step (lib/terrain/specialfit.ts), as in the World Editor. */
+        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean; specials?: boolean }, pasted = false): boolean => {
           if (enforceWater()) {
             // Enforce Water Height Limits: water pushed against the limit of the stored level is cut off
             // there and loses its shape, so the whole edit is refused instead.
@@ -2055,12 +2058,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pendingTiles = null;
           const tilesAfter = tilesBefore ? tileSnapshot(terrain) : null;
           const putTiles = (s: ReturnType<typeof tileSnapshot> | null) => { if (!s) return; restoreTiles(terrain, s); void syncTileList(); minimapStale.set(); };
+          // The specials the stroke leaves without their cliff; under a partial load only those wholly in the open part.
+          const dooDoc = dooFile?.doc;
+          const specialsBefore = st.specials && dooDoc && Array.isArray(dooDoc.specials) ? dooDoc.specials as unknown[] : null;
+          const specialsKept = specialsBefore
+            ? specialsAfterCliffs(terrain, specialsBefore, (id) => specialSizes.get(id), partial ? (i) => partial!.corners[i] === OPEN_CORNER : undefined)
+            : null;
+          const specialsAfter = specialsKept?.removed.length ? specialsKept.kept : null;
+          const putSpecials = (list: unknown[] | null) => { if (list && dooDoc) dooDoc.specials = list; };
+          // Before pushEdit: a refused edit's undo puts them back.
+          putSpecials(specialsAfter);
           pushEdit({
-            undo: () => { st.undo(); putTiles(tilesBefore); if (moved) setZ(zBefore); },
-            redo: () => { putTiles(tilesAfter); st.redo(); if (moved) setZ(zAfter); },
-            terrain: true, objects: moved,
+            undo: () => { st.undo(); putTiles(tilesBefore); if (moved) setZ(zBefore); putSpecials(specialsAfter && specialsBefore); },
+            redo: () => { putTiles(tilesAfter); st.redo(); if (moved) setZ(zAfter); putSpecials(specialsAfter); },
+            terrain: true, objects: moved || !!specialsAfter,
           });
-          if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); } else refloat();
+          if (moved || specialsAfter) { if (moved) setZ(zAfter); objectsTouched = true; void rebuildObjects(); } else refloat();
           if (st.cliffs) replanCliffs(); else void replanShore();
           renderer.terrainChanged();
           redraw();
@@ -2714,7 +2727,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (group.length) { groupRingsStale = true; refreshGroupRings(); }
         }
         /** The specials' footprints by type id (null: unreadable), and what is drawn of them now (for tests). */
-        const specialSizes = new Map<string, Footprint | null>();
+        const specialSizes = new Map<string, PathImage | null>();
         let drawnSpecials: { id: string; x: number; y: number; z: number; model: string }[] = [];
         async function rebuildObjects() {
           const ctx = nextCtx ?? objCtx;
@@ -2729,7 +2742,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const specialList = specialsOf(dooFile?.doc);
           const unsized = specialList.filter((sp) => !specialSizes.has(sp.id));
           if (unsized.length) {
-            const found = await specialFootprints(w3, unsized, (p) => readFile(w3, doc, p, terrain.tileset)).catch(() => new Map<string, Footprint>());
+            const found = await specialFootprints(w3, unsized, (p) => readFile(w3, doc, p, terrain.tileset)).catch(() => new Map<string, PathImage>());
             for (const sp of unsized) specialSizes.set(sp.id, found.get(sp.id) ?? null);
           }
           if (gen !== rebuildGen) return;
