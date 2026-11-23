@@ -565,6 +565,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // And what it writes is what the editor holds after reading it again (a replaced barrel's life as a doodad's): a
       // save then writes the same, which leaves the edit's undo possible.
       if (editor) await editor.handle.objects.openRules(list);
+      // In the version the open editor's save writes (version 13), for the same reason.
+      ownEditor()?.handle.objects.saveVersion(doc, key);
       const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
       // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
       const infoPath = "map/war3map.w3i.json", infoText = key === "units" ? await read(infoPath).catch(() => null) : null;
@@ -5009,6 +5011,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => groundFor(e.id, x, y), what);
             },
             openRules: (entries) => openRules(entries as Placed[]),
+            saveVersion: (doc, key) => { if (!partial) (key === "doodads" ? editorDooVersion : editorUnitsVersion)(doc); },
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             update: () => {
               objectsTouched = true;
