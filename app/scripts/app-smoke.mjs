@@ -9789,6 +9789,10 @@ async function cliCheck(page, found) {
     if (!app.melee.findings?.length) fail("check_melee found nothing to compare (control)");
     // The melee override: this map has the Melee flag, so by default it runs; --melee off skips it, and the manifest's off does too (--only=melee still asks).
     const melee = (...args) => { const o = spawnSync(cli, ["check", root, "--json", ...args], { encoding: "utf8", env, timeout: 300000 }); try { return JSON.parse(o.stdout).sections.find((x) => x.section === "melee"); } catch { return { err: `${o.stdout}${o.stderr}`.slice(-300) }; } };
+    // The map's own edits (a placed start location, creeps) left its Melee flag off; set it in the saved w3i the CLI reads.
+    const w3i = join(root, "map", "war3map.w3i.json"), info = JSON.parse(readFileSync(w3i, "utf8"));
+    if (melee()?.ran !== false) fail("melee flag off, auto: expected it skipped (control)");
+    writeFileSync(w3i, JSON.stringify({ ...info, flags: info.flags | 4 }, null, 2));
     if (melee()?.ran !== true) fail(`melee flag on, auto: expected it to run: ${lit(melee())}`);
     if (melee("--melee", "off")?.ran !== false) fail("--melee off didn't skip check_melee");
     writeFileSync(join(root, "w3proj.toml"), `${existsSync(join(root, "w3proj.toml")) ? readFileSync(join(root, "w3proj.toml"), "utf8") : "format = 1\n"}\n[checks]\nmelee = "off"\n`);
