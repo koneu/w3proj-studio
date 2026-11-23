@@ -35,7 +35,7 @@ fn a_checks_severity_table_loads_and_survives_a_save() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("w3proj-severity-{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
-    let text = "format = 1\n\n[checks]\ndisable = [\"a\"]\n\n[checks.severity]\nimports = \"warning\"\n\"melee/camps\" = \"off\"\n";
+    let text = "format = 1\n\n[checks]\ndisable = [\"a\"]\nmelee = \"off\"\n\n[checks.severity]\nimports = \"warning\"\n\"melee/camps\" = \"off\"\n";
     std::fs::write(dir.join(w3proj::project::MANIFEST), text).unwrap();
     let m = Manifest::load(&dir).expect("manifest with [checks.severity] loads");
     m.save(&dir).unwrap();

@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
-import { MANIFEST_FILE, MINIMAL_MANIFEST, addDisabled, applySeverity, disabledIds, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
+import { MANIFEST_FILE, MELEE_SETTINGS, MINIMAL_MANIFEST, addDisabled, setMelee, type MeleeSetting, applySeverity, disabledIds, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
 import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
@@ -198,6 +198,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.workspace.writeText(MANIFEST_FILE, next);
     await service.run();
   };
+  /** Sets [checks] melee in w3proj.toml (auto removes the line): whether `w3proj check` and the melee tools hold the map to the
+   *  melee rules whatever its Melee flag says. Same guards as disableCheck. */
+  const setMeleeSetting = async (value: MeleeSetting) => {
+    if (!MELEE_SETTINGS.includes(value)) throw new Error(`melee: ${JSON.stringify(value)} isn't on, off or auto`);
+    const root = w3.workspace.project()?.root ?? null;
+    if (!root) throw new Error("Open a project first.");
+    const exists = await w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) });
+    let next: string;
+    try { next = setMelee(exists ? await w3.workspace.readText(MANIFEST_FILE) : MINIMAL_MANIFEST, value); } catch (e) { throw new Error(`${MANIFEST_FILE} can't be used for its [checks], so nothing was written: ${e instanceof Error ? e.message : String(e)}`); }
+    if (resultsStale(root, w3.workspace.project()?.root ?? null)) return;
+    if (exists && next === await w3.workspace.readText(MANIFEST_FILE)) return;
+    if (!exists && value === "auto") return;
+    await w3.workspace.writeText(MANIFEST_FILE, next);
+    await service.run();
+  };
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
   ctx.subscriptions.push(
     w3.commands.register("w3.problems.run", async () => { await w3.views.show("problems"); await service.run(); }),
@@ -214,6 +229,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (await deleteInvalid(w3)) await service.run();
     }),
     w3.commands.register("w3.problems.disableCheck", (id: string) => disableCheck(id)),
+    w3.commands.register("w3.problems.setMelee", (value: MeleeSetting) => setMeleeSetting(value)),
     w3.commands.register("w3.problems.toggleIgnored", () => { showIgnored = !showIgnored; w3.views.refresh("w3.problems.list"); }),
     w3.commands.register("w3.problems.open", async (path: string) => { await w3.editors.open(path); }),
     w3.workspace.onDidChange(() => {
@@ -238,6 +254,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${describeCounts(counted)}` : " No problems found.") : "")));
         if (ran && configBad) el.append(h("div.view-empty.problems-failed", {}, `${configBad}. No check is switched off until it is fixed.`));
         else if (ran && disabledIds(config).length) el.append(h("div.view-empty.problems-disabled", { title: "Set in the [checks] section of w3proj.toml (disable = [...])" }, `Switched off by the project (w3proj.toml): ${disabledIds(config).join(", ")}`));
+        if (ran && !configBad) el.append(h("div.problems-melee", { title: "w3proj.toml [checks] melee: whether check_melee (w3proj check, the AI tools) holds the map to the melee rules. Auto: only when war3map.w3i's Melee flag is on." },
+          h("span.muted", {}, "Melee checks: "),
+          ...MELEE_SETTINGS.map((m) => h(`button.problem-fix${config.melee === m ? ".active" : ""}`, { disabled: config.melee === m, onclick: run(() => setMeleeSetting(m)) }, m === "auto" ? "Auto (Melee flag)" : m === "on" ? "Always" : "Never"))));
         if (ran && ignoreBad) el.append(h("div.view-empty.problems-failed", {}, `${ignoreBad}. Nothing is hidden, and ignoring is off until it is fixed.`));
         if (!ran) {
           el.append(h("div.view-empty", {}, "Checks the map script, files used by object data, imported models' textures, placed objects and imports. Build runs them too."));

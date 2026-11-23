@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
-import { MINIMAL_MANIFEST, addDisabled, applySeverity, disabledIds, isDisabled, severityOverride, parseChecksConfig, readChecksConfig } from "./checkconfig";
+import { MINIMAL_MANIFEST, addDisabled, meleeMode, setMelee, applySeverity, disabledIds, isDisabled, severityOverride, parseChecksConfig, readChecksConfig } from "./checkconfig";
 import { blocksPacking, countProblems, describeCounts } from "../../lib/problemcount";
 import { activate } from "./index";
 import { readFixture } from "../../lib/testhelpers/testutil";
@@ -30,10 +30,10 @@ test("a [checks] section that can't be read is an error, not an empty list", asy
 });
 
 test("a melee rule is switched off by its own id or by melee", () => {
-  assert.equal(isDisabled({ disable: ["melee/camps"], severity: {} }, "melee/camps"), true);
-  assert.equal(isDisabled({ disable: ["melee/camps"], severity: {} }, "melee/mines"), false);
-  assert.equal(isDisabled({ disable: ["melee"], severity: {} }, "melee/mines"), true);
-  assert.equal(isDisabled({ disable: ["melee"], severity: {} }, "imports"), false);
+  assert.equal(isDisabled({ disable: ["melee/camps"], severity: {}, melee: "auto" }, "melee/camps"), true);
+  assert.equal(isDisabled({ disable: ["melee/camps"], severity: {}, melee: "auto" }, "melee/mines"), false);
+  assert.equal(isDisabled({ disable: ["melee"], severity: {}, melee: "auto" }, "melee/mines"), true);
+  assert.equal(isDisabled({ disable: ["melee"], severity: {}, melee: "auto" }, "imports"), false);
 });
 
 function harness(files: Record<string, string>, ids: string[]) {
@@ -205,4 +205,46 @@ test("info findings are neither errors nor warnings and don't block packing", ()
   assert.equal(blocksPacking(countProblems([{ severity: "info" }, { severity: "error" }])), true, "control: an error blocks");
   assert.equal(describeCounts(infos), "0 errors, 0 warnings, 2 infos");
   assert.equal(describeCounts(countProblems([{ severity: "warning" }])), "0 errors, 1 warning");
+});
+
+test("[checks] melee is read as on, off or auto; absent is auto; anything else is an error", () => {
+  for (const m of ["on", "off", "auto"]) assert.equal(parseChecksConfig(`[checks]\nmelee = "${m}" # why\n`).melee, m);
+  assert.equal(parseChecksConfig("[checks]\nmelee = 'off'\n").melee, "off", "single quotes");
+  assert.equal(parseChecksConfig('[checks]\ndisable = ["a"]\n').melee, "auto", "control: absent");
+  assert.equal(parseChecksConfig('melee = "off"\n[pack]\nmelee = "off"\n').melee, "auto", "only [checks] counts");
+  for (const bad of ['[checks]\nmelee = true\n', '[checks]\nmelee = "yes"\n', '[checks]\nmelee = on\n']) assert.throws(() => parseChecksConfig(bad), /melee/, bad);
+});
+
+test("the melee decision: --melee, then --only=melee, then the manifest; auto looks at the Melee flag", () => {
+  const d = (force: "on" | "off" | "auto" | null, asked: boolean, setting: "on" | "off" | "auto") => meleeMode({ force, asked, setting }).mode;
+  assert.equal(d(null, false, "auto"), "flag", "today's behaviour");
+  assert.equal(d(null, false, "on"), "on");
+  assert.equal(d(null, false, "off"), "off");
+  assert.equal(d(null, true, "auto"), "on", "--only=melee forces on");
+  assert.equal(d(null, true, "off"), "on", "asked by name beats the manifest");
+  assert.equal(d("off", true, "on"), "off", "--melee beats everything");
+  assert.equal(d("on", false, "off"), "on");
+  assert.equal(d("auto", true, "off"), "flag");
+});
+
+test("setMelee writes the line in place, creates the section, and auto removes it; the rest stays byte for byte", () => {
+  assert.equal(setMelee("format = 1\n", "on"), 'format = 1\n\n[checks]\nmelee = "on"\n');
+  assert.equal(setMelee('[checks]\ndisable = ["a"]\n[pack]\nx = 1\n', "off"), '[checks]\ndisable = ["a"]\nmelee = "off"\n[pack]\nx = 1\n');
+  assert.equal(setMelee('[checks]\r\nmelee = "on" # keep\r\ndisable = []\r\n', "off"), '[checks]\r\nmelee = "off" # keep\r\ndisable = []\r\n');
+  assert.equal(setMelee('[checks]\nmelee = "on"\ndisable = ["a"]\n', "auto"), '[checks]\ndisable = ["a"]\n');
+  assert.equal(setMelee("format = 1\n", "auto"), "format = 1\n", "control: nothing to remove");
+  for (const v of ["on", "off", "auto"] as const) assert.equal(parseChecksConfig(setMelee('[checks]\nmelee = "off"\n', v)).melee, v, "reads back");
+  assert.throws(() => setMelee('[checks]\nmelee = "x"\n', "on"), /melee/);
+});
+
+test("the Problems command writes [checks] melee and refuses an unreadable manifest", async () => {
+  const h = harness({ "w3proj.toml": 'format = 1\n' }, ["mine-a"]);
+  await h.cmds.get("w3.problems.setMelee")!("off");
+  assert.equal(h.files["w3proj.toml"], 'format = 1\n\n[checks]\nmelee = "off"\n');
+  await h.cmds.get("w3.problems.setMelee")!("auto");
+  assert.equal(h.files["w3proj.toml"], "format = 1\n\n[checks]\n");
+  await assert.rejects(async () => h.cmds.get("w3.problems.setMelee")!("sometimes"), /isn't on, off or auto/);
+  const bad = harness({ "w3proj.toml": '[checks]\nmelee = "x"\n' }, []);
+  await assert.rejects(async () => bad.cmds.get("w3.problems.setMelee")!("on"), /\[checks\]/);
+  assert.equal(bad.files["w3proj.toml"], '[checks]\nmelee = "x"\n');
 });

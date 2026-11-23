@@ -566,7 +566,8 @@ enum Cmd {
     /// Prints one line per report (severity, check, location, message) and how many the project's
     /// .w3proj/problems-ignore.json left out. Exits with 1 when there are errors (with
     /// --warnings-fail also on warnings). Without --only: the Problems checks, check_melee when the
-    /// map's war3map.w3i has the Melee flag (--only melee runs it on any map),
+    /// map's war3map.w3i has the Melee flag (--only melee runs it on any map; --melee on|off|auto and
+    /// w3proj.toml's [checks] melee = "on" | "off" | "auto" force it on or off),
     /// and check_path when --path gives its points. w3proj.toml's [checks] disable = ["id", ...]
     /// switches checks off (a Problems check id, "melee/<rule>" or "melee"); a [checks.severity] table
     /// (id = "error" | "warning" | "info" | "off") sets their severity. Runs the
@@ -579,6 +580,9 @@ enum Cmd {
         /// check_path from one point to another, in world coordinates: x1,y1:x2,y2.
         #[arg(long, allow_hyphen_values = true)]
         path: Option<String>,
+        /// Whether check_melee runs, whatever w3proj.toml's [checks] melee says: on (any map), off (none) or auto (maps with the Melee flag).
+        #[arg(long)]
+        melee: Option<String>,
         /// Collision size of the unit check_path and check_melee walk with (default 31, a Footman's, as the MCP tools).
         #[arg(long)]
         unit_size: Option<f64>,
@@ -1031,8 +1035,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Rebuild { project, only, force, game, mode } => {
             return rebuild::run(rebuild::Options { project, only, force, game, mode, formats: extra });
         }
-        Cmd::Check { project, only, path, unit_size, warnings_fail, json, game, mode } => {
-            return check::run(check::Options { project, only, path, unit_size, warnings_fail, json, game, mode, formats: extra });
+        Cmd::Check { project, only, path, melee, unit_size, warnings_fail, json, game, mode } => {
+            return check::run(check::Options { project, only, path, melee, unit_size, warnings_fail, json, game, mode, formats: extra });
         }
         Cmd::Mcp => mcp::run()?,
         Cmd::ServeBackend { project, read_only } => rebuild::serve_stdio(&project, extra, read_only)?,

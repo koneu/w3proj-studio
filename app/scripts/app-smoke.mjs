@@ -9787,6 +9787,13 @@ async function cliCheck(page, found) {
     // The trees are in the way: the way squeezes between them (open ground is 1000s wide; 256 since a unit needs a free square of 2 cells).
     if (!app.path.walkable || app.path.standingNearby?.id !== "LTlt" || !(app.path.narrowest?.width < 300)) fail(`check_path didn't meet the trees (control): ${lit(app.path).slice(0, 300)}`);
     if (!app.melee.findings?.length) fail("check_melee found nothing to compare (control)");
+    // The melee override: this map has the Melee flag, so by default it runs; --melee off skips it, and the manifest's off does too (--only=melee still asks).
+    const melee = (...args) => { const o = spawnSync(cli, ["check", root, "--json", ...args], { encoding: "utf8", env, timeout: 300000 }); try { return JSON.parse(o.stdout).sections.find((x) => x.section === "melee"); } catch { return { err: `${o.stdout}${o.stderr}`.slice(-300) }; } };
+    if (melee()?.ran !== true) fail(`melee flag on, auto: expected it to run: ${lit(melee())}`);
+    if (melee("--melee", "off")?.ran !== false) fail("--melee off didn't skip check_melee");
+    writeFileSync(join(root, "w3proj.toml"), `${existsSync(join(root, "w3proj.toml")) ? readFileSync(join(root, "w3proj.toml"), "utf8") : "format = 1\n"}\n[checks]\nmelee = "off"\n`);
+    if (melee()?.ran !== false) fail("[checks] melee = off didn't skip check_melee");
+    if (melee("--only=melee")?.ran !== true) fail("--only=melee didn't run it over the manifest's off");
   } finally {
     await page.evaluate(`(async () => { if (window.__cliCheckKept) w3.window.confirm = window.__cliCheckKept; delete window.__cliCheckKept; await w3.editors.closeAll(); })()`).catch(() => {});
     await restoreWindow(page);
