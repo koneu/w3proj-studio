@@ -3,11 +3,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
-import { checkScripts, generatorProblems, scriptFiles, smokeChecks, smokeListProblems, smokeRunProblems, syntaxProblems } from "./check-scripts.mjs";
+import { checkScripts, generatorProblems, readmeProblems, scriptFiles, smokeChecks, smokeListProblems, smokeRunProblems, syntaxProblems } from "./check-scripts.mjs";
 
 // The repository's root, found from the working directory up.
 const repo = dirname(dirname(repoPath("tests", "gate.mjs")));
@@ -93,4 +93,16 @@ test("a function of app-smoke.mjs that calls run( without a local run is a probl
     "async function c(page) {\n  await run(1); // top-level run\n}",
   ]) assert.deepEqual(smokeRunProblems(ok), [], ok);
   assert.equal(smokeRunProblems("async function c(page) {\n  const t = `${run(1)}`;\n}").length, 1);
+});
+
+test("a built-in extension folder without a README.md is a problem", () => {
+  // The repository passes (the control); a copy of its builtin folder names with one README missing fails.
+  assert.deepEqual(readmeProblems(repo), []);
+  const fake = scratchDir("readme-problems");
+  const dir = join(fake, "app", "src", "builtin");
+  mkdirSync(join(dir, "has"), { recursive: true });
+  mkdirSync(join(dir, "lacks"), { recursive: true });
+  writeFileSync(join(dir, "has", "README.md"), "x");
+  assert.deepEqual(readmeProblems(fake).map((p) => p.split(":")[0]), ["app/src/builtin/lacks"]);
+  rmSync(fake, { recursive: true, force: true });
 });
