@@ -520,6 +520,12 @@ impl Server {
                 let rects: Vec<String> = args.get("rects").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
                 to_json(backend::flatview::split(root()?, &rects)?)
             }
+            "terrain_merge_hook" => {
+                self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                let remove = args.get("remove").and_then(Value::as_bool) == Some(true);
+                let me = std::env::current_exe().map_err(|e| e.to_string())?;
+                to_json(backend::mergehook::run(Path::new(root()?), remove, &me.to_string_lossy())?)
+            }
             "terrain_merge" => {
                 self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
                 to_json(backend::flatview::merge(root()?)?)

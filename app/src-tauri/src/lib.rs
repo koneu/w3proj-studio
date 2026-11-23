@@ -269,6 +269,18 @@ async fn terrain_merge(root: String) -> CmdResult<Value> {
         .map_err(err)?
 }
 
+/// "Install Merge Hook" / "Remove Merge Hook" (`backend::mergehook`, as `w3proj terrain merge-hook`): the hook runs the
+/// w3proj next to this program (its name alone when there is none; W3PROJ_BIN overrides it when the hook runs).
+#[tauri::command]
+async fn terrain_merge_hook(root: String, remove: bool) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let program = mcp::mcp_bridge_path().unwrap_or_else(|| "w3proj".to_string());
+        serde_json::to_value(backend::mergehook::run(std::path::Path::new(&root), remove, &program)?).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
 /// New, resized, renamed and joined subterrains (`backend::flatview::relayout`); `undoable`: kept so
 /// `terrain_relayout_undo` can take it back (`backend::flatview::relayout_undoable`, the layout editor's Apply).
 #[tauri::command]
@@ -1302,6 +1314,7 @@ pub fn run() {
             script_set_mode,
             terrain_split,
             terrain_merge,
+            terrain_merge_hook,
             terrain_relayout,
             terrain_relayout_undo,
             terrain_relayout_preview,
