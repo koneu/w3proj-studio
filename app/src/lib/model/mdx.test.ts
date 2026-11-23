@@ -124,6 +124,22 @@ test("lights: the classic 44-byte layout (versions 800–1100) and version 1200'
   assert.deepEqual(v1200.lights?.map((l) => [l.attenuationStart, l.attenuationEnd, l.intensity]), [[80, 200, 18], [30, 120, 10]]);
 });
 
+test("lights: the fixed values the World Editor copies into a doodad's light block, an animated intensity's too", () => {
+  // Version 1800: colour, intensity 0 (animated: KLAI 10), ambient colour and intensity, shadow intensity 0.6, casting
+  // start 30 and end 90, quadratic 0.002, linear 0.03, damping 0.0004 (make-doo-lights.mjs LightA's numbers).
+  const f = Math.fround;
+  const values = [0.25, 0.5, 0.75, 0, 0.1, 0.2, 0.3, 0.7, 0.6, 30, 90, 0.002, 0.03, 0.0004];
+  const [hd] = parseMdx(lightModel([{ words: 18, start: 50, end: 300, values, track: true }])).lights ?? [];
+  assert.equal(hd.intensity, 10, "the drawn intensity is the track's first key");
+  assert.deepEqual(hd.fixed, { color: [0.25, 0.5, 0.75], intensity: 0, shadowStart: 30, shadowEnd: 90, quadratic: f(0.002), linear: f(0.03), damping: f(0.0004) });
+  // Before version 1600 there is no casting range or falloff: the editor's defaults (a version-800 text model measured).
+  const defaults = { shadowStart: 0, shadowEnd: 0, quadratic: f(0.0005), linear: 0, damping: f(0.00001) };
+  for (const [words, version] of [[11, 800], [12, 1200]] as const) {
+    const [old] = parseMdx(lightModel([{ words, start: 80, end: 200, values: [1, 0.5, 0.25, 18, 1, 1, 1, 0, 0.4] }], version)).lights ?? [];
+    assert.deepEqual(old.fixed, { color: [1, 0.5, 0.25], intensity: 18, ...defaults }, `v${version}`);
+  }
+});
+
 test("lights: a damaged one is left out or warned about, never read past its end", () => {
   // Too short to hold the values: no light, but the node is there and the model reads.
   const short = parseMdx(lightModel([{ words: 12, start: 1, end: 2, size: 4 + 96 + 20 }]));

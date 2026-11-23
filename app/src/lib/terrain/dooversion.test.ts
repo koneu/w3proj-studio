@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadNumber, EDITOR_DOO_VERSION, editorDooVersion } from "./dooversion";
+import type { LightFixed, ModelLight } from "../model/mdx";
+import { doodadNumber, EDITOR_DOO_VERSION, editorDooVersion, lightBlock, lightBlocks } from "./dooversion";
 
 const UNSET = 0xffffffff;
 const v8 = (id: string, editorId: number, more: Record<string, unknown> = {}) =>
@@ -82,6 +83,54 @@ test("other versions and documents that aren't lists of doodads are left as they
     assert.equal(editorDooVersion(doc), false, JSON.stringify(before));
     assert.deepEqual(doc, before);
   }
+});
+
+/** A float's bits as the codec keeps them. */
+const bits = (f: number) => { const v = new DataView(new ArrayBuffer(4)); v.setFloat32(0, f, true); return v.getUint32(0, true); };
+/** A u32's float, as the game's models store their values. */
+const float = (u: number) => { const v = new DataView(new ArrayBuffer(4)); v.setUint32(0, u, true); return v.getFloat32(0, true); };
+const SD_REST = { shadowStart: 0, shadowEnd: 0, quadratic: float(973279855), linear: 0, damping: float(925353388) };
+/** A light with fixed values only, as the readers give it. */
+const light = (fixed: LightFixed): ModelLight => ({ node: { name: "Omni01", objectId: 0, parentId: -1, flags: 0x200, kind: "lite" }, type: 0, attenuationStart: 80, attenuationEnd: 200, color: fixed.color, intensity: fixed.intensity, fixed });
+
+test("a model's light as the World Editor's save writes it into a doodad's extras", () => {
+  // we-drive 2026-11-23 (tests/we-compare/doo-lights.json, SD): the game's models' values as stored (their f32 bits) and
+  // the blocks the editor's save wrote for them.
+  const lamp = (intensity: number) => light({ color: [1, 1, 1], intensity, ...SD_REST });
+  assert.deepEqual(lightBlocks([lamp(11)]), [[0, 0, 0xffffffff, bits(11), 0, 0, 973279855, 0, 925353388]], "LOlp variation 0");
+  // YOlp: colour 1, 0.968628, 0.623529 (times 255: 247.0001 and 158.9999, cut down), intensity 0 under a KLAI track.
+  const yolp = light({ color: [1, float(1064826881), float(1059037081)], intensity: 0, ...SD_REST });
+  yolp.intensity = 1;
+  assert.deepEqual(lightBlocks([yolp]), [[0, 0, 0xfffff79e, 0, 0, 0, 973279855, 0, 925353388]], "the fixed intensity, not the drawn one");
+  // Two lights (YOf1, DTs0): one block each, numbered.
+  assert.deepEqual(lightBlocks([lamp(30), lamp(30)])?.map((b) => b[0]), [0, 1]);
+  // make-doo-lights.mjs LightA: every value its own.
+  const a = light({ color: [0.25, 0.5, 0.75].map(Math.fround) as [number, number, number], intensity: 6.5, shadowStart: 30, shadowEnd: 90, quadratic: Math.fround(0.002), linear: Math.fround(0.03), damping: Math.fround(0.0004) });
+  assert.deepEqual(lightBlocks([a]), [[0, 0, 0xff3f7fbf, bits(6.5), bits(30), bits(90), bits(0.002), bits(0.03), bits(0.0004)]]);
+  // Out of range and unreadable colours stay within a byte.
+  assert.equal(lightBlock(0, { color: [2, -1, NaN], intensity: 0, ...SD_REST })[2], 0xffff0000);
+  assert.deepEqual(lightBlocks(undefined), [], "a model without lights");
+  assert.equal(lightBlocks([{ ...lamp(1), fixed: undefined }]), null, "a light without its fixed values isn't guessed at");
+});
+
+test("a doodad without lights of its own gets its model's when the file is saved, a version-13 file's too", () => {
+  const block = [0, 0, 0xffffffff, bits(11), 0, 0, 973279855, 0, 925353388];
+  const own = [[0, 1, 0xff102030, 1, 2, 3, 4, 5, 6]];
+  const lights = new Map<string, number[][] | null>([["LOlp", [block]], ["LTlt", []], ["ZZZZ", null]]);
+  const lightsOf = (d: Readonly<Record<string, unknown>>) => lights.get(String(d.id));
+  const v13 = (id: string, extras: number[][]) => ({ ...v8(id, UNSET, { skinId: id, preFlags: UNSET, trailer: [1, 0, 0] }), extras });
+  const doc = { version: 13, subversion: 11, doodads: [v13("LOlp", []), v13("LOlp", structuredClone(own)), v13("LTlt", []), v13("ZZZZ", []), v13("QQQQ", [])] };
+  assert.equal(editorDooVersion(doc, lightsOf), true);
+  assert.deepEqual(doc.doodads.map((d) => d.extras), [[block], own, [], [], []], "its own lights kept; a model without lights, an unread one and an unknown type keep []");
+  assert.notEqual(doc.doodads[0].extras[0], block, "a copy of the block");
+  assert.equal(editorDooVersion(doc, lightsOf), false, "nothing left to do");
+  // Without the models' lights (no lookup) nothing is given.
+  const plain = { version: 13, subversion: 11, doodads: [v13("LOlp", [])] };
+  assert.equal(editorDooVersion(plain), false);
+  // An upgraded version-8 doodad (no extras at all) gets them as well.
+  const old = { version: 8, subversion: 11, skinIds: false, doodads: [v8("LOlp", 5)] };
+  assert.equal(editorDooVersion(old, lightsOf), true);
+  assert.deepEqual(old.doodads[0], v8("LOlp", UNSET, { skinId: "LOlp", preFlags: UNSET, trailer: [5, 0, 0], extras: [block] }));
 });
 
 test("a doodad's creation number is read from where its layout keeps it", () => {

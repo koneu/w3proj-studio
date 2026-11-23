@@ -60,7 +60,7 @@ import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
-import { editorDooVersion, UPGRADED_DOO_VERSIONS } from "../../lib/terrain/dooversion";
+import { editorDooVersion, lightBlocks, UPGRADED_DOO_VERSIONS, type DoodadLights } from "../../lib/terrain/dooversion";
 import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -3047,6 +3047,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (g) { randomGroups = g; setGroupCycle(autoCycleLine(mostLines(g))); }
             }
             await rebuildObjects();
+            // A doodad without lights of its own whose model has some: the World Editor's save gives them, so the
+            // next save writes the doodads file (dooversion.ts); not an edit, as the version's upgrade above.
+            if (df && dooFile === df && !partial && !objectsTouched && df.list.some(lightless)) {
+              const lights = await doodadLights(df);
+              if (!disposed && dooFile === df && df.list.some((d) => lightless(d) && !!lights(d as unknown as Record<string, unknown>)?.length)) objectsTouched = true;
+            }
           });
         }
         /** Whether the scale ranges are known: false while the map's own doodad or destructable data can't be read. */
@@ -3064,7 +3070,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const dooUpgradeDue = (f: PlacedFile) => !partial && UPGRADED_DOO_VERSIONS.includes(Number(f.doc.version));
         /** The doodads file in the World Editor's version, where a save may change it (dooUpgradeDue); a doodad an
          *  undo put back after an earlier save upgraded the file gets the fields too. */
-        const upgradeDoodads = (f: PlacedFile) => { if (!partial) editorDooVersion(f.doc); };
+        const upgradeDoodads = (f: PlacedFile, lights?: DoodadLights) => { if (!partial) editorDooVersion(f.doc, lights); };
+        /** Whether a doodad has no lights of its own: the World Editor's save gives it its model's (dooversion.ts). */
+        const lightless = (d: Placed) => { const x = (d as unknown as { extras?: unknown }).extras; return x === undefined || (Array.isArray(x) && x.length === 0); };
+        /** The light blocks of the models of `f`'s doodads without lights of their own (dooversion.ts lightBlocks), in
+         *  the art the view draws (as the World Editor's save in its mode): the models as the view loads them. A doodad
+         *  whose type or model can't be read gets none (null), and keeps its []. */
+        const doodadLights = async (f: PlacedFile): Promise<DoodadLights> => {
+          const known = new Map<string, number[][] | null>();
+          const keyOf = (d: Readonly<Record<string, unknown>>) => `${String(d.id)}|${Number(d.variation) || 0}`;
+          const due = new Map<string, Placed>();
+          for (const d of f.list) if (lightless(d)) due.set(keyOf(d as unknown as Record<string, unknown>), d);
+          await Promise.all([...due].map(async ([key, d]) => {
+            const skin = skinOf(d);
+            if (!skin) return;
+            const gpu = await loader.modelFor(skin, Number(d.variation) || 0).catch(() => null);
+            if (gpu) known.set(key, lightBlocks(gpu.model.lights));
+          }));
+          return (d) => known.get(keyOf(d)) ?? null;
+        };
         /** Units on the Ground on Save (objheights.ts savedUnitZ; setting terrain.units.groundOnSave): every object of
          *  war3mapUnits.doo goes to the height the World Editor's save writes for it, a ship in water to the surface,
          *  anything else to the ground the editor works out for its type (unitGround: a building on the highest of the
@@ -6701,6 +6725,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const removed = removeUnusedTiles();
               if (removed?.length) void w3.window.showInfo(`Saving removed the ground tiles nothing uses: ${removed.join(", ")} (setting Remove Unused Tiles on Save). Undo takes it back.`);
             }
+            // The lights of the doodads' models, which the doodads file gets as the World Editor's save gives them
+            // (upgradeDoodads): looked up here, before the files are taken without an await. A doodad placed meanwhile
+            // keeps its [] until the next save.
+            const dooLights = objectsTouched && dooFile && !partial ? await doodadLights(dooFile) : undefined;
             // Below, everything the save writes is taken in one go with no await, so the files agree with
             // each other and with the undo position. An edit made while they are written is not in them,
             // and stays unsaved.
@@ -6713,7 +6741,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 // The placement files in the World Editor's version 13 (upgradeUnits, upgradeDoodads), here where they are taken.
                 placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => {
                   if (f === unitsFile) upgradeUnits(f);
-                  if (f === dooFile) upgradeDoodads(f);
+                  if (f === dooFile) upgradeDoodads(f, dooLights);
                   return { f, text: placedText(f.doc) };
                 }) : [],
                 starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,

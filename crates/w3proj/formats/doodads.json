@@ -4,10 +4,11 @@
 // came later from World Editor saves (build 7003, we-compare format-fields and format-doodad-props, 2026-11-17):
 // v13's `trailer` is the placement id, then Roll and Pitch of the Doodad Properties dialog in radians (15 and 30
 // degrees typed there gave 0.2618 and 0.5236); `extras` are the doodad's lights, its Lights tab, one block per light:
-// 0 (not in the dialog), Casts Shadows (0/1), Color (ARGB), Intensity, Shadow Start, Shadow End, then Quadratic,
-// Linear Falloff and Damping as the dialog's value times 0.0001, 0.01 and 0.000001 (3, 2, 1 typed gave 0.0003, 0.02,
-// 0.000001). A doodad whose model has a light gets one from the editor's save if it had none (the lamp post LOlp:
-// white, intensity 11, the rest 0 but Quadratic 5 and Damping 10). `preFlags` 0 and 7 come back from a save as they
+// the index of the model's light it came from (not in the dialog; 0 after the dialog's edit), Casts Shadows (0/1),
+// Color (ARGB), Intensity, Shadow Start, Shadow End, then Quadratic, Linear Falloff and Damping as the dialog's value
+// times 0.0001, 0.01 and 0.000001 (3, 2, 1 typed gave 0.0003, 0.02, 0.000001). A doodad with none gets its model's
+// lights from the editor's save, one block each (the lamp post LOlp: white, intensity 11, the rest 0 but Quadratic 5
+// and Damping 10; the rule: app/src/lib/terrain/dooversion.ts). `preFlags` 0 and 7 come back from a save as they
 // were; the dialog has nothing for them. Flag 8 is the dialog's "Use model axes (instead of world)" for the scale.
 {
   "name": "doodads",

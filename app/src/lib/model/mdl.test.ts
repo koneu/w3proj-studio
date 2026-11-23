@@ -248,7 +248,9 @@ function comparable(m: Model) {
   return plain({
     version: m.version, name: m.name, extent: m.extent, sequences: m.sequences, globalSequences: m.globalSequences, textures: m.textures, materials,
     geosets: m.geosets.map((g) => ({ ...g, vertexGroups: Array.from(g.vertexGroups) })), geosetAnims: m.geosetAnims, nodes: m.nodes, pivots: m.pivots,
-    particleEmitters2: m.particleEmitters2, ribbons: m.ribbons, textureAnims: m.textureAnims, lights: m.lights,
+    particleEmitters2: m.particleEmitters2, ribbons: m.ribbons, textureAnims: m.textureAnims,
+    // A light's fixed values differ by design: the World Editor reads a text model's colour reversed (mdx.ts ModelLight.fixed).
+    lights: m.lights?.map(({ fixed: _f, ...l }) => l),
   });
 }
 
@@ -472,6 +474,17 @@ test("a lighting model as the World Editor writes it (dnclight's writer) reads a
   assert.deepEqual(m.lights?.map((l) => [l.node.name, l.type, l.attenuationStart, l.attenuationEnd]), [["Sun", 1, 80, 200]]);
   assert.deepEqual([...m.nodes[0].rotation!.values], [0, 0, 0, 1, 0, 0, 1, 0]);
   assert.deepEqual([...m.pivots], [1, 2, 3]);
+});
+
+test("a text model's light: the fixed values for the World Editor's light block, its colour reversed", () => {
+  // make-doo-lights.mjs LightB (version 800): Color { 0.2, 0.4, 0.8 } came back from the editor's save as 0xFFCC6633.
+  const f = Math.fround;
+  const text = (more: string) => `Version { FormatVersion 800, }\nModel "L" { NumLights 1, }\nLight "Omni01" { ObjectId 0, Omnidirectional, static AttenuationStart 60, static AttenuationEnd 250, static Intensity 7.5, static Color { 0.2, 0.4, 0.8 }, ${more} }\nPivotPoints 1 { { 0, 0, 100 }, }\n`;
+  const [old] = parseMdl(text("")).lights ?? [];
+  assert.deepEqual(old.fixed, { color: [f(0.8), f(0.4), f(0.2)], intensity: 7.5, shadowStart: 0, shadowEnd: 0, quadratic: f(0.0005), linear: 0, damping: f(0.00001) });
+  // A text of version 1600 on with the casting range, falloffs and damping.
+  const [hd] = parseMdl(text("static ShadowCastingStart 30, static ShadowCastingEnd 90, static QuadraticFalloff 0.002, static LinearFalloff 0.03, static Damping 0.0004,")).lights ?? [];
+  assert.deepEqual(hd.fixed, { color: [f(0.8), f(0.4), f(0.2)], intensity: 7.5, shadowStart: 30, shadowEnd: 90, quadratic: f(0.002), linear: f(0.03), damping: f(0.0004) });
 });
 
 test("parseModel tells MDX from MDL by content", () => {
