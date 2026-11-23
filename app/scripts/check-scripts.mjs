@@ -118,12 +118,23 @@ export function smokeListProblems(source) {
   return problems;
 }
 
+/** The files the unpack no longer writes: a map's triggers are map/triggers/ (the flat war3map.wtg.json and war3map.wct.txt are gone). */
+const GONE_FILES = ["war3map.wtg.json", "war3map.wct.txt"];
+
+/** Generators (tests/fixtures/we-specs/make-*.mjs) of `sources` ({ file name: text }) that name a file the unpack doesn't write any more. */
+export function generatorProblems(sources) {
+  return Object.entries(sources).flatMap(([name, text]) => GONE_FILES.filter((f) => text.includes(f))
+    .map((f) => `${name}: names ${f}, which the unpack no longer writes (the triggers are map/triggers/; tests/fixtures/we-specs/trigger-folder.mjs edits them)`));
+}
+
 /** Every problem of the repository's scripts, as messages. */
 export async function checkScripts(repo) {
   const files = scriptFiles(repo);
   const problems = (await syntaxProblems(files)).map((p) => `${relative(repo, p.file).split("\\").join("/")} doesn't load:\n    ${p.message.split("\n").join("\n    ")}`);
   const smoke = join(repo, "app", "scripts", "app-smoke.mjs");
   problems.push(...smokeListProblems(readFileSync(smoke, "utf8")));
+  const specs = join(repo, "tests", "fixtures", "we-specs");
+  problems.push(...generatorProblems(Object.fromEntries(readdirSync(specs).filter((f) => /^make-.*\.mjs$/.test(f)).map((f) => [`tests/fixtures/we-specs/${f}`, readFileSync(join(specs, f), "utf8")]))));
   return { files, problems };
 }
 

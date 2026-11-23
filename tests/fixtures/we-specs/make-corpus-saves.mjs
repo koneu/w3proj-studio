@@ -15,12 +15,8 @@
 //   melee-banewoodbog-noskin-off  the same with Melee off and war3mapSkin.w3d removed
 //   melee-gui-args    flat.w3x (melee) with a second GUI trigger "Hello" whose action has arguments
 //                     (DisplayTextToForce(GetPlayersAll(), "hello"))
-//   zero-<project>    a build_1 project (an older Studio's save, all-zero ally masks) packed as is (pack_as_is:
-//                     `w3proj pack` would work the masks out): zero-meelee-map.w3x, zero-meelee-map-2.w3x,
-//                     zero-another-melee-map.w3x
 //   zero-crazyherosiege  CrazyHeroSiegeAI_v2.0 (all-zero masks, no war3map.wtg) with flat.w3x's wtg and wct, as is
 //   wc2orc04          WC2Orc04.w3x as the campaign file CSW_Tides_Of_Darkness.w3n holds it
-//   wc2orc04-pack     the chapter project of build_1/CSW_Tides_Of_Darkness packed by `w3proj pack`
 //   lua-sky-or        flat.w3x with a Lua script (w3i scriptType 1, war3map.lua from `w3proj rebuild`) and the GUI
 //                     triggers "Sky" (SetSkyModel(SkyModelNone)) and "Or" (an Or condition of two comparisons)
 //   lua-or, lua-sky-cond  one trigger each: the Or condition alone; a plain condition and SetSkyModel(SkyModelNone)
@@ -45,6 +41,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, mainCheckout } from "../../gamepath.mjs";
 import { requireFresh } from "../../binfresh.mjs";
+import { addGuiTrigger, copyTriggers } from "./trigger-folder.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..", "..");
@@ -134,18 +131,9 @@ if (want("melee-banewoodbog-noskin-off")) {
 
 const eca = (kind, name, params = [], extra = {}) => ({ kind, name, enabled: true, params, children: [], ...extra });
 const str = (value) => ({ type: 3, value });
-/** flat.w3x's project with GUI triggers added (`items`: trigger items without id and parent). */
+/** flat.w3x's project with GUI triggers added (`items`: trigger items without id and parent): files in map/triggers/. */
 function withTriggers(dir, items) {
-  const wtgFile = join(dir, "map", "war3map.wtg.json");
-  const wtg = readJson(wtgFile);
-  const category = wtg.items.find((i) => i.type === 4).id;
-  items.forEach((it, n) => wtg.items.push({ type: 8, description: "", isComment: 0, id: (3 << 24) | (n + 1), enabled: true, isCustom: false,
-    initiallyOff: false, runOnInit: false, parent: category, ...it }));
-  wtg.counts[3].count += items.length;
-  writeFileSync(wtgFile, JSON.stringify(wtg, null, 1));
-  const wctFile = join(dir, "map", "war3map.wct.txt");
-  const wct = readFileSync(wctFile, "utf8").replace(/\r?\n$/, "");
-  writeFileSync(wctFile, `${wct}\n${items.map((it, n) => `//== trigger ${n + 1} (no text): ${it.name} ==`).join("\n")}\n`);
+  for (const it of items) addGuiTrigger(dir, { description: "", isComment: 0, enabled: true, initiallyOff: false, runOnInit: false, ...it });
 }
 const flat = join(here, "flat.w3x");
 if (want("melee-gui-args")) {
@@ -157,29 +145,18 @@ if (want("melee-gui-args")) {
   pack(dir, "melee-gui-args");
 }
 
-for (const project of ["meelee_map", "meelee_map_2", "another melee map"]) {
-  const name = `zero-${project.replace(/ /g, "-").replace(/_/g, "-")}`;
-  if (!want(name)) continue;
-  const dir = join(work, name);
-  cpSync(join(maps, "build_1", project), dir, { recursive: true });
-  const info = readJson(join(dir, "map", "war3map.w3i.json"));
-  if (info.players.some((p) => p.allyLow || p.allyHigh)) throw new Error(`${project}: its ally masks aren't all zero`);
-  packAsIs(dir, join(out, `${name}.w3x`));
-}
-
 // CrazyHeroSiegeAI_v2.0 has no war3map.wtg (the editor refuses it: "Trigger data missing or invalid"): flat.w3x's wtg
 // and wct added, packed as is (its all-zero ally masks kept).
 if (want("zero-crazyherosiege")) {
   const dir = unpack("crazy", join(maps, "new(er)_maps", "CrazyHeroSiegeAI_v2.0.w3x"));
   const flatDir = unpack("flat-crazy", join(here, "flat.w3x"));
-  for (const f of ["war3map.wtg.json", "war3map.wct.txt"]) cpSync(join(flatDir, "map", f), join(dir, "map", f));
+  copyTriggers(flatDir, dir);
   const info = readJson(join(dir, "map", "war3map.w3i.json"));
   if (info.players.some((p) => p.allyLow || p.allyHigh)) throw new Error("CrazyHeroSiegeAI: its ally masks aren't all zero");
   packAsIs(dir, join(out, "zero-crazyherosiege.w3x"));
 }
 
 if (want("wc2orc04")) writeFileSync(join(out, "wc2orc04.w3x"), run("cat", join(maps, "campaign", "CSW_Tides_Of_Darkness.w3n"), "WC2Orc04.w3x"));
-if (want("wc2orc04-pack")) run("pack", join(maps, "build_1", "CSW_Tides_Of_Darkness", "maps", "WC2Orc04.w3x"), "-o", join(out, "wc2orc04-pack.w3x"));
 
 // OperatorCompareInteger takes a ComparisonOperator (OperatorEqual); OperatorEqualENE is the EqualNotEqualOperator of
 // other comparisons, and with it the editor's compile stops at a syntax error.
@@ -231,7 +208,7 @@ if (["wormwar", ...Object.keys(WORMWAR_VARIANTS)].some(want)) {
   for (const [name, gone] of Object.entries(variants)) {
     if (!want(name)) continue;
     const dir = unpack(name, src);
-    for (const f of ["war3map.wtg.json", "war3map.wct.txt"]) cpSync(join(flatDir, "map", f), join(dir, "map", f));
+    copyTriggers(flatDir, dir);
     for (const f of gone) rmSync(join(dir, "map", f), { force: true });
     pack(dir, name);
   }

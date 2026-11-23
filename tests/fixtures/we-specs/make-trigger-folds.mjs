@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { addCategory, readCategory } from "./trigger-folder.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cliArg, gameArg] = process.argv.slice(2);
@@ -25,13 +26,9 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-trigger-folds-"));
 try {
   const dir = join(scratch, "folds");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
-  const path = join(dir, "map", "war3map.wtg.json");
-  const wtg = JSON.parse(readFileSync(path, "utf8"));
-  const init = wtg.items.findIndex((it) => it.type === 4);
-  if (init < 0 || wtg.items[init].expanded !== 0) throw new Error("flat.w3x's Initialization category isn't as expected");
-  wtg.items.splice(init, 0, { type: 4, id: 33554433, name: "Other", isComment: 0, expanded: 0, parent: 0 });
-  wtg.counts[2].count += 1;
-  writeFileSync(path, JSON.stringify(wtg, null, 2));
+  const init = readCategory(dir, "Initialization");
+  if (init.type !== 4 || init.expanded !== 0) throw new Error("flat.w3x's Initialization category isn't as expected");
+  addCategory(dir, "Other", "Initialization");
   run("pack", dir, "-o", join(here, "trigger-folds.w3x"));
 } finally {
   rmSync(scratch, { recursive: true, force: true });

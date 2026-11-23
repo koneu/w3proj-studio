@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { addVariables } from "./trigger-folder.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const flag = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
@@ -35,18 +36,10 @@ try {
   const dir = join(scratch, "p");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
   const map = join(dir, "map");
-  const file = join(map, "war3map.wtg.json");
-  const doc = JSON.parse(readFileSync(file, "utf8"));
-  // As Studio's add_trigger_variable writes them (v7): the variable, a type 64 item naming it under the first category
-  // (Initialization, 33554432), and the variable count (counts[6]).
+  // The variables and their places under the first category (Initialization): variables.json and `$name` entries of
+  // map/triggers/Initialization/ (pack gives them ids and raises the variable count).
   const picked = VARS.filter(([name, , , compiles]) => (flag("--only") ? name === flag("--only") : compiles || process.argv.includes("--all")));
-  picked.forEach(([name, type, initialValue], i) => {
-    const id = 100663296 + i;
-    doc.variables.push({ name, type, unknown: 1, isArray: false, arraySize: 1, initialized: initialValue !== "", initialValue, id, parent: 33554432 });
-    doc.items.push({ type: 64, id, name, parent: 33554432 });
-  });
-  doc.counts[6].count = picked.length;
-  writeFileSync(file, JSON.stringify(doc, null, 2));
+  addVariables(dir, picked.map(([name, type, initialValue]) => ({ name, type, unknown: 1, isArray: false, arraySize: 1, initialized: initialValue !== "", initialValue })));
   // No script: the editor makes its own when it saves, Studio's rebuild its own (it keeps a script it didn't write).
   rmSync(join(map, "war3map.j"), { force: true });
   run("pack", dir, "-o", flag("--out") ? resolve(flag("--out")) : join(here, "var-code.w3x"), "--force-stale");

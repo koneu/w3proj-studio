@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { addLookCameras, lookCamera, parseLook, resolveLook, terrainHead } from "../../../app/scripts/we-camera.mjs";
 import { requireFresh } from "../../binfresh.mjs";
+import { addGuiTrigger, addScriptTrigger } from "./trigger-folder.mjs";
 import { gamePath } from "../../gamepath.mjs";
 
 const [empty, cli, out] = process.argv.slice(2).filter((a) => !a.startsWith("--")).map((p) => (p ? resolve(p) : p));
@@ -36,37 +37,23 @@ try {
   const look = resolveLook(parseLook("0,0,1500"), head);
   cameras.cameras.push(lookCamera(look, 0, cameras.version, cameras.localAngles === true, "Alpha"), lookCamera(look, 1, cameras.version, cameras.localAngles === true, "Bravo"));
   writeFileSync(camerasFile, `${JSON.stringify(cameras, null, 2)}\n`);
-  const wtgFile = join(map, "war3map.wtg.json");
-  const wtg = JSON.parse(readFileSync(wtgFile, "utf8"));
-  wtg.counts[3].count += 3;
-  wtg.items.push({
-    type: 8, name: "Use Cams", description: "", isComment: 0, id: (3 << 24) | 1, enabled: true, isCustom: false,
-    initiallyOff: false, runOnInit: false, parent: 33554432,
-    ecas: [
-      eca(0, "MapInitializationEvent", []),
-      apply("Alpha"),
-      apply("Bravo", { enabled: false }),
-      eca(2, "CustomScriptCode", [{ type: 3, value: "// gg_cam_Alpha is named here in script" }]),
-    ],
-  }, {
-    type: 8, name: "Block", description: "", isComment: 0, id: (3 << 24) | 2, enabled: true, isCustom: false,
-    initiallyOff: false, runOnInit: false, parent: 33554432,
-    ecas: [
-      eca(0, "TriggerRegisterTimerEventSingle", [{ type: 3, value: "5.00" }]),
-      eca(2, "IfThenElseMultiple", [], { children: [
-        eca(1, "OperatorCompareInteger", [{ type: 3, value: "1" }, { type: 0, value: "OperatorEqual" }, { type: 3, value: "1" }], { group: 0 }),
-        eca(2, "DoNothing", [], { group: 1 }),
-        eca(2, "CommentString", [{ type: 3, value: "else part" }], { group: 2 }),
-      ] }),
-    ],
-  }, {
-    type: 8, name: "Textual", description: "", isComment: 0, id: (3 << 24) | 3, enabled: true, isCustom: true,
-    initiallyOff: false, runOnInit: false, parent: 33554432, ecas: [],
-  });
-  writeFileSync(wtgFile, JSON.stringify(wtg, null, 1));
-  const wctFile = join(map, "war3map.wct.txt");
-  const wct = readFileSync(wctFile, "utf8").replace(/\r?\n$/, "");
-  writeFileSync(wctFile, `${wct}\n//== trigger 1 (no text): Use Cams ==\n//== trigger 2 (no text): Block ==\n//== trigger 3: Textual ==\nfunction InitTrig_Textual takes nothing returns nothing\n    call CameraSetupApplyForPlayer(true, gg_cam_Bravo, Player(0), 0)\nendfunction\n`);
+  const plain = { description: "", isComment: 0, enabled: true, initiallyOff: false, runOnInit: false };
+  addGuiTrigger(dir, { ...plain, name: "Use Cams", ecas: [
+    eca(0, "MapInitializationEvent", []),
+    apply("Alpha"),
+    apply("Bravo", { enabled: false }),
+    eca(2, "CustomScriptCode", [{ type: 3, value: "// gg_cam_Alpha is named here in script" }]),
+  ] });
+  addGuiTrigger(dir, { ...plain, name: "Block", ecas: [
+    eca(0, "TriggerRegisterTimerEventSingle", [{ type: 3, value: "5.00" }]),
+    eca(2, "IfThenElseMultiple", [], { children: [
+      eca(1, "OperatorCompareInteger", [{ type: 3, value: "1" }, { type: 0, value: "OperatorEqual" }, { type: 3, value: "1" }], { group: 0 }),
+      eca(2, "DoNothing", [], { group: 1 }),
+      eca(2, "CommentString", [{ type: 3, value: "else part" }], { group: 2 }),
+    ] }),
+  ] });
+  addScriptTrigger(dir, { ...plain, name: "Textual" },
+    "function InitTrig_Textual takes nothing returns nothing\n    call CameraSetupApplyForPlayer(true, gg_cam_Bravo, Player(0), 0)\nendfunction\n");
   run("pack", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });

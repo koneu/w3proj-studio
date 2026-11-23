@@ -7,7 +7,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
-import { checkScripts, scriptFiles, smokeChecks, smokeListProblems, syntaxProblems } from "./check-scripts.mjs";
+import { checkScripts, generatorProblems, scriptFiles, smokeChecks, smokeListProblems, syntaxProblems } from "./check-scripts.mjs";
 
 // The repository's root, found from the working directory up.
 const repo = dirname(dirname(repoPath("tests", "gate.mjs")));
@@ -66,4 +66,11 @@ test("the --only map and the full run must name the same checks", () => {
   assert.match(smokeListProblems(unsorted).join("\n"), /alphabetical order; byHand comes before viewModes/);
   // The map itself gone (renamed): said so, not passed.
   assert.match(smokeListProblems(smoke.replace("const onlyChecks = {", "const checks = {")).join("\n"), /wasn't found/);
+});
+
+test("a generator that names war3map.wtg.json or war3map.wct.txt is a problem", () => {
+  assert.deepEqual(generatorProblems({ "make-ok.mjs": 'join(map, "triggers")' }), []);
+  const p = generatorProblems({ "make-a.mjs": 'join(map, "war3map.wtg.json")', "make-b.mjs": "// war3map.wct.txt and war3map.wtg.json" });
+  assert.equal(p.length, 3);
+  assert.ok(p[0].startsWith("make-a.mjs: names war3map.wtg.json"));
 });
