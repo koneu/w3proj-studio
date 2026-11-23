@@ -6,7 +6,7 @@ import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { smallestMipColor } from "../../lib/image/mipcolor";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { parseMdx } from "../../lib/model/mdx";
+import { readModel } from "../../lib/model/mdl";
 import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapObject, type MinimapParams, type PathMask, type Rgb } from "./minimap";
 import { importedPath, modeNames } from "../../lib/imports";
 import { loadSkins, modelPath, plainModelPath, reforgedModelPath, type Placed, type Skin } from "./objects";
@@ -101,10 +101,7 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
     reforgedModelPath(skin, 0),
     skin.reforgedFile ? plainModelPath({ file: skin.reforgedFile, numVar: skin.numVar }) : undefined,
   ].filter((p): p is string => !!p);
-  let model;
-  for (const p of candidates) {
-    try { model = parseMdx(await readFile(p)); break; } catch { /* the next candidate */ }
-  }
+  const model = await readModel(candidates, readFile).catch(() => undefined);
   if (!model) return null;
   const pathOf = (tex: { replaceableId: number; path: string }) => tex.replaceableId === 0 ? tex.path
     : tex.replaceableId === skin.texId && skin.texFile ? (/\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp`) : "";

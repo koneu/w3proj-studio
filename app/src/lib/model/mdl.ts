@@ -48,6 +48,26 @@ export function parseModel(buf: Uint8Array): Model {
   return parseMdl(new TextDecoder("latin1").decode(bom ? buf.subarray(3) : buf));
 }
 
+/** The MDL text file of a model path (the same name, `.mdl`). */
+export const mdlPath = (path: string): string => path.replace(/\.mdx$/i, ".mdl");
+
+/** The files readModel tries, in order: the `.mdx` paths, then the same names as `.mdl`. */
+export function modelCandidates(paths: readonly (string | undefined)[]): string[] {
+  const mdx = paths.filter((p): p is string => !!p);
+  return [...new Set([...mdx, ...mdx.map(mdlPath)])];
+}
+
+/** Reads a model by its `.mdx` paths, in order, then by the same names as `.mdl`: a map can hold a model only as MDL
+ *  text (imported next to its object data). The first one read and parsed wins (parseModel: either form); when none
+ *  is, the first failure is thrown. The terrain view's objects, the baked shadows and the minimap read models so. */
+export async function readModel(paths: readonly (string | undefined)[], readFile: (path: string) => Promise<Uint8Array>): Promise<Model> {
+  let failure: { error: unknown } | undefined;
+  for (const p of modelCandidates(paths)) {
+    try { return parseModel(await readFile(p)); } catch (error) { failure ??= { error }; }
+  }
+  throw failure ? failure.error : new Error("no model path");
+}
+
 /** Reads MDL text. Throws, with the line, when a block the renderer needs can't be read. */
 export function parseMdl(text: string): Model {
   return new MdlReader(text).model();

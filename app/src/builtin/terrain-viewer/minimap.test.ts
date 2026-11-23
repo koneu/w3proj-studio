@@ -666,6 +666,35 @@ test("minimapObjects: a doodad whose model can't be read is a grey dot whatever 
   assert.deepEqual(objects.map((o) => o.rgb), [[183, 183, 183], [183, 183, 183]]);
 });
 
+test("modelTextureColor: a model the map only has as .mdl gives the colour the same model gives as .mdx, the .mdx asked for first", async () => {
+  const mdl = new TextEncoder().encode([
+    "Version { FormatVersion 800, }",
+    "Model \"OnlyMdl\" { NumGeosets 0, BlendTime 150, }",
+    "Textures 3 {",
+    "\tBitmap { Image \"\", ReplaceableId 1, }",
+    "\tBitmap { Image \"Textures\\RockWall.blp\", }",
+    "\tBitmap { Image \"Textures\\Moss.blp\", }",
+    "}",
+  ].join("\n"));
+  const mdx = mdxOfTextures([[1, ""], [0, "Textures\\RockWall.blp"], [0, "Textures\\Moss.blp"]]);
+  const textures: [string, Uint8Array][] = [["Textures\\RockWall.blp", tgaOf([87, 88, 82])], ["Textures\\Moss.blp", tgaOf([20, 90, 30])]];
+  const asked: string[] = [];
+  const reader = (files: Map<string, Uint8Array>) => async (p: string) => { asked.push(p); const f = files.get(p); if (!f) throw new Error(`not found: ${p}`); return f; };
+  const asMdl = reader(new Map([["Doodads\\Imp\\Imp0.mdl", mdl], ...textures]));
+  const asMdx = reader(new Map([["Doodads\\Imp\\Imp0.mdx", mdx], ...textures]));
+  const skin = { file: "Doodads\\Imp\\Imp.mdl", numVar: 2, texId: -1, texFile: "" };
+  for (const mean of [false, true]) {
+    const want = await modelTextureColor(skin, asMdx, mean);
+    assert.deepEqual(want, [87, 88, 82], `the .mdx's colour (mean ${mean})`);
+    asked.length = 0;
+    assert.deepEqual(await modelTextureColor(skin, asMdl, mean), want, `the .mdl's is the same (mean ${mean})`);
+    assert.equal(asked[0], "Doodads\\Imp\\Imp0.mdx", "the .mdx first");
+    assert.ok(asked.indexOf("Doodads\\Imp\\Imp0.mdl") > asked.indexOf("Doodads\\Imp\\Imp.mdx"), "the .mdl names after all the .mdx ones");
+  }
+  // Control: with neither, no colour.
+  assert.equal(await modelTextureColor(skin, reader(new Map(textures))), null);
+});
+
 test("modelTextureColor and minimapBase in DE fall back to the HD model when the plain Classic file isn't stored (EW00, ET00, EMt0)", async () => {
   const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
   const tables: Record<string, string> = {

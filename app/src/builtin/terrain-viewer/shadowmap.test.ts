@@ -357,7 +357,12 @@ test("the save's shadow update leaves the stored war3map.shd as it is when the m
   // Flaky: the first read fails, later ones would go through. Before and after agree on the model (one read), so the
   // diff doesn't stamp in the after's shadow alone: refused as above, not half-updated.
   let calls = 0;
-  const flaky = await save("sd-save-flaky", async (p) => { if (/\.mdx$/i.test(p) && calls++ === 0) throw new Error("flaky"); return TOWER_OPAQUE; });
+  // (Only the .mdx is there: the .mdl names asked for after it are not found.)
+  const flaky = await save("sd-save-flaky", async (p) => {
+    if (!/\.mdx$/i.test(p)) throw new Error(`not found: ${p}`);
+    if (calls++ === 0) throw new Error("flaky");
+    return TOWER_OPAQUE;
+  });
   assert.deepEqual(flaky.writes, [], "a flaky read doesn't half-update the file");
   assert.equal(flaky.warnings.length, 1);
 });
@@ -403,4 +408,64 @@ test("predictShadows in DE falls back to the HD model when the plain Classic fil
   const sdOut = await predictShadows(terrain, [placed("EW00", 3), placed("ET00", 8)], sdSkins, () => undefined, read, undefined, undefined, () => "sd", sdStats);
   assert.deepEqual(sdStats, { wanted: 2, unreadable: 2 });
   assert.equal(shadowed(sdOut), 0);
+});
+
+/** towerModel's opaque box as MDL text (a map can import a model so). */
+function towerMdl(h = 1000): Uint8Array {
+  const w = 50;
+  const corners: number[][] = [];
+  for (const z of [0, h]) for (const [x, y] of [[-w, -w], [w, -w], [w, w], [-w, w]]) corners.push([x, y, z]);
+  const quads = [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [4, 5, 6, 7]];
+  const faces = quads.flatMap(([a, b, c, d]) => [a, b, c, a, c, d]);
+  const rows = (vs: number[][]) => vs.map((v) => `{ ${v.join(", ")} },`).join(" ");
+  return new TextEncoder().encode([
+    "Version { FormatVersion 800, }",
+    `Model "tower" { NumGeosets 1, BlendTime 150, MinimumExtent { ${-w}, ${-w}, 0 }, MaximumExtent { ${w}, ${w}, ${h} }, BoundsRadius ${h}, }`,
+    "Materials 1 { Material { Layer { FilterMode None, static TextureID 0, } } }",
+    "Geoset {",
+    `\tVertices 8 { ${rows(corners)} }`,
+    `\tNormals 8 { ${rows(corners.map(() => [0, 0, 1]))} }`,
+    `\tTVertices 8 { ${rows(corners.map(() => [0, 0]))} }`,
+    `\tVertexGroup { ${corners.map(() => "0,").join(" ")} }`,
+    `\tFaces 1 ${faces.length} { Triangles { { ${faces.join(", ")} }, }, }`,
+    "\tGroups 1 1 { Matrices { 0 }, }",
+    "\tMaterialID 0,",
+    "}",
+    "Bone \"root\" { ObjectId 0, GeosetId 0, GeosetAnimId None, }",
+    "PivotPoints 1 { { 0, 0, 0 }, }",
+  ].join("\n"));
+}
+
+test("a doodad and a special doodad the map only has as .mdl cast the shadow of the same model as .mdx, the .mdx names asked for first", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LOrk]\nfile=Doodads\\Imp\\Rock\nnumVar=2\nshadow=1\n[YCr2]\nfile=Doodads\\Imp\\Cave\nshadow=1",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const mode = "sd-mdl-only-shadow-test";
+  const skins = await loadSkins({ settings: { get: () => mode }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api);
+  const mdl = towerMdl();
+  const terrain = FLAT_32, ground = FLAT_32_GROUND;
+  const shadowed = (m: Uint8Array) => m.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0);
+  const placed: Placed[] = [{ id: "LOrk", variation: 1, position: [terrain.offsetX + 6 * 128, terrain.offsetY + 6 * 128, 0], angle: 0, scale: [1, 1, 1] }];
+  const specials = specialShadows([{ id: "YCr2", x: 20, y: 20 }], skins, () => ({ width: 4, height: 4 }));
+  const asked: string[] = [];
+  // Each its own mode: the meshes are kept per mode and path, and the two runs read the same paths in different forms.
+  const predict = (ext: string, m: string, stats?: ShadowStats) => predictShadows(terrain, placed, skins, () => undefined, async (p) => {
+    asked.push(p);
+    if (new RegExp(`^Doodads\\\\Imp\\\\(Rock1|Cave)\\.${ext}$`, "i").test(p)) return ext === "mdx" ? TOWER_OPAQUE : mdl;
+    throw new Error(`not found: ${p}`);
+  }, undefined, undefined, () => m, stats, specials);
+  const asMdx = await predict("mdx", `${mode}-mdx`);
+  assert.ok(shadowed(asMdx) > 100, `the .mdx casts (the control): ${shadowed(asMdx)} cells`);
+  asked.length = 0;
+  const stats: ShadowStats = { wanted: 0, unreadable: 0 };
+  const asMdl = await predict("mdl", `${mode}-mdl`, stats);
+  assert.deepEqual(asMdl, asMdx, "the .mdl casts the same cells");
+  assert.deepEqual(stats, { wanted: 1, unreadable: 0 });
+  const rock = asked.filter((p) => /Rock/.test(p));
+  assert.equal(rock[0], "Doodads\\Imp\\Rock1.mdx", "the .mdx first");
+  assert.ok(rock.indexOf("Doodads\\Imp\\Rock1.mdl") > rock.indexOf("Doodads\\Imp\\Rock.mdx"), "the .mdl names after all the .mdx ones");
+  // Control: with neither form, nothing is cast.
+  assert.equal(shadowed(await predictShadows(terrain, placed, skins, () => undefined, async (p) => { throw new Error(`not found: ${p}`); },
+    undefined, undefined, () => `${mode}-none`, undefined, specials)), 0);
 });

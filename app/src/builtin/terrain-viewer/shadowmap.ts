@@ -3,7 +3,8 @@
 // (trees) cast no baked shadows.
 
 import { decodeImage } from "../../lib/image/index.ts";
-import { parseMdx } from "../../lib/model/mdx";
+import { modelCandidates, parseModel, readModel } from "../../lib/model/mdl";
+import type { Model } from "../../lib/model/mdx";
 import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
 import { modelPath, plainModelPath, reforgedModelPath, type loadSkins, type Placed, type Skin } from "./objects";
@@ -46,7 +47,8 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
   const key = `${artMode()}|${path.toLowerCase()}`;
   if (failed.has(key)) return Promise.resolve(null);
   return meshes.get(artMode, path.toLowerCase(), async () => {
-    const model = parseMdx(await readFile(path));
+    // Exactly this file, either form (predictShadows asks for the .mdl names after all the .mdx ones: modelCandidates).
+    const model = parseModel(await readFile(path));
     const maps = new Map<string, AlphaMap | null>();
     // Classic art: the editor casts alpha-tested geosets whole, their textures' holes included (we-drive, branch
     // we-shadow-3, SD: LRrk's ten variations and eight turns, 984 cells; whole quads 983 of them and 5 more, with the
@@ -66,7 +68,7 @@ const rampMeshes = new ModeCache<{ positions: number[]; faces: number[] } | null
 const specialMeshes = new ModeCache<{ positions: number[]; faces: number[] } | null>();
 
 /** A model's most detailed triangles, in its own space. */
-function modelTriangles(model: ReturnType<typeof parseMdx>): { positions: number[]; faces: number[] } {
+function modelTriangles(model: Model): { positions: number[]; faces: number[] } {
   const positions: number[] = [], faces: number[] = [];
   for (const g of model.geosets) {
     if (g.lod > 0) continue;
@@ -106,7 +108,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   for (const sp of specials) {
     const mesh = await specialMeshes.get(artMode, sp.path.toLowerCase(), async () => {
       try {
-        const m = modelTriangles(parseMdx(await readFile(sp.path)));
+        const m = modelTriangles(await readModel([sp.path], readFile));
         return m.faces.length ? m : null;
       } catch { return null; }
     });
@@ -134,7 +136,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   // again on every prediction otherwise): before and after of a save agree on it. clearShadowMeshes forgets it.
   const heights = (path: string) => cliffHeights.get(artMode, path.toLowerCase(), async () => {
     try {
-      const { positions, faces } = modelTriangles(parseMdx(await readFile(path)));
+      const { positions, faces } = modelTriangles(await readModel([path], readFile));
       return faces.length ? cliffCellHeights(positions, faces) : null;
     } catch { return null; }
   });
@@ -148,7 +150,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
     const path = `Doodads\\Terrain\\${dir}\\${dir}${shadowRampName(side.outer, side.base)}0.mdx`;
     const mesh = await rampMeshes.get(artMode, path.toLowerCase(), async () => {
       try {
-        const m = modelTriangles(parseMdx(await readFile(path)));
+        const m = modelTriangles(await readModel([path], readFile));
         return m.faces.length ? m : null;
       } catch { return null; }
     });
@@ -270,7 +272,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     let mesh: ShadowMesh | typeof NO_FACES | null = null;
-    for (const path of shadowPaths(skin, d.variation)) {
+    for (const path of modelCandidates(shadowPaths(skin, d.variation))) {
       mesh = await modelMesh(path, readFile, artMode, failed);
       if (mesh !== null) break;
     }

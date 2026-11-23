@@ -4,7 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
-import { parseModel } from "../../lib/model/mdl";
+import { readModel } from "../../lib/model/mdl";
 import { parseMdx, type Model } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
 import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
@@ -411,8 +411,6 @@ export function modelPath(skin: Pick<Skin, "file" | "numVar">, variation: number
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
 
-/** The MDL text file of a model path (the same name, `.mdl`). */
-export const mdlPath = (path: string): string => path.replace(/\.mdx$/i, ".mdl");
 
 /** Whether a model's own particle effects show anything. Some Reforged models keep their classic emitters as empty
  *  placeholders (the Lordaeron brazier LObr: colours and alphas all 0) next to their PopcornFX fire: those count as
@@ -658,14 +656,8 @@ export class ObjectLoader {
       let again = false;
       const read = (p: string) => this.readFile(p).catch((e: unknown) => { again ||= !isMissing(e); throw e; });
       const load = m = this.track((async () => {
-        const model = parseModel(await read(req.path)
-          .catch((e: unknown) => { if (req.plain) return read(req.plain); throw e; })
-          .catch((e: unknown) => { if (req.reforged) return read(req.reforged); throw e; })
-          // A model the map only has as MDL text (imported next to its object data): parseModel reads either form.
-          .catch(async (e: unknown) => {
-            for (const p of [req.path, req.plain]) if (p) { try { return await read(mdlPath(p)); } catch { /* the next candidate */ } }
-            throw e;
-          }));
+        // The .mdx names first, then a model the map only has as MDL text (imported next to its object data).
+        const model = await readModel([req.path, req.plain, req.reforged], read);
         const gpu = new ModelGpu(this.gl, model);
         // Stand still at the start of its "Stand" animation.
         gpu.props = req.props ?? [];
