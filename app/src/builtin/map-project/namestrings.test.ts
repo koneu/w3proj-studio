@@ -131,6 +131,49 @@ test("no war3map.wts: one is made with the new strings", async () => {
   assert.equal(new StringTable(files["map/war3map.wts"]).get(1), "Plain player 1");
 });
 
+// studio-paths-nowts: the editor reads a reference with no string as no text and its save writes "".
+test("no war3map.wts: stringless TRIGSTR_ names become \"\" in one edit, no table made; with a table they stay", async () => {
+  const stringless = () => ({
+    [INFO]: JSON.stringify({ name: "Echo", players: [{ id: 0, name: "TRIGSTR_001" }, { id: 1, name: "TRIGSTR_002" }], forces: [{ flags: 0, name: "TRIGSTR_003" }] }),
+  } as Record<string, string>);
+  const files = stringless();
+  const { w3, writes, records } = fakeW3(files);
+  assert.deepEqual(await namesToStringTable(w3), { added: [], reused: 0, kept: null, blanked: [1, 2, 3] });
+  assert.deepEqual(info(files).players.map((p) => p.name), ["", ""]);
+  assert.deepEqual(info(files).forces.map((f) => f.name), [""]);
+  assert.equal(info(files).name, "Echo");
+  assert.deepEqual(writes, [INFO]);
+  assert.equal("map/war3map.wts" in files, false, "no table made from nothing");
+  assert.equal(records.length, 1, "one undoable edit");
+  // Mixed with a plain name: it gets a string of a new table, the stringless ones "".
+  const mixed = stringless();
+  const doc = JSON.parse(mixed[INFO]);
+  doc.players[1].name = "Plain";
+  mixed[INFO] = JSON.stringify(doc);
+  const m = fakeW3(mixed);
+  const got = await namesToStringTable(m.w3);
+  assert.deepEqual(got.blanked, [1, 3]);
+  assert.equal(got.added.length, 1);
+  assert.deepEqual(info(mixed).players.map((p) => p.name), ["", `TRIGSTR_${String(got.added[0]).padStart(3, "0")}`]);
+  assert.equal(new StringTable(mixed["map/war3map.wts"]).get(got.added[0]), "Plain");
+  // The control: with a war3map.wts the references stay, even one whose string it lacks.
+  const kept = { ...stringless(), "map/war3map.wts": WTS };
+  const k = fakeW3(kept);
+  assert.deepEqual(await namesToStringTable(k.w3), { added: [], reused: 0, kept: null });
+  assert.deepEqual(info(kept).players.map((p) => p.name), ["TRIGSTR_001", "TRIGSTR_002"]);
+  assert.deepEqual(k.writes, []);
+});
+
+test("a chapter map without war3map.wts: its stringless names become \"\"", async () => {
+  const files = {
+    "maps/Chapter 1/map/war3map.w3i.json": JSON.stringify({ name: "C1", players: [{ id: 0, name: "TRIGSTR_004" }], forces: [] }),
+  } as Record<string, string>;
+  const { w3 } = fakeW3(files);
+  const got = await namesToStringTable(w3);
+  assert.deepEqual(got.chapters, [{ folder: "maps/Chapter 1", added: [], reused: 0, blanked: [4] }]);
+  assert.equal(JSON.parse(files["maps/Chapter 1/map/war3map.w3i.json"]).players[0].name, "");
+});
+
 test("a table there but unreadable, or a w3i that isn't JSON: throws, nothing written", async () => {
   const files = project();
   files["map/war3map.wts"] = "\u0000unreadable";
