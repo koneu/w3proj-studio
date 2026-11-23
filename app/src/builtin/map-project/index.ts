@@ -157,6 +157,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         throw new Error(`Not packed: ${closed} of the ${state.subterrains.length} subterrains are closed, so pathing, shadows and the minimap follow part of the map only. Open them all (Open Subterrains…), then build.`);
       }
     }
+    // Snap and Fix Doodads on Load, which the World Editor applies whenever it opens a map and its save writes: on the
+    // placement files as stored, also when the terrain view never opened them (terrain-viewer openrules.ts; the
+    // extension can be off). Pathing, shadows and the minimap follow; the script reads the destructables' places.
+    type Ruled = { snapped: number; fixed: number; units: number; unitsWritten: boolean; notes: string[] };
+    const ruled = await w3.commands.execute<Ruled | null>("w3.terrain.openRulesForPack").catch((e) => {
+      out.append(`doodads left as they are: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    });
+    for (const n of ruled?.notes ?? []) out.append(`Snap and Fix Doodads on Load: ${n}`);
+    if (ruled && (ruled.snapped || ruled.fixed || ruled.unitsWritten)) {
+      const parts = [ruled.snapped ? `put ${ruled.snapped} doodad${ruled.snapped === 1 ? "" : "s"} on ${ruled.snapped === 1 ? "its" : "their"} grid and facing` : "",
+        ruled.fixed ? `gave ${ruled.fixed} doodad${ruled.fixed === 1 ? "" : "s"} the scale, flags, life or height the World Editor saves` : "",
+        ruled.units ? `gave ${ruled.units} unit${ruled.units === 1 ? "" : "s"} the facing the World Editor reads` : ""].filter(Boolean);
+      out.append(`${parts.join(", ")} (war3map.doo, war3mapUnits.doo), as the World Editor does when it opens a map (settings Snap and Fix Doodads on Load)`);
+      await w3.commands.execute("w3.script.settle").catch(() => {});
+    }
     // The destructables' flag "placed by the game" as the script in the build has it (the extension can be off).
     await w3.commands.execute("w3.script.followFlags").catch(() => {});
     if (check) {

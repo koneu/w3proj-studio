@@ -20,6 +20,10 @@ async function view(page, spec) {
     const stage = window.__driveEd.host.querySelector(".model-stage");
     const r = devicePixelRatio;
     Object.assign(stage.style, { position: "fixed", left: "0", top: "0", flex: "none", zIndex: "10000", width: 1184 / r + "px", height: 844 / r + "px" });
+    // The editor's terrain view has no minimap on it (its minimap is a window of its own): Studio's, in the view's
+    // lower left, would take the clicks the editor's view gives the ground there (a Level click at 300,800 painted
+    // nothing, branch fix/level-stroke-we). Hidden for this editor; the panel's own hidden flag doesn't undo it.
+    stage.querySelector(".terrain-minimap")?.style.setProperty("display", "none", "important");
     window.__driveEd.redraw();
     // Race two frames against a 300 ms fallback so a throttled/hidden window under Xvfb can never hang here.
     await Promise.race([
@@ -44,6 +48,16 @@ export async function uiStep(page, actions) {
   checkUiActions(actions);
   // dragMod's key, held during the next drag only (DevTools' bits: 1 Alt, 2 Ctrl, 8 Shift).
   let dragModifiers = 0;
+  /** Refuses a press that wouldn't reach the terrain view's canvas at `p` (something of Studio's on top of the view
+   *  there): the editor's view would take it, so both sides would differ for a reason no spec is about. */
+  const onView = async (p, what) => {
+    const hit = await page.evaluate(`((x, y) => {
+      const c = document.querySelector(".model-stage canvas"), e = document.elementFromPoint(x, y);
+      if (!e || e === c) return null;
+      return e.tagName.toLowerCase() + (typeof e.className === "string" ? e.className.split(" ").filter(Boolean).map((k) => "." + k).join("") : "");
+    })(${p.x}, ${p.y})`);
+    if (hit) throw new Error(`${what}: Studio's ${hit} covers the terrain view there, so the press wouldn't reach the ground`);
+  };
   for (const [kind, ...a] of actions) {
     if (kind === "view") await view(page, a[0]);
     else if (kind === "tab") {
@@ -58,6 +72,7 @@ export async function uiStep(page, actions) {
     else if (kind === "size") await page.evaluate(`(() => { const i = document.querySelector(".painter-options input[type=range]"); if (!i) throw new Error("no brush size slider"); const v = ${Number(a[0])}; if (v < Number(i.min) || v > Number(i.max)) throw new Error("brush size " + v + " is outside the slider's " + i.min + " to " + i.max); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     else if (kind === "click") {
       const p = at(a[0], a[1]);
+      await onView(p, `click ${a[0]},${a[1]}`);
       await hands.mouse("mouseMoved", p.x, p.y);
       await hands.mouse("mousePressed", p.x, p.y, 1);
       await hands.mouse("mouseReleased", p.x, p.y, 0);
@@ -68,6 +83,7 @@ export async function uiStep(page, actions) {
       if (!p) throw new Error(`the ground point ${a.join(",")} is behind the camera`);
       const [x, y] = p.map(Math.round);
       if (!(x >= 0 && y >= 0 && x < 1184 && y < 844)) throw new Error(`the ground point ${a.join(",")} is at ${x},${y}, outside the view`);
+      await onView({ x, y }, `clickGround ${a.join(",")}`);
       await hands.mouse("mouseMoved", x, y);
       await hands.mouse("mousePressed", x, y, 1);
       await hands.mouse("mouseReleased", x, y, 0);
@@ -81,6 +97,7 @@ export async function uiStep(page, actions) {
     } else if (kind === "drag") {
       // a[4]: the drag's time (as the editor's --drag @MS): the painter re-applies a held brush at most every
       // HEIGHT_TICK (40 ms), so moves 30 ms apart drop some, and which ones (the stroke's end too) went by the timing.
+      await onView(at(a[0], a[1]), `drag from ${a[0]},${a[1]}`);
       await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20, a[4] ? a[4] / 20 : 30, dragModifiers);
       dragModifiers = 0;
       await settled();

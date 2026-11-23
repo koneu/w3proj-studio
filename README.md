@@ -619,7 +619,10 @@ shadows and the minimap all follow the terrain and doodads.
 view's checks as the view and Build run them, and check_melee / check_path on the saved files as the MCP tools answer
 them in the app. Ignored reports aren't listed, only counted; a check that can't run (no game folder) is an error.
 check_melee runs by default only on maps with war3map.w3i's Melee flag (a map without it says "skipped: not a melee
-map"). `--only=problems` leaves it out, `--only=melee` forces it on any map. It writes nothing: its backend refuses every write.
+map"). `--only=problems` leaves it out, `--only=melee` forces it on any map, and `--melee on|off|auto` forces it on or
+off (`off` also with `--only=melee`; it wins over the manifest). The project can set this for good with `melee = "on" |
+"off" | "auto"` under `[checks]` in `w3proj.toml` (auto, the default, is the Melee flag as above; `--only=melee` and
+`--melee` win over it); the Problems view has the same three choices ("Melee checks"). It writes nothing: its backend refuses every write.
 
 Checks can be switched off per project in a `[checks]` section of `w3proj.toml` (the Problems view and `w3proj check`
 both read it; Rust leaves it alone when it rewrites the manifest):

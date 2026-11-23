@@ -13,6 +13,7 @@
       { "id": "w3.problems.deleteInvalid", "when": "project", "menu": "Tools:1:9", "title": "Delete Invalid Objects…", "category": "Project" },
       { "id": "w3.problems.show", "menu": "View:2:3", "title": "Show Problems", "category": "Project" },
       { "id": "w3.problems.toggleIgnored", "when": "project", "title": "Show or Hide Ignored Problems", "category": "Project" },
+      { "id": "w3.problems.setMelee", "when": "project", "title": "Set Melee Checks (on, off, auto)", "category": "Project", "hidden": true },
       { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
     ],
     "mcpTools": [

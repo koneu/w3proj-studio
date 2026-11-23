@@ -5,7 +5,7 @@
 //   problems  the Problems view's checks (builtin/problems: the service's runChecked, so the project's
 //             .w3proj/problems-ignore.json is honoured and the ignored are counted as in the view and Build)
 //   melee     check_melee (terrain-viewer/meleefacts.ts meleeReport), on the saved files: by default only on maps whose
-//             war3map.w3i has the Melee flag (--only=melee runs it on any map). w3proj.toml's [checks] disable = [...] switches checks off (builtin/problems/checkconfig.ts)
+//             war3map.w3i has the Melee flag (--only=melee runs it on any map; --melee on|off|auto and w3proj.toml's [checks] melee = "on"|"off"|"auto" decide it too). w3proj.toml's [checks] disable = [...] switches checks off (builtin/problems/checkconfig.ts)
 //   path      check_path between two points (meleefacts.ts pathReport); only when the job gives them
 //
 // Nothing is written: the checks only read, and the CLI's backend refuses writes for this job.
@@ -16,7 +16,7 @@ import { PROBLEMS_SERVICE, TERRAIN_SERVICE, type CheckedGroup, type ProblemsServ
 import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
-import { MANIFEST_FILE, applySeverity, disabledIds, isDisabled, readChecksConfig } from "../builtin/problems/checkconfig";
+import { MANIFEST_FILE, MELEE_SETTINGS, applySeverity, disabledIds, isDisabled, meleeMode, readChecksConfig, type MeleeSetting } from "../builtin/problems/checkconfig";
 import { DEFAULT_UNIT_SIZE } from "../builtin/terrain-viewer/pathcheck";
 import { meleeReport, pathReport, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
@@ -34,6 +34,8 @@ export interface CheckJob {
   root: string;
   /** The sections asked for by name (`--only`); absent: problems, and melee on a melee map (path needs points). */
   only?: Section[];
+  /** `--melee on|off|auto`: whether check_melee runs whatever w3proj.toml says; absent: the manifest's `[checks] melee`. */
+  melee?: MeleeSetting;
   /** check_path's two points, world coordinates. */
   path?: { from: [number, number]; to: [number, number] };
   /** The collision size (a radius) of the unit the path and melee checks walk with; a Footman's (31) as the MCP tools. */
@@ -70,6 +72,7 @@ const at = (p: readonly number[]) => `${Math.round(p[0])}, ${Math.round(p[1])}`;
 export async function check(job: CheckJob): Promise<CheckReport> {
   const asked = job.only ? new Set(job.only) : null;
   for (const s of asked ?? []) if (!SECTIONS.includes(s)) throw new Error(`no section ${JSON.stringify(s)} (problems, melee, path)`);
+  if (job.melee !== undefined && !MELEE_SETTINGS.includes(job.melee)) throw new Error(`--melee: ${JSON.stringify(job.melee)} isn't on, off or auto`);
   if (asked?.has("path") && !job.path) throw new Error("the path check needs its two points (--path x1,y1:x2,y2)");
   const unitSize = typeof job.unitSize === "number" && job.unitSize >= 0 ? job.unitSize : DEFAULT_UNIT_SIZE;
   const h = headless([problemsManifest, terrainManifest, pathingManifest] as ExtensionManifest[], job.settings);
@@ -114,12 +117,16 @@ export async function check(job: CheckJob): Promise<CheckReport> {
   if (wantMelee) {
     let skip: string | null = null;
     let why: string | undefined;
-    if (!asked) {
-      // By default a melee map (the w3i's Melee flag) is held to what ladder maps do; no other map is.
+    // On, off, or the w3i's Melee flag: --melee, else --only=melee, else w3proj.toml's [checks] melee (auto by default:
+    // a melee map is held to what ladder maps do; no other map is).
+    const decided = meleeMode({ force: job.melee, asked: !!asked, setting: cfg.config.melee });
+    if (decided.mode === "off") skip = `switched off (${decided.by} = off)`;
+    else if (decided.mode === "on") { if (decided.by !== "--only=melee") why = `forced on (${decided.by} = on), whatever the Melee flag says`; }
+    else {
       try {
         const info = await readMapDocStrict<{ flags?: number }>(w3, "map/war3map.w3i.json");
         const melee = !!info && !!((info.flags ?? 0) & MELEE_MAP);
-        if (!melee) skip = !info ? "the project has no war3map.w3i, so it isn't a melee map" : "not a melee map (war3map.w3i's Melee flag is off; --only=melee checks it anyway)";
+        if (!melee) skip = !info ? "the project has no war3map.w3i, so it isn't a melee map" : "not a melee map (war3map.w3i's Melee flag is off; --only=melee, --melee on or [checks] melee = \"on\" checks it anyway)";
       } catch (e) {
         skip = `whether it is a melee map can't be told: ${text(e)}`;
         rows.push({ severity: "warning", check: "melee", location: "map/war3map.w3i", message: skip });

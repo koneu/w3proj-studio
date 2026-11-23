@@ -51,11 +51,12 @@ const LIST = [
 const gamePath = (p: string) => p.replace(/^War3\.w3mod:/i, "").replace(/\\/g, "/");
 
 /** A map project placing each of `ids` once, supporting the graphics modes `modes`; `w3d`: its doodad object data. */
-function project(modes: number, ids: string[], w3d?: unknown) {
+function project(modes: number, ids: string[], w3d?: unknown, more: Record<string, unknown> = {}) {
   const docs: Record<string, unknown> = {
     "map/war3map.w3i.json": { supportedModes: modes },
     "map/war3map.doo.json": { doodads: ids.map((id, i) => ({ id, variation: 0, position: [i * 128, 0, 0] })) },
     ...(w3d ? { "map/war3map.w3d.json": w3d } : {}),
+    ...more,
   };
   const text: Record<string, string> = Object.fromEntries(Object.entries(docs).map(([k, v]) => [k, JSON.stringify(v)]));
   const none = { dispose() {} };
@@ -173,4 +174,12 @@ test("reforgedChoices: models every supported Reforged mode loads, per set; offe
   assert.equal(offersReforgedReplace([SD, HD], false), false);
   assert.equal(offersReforgedReplace([HD], false), true);
   assert.equal(offersReforgedReplace([SD], true), false);
+});
+
+test("a custom type's warning is labelled with its own name (the skin file's wins), else its base type's", async () => {
+  const model = { field: "dfil", value: "war3mapImported\\Lost.mdl" };
+  const w3d = { custom: [{ base: "LRef", id: "D000", mods: [model, { field: "dnam", value: "Plain name" }] }, { base: "LRef", id: "D001", mods: [model] }] };
+  const skin = { custom: [{ base: "LRef", id: "D000", mods: [{ field: "dnam", value: "Skin name" }] }] };
+  const got = (await project(1, [], w3d, { "map/war3mapSkin.w3d.json": skin }).objectPaths()).map((x) => x.location);
+  assert.deepEqual(got.map((l) => l?.split(" \u203a ")[0]), ["Skin name (D000)", "Reforged Only (D001)"]);
 });

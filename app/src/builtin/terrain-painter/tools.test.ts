@@ -647,3 +647,72 @@ test("the terrain survives w3e and text round trips", () => {
   assert.deepEqual(writeW3e(parseW3e(bytes)), bytes);
   assert.deepEqual(w3eFromText(w3eToText(bytes)), bytes);
 });
+
+/** flat64 with every corner wet, the surface at `surface` (world height; the ground is at 0). */
+function wet64(surface = -89.6): Terrain {
+  const t = flat64(2);
+  for (const c of t.corners) { c.hasWater = true; c.water = surface; }
+  return t;
+}
+/** The corners of the 4 × 4-tile blocks named "bx,by" (corners 4b to 4b + 4 each way), as sorted indices. */
+function blockCorners(t: Terrain, blocks: string[]): number[] {
+  const out = new Set<number>();
+  for (const b of blocks) {
+    const [bx, by] = b.split(",").map(Number);
+    for (let y = 4 * by; y <= 4 * by + 4; y++) for (let x = 4 * bx; x <= 4 * bx + 4; x++) out.add(y * t.width + x);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+const driedOf = (t: Terrain) => t.corners.flatMap((c, i) => (c.hasWater ? [] : [i]));
+/** One Level click on corner (x, y) as the painter makes it; the stroke. */
+function level(t: Terrain, x: number, y: number, size: number, tool: painterTools.LayerTool = "cliffLevel"): Stroke {
+  const target = painterTools.layerTarget(t, tool, x, y, 1)!;
+  const s = new Stroke(tool);
+  applyLayer(t, painterTools.cornerBrush(t, t.offsetX + x * 128, t.offsetY + y * 128, size), tool, target, s);
+  retypeCliffs(t, s, CLIFF_GROUND, 1);
+  return s;
+}
+
+test("a cliff stroke dries the wet corners above their surface in the 4 x 4 blocks its stencil is inside", () => {
+  // we-compare level-stroke-* (branch fix/level-stroke-we, 2026-11-23): on flat.w3x with every corner wet under a
+  // surface 89.6 below the ground, the editor's Level dried exactly these blocks (dryAboveWater).
+  const cases: [number, number, number, string[]][] = [
+    [32, 30, 1, ["7,7", "8,7"]], // the centre on a block's edge line in x: its stencil 31..33 is inside both
+    [35, 30, 1, ["8,7"]], // the stencil's corner 36 on the edge line counts for neither block
+    [36, 30, 1, ["8,7", "9,7"]],
+    [32, 32, 1, ["7,7", "8,7", "7,8", "8,8"]],
+    [35, 33, 2, ["8,8", "9,8"]], // the stencil 5 wide, 3 high: its row 32 is on the edge line
+    [32, 31, 2, ["7,7", "8,7"]],
+    [32, 30, 3, ["7,6", "8,6", "7,7", "8,7", "7,8", "8,8"]],
+    [29, 28, 5, ["6,6", "7,6", "6,7", "7,7", "8,7", "7,8"]], // not (8,6), (6,8), (8,8): the irregular size-5 stencil
+  ];
+  for (const [x, y, size, blocks] of cases) {
+    const t = wet64();
+    const s = level(t, x, y, size);
+    assert.deepEqual(driedOf(t), blockCorners(t, blocks), `size ${size} at ${x},${y}`);
+    assert.equal(s.finish(t), true);
+    s.undo(t);
+    assert.equal(driedOf(t).length, 0, "undo wets them again");
+  }
+  // Increase One the same (p-low-u2).
+  const t = wet64();
+  level(t, 32, 30, 2, "cliffUp");
+  assert.deepEqual(driedOf(t), blockCorners(t, ["7,7", "8,7"]));
+});
+
+test("a cliff stroke keeps the corners under their surface wet and the dry ones dry", () => {
+  // level-wet-steps: the surface at 38.4, the ground just under it stays wet, just over it turns dry.
+  const t = wet64(38.4);
+  for (let x = 28; x <= 36; x++) {
+    const c = t.corners[30 * t.width + x];
+    setGroundHeight(c, x % 2 ? 38.25 : 38.5);
+  }
+  level(t, 32, 30, 3);
+  for (let x = 28; x <= 36; x++) assert.equal(t.corners[30 * t.width + x].hasWater, x % 2 === 1, `corner ${x},30`);
+  // level-dry-high: dry corners under the surface stay dry.
+  const d = flat64(2);
+  for (const c of d.corners) c.water = 38.4;
+  const s = level(d, 32, 30, 2);
+  assert.equal(d.corners.filter((c) => c.hasWater).length, 0);
+  assert.equal(s.corners().some((i) => d.corners[i].hasWater !== false), false);
+});

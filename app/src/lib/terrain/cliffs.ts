@@ -1,6 +1,6 @@
 // Cliff types and ramps: what the terrain brushes and the AI tools share.
 
-import { setLayer, type Corner, type Terrain } from "./w3e";
+import { rampLift, setLayer, type Corner, type Terrain } from "./w3e";
 
 /** What these functions report the corners they're about to change to. */
 export interface CornerLog {
@@ -103,6 +103,52 @@ export function cliffTypeStencil(radius: number, square = false): [number, numbe
     if (near) out.set(`${x},${y}`, [x, y]);
   }
   return [...out.values()];
+}
+
+/** The side of the blocks the World Editor checks the water flags of after a cliff brush stamp, in tiles. */
+export const WATER_CHECK_BLOCK = 4;
+
+/** After one cliff brush stamp centred on corner (cx, cy): the World Editor checks the water flag again in blocks of
+ *  4 × 4 tiles round it, and a wet corner there whose ground (with its cliff level, a ramp's middle corner with its
+ *  lift: rampLift) isn't below its water surface turns dry; a dry corner stays dry, under the surface or not. The
+ *  blocks are those of the map's grid from corner 0 (block k: corners 4k to 4k + 4, its edge lines shared with the
+ *  next) that have a corner of the stamp's cliff type stencil (cliffTypeStencil) strictly inside them; a stencil corner
+ *  on a block's edge line counts for neither block beside it. Measured (branch fix/level-stroke-we, 2026-11-23, specs
+ *  tests/we-compare/level-stroke.json, maps make-level-wet.mjs): Level at sizes 1, 2, 3, 5, 8 and Increase One at size
+ *  2 on flat.w3x with every corner wet under a surface 89.6 below the ground dried exactly those blocks' corners, 22
+ *  clicks at size 1 and 2 on each corner residue of the grid, 3 and 5 elsewhere; with the surface 38.4 up and the ground
+ *  in columns round it, the corners 0.1 and more above it dried and those 0.15 and more below stayed wet; on
+ *  (2)AutumnLeaves a Level at size 2 dried the 8 corners above its lake in the blocks round it. With the surface above
+ *  dry ground nothing turned wet. Increase Two and the Decreases weren't measured: the painter's cliff brushes all call
+ *  this, as they share the stencil; its water brushes (not measured either) don't. `touch`
+ *  sees each corner before it changes; returns the corners it dried. */
+export function dryAboveWater(t: Terrain, cx: number, cy: number, radius: number, square: boolean, touch: (i: number) => void): number[] {
+  const B = WATER_CHECK_BLOCK;
+  const blocks = new Set<number>();
+  const bw = Math.ceil((t.width - 1) / B);
+  for (const [dx, dy] of cliffTypeStencil(radius, square)) {
+    const x = cx + dx, y = cy + dy;
+    if (x < 0 || y < 0 || x >= t.width || y >= t.height || x % B === 0 || y % B === 0) continue;
+    blocks.add(Math.floor(y / B) * bw + Math.floor(x / B));
+  }
+  const dried: number[] = [];
+  const seen = new Set<number>();
+  for (const k of blocks) {
+    const bx = (k % bw) * B, by = Math.floor(k / bw) * B;
+    for (let y = by; y <= Math.min(by + B, t.height - 1); y++) {
+      for (let x = bx; x <= Math.min(bx + B, t.width - 1); x++) {
+        const i = y * t.width + x;
+        if (seen.has(i)) continue;
+        seen.add(i);
+        const c = t.corners[i];
+        if (!c.hasWater || c.water > c.height + rampLift(t, x, y)) continue;
+        touch(i);
+        c.hasWater = false;
+        dried.push(i);
+      }
+    }
+  }
+  return dried;
 }
 
 /** Ramp tool, one click at world (wx, wy): on a one-layer cliff tile the

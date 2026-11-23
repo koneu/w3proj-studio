@@ -8904,8 +8904,10 @@ async function addPathReady(page, found) {
  *  cart on its edge keeps 2. The facing: a tree LTlt (fixedRot 270) at 30° turns to 270° (not with the map's object
  *  data unreadable), wheel ruts LOrb at -90° to 270°; an LTex whose range the map's w3b turns round (1.5 to 1.1) at
  *  scale 2 gets 1.5. Heights: a ZPsh stored at 50 without flag 4 goes to its ground (-3), a ZWsw with flag 4 keeps 50.
- *  Opened a second time after the save, nothing changes: no note, the save writes the same file. Both off: scales,
- *  flags, heights and facings stay as stored, opened and saved. */
+ *  Opened a second time after the save, nothing changes: no note, the save writes the same file. A copy opened with no
+ *  terrain view and packed: the pack writes the same doodads and facings as that save (openrules.ts), opening wrote
+ *  nothing, a second pack changes nothing. Both off: scales, flags, heights and facings stay as stored, opened and
+ *  saved, and packed without the terrain view. */
 async function doodadSnapOnLoad(page, found) {
   const fail = (what) => found.push(`doodad snap on load: ${what}`);
   const KEY = "terrain.doodads.snapOnLoad", FIX = "terrain.doodads.fixOnLoad", TXT = "map/war3map.w3e.txt";
@@ -8983,6 +8985,21 @@ async function doodadSnapOnLoad(page, found) {
     await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
     await page.evaluate(`w3.editors.open(${lit(TXT)})`);
     await until("the doodads loaded", async () => (await live()) !== null, 30000);
+  };
+  /** Opens the project and no editor at all (no terrain view). */
+  const openNoView = async (root) => {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
+    await settled(page);
+  };
+  /** Pack Map as its command does it, without the problems' question (the test's doodads stand off the map): what a pack
+   *  does to the project first (w3.project.preparePack), then the backend's pack. */
+  const packNoView = async (root) => {
+    const built = resolve(root, await page.evaluate(`w3.workspace.project().default_output`));
+    rmSync(built, { force: true });
+    await page.evaluate(`(async () => { await w3.commands.execute("w3.project.preparePack"); await w3.backend.invoke("project_pack", { root: ${lit(root)}, output: null }); })()`);
+    if (!existsSync(built)) fail(`packing wrote no map for ${root}`);
+    await settled(page);
   };
   /** An edit that changes nothing, so the save runs: what it writes of the doodads is the snap's. */
   const saveAfterEdit = async () => {
@@ -9076,6 +9093,28 @@ async function doodadSnapOnLoad(page, found) {
     if (brokenAt.LTlt?.[2] !== onDisk(broken).LTlt[2]) fail(`with the map's object data unreadable the tree LTlt turned to ${brokenAt.LTlt?.[2]}`);
     if (brokenAt.LOrb?.[2] !== TURNED) fail(`with the map's object data unreadable the wheel ruts at -90° are at ${brokenAt.LOrb?.[2]}, not 270°`);
 
+    // ---- on, the terrain view never opened: packing applies the rules to the files (openrules.ts), as the World
+    // Editor's open and save would; the doodads and facings come out as the terrain view's save after an edit wrote them ----
+    const noView = make("noview");
+    const noViewBefore = hash(join(noView, "map", "war3map.doo.json"));
+    await openNoView(noView);
+    if ((await live()) !== null) fail("the project without the terrain view has a terrain editor open (control)");
+    if (hash(join(noView, "map", "war3map.doo.json")) !== noViewBefore) fail("opening the project without the terrain view wrote the doodad file");
+    if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail("opening the project without the terrain view marked something as changed");
+    await packNoView(noView);
+    if ((await live()) !== null) fail("packing opened a terrain editor");
+    const packed = JSON.parse(readFileSync(join(noView, "map", "war3map.doo.json"), "utf8")).doodads;
+    const firstSave = JSON.parse(savedOnce).doodads;
+    if (!same(packed.map(pick), firstSave.map(pick))) {
+      const differ = packed.filter((d, i) => !same(pick(d), firstSave[i] && pick(firstSave[i]))).map((d) => `${d.id} ${lit(pick(d))}`);
+      fail(`packing without the terrain view wrote other doodads than the terrain view's save: ${differ.join("; ").slice(0, 500)}`);
+    }
+    if (!same(facingsOnDisk(noView), OPENED)) fail(`packing without the terrain view left the units facing ${lit(facingsOnDisk(noView))}, not the World Editor's ${lit(OPENED)}`);
+    // A second pack changes nothing more.
+    const packedOnce = readFileSync(join(noView, "map", "war3map.doo.json"), "utf8");
+    await packNoView(noView);
+    if (readFileSync(join(noView, "map", "war3map.doo.json"), "utf8") !== packedOnce) fail("a second pack without the terrain view changed the doodads again");
+
     // ---- off ----
     await page.evaluate(`w3.settings.set(${lit(KEY)}, false); w3.settings.set(${lit(FIX)}, false)`);
     const off = make("off");
@@ -9098,6 +9137,13 @@ async function doodadSnapOnLoad(page, found) {
     const afterFixes = scaleFlagsOnDisk(off);
     for (const id of Object.keys(FIXED)) if (!same(afterFixes[id], keptFixes[id])) fail(`with Fix Doodads on Load off the save wrote ${id} with scale and flags ${lit(afterFixes[id])}, not the map's ${lit(keptFixes[id])}`);
     if (!same(facingsOnDisk(off), facingsOnDisk(make("off-control")))) fail(`with the setting off the save wrote the units facing ${lit(facingsOnDisk(off))}, not as stored`);
+    // Off, packed without the terrain view: the placement files stay as stored.
+    const offNoView = make("off-noview");
+    const offDoo = hash(join(offNoView, "map", "war3map.doo.json")), offUnits = hash(join(offNoView, "map", "war3mapUnits.doo.json"));
+    await openNoView(offNoView);
+    await packNoView(offNoView);
+    if (hash(join(offNoView, "map", "war3map.doo.json")) !== offDoo) fail("with both settings off packing without the terrain view wrote the doodad file");
+    if (hash(join(offNoView, "map", "war3mapUnits.doo.json")) !== offUnits) fail("with both settings off packing without the terrain view wrote the units file");
   } finally {
     await page.evaluate(`w3.settings.set(${lit(KEY)}, undefined); w3.settings.set(${lit(FIX)}, undefined); w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
     await page.evaluate(`window.__snapGroup?.dispose(); window.__snapGroup = null; window.__snapEd = null;`).catch(() => {});
@@ -9810,6 +9856,17 @@ async function cliCheck(page, found) {
     // The trees are in the way: the way squeezes between them (open ground is 1000s wide; 256 since a unit needs a free square of 2 cells).
     if (!app.path.walkable || app.path.standingNearby?.id !== "LTlt" || !(app.path.narrowest?.width < 300)) fail(`check_path didn't meet the trees (control): ${lit(app.path).slice(0, 300)}`);
     if (!app.melee.findings?.length) fail("check_melee found nothing to compare (control)");
+    // The melee override: this map has the Melee flag, so by default it runs; --melee off skips it, and the manifest's off does too (--only=melee still asks).
+    const melee = (...args) => { const o = spawnSync(cli, ["check", root, "--json", ...args], { encoding: "utf8", env, timeout: 300000 }); try { return JSON.parse(o.stdout).sections.find((x) => x.section === "melee"); } catch { return { err: `${o.stdout}${o.stderr}`.slice(-300) }; } };
+    // The map's own edits (a placed start location, creeps) left its Melee flag off; set it in the saved w3i the CLI reads.
+    const w3i = join(root, "map", "war3map.w3i.json"), info = JSON.parse(readFileSync(w3i, "utf8"));
+    if (melee()?.ran !== false) fail("melee flag off, auto: expected it skipped (control)");
+    writeFileSync(w3i, JSON.stringify({ ...info, flags: info.flags | 4 }, null, 2));
+    if (melee()?.ran !== true) fail(`melee flag on, auto: expected it to run: ${lit(melee())}`);
+    if (melee("--melee", "off")?.ran !== false) fail("--melee off didn't skip check_melee");
+    writeFileSync(join(root, "w3proj.toml"), `${existsSync(join(root, "w3proj.toml")) ? readFileSync(join(root, "w3proj.toml"), "utf8") : "format = 1\n"}\n[checks]\nmelee = "off"\n`);
+    if (melee()?.ran !== false) fail("[checks] melee = off didn't skip check_melee");
+    if (melee("--only=melee")?.ran !== true) fail("--only=melee didn't run it over the manifest's off");
   } finally {
     await page.evaluate(`(async () => { if (window.__cliCheckKept) w3.window.confirm = window.__cliCheckKept; delete window.__cliCheckKept; await w3.editors.closeAll(); })()`).catch(() => {});
     await restoreWindow(page);
@@ -14258,10 +14315,7 @@ async function worldEditorSync(page, found) {
   rmSync(dir, { recursive: true, force: true });
   const proj = join(dir, "proj"), changed = join(dir, "changed"), ctl = join(dir, "ctl"), saved = join(dir, "saved.w3x");
   cpSync(FIXTURE, proj, { recursive: true });
-  cpSync(FIXTURE, changed, { recursive: true });
   mkdirSync(ctl, { recursive: true });
-  mkdirSync(join(changed, "map", "war3mapImported"), { recursive: true });
-  writeFileSync(join(changed, "map", "war3mapImported", "we-saved.txt"), "saved in the World Editor\n");
   const standin = join(dir, "standin.mjs");
   writeFileSync(standin, WE_STANDIN);
   const sq = (s) => `'${s.replace(/'/g, "'\\''")}'`;
@@ -14288,7 +14342,16 @@ async function worldEditorSync(page, found) {
     const { map } = JSON.parse(readFileSync(join(ctl, `started-${first}`), "utf8"));
     if (resolve(map) !== resolve(join(proj, "build", "proj.edit.w3x"))) fail(`the editor was given ${lit(map)}, not the project's edit build`);
     if (await mark() !== "● World Editor") fail(`with the editor open the status bar shows ${lit(await mark())}`);
-    // A save there: the map rewritten as the editor writes it, with a file the project hadn't.
+    // The edit build's pack applied Snap and Fix Doodads on Load to the placement files, in an app whose terrain view
+    // may never have opened (the command activates its extension): the mini map's doodads come off their grid.
+    if (readFileSync(join(proj, "map", "war3map.doo.json"), "utf8") === readFileSync(join(FIXTURE, "map", "war3map.doo.json"), "utf8")) {
+      fail("Open in World Editor packed the edit build without Snap and Fix Doodads on Load (war3map.doo.json as the fixture has it)");
+    }
+    // A save there: the map rewritten as the editor writes it (the project as the edit build has it, which the editor
+    // opened), with a file the project hadn't.
+    cpSync(proj, changed, { recursive: true, filter: (p) => resolve(p) !== resolve(join(proj, "build")) });
+    mkdirSync(join(changed, "map", "war3mapImported"), { recursive: true });
+    writeFileSync(join(changed, "map", "war3mapImported", "we-saved.txt"), "saved in the World Editor\n");
     const packed = await page.evaluate(`w3.backend.invoke("project_pack", { root: ${lit(changed)}, output: ${lit(saved)} }).then(() => null, (e) => String(e))`);
     if (packed) return fail(`packing the map the editor "saves": ${packed}`);
     writeFileSync(join(ctl, `save-${first}`), saved);

@@ -24,6 +24,8 @@ pub struct Options {
     pub only: Option<Vec<String>>,
     /// check_path's points: `x1,y1:x2,y2`.
     pub path: Option<String>,
+    /// `--melee on|off|auto`: whether check_melee runs, whatever w3proj.toml's `[checks] melee` says; None: the manifest's.
+    pub melee: Option<String>,
     /// The collision size of the unit the path and melee checks walk with.
     pub unit_size: Option<f64>,
     /// Warnings fail the check too, not only errors.
@@ -76,6 +78,12 @@ fn job(o: &Options, root: &str) -> Result<Value> {
     if let Some(p) = &o.path {
         let [from, to] = parse_path(p)?;
         job["path"] = json!({ "from": from, "to": to });
+    }
+    if let Some(m) = &o.melee {
+        if !["on", "off", "auto"].contains(&m.as_str()) {
+            bail!("--melee {m:?}: expected on, off or auto");
+        }
+        job["melee"] = json!(m);
     }
     if let Some(size) = o.unit_size {
         if !(size.is_finite() && size >= 0.0) {
@@ -196,8 +204,8 @@ mod tests {
         assert_eq!(l[2], "skipped  path: needs two points");
         assert_eq!(l[3], "1 error, 1 warning; 3 reports ignored by the project (.w3proj/problems-ignore.json)");
         assert_eq!(l.len(), 4);
-        let ran = json!({ "rows": [], "ignored": 0, "sections": [{ "section": "melee", "ran": true, "note": "Melee flag off; ran because the map has 4 starts and 8 gold mines" }] });
-        assert_eq!(lines(&ran)[0], "note     melee: Melee flag off; ran because the map has 4 starts and 8 gold mines");
+        let ran = json!({ "rows": [], "ignored": 0, "sections": [{ "section": "melee", "ran": true, "note": "forced on (--melee = on), whatever the Melee flag says" }] });
+        assert_eq!(lines(&ran)[0], "note     melee: forced on (--melee = on), whatever the Melee flag says");
     }
 
     /// The check's backend writes nothing, not even inside the project; the rebuild's still does (control).
@@ -223,6 +231,7 @@ mod tests {
             project: PathBuf::new(),
             only: only.map(|v| v.into_iter().map(String::from).collect()),
             path: path.map(String::from),
+            melee: None,
             unit_size: None,
             warnings_fail: false,
             json: false,
@@ -237,6 +246,14 @@ mod tests {
         assert_eq!(j["only"], json!(["path", "melee"]));
         assert_eq!(j["task"], "check");
         let plain = job(&o(None, None), "/p").unwrap();
-        assert!(plain.get("only").is_none() && plain.get("path").is_none(), "control: nothing asked, nothing set");
+        assert!(plain.get("only").is_none() && plain.get("path").is_none() && plain.get("melee").is_none(), "control: nothing asked, nothing set");
+        for m in ["on", "off", "auto"] {
+            let mut with = o(None, None);
+            with.melee = Some(m.into());
+            assert_eq!(job(&with, "/p").unwrap()["melee"], m);
+        }
+        let mut bad = o(None, None);
+        bad.melee = Some("maybe".into());
+        assert!(job(&bad, "/p").is_err());
     }
 }
