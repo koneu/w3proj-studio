@@ -14281,10 +14281,7 @@ async function worldEditorSync(page, found) {
   rmSync(dir, { recursive: true, force: true });
   const proj = join(dir, "proj"), changed = join(dir, "changed"), ctl = join(dir, "ctl"), saved = join(dir, "saved.w3x");
   cpSync(FIXTURE, proj, { recursive: true });
-  cpSync(FIXTURE, changed, { recursive: true });
   mkdirSync(ctl, { recursive: true });
-  mkdirSync(join(changed, "map", "war3mapImported"), { recursive: true });
-  writeFileSync(join(changed, "map", "war3mapImported", "we-saved.txt"), "saved in the World Editor\n");
   const standin = join(dir, "standin.mjs");
   writeFileSync(standin, WE_STANDIN);
   const sq = (s) => `'${s.replace(/'/g, "'\\''")}'`;
@@ -14311,7 +14308,16 @@ async function worldEditorSync(page, found) {
     const { map } = JSON.parse(readFileSync(join(ctl, `started-${first}`), "utf8"));
     if (resolve(map) !== resolve(join(proj, "build", "proj.edit.w3x"))) fail(`the editor was given ${lit(map)}, not the project's edit build`);
     if (await mark() !== "● World Editor") fail(`with the editor open the status bar shows ${lit(await mark())}`);
-    // A save there: the map rewritten as the editor writes it, with a file the project hadn't.
+    // The edit build's pack applied Snap and Fix Doodads on Load to the placement files, in an app whose terrain view
+    // may never have opened (the command activates its extension): the mini map's doodads come off their grid.
+    if (readFileSync(join(proj, "map", "war3map.doo.json"), "utf8") === readFileSync(join(FIXTURE, "map", "war3map.doo.json"), "utf8")) {
+      fail("Open in World Editor packed the edit build without Snap and Fix Doodads on Load (war3map.doo.json as the fixture has it)");
+    }
+    // A save there: the map rewritten as the editor writes it (the project as the edit build has it, which the editor
+    // opened), with a file the project hadn't.
+    cpSync(proj, changed, { recursive: true, filter: (p) => resolve(p) !== resolve(join(proj, "build")) });
+    mkdirSync(join(changed, "map", "war3mapImported"), { recursive: true });
+    writeFileSync(join(changed, "map", "war3mapImported", "we-saved.txt"), "saved in the World Editor\n");
     const packed = await page.evaluate(`w3.backend.invoke("project_pack", { root: ${lit(changed)}, output: ${lit(saved)} }).then(() => null, (e) => String(e))`);
     if (packed) return fail(`packing the map the editor "saves": ${packed}`);
     writeFileSync(join(ctl, `save-${first}`), saved);

@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { fixturePath } from "../../lib/testhelpers/testutil";
-import type { W3Api } from "../../extensions/api";
+import { fixturePath, repoPath } from "../../lib/testhelpers/testutil";
+import type { ExtensionManifest, W3Api } from "../../extensions/api";
+import { ExtensionHost } from "../../extensions/host";
 import { applyOpenRulesToProject, type OpenRulesIo } from "./openrules";
 import type { PathingData } from "./pathmap";
 import type { Skin } from "./objects";
@@ -144,4 +145,18 @@ test("a file written while the rules ran keeps that write; another project opene
       assert.deepEqual(q.writes, []);
     } finally { q.dispose(); }
   } finally { p.dispose(); }
+});
+
+test("packing activates the terrain viewer for the rules: an app whose terrain view never opened gets them too", async () => {
+  // Not activated by its command, w3.terrain.openRulesForPack wasn't registered in a fresh app and the pack (which
+  // catches the failed command) left the doodads as stored: app-smoke worldEditorSync passed alone and failed after
+  // checks that had opened a terrain view.
+  const manifest = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "extension.json"), "utf8")) as ExtensionManifest;
+  const host = new ExtensionHost({} as W3Api, () => {}, () => {});
+  // Its dependencies aren't loaded here: what counts is whether the event activates it.
+  host.addExternal([{ dir: "terrain-viewer", source: "project", manifest: { ...manifest, extensionDependencies: [] }, main_source: null }]);
+  await host.fire("onCommand:w3.terrain.somethingElse");
+  assert.equal(host.extensions[0].active, false, "control: another command leaves it inactive");
+  await host.fire("onCommand:w3.terrain.openRulesForPack");
+  assert.equal(host.extensions[0].active, true);
 });
