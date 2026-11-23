@@ -1165,7 +1165,7 @@ export class TerrainRenderer {
   }
 
   /** Per tile, the highest water surface near it (wetLevels), made with the water. */
-  private wet = new Float32Array(0);
+  private wet: Float32Array = new Float32Array(0);
 
   /** Whether a placed model stands in the water near it, so that parts of it may show through: its origin (where it's
    *  drawn: a swimming unit's or a ship's on the surface, a unit wading through a ford on the bed) at most a little

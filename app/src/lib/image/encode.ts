@@ -164,14 +164,14 @@ function halve(width: number, height: number, px: Uint8Array): { width: number; 
  *  minimaps: one level, no alpha; `alpha` keeps the alpha channel (8 bits), `mipmaps` adds the
  *  smaller levels down to 1×1 (model textures). */
 export function encodeBlp1Jpeg(width: number, height: number, rgba: ArrayLike<number>, quality = 85, opts: { alpha?: boolean; mipmaps?: boolean } = {}): Uint8Array {
-  let level = { width, height, px: new Uint8Array(width * height * 4) };
+  let level: { width: number; height: number; px: Uint8Array } = { width, height, px: new Uint8Array(width * height * 4) };
   for (let i = 0; i < width * height; i++) {
     level.px[i * 4] = rgba[i * 4 + 2];
     level.px[i * 4 + 1] = rgba[i * 4 + 1];
     level.px[i * 4 + 2] = rgba[i * 4];
     level.px[i * 4 + 3] = opts.alpha ? rgba[i * 4 + 3] : 255;
   }
-  let tables = new Uint8Array(0);
+  let tables: Uint8Array = new Uint8Array(0);
   const frames: Uint8Array[] = [];
   for (let n = 0; n < 16; n++) {
     const enc = encodeJpeg4(level.width, level.height, level.px, quality);
