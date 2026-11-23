@@ -5809,6 +5809,66 @@ async function resizeUndoChecks(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Map Size writes war3map.doo in the World Editor's version 13, as every save of the terrain view does (bug: the resize
+ *  saved a version-8 file as 8, the next normal save upgraded it): a new map whose doodads file is made version 8 (one
+ *  doodad, creation number 7) is grown by resize_map; the file is version 13 with the number in trailer[0], Undo Resize
+ *  puts the version-8 bytes back and Redo Resize the version-13 ones. */
+async function resizeDooV13(page, found) {
+  const fail = (what) => found.push(`resize doo v13: ${what}`);
+  await page.evaluate(`(() => { window.__dooV13Kept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; w3.window.showWarning = async () => "Apply"; })()`);
+  try {
+    const tool = mcpTool(page);
+    const TXT = "map/war3map.w3e.txt";
+    const folder = join(work, "resize-doo-v13");
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "ResizeDooV13", width: 64, height: 64, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)}`), 20000);
+    await until("the map's editor drawn", () => page.evaluate(`!!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await tool("save_project");
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    const file = join(root, "map", "war3map.doo.json");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await settled(page);
+    // A version-8 doodads file, as a map saved before Reforged's 3.0 fields has it (the mini map's layout).
+    const doo = JSON.parse(readFileSync(file, "utf8"));
+    Object.assign(doo, { version: 8, skinIds: true, doodads: [{ id: "LTbr", variation: 0, position: [256, 256, 0], angle: 0, scale: [1, 1, 1], skinId: "LTbr", flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 7 }] });
+    writeFileSync(file, JSON.stringify(doo, null, 2));
+    const v8 = readFileSync(file);
+    await page.evaluate(`w3.workspace.refresh()`);
+    await page.evaluate(`w3.editors.open(${lit(TXT)}, "w3.terrainViewer")`);
+    await until("the editor on the version-8 file", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)} && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await settled(page);
+    if (!readFileSync(file).equals(v8)) { fail("opening the editor changed war3map.doo.json (control)"); return; }
+    const read = () => JSON.parse(readFileSync(file, "utf8"));
+
+    await tool("resize_map", { right: 32 });
+    await until("the resized doodads file", () => !readFileSync(file).equals(v8), 30000).catch(() => {});
+    await settled(page);
+    const after = read();
+    const d = after.doodads?.[0];
+    if (after.version !== 13 || "skinIds" in after) fail(`after the resize the doodads file is version ${after.version} (skinIds ${after.skinIds}), not 13`);
+    if (after.doodads?.length !== 1 || d?.id !== "LTbr" || JSON.stringify(d.trailer) !== "[7,0,0]" || d.editorId !== 0xffffffff || d.preFlags !== 0xffffffff || !Array.isArray(d.extras)) fail(`the resized doodad: ${lit(d).slice(0, 300)}`);
+    const v13 = readFileSync(file);
+
+    const run = (id) => page.evaluate(`w3.commands.execute(${lit(id)}).then(() => null, (e) => String(e))`);
+    const err = await run("w3.terrainMapSize.undo");
+    if (err) fail(`Undo Resize: ${err}`);
+    await until("the undo", () => readFileSync(file).equals(v8), 30000).catch(() => fail(`Undo Resize left the doodads file version ${read().version}, not the version-8 bytes`));
+    await until("the editor again", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)} && !!document.querySelector(".model-stage canvas")`), 30000);
+    await settled(page);
+    if (!readFileSync(file).equals(v8)) fail("the doodads file changed again after the undo");
+    const again = await run("w3.terrainMapSize.redo");
+    if (again) fail(`Redo Resize: ${again}`);
+    await until("the redo", () => readFileSync(file).equals(v13), 30000).catch(() => fail(`Redo Resize left the doodads file version ${read().version}, not the resize's bytes`));
+    await until("the editor again", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)} && !!document.querySelector(".model-stage canvas")`), 30000);
+    await settled(page);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__dooV13Kept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__dooV13Kept; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** Map Size at its limits, through the real apply path (resize_map): a 64 × 64 map grown to 480 × 480 and cut to 32 × 32 has
  *  that size in the terrain, shadows, pathing, camera bounds and playable area, saved and reopened it is the same, and it
  *  packs; 481, 31, 484, 28 (past a limit or off the step of 4) and an edge past ±32256 are refused with every file as it was. */
@@ -17280,6 +17340,7 @@ async function run() {
         realMapSave,
         rebuildCli,
         replaceUndoLife,
+        resizeDooV13,
         resizeLimits,
         resizeRefusedShadows,
         resizeUndo,
@@ -17571,6 +17632,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "scriptGenerated", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
   await leftOpen(page, "resizeUndo", found);
+  await resizeDooV13(page, found).catch((e) => found.push(`resize doo v13: ${e.message}`));
+  await leftOpen(page, "resizeDooV13", found);
   await resizeLimits(page, found).catch((e) => found.push(`resize limits: ${e.message}`));
   await leftOpen(page, "resizeLimits", found);
   await resizeRefusedShadows(page, found).catch((e) => found.push(`resize refused shadows: ${e.message}`));

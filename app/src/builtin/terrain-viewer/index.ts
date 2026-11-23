@@ -4827,7 +4827,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 removed += moved.removed;
               }
             }
+            // In the World Editor's version 13 as every save writes them (upgradeUnits, upgradeDoodads): the old bytes
+            // were kept above (beginResize), so Undo Resize puts the old version back.
             if (f === unitsFile) upgradeUnits(f);
+            if (f === dooFile) upgradeDoodads(f);
             await savePlacedFile(w3, f);
           }
           await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset), cliffGroundOf(next))), doc);
