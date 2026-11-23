@@ -12,6 +12,7 @@ import {
   AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, FIRST_HERO_ONLY, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
+import { aiTypeText } from "./labels";
 import { aiNumber, GAME_SPEED_LIMITS, HARVEST_WORKER_LIMITS, repeatWavesLimits, rescaleChances } from "./numbers";
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
@@ -816,7 +817,10 @@ class AiView {
           h("td", {}, this.select(p.race, withCurrent(races, p.race), (v) => { p.race = v; })),
           h("td", {}, this.num("Color", p.color, (v) => { p.color = v; }, { min: 0 })),
           h("td", {}, this.num("Handicap", p.handicap, (v) => { p.handicap = v; }, { min: 50, max: 100 })),
-          h("td", { title: "Control and AI type as stored" }, this.num("AI type", p.aiType, (v) => { p.aiType = v; }, { min: 0 })),
+          h("td", { title: "Control and AI type as stored" }, ...((): Node[] => {
+            const text = h("span.muted.ai-type-text", {}, ` ${aiTypeText(p.aiType)}`);
+            return [this.num("AI type", p.aiType, (v) => { p.aiType = v; text.textContent = ` ${aiTypeText(v)}`; }, { min: 0 }), text];
+          })()),
           h("td", {}, this.select(p.difficulty, withCurrent(diffs, p.difficulty), (v) => { p.difficulty = v; })),
           h("td", {}, this.text(p.script, (v) => { p.script = v; })))))) : h("p.muted", {}, "No players configured."));
   }
