@@ -5,6 +5,7 @@ import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, MAX_CLIFF_TYPES, toggleRamp } from "../../lib/terrain/cliffs";
+import { specialsAfterCliffs, type SpecialTexture } from "../../lib/terrain/specialfit";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { defaultCliffToAdd, weDefaultCliffType, type CliffLook } from "./cliffs";
 import { groundLimitText } from "./limits";
@@ -599,6 +600,16 @@ function refuseGroundPast(heights: Iterable<number>) {
   let past = 0;
   for (const g of heights) if (!groundFits(g)) past++;
   if (past) throw new Error(groundLimitText(past));
+}
+
+/** After a cliff change by a tool: takes the special doodads that no longer fit their cliff out of the doodads file's
+ *  `specials` (lib/terrain/specialfit.ts, as a brush stroke does); `open` limits it to the open part of a partial load.
+ *  The ids of those taken out. */
+export function dropFallenSpecials(file: Record<string, unknown>, t: Terrain, tex: (id: string) => SpecialTexture | null | undefined, open?: (corner: number) => boolean): string[] {
+  if (!Array.isArray(file.specials)) return [];
+  const { kept, removed } = specialsAfterCliffs(t, file.specials, tex, open);
+  if (removed.length) file.specials = kept;
+  return removed.map((s) => s.id);
 }
 
 interface Follower { id?: string; position: number[]; flags?: number }
