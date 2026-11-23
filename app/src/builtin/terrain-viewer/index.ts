@@ -93,7 +93,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { clearShadowMeshes, predictShadows, readSpecialShadows } from "./shadowmap";
-import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
+import { playerRaces, startPreviewHidden, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
@@ -2788,7 +2788,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, { baseOf, shownAs: skinShown }),
             loader.load("units", units, skins, team, { baseOf, heightOf: (p, skin) => drawnZ(p, skin.moveType, skin), shownAs,
               looksOf: (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType)) }),
-            loader.load("units", startPreviews(units, startRaces), skins, team, { placeholders: false }),
+            loader.load("units", startPreviews(units, startRaces, startHidden), skins, team, { placeholders: false }),
             loader.load("specials", specialPlaced, skins, () => 0, { baseOf, placeholders: false, texturesOf: specialLook })]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
@@ -2811,7 +2811,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The start locations' model and the start buildings are the editor's: game view leaves them out.
           const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
           previewBatches = s.batches.map(lookOfPreview);
-          previewKey = startPreviewKey(units, startRaces);
+          previewKey = startPreviewKey(units, startRaces, startHidden);
           renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)), ...previewBatches]);
           void artLoad(showSplats());
           showShadowObjects();
@@ -2927,6 +2927,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let startRaces = new Map<number, number>();
         /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
         let previewKey = "";
+        const startHidden = (x: number, y: number) => startPreviewHidden(terrain, specialRects, x, y);
         let previewBatches: ObjectBatch[] = [];
         let previewGen = 0;
         function lookOfPreview<B extends { instances: ObjectInstance[] }>(b: B) {
@@ -2940,11 +2941,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ctx = nextCtx ?? objCtx;
           if (!ctx || !unitsFile) return;
           const units = unitsFile.list;
-          const key = startPreviewKey(units, startRaces);
+          const key = startPreviewKey(units, startRaces, startHidden);
           if (key === previewKey) return;
           previewKey = key;
           const gen = ++previewGen, rebuilt = rebuildGen;
-          void viewWork.track(loader.load("units", startPreviews(units, startRaces), ctx.skins, team, { placeholders: false }).then((s) => {
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces, startHidden), ctx.skins, team, { placeholders: false }).then((s) => {
             // A full rebuild in between made them itself; a newer change makes them again.
             if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
             const fresh = s.batches.map(lookOfPreview);
