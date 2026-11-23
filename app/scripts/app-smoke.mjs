@@ -8943,9 +8943,20 @@ async function doodadSnapOnLoad(page, found) {
   /** What the World Editor reads the units' facings as (a whole number as degrees, into 0..360). */
   const OPENED = { hfoo: f(4.5), hkni: f(5.7831855), hrif: f(0.034906585) };
   const onDisk = (root) => xyAngle(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
-  const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  // Every note shown since the last open, collected as it appears: under load a toast can be gone before a slow check reads.
+  const toasts = () => page.evaluate(`[...(window.__snapNotes ?? [])].join(" | ")`);
+  const noteSeen = (re, ms = 20000) => until("", async () => re.test(await toasts()), ms).then(() => true, () => false);
   const open = async (root) => {
-    await page.evaluate(`(async () => { await w3.editors.closeAll(); document.querySelectorAll(".notification, .toast").forEach((e) => e.remove()); await w3.workspace.open(${lit(root)}); })()`);
+    await page.evaluate(`(async () => {
+      await w3.editors.closeAll();
+      document.querySelectorAll(".notification, .toast").forEach((e) => e.remove());
+      window.__snapNotes = new Set();
+      window.__snapObs?.disconnect();
+      const grab = () => document.querySelectorAll(".notification, .toast").forEach((e) => { if (e.textContent) window.__snapNotes.add(e.textContent); });
+      window.__snapObs = new MutationObserver(grab);
+      window.__snapObs.observe(document.body, { childList: true, subtree: true, characterData: true });
+      await w3.workspace.open(${lit(root)});
+    })()`);
     await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
     await page.evaluate(`w3.editors.open(${lit(TXT)})`);
     await until("the doodads loaded", async () => (await live()) !== null, 30000);
@@ -8989,14 +9000,15 @@ async function doodadSnapOnLoad(page, found) {
     if (storedFacings.hrif !== 2 || storedFacings.hkni !== -0.5) fail(`the stored unit facings aren't the test's (control): ${lit(storedFacings)}`);
     if (!same(await liveFacings(), OPENED)) fail(`the units face ${lit(await liveFacings())} after the open, not the World Editor's ${lit(OPENED)}`);
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("opening wrote the doodad file");
-    if (!/Put 6 doodads on their grid/.test(await toasts())) fail(`no note of the 6 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
+    if (await noteSeen(/a note nobody writes/, 300)) fail("the note check saw a note that was never written (control)");
+    if (!await noteSeen(/Put 6 doodads on their grid/)) fail(`no note of the 6 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
     const storedFixes = scaleFlagsOnDisk(on);
     if (!same(storedFixes.LOtr, [f(0.75), f(0.75), f(1.25), 2]) || storedFixes.LOfl?.[3] !== 1) fail(`the stored scales and flags aren't the test's (control): ${lit(storedFixes)}`);
     const fixedLive = scaleFlags(await live());
     for (const [id, want] of Object.entries(FIXED)) if (!same(fixedLive[id], want)) fail(`fix on load: ${id} has scale and flags ${lit(fixedLive[id])}, not ${lit(want)}`);
     // The 8 of scale and flags, ZPsh's height, ZWsw's scale, and the hay cart's height (turned on the spot, it stays at
     // 0 over ground of -0.75).
-    if (!/Set the scale, flags, life or height of 11 doodads/.test(await toasts())) fail(`no note of the 11 doodads given the World Editor's scale, flags and height: ${(await toasts()).slice(0, 400)}`);
+    if (!await noteSeen(/Set the scale, flags, life or height of 11 doodads/)) fail(`no note of the 11 doodads given the World Editor's scale, flags and height: ${(await toasts()).slice(0, 400)}`);
     const storedHeights = heights(JSON.parse(readFileSync(join(on, "map", "war3map.doo.json"), "utf8")).doodads);
     if (!same(storedHeights, { ZPsh: 50, ZWsw: 50 })) fail(`the stored heights aren't the test's (control): ${lit(storedHeights)}`);
     if (!same(heights(await live()), RESTED)) fail(`fix on load: the heights are ${lit(heights(await live()))}, not ${lit(RESTED)} (ZPsh on its ground, ZWsw's own)`);
