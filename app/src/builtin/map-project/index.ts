@@ -182,7 +182,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         out.append(`${c.folder}: gave ${c.added.length} plain player or force name${c.added.length === 1 ? "" : "s"} a string of its war3map.wts${c.added.length ? ` (${c.added.join(", ")})` : ""}${c.reused ? `, ${c.reused} now refer${c.reused === 1 ? "s" : ""} to one with the same text` : ""}, as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);
       }
       if (named.reused) out.append(`${named.reused} plain player or force name${named.reused === 1 ? "" : "s"} now refer${named.reused === 1 ? "s" : ""} to a string of war3map.wts with the same text, as the World Editor's save does`);
-      if (named.added.length || named.reused) {
+      const blankedMsg = (n: number[]) => `wrote ${n.length} text${n.length === 1 ? "" : "s"} of war3map.w3i referring to a string the map has no war3map.wts for as "" (TRIGSTR_ ${n.join(", ")}), as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`;
+      for (const c of named.chapters ?? []) if (c.blanked) out.append(`${c.folder}: ${blankedMsg(c.blanked)}`);
+      if (named.blanked) out.append(blankedMsg(named.blanked));
+      if (named.added.length || named.reused || named.blanked || named.chapters?.length) {
         if (named.added.length) out.append(`gave ${named.added.length} plain player or force name${named.added.length === 1 ? "" : "s"} a string of war3map.wts (${named.added.join(", ")}), as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);
         // war3map.w3i is one of the script's inputs.
         await w3.commands.execute("w3.script.settle").catch(() => {});
