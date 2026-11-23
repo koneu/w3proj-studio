@@ -392,7 +392,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const ask = (message: string) => w3.window.notify("warning", message, ["Replace the script", "Show Difference", "Keep it"], { signal: questions.signal });
   /** Writes the script; false when it stays as it is. `force`: also over a script that isn't the one this app
    *  wrote last. `onlyFor`: only in that project (else nothing is written). `compile: false`: a generated script whose
-   *  texts a language extension compiles (vJASS) isn't made now (a save never waits for JassHelper); it stays stale.
+   *  texts a language extension compiles (vJASS) isn't made now (an open or a save never runs JassHelper, a kept
+   *  script included); it stays as it is.
    *  A generated script (map/triggers/triggers.json "script": "generated", kept in .w3proj/derived/) is always the one
    *  the data makes, and what it was made from is recorded (`w3proj pack` checks that record). */
   const write = (reason: string, force = false, onlyFor?: string, opts: { compile?: boolean } = {}): Promise<boolean> => {
@@ -404,13 +405,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const generated = (await scriptState(root))?.mode === "generated";
         // Taken before the generator reads anything: a file saved meanwhile shows as changed in the record.
         const sources = generated && root ? await w3.backend.invoke<Record<string, string>>("script_sources", { root }) : null;
-        const { path, text, vjass, language, flags, deferred, printf } = await generate(false, undefined, { compile: !generated || opts.compile !== false });
+        const { path, text, vjass, language, flags, deferred, printf } = await generate(false, undefined, { compile: opts.compile !== false });
         const file = path.slice(4);
         // Generating can take a while: this script must not land in another project.
         if (w3.workspace.project()?.root !== root) { out.append(`${reason}: ${file} not written: the project was changed meanwhile`); return false; }
         if (printf?.length) out.append(`${reason}: ${file}: ${printfIssuesText(printf)}`);
         if (deferred) {
-          out.append(`${reason}: ${file} not made now: its triggers are compiled with ${deferred}, which runs on pack and on Regenerate Map Script…, never on a save; until then the generated script doesn't follow the triggers`);
+          out.append(generated
+            ? `${reason}: ${file} not made now: its triggers are compiled with ${deferred}, which runs on pack and on Regenerate Map Script…, never on a save; until then the generated script doesn't follow the triggers`
+            : `${reason}: ${file} not compiled now: ${deferred} runs on pack, on Regenerate Map Script… and on Check with JassHelper, never on an open or a save; the kept script stays as it is`);
           return false;
         }
         /** The record of what the generated script was made from (nothing for a kept one). Not recorded: `w3proj pack`
@@ -546,7 +549,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const t = await w3.workspace.readText(p).catch(() => null);
           if (t !== null && stamp === scriptHash(t)) return true;
         }
-        const { path, text, vjass } = await generate(true);
+        const { path, text, vjass, deferred } = await generate(true, undefined, { compile: false });
+        if (deferred) return true;
         if (vjass || w3.workspace.project()?.root !== root) return true;
         const current = await readScript(path);
         if (typeof current !== "string" || !sameButPlacingOrder(current, text) || w3.workspace.project()?.root !== root) return true;
@@ -599,7 +603,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const t = await w3.workspace.readText(p).catch(() => null);
         if (t !== null && stamp === scriptHash(t)) ours = true;
       }
-      if (ours && w3.workspace.project()?.root === root) await write("opened (a chapter of a campaign)", false, root);
+      if (ours && w3.workspace.project()?.root === root) await write("opened (a chapter of a campaign)", false, root, { compile: false });
     } catch (e) {
       out.append(`opened: the chapter's map script wasn't made again: ${e instanceof Error ? e.message : String(e)}`);
     }

@@ -11939,10 +11939,9 @@ async function triggerFolders(page, found) {
  *  it) and a custom text calling a function nothing defines. The command lists the id as an error at the copy, the
  *  Map script check lists the text's problem at its own file and line; a click opens the file there; Renumber and Fix
  *  order.txt (buttons in the Problems view) write only the files they are about, and the next run has them gone.
- *  A fix waits for the map script due before it and after it (EditLog.settle): with the game folder set, the fixture's
- *  vJASS text has JassHelper compile it on the open and on each fix's save, seconds through Proton and up to
- *  "vjass.timeout" when a run hangs. So a fix is waited for by its button ("Renumber…" until the run after it is over),
- *  not for a set time; a fix that wrote nothing by then failed. */
+ *  A fix waits for the map script due before it and after it (EditLog.settle); an open or a save never runs JassHelper
+ *  for a kept script, so that wait is short. A fix is still waited for by its button ("Renumber…" until the run after
+ *  it is over), not for a set time; a fix that wrote nothing by then failed. */
 async function triggerTree(page, found) {
   const fail = (what) => found.push(`check trigger tree: ${what}`);
   const soon = (check, ms) => until("", check, ms).then(() => true, () => false);
@@ -14418,8 +14417,8 @@ async function vjassCheck(page, found) {
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   try {
     const k = await heightKit(page, "VjassCheck");
-    // A tracked script: a save compiles it with JassHelper (a generated vJASS script waits for pack or Regenerate Map
-    // Script…, which scriptGenerated covers).
+    // A tracked script: a save doesn't compile it either (pack, Regenerate Map Script… and build_script do; scriptGenerated
+    // covers the generated one).
     await setScriptMode(page, k.root, "kept");
     // A save whose script JassHelper refuses says so once (Map Script): expected here while Lib A is broken.
     await page.evaluate(`(() => { window.__vjWarns = []; w3.window.showWarning = (m) => { window.__vjWarns.push(String(m)); }; })()`);
@@ -14433,6 +14432,8 @@ async function vjassCheck(page, found) {
     await k.tool("create_script_trigger", { name: "Lib A", script: libA("DoNothing()") });
     await k.tool("create_script_trigger", { name: "Uses A", script: usesA(" requires A") });
     await settled(page);
+    // A save never runs JassHelper for a kept script: the explicit request does (build_script).
+    await k.tool("build_script", {});
     // The map's own compile takes it: this is right code for this map.
     const made = readFileSync(scriptOnDisk(k.root), "latin1");
     if (!/LIBRARY_B\s*=\s*true/.test(made) || !made.includes(global)) return fail(`the map's script wasn't compiled with the two libraries (control): ${lit(await page.evaluate(`window.__vjWarns`))}`);
