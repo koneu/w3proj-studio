@@ -106,6 +106,26 @@ export async function mergeTerrain(w3: W3Api, arg?: { quiet?: boolean }): Promis
   return convert(w3, "Merge Subterrains", (root) => w3.backend.invoke<Converted>("terrain_merge", { root }), arg?.quiet === true);
 }
 
+/** What `backend::mergehook::run` did (crates/backend mergehook.rs Outcome). */
+export interface MergeHookResult { action: "installed" | "updated" | "removed" | "none" | "foreign" | "noGit"; git: boolean; hook: string; message: string }
+
+/** Install Merge Hook / Remove Merge Hook: the opt-in git post-merge hook that runs Check Terrain Seams after a merge
+ *  that touched two subterrains (`w3proj terrain merge-hook`, one body in the backend). Says where the hook is and
+ *  whether git was found; a post-merge hook that isn't ours is left as it is (the notice has the line to add to it). */
+export async function mergeHook(w3: W3Api, arg?: { remove?: boolean; quiet?: boolean }): Promise<MergeHookResult> {
+  const what = arg?.remove ? "Remove Merge Hook" : "Install Merge Hook";
+  const project = w3.workspace.project();
+  if (!project) throw new Error(`${what}: no project is open.`);
+  const r = await w3.backend.invoke<MergeHookResult>("terrain_merge_hook", { root: project.root, remove: arg?.remove === true })
+    .catch((e) => { throw new Error(`${what}: ${errorText(e)}`); });
+  if (arg?.quiet !== true) {
+    if (!r.git) void w3.window.showWarning(`${what}: git wasn't found, so there is no repository to put a hook in.`);
+    else if (r.action === "foreign") void w3.window.showWarning(`${what}: ${r.message}`);
+    else void w3.window.showInfo(`${what}: ${r.message} (git found)`);
+  }
+  return r;
+}
+
 /** What Check Terrain IDs found (terrain_ids.rs Report, backend flatview.rs check). */
 export interface IdCheck {
   duplicates: { kind: string; number: number; files: string[]; members: FixMember[] }[];
@@ -685,6 +705,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.terrainLayout.split", shown(w3, (arg?: { layout?: SplitLayout; quiet?: boolean }) => splitTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.merge", shown(w3, (arg?: { quiet?: boolean }) => mergeTerrain(w3, arg))),
+    w3.commands.register("w3.terrainLayout.installMergeHook", shown(w3, (arg?: { quiet?: boolean }) => mergeHook(w3, arg))),
+    w3.commands.register("w3.terrainLayout.removeMergeHook", shown(w3, (arg?: { quiet?: boolean }) => mergeHook(w3, { ...arg, remove: true }))),
     w3.commands.register("w3.terrainLayout.checkIds", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainIds(w3, arg))),
     w3.mcp.registerTool("change_subterrains", (args) => changeSubterrainsTool(w3, args)),
     w3.commands.register("w3.terrainLayout.fixIds", shown(w3, (arg?: { mode?: FixMode; dryRun?: boolean; quiet?: boolean }) => fixCreationIds(w3, arg))),

@@ -5,9 +5,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
-import type { ExtensionManifest, W3Api } from "../extensions/api";
+import { execFileSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
+import type { ExtensionContext, ExtensionManifest, W3Api } from "../extensions/api";
 import { headless } from "./host";
 import { rustBackend } from "./rustbackend";
 import { fixturePath, repoPath } from "../lib/testhelpers/testutil";
@@ -23,7 +24,7 @@ import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
 import { MCP_EDITS_SERVICE } from "../extensions/services";
-import { changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, getSubterrainsTool, isSplit, joinSubterrains, layoutOps, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { activate, changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, getSubterrainsTool, isSplit, joinSubterrains, mergeHook, layoutOps, mergeTerrain, type MergeHookResult, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { addSub, draftOf, gridRects, planOf, renameSub, resizeSub } from "../lib/terrain/layoutdraft";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, resizeTerrain, type PathingOverrides } from "../lib/terrain/resize";
@@ -91,6 +92,34 @@ test("the split command cuts the project into subterrains; a split it can't keep
     for (const f of FLAT_FILES) assert.ok(!files.includes(f), `${f} isn't on disk any more`);
   }
   await assert.rejects(splitTerrain(grid, { layout: "main", quiet: true }), /split already/);
+});
+
+test("Install Merge Hook writes the shared backend's hook into the project's repository; Remove takes it away", async () => {
+  execFileSync("git", ["init", "-q"], { cwd: gridRoot });
+  const hook = join(gridRoot, ".git", "hooks", "post-merge");
+  const got = await mergeHook(grid, { quiet: true });
+  assert.ok(got.git && got.action === "installed" && existsSync(hook), JSON.stringify(got));
+  assert.equal(resolve(got.hook), resolve(hook));
+  const text = readFileSync(hook, "utf8");
+  assert.ok(text.includes("# w3proj terrain merge-hook") && text.includes("terrain seams"), "the backend's text");
+  assert.equal((await mergeHook(grid, { quiet: true })).action, "updated");
+  // Control: someone else's hook is left alone.
+  writeFileSync(hook, "#!/bin/sh\necho mine\n");
+  const foreign = await mergeHook(grid, { quiet: true });
+  assert.equal(foreign.action, "foreign");
+  assert.equal(readFileSync(hook, "utf8"), "#!/bin/sh\necho mine\n");
+  await assert.rejects(mergeHook(grid, { quiet: true, remove: true }), /left as it is/);
+  rmSync(hook);
+  assert.equal((await mergeHook(grid, { quiet: true })).action, "installed");
+  assert.equal((await mergeHook(grid, { quiet: true, remove: true })).action, "removed");
+  assert.ok(!existsSync(hook));
+  // A flat project has no seams to check.
+  await assert.rejects(mergeHook(flat, { quiet: true }), /no split terrain/);
+  // The commands are in the manifest, for an open project, and call the same function.
+  for (const id of ["installMergeHook", "removeMergeHook"]) assert.ok((manifest as ExtensionManifest).contributes?.commands?.some((c) => c.id === `w3.terrainLayout.${id}` && c.when === "project"), id);
+  activate(grid, { subscriptions: [] } as unknown as ExtensionContext);
+  assert.equal((await grid.commands.execute<MergeHookResult>("w3.terrainLayout.installMergeHook", { quiet: true })).action, "installed");
+  assert.equal((await grid.commands.execute<MergeHookResult>("w3.terrainLayout.removeMergeHook", { quiet: true })).action, "removed");
 });
 
 test("split 2×2 and into main, the terrain editor loads what it loads from the flat project", async () => {

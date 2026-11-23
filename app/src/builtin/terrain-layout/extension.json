@@ -3,7 +3,7 @@
   "name": "Subterrains",
   "version": "0.1.0",
   "description": "Splits the map's terrain and placed objects into subterrains (map/terrain/: one folder per rectangle, so several people can edit different parts of a large map and merge in git), and merges them back into the single files. The map is the same either way; every editor reads and saves it as before. Open Subterrains… (and the Subterrains view) opens only some of them: the others aren't read, drawn or saved, and a strip of two corners around the open ones is shown read-only.",
-  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.checkIds", "onCommand:w3.terrainLayout.fixIds", "onCommand:w3.terrainLayout.checkSeams", "onCommand:w3.terrainLayout.openSubterrains", "onView:w3.terrainLayout.subterrains", "onCommand:w3.terrainLayout.edit", "onEditor:w3.terrainLayout.editor"],
+  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.installMergeHook", "onCommand:w3.terrainLayout.removeMergeHook", "onCommand:w3.terrainLayout.checkIds", "onCommand:w3.terrainLayout.fixIds", "onCommand:w3.terrainLayout.checkSeams", "onCommand:w3.terrainLayout.openSubterrains", "onView:w3.terrainLayout.subterrains", "onCommand:w3.terrainLayout.edit", "onEditor:w3.terrainLayout.editor"],
   "contributes": {
     "views": [{ "id": "w3.terrainLayout.subterrains", "title": "Subterrains", "container": "terrain" }],
     "editors": [{ "id": "w3.terrainLayout.editor", "title": "Terrain Layout", "patterns": ["w3:terrain-layout"] }],
@@ -16,6 +16,8 @@
     "commands": [
       { "id": "w3.terrainLayout.split", "when": "project", "title": "Split Terrain into Subterrains…", "category": "Terrain" },
       { "id": "w3.terrainLayout.merge", "when": "project", "title": "Merge Subterrains", "category": "Terrain" },
+      { "id": "w3.terrainLayout.installMergeHook", "when": "project", "title": "Install Merge Hook", "category": "Source Control" },
+      { "id": "w3.terrainLayout.removeMergeHook", "when": "project", "title": "Remove Merge Hook", "category": "Source Control" },
       { "id": "w3.terrainLayout.checkIds", "when": "project", "title": "Check Terrain IDs", "category": "Terrain" },
       { "id": "w3.terrainLayout.fixIds", "when": "project", "title": "Fix Duplicate Creation Numbers…", "category": "Terrain" },
       { "id": "w3.terrainLayout.checkSeams", "when": "project", "title": "Check Terrain Seams", "category": "Terrain" },
