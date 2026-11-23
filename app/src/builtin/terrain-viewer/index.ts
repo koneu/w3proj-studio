@@ -58,7 +58,7 @@ import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
-import { editorUnitsVersion } from "../../lib/terrain/unitsversion";
+import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
 import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -3002,7 +3002,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (disposed) return;
             // The facings the World Editor reads war3mapUnits.doo with (doodadedit.ts unitAnglesAsOpened), with the
             // doodads' (setting Snap Doodads on Load): not an edit either; the next save writes them.
-            // A version-8 file too: the World Editor's save writes it as version 13 (unitsversion.ts), so the next save does.
+            // A file of version 7 or 8 too: the World Editor's save writes it as version 13 (unitsversion.ts), so the next save does.
             const anglesFixed = !!uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(partial ? uf.list.filter(inOpenArea) : uf.list) > 0;
             if (uf && unitsFile === uf && (anglesFixed || unitsUpgradeDue(uf))) objectsTouched = unitAnglesUnsaved = true;
             // Auto Cycle Random Groups: a group's objects are drawn as one of its lines from the start, a random one.
@@ -3018,6 +3018,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let scalesKnown = true;
         /** Whether the units' movement types are known: false while the map's own unit data can't be read. */
         let unitMovesKnown = true;
+        /** A units file the save gives the World Editor's version 13 (unitsversion.ts): version 7 or 8, and the whole
+         *  map loaded (a partial load's save can't change the header the closed subterrains' files are read by). */
+        const unitsUpgradeDue = (f: PlacedFile) => !partial && UPGRADED_UNITS_VERSIONS.includes(Number(f.doc.version));
+        /** The units file in the World Editor's version, where a save may change it (unitsUpgradeDue); an entry an undo
+         *  put back after an earlier save upgraded the file gets the fields too. */
+        const upgradeUnits = (f: PlacedFile) => { if (!partial) editorUnitsVersion(f.doc); };
         /** Units on the Ground on Save (objheights.ts savedUnitZ; setting terrain.units.groundOnSave): every object of
          *  war3mapUnits.doo goes to the height the World Editor's save writes for it, a ship in water to the surface,
          *  anything else to the ground the editor works out for its type (unitGround: a building on the highest of the
@@ -3026,12 +3032,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  and goes to the ground) keeps its height, and all do while the map's unit data can't be read. A height within
          *  unitZTolerance of the one wanted is left as it is (0.01; 32 where unitGround has no rule), so a map the World
          *  Editor saved isn't rewritten for rounding. True when one changed. */
-        /** A units file the save gives the World Editor's version 13 (unitsversion.ts): version 8, and the whole map
-         *  loaded (a partial load's save can't change the header the closed subterrains' files are read by). */
-        const unitsUpgradeDue = (f: PlacedFile) => !partial && Number(f.doc.version) === 8;
-        /** The units file in the World Editor's version, where a save may change it (unitsUpgradeDue); an entry an undo
-         *  put back after an earlier save upgraded the file gets the fields too. */
-        const upgradeUnits = (f: PlacedFile) => { if (!partial) editorUnitsVersion(f.doc); };
         const groundUnitsForSave = (): boolean => {
           if (!unitsFile || !objCtx || !unitMovesKnown) return false;
           if (!switchedOn(w3, "terrain.units.groundOnSave", SWITCH_DEFAULTS["terrain.units.groundOnSave"])) return false;

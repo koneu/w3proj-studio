@@ -41,9 +41,15 @@ test("an entry an undo put back into an upgraded file gets the fields; its own v
   assert.deepEqual(whole, { version: 13, subversion: 9, units: [own] });
 });
 
+test("a version-7 file becomes version 13 too, its subversion 9 kept", () => {
+  // we-drive 2026-11-23 (make-units-v13.mjs autumn-v7): the editor saved it as 13 (its 11 there came from flag 0x4000).
+  const doc = { version: 7, subversion: 9, units: [{ id: "hfoo" }] };
+  assert.equal(editorUnitsVersion(doc), true);
+  assert.deepEqual(doc, { version: 13, subversion: 9, units: [{ id: "hfoo", skinId: "hfoo", preFlags: 0xffffffff, trailer: [0, 0], extras: [] }] });
+});
+
 test("other versions and documents that aren't lists of entries are left as they are", () => {
   for (const doc of [
-    { version: 7, subversion: 9, units: [{ id: "hfoo" }] },
     { version: 12, subversion: 11, units: [{ id: "hfoo" }] },
     { version: 8, subversion: 11, units: [{ id: "hfoo" }, 7] },
     { version: 8, subversion: 11, units: [{ id: 5 }] },

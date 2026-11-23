@@ -5,9 +5,10 @@
 //                      war3mapUnits.doo of version 8 without skin ids (the editor tells their layout by editorVersion: a
 //                      Reforged one reads skin ids, and the stripped files crash it)
 //   autumn-v7.w3x      the same with the units file of version 7 (subversion 9: no item tables, no hero attributes)
-//   flat-8-9.w3x       flat.w3x (one start location) with its units file of version 8 / subversion 9 without skin ids
-//                      (editorVersion 6059)
-//   flat-8-9-skin.w3x  the same with skin ids (editorVersion 7003 as it was)
+//   flat-8-9-skin.w3x  flat.w3x (one start location, nothing of version 1) with its units file of version 8 / subversion 9
+//                      with skin ids (editorVersion 7003 as it was)
+// Not made: flat.w3x with editorVersion 6059 and units without skin ids. Its war3map.doo is version 13; the editor opening
+// such a map (melee-valid-tft-unit-v0 changed so, 2026-11-23) grew to 57 GB and was killed by the kernel.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,7 +59,6 @@ run("unpack", flat, join(out, "flat"));
 const variants = {
   "autumn-noskin": ["autumn", (p) => { edit(p, "war3map.w3i.json", preReforged); edit(p, "war3map.doo.json", layout("doodads", 8, undefined, false)); edit(p, "war3mapUnits.doo.json", layout("units", 8, 11, false)); }],
   "autumn-v7": ["autumn", (p) => { edit(p, "war3map.w3i.json", preReforged); edit(p, "war3map.doo.json", layout("doodads", 8, undefined, false)); edit(p, "war3mapUnits.doo.json", layout("units", 7, 9, false)); }],
-  "flat-8-9": ["flat", (p) => { edit(p, "war3map.w3i.json", preReforged); edit(p, "war3mapUnits.doo.json", layout("units", 8, 9, false)); }],
   "flat-8-9-skin": ["flat", (p) => { edit(p, "war3mapUnits.doo.json", layout("units", 8, 9, true)); }],
 };
 for (const [name, [base, change]] of Object.entries(variants)) {
