@@ -8599,15 +8599,15 @@ async function typedFieldSave(page, found) {
         .catch(async () => fail(`Ctrl+S right after typing a variable's name saved the variables ${lit((await wtgFile()).variables.map((v) => v.name))}`));
       await settled(page);
       if (await dirty(wtgPath)) fail("Ctrl+S right after typing a variable's name left the Trigger Editor unsaved");
-      // An initial value the script can't hold is refused with why, the box shows the value kept, no edit (literals.ts);
+      // An initial value that isn't a number is refused with why, the box shows the value kept, no edit (literals.ts; a number past 32 bits is wrapped and clamped as the World Editor does, literals.test.ts);
       // the same for add_trigger_variable's size and initial value.
       const wtgBefore = triggerFiles();
       await k.clearToasts();
       const shown = await page.evaluate(`(() => { const row = [...document.querySelectorAll("input.trig-var-name")].find((e) => e.value === "SavedVar")?.closest("tr");
-        const i = row?.querySelector("input.trig-var-value"); if (!i) return null; const was = i.value; i.value = "2147483648"; i.dispatchEvent(new Event("change", { bubbles: true })); return [was, i.value]; })()`);
+        const i = row?.querySelector("input.trig-var-value"); if (!i) return null; const was = i.value; i.value = "1-2"; i.dispatchEvent(new Event("change", { bubbles: true })); return [was, i.value]; })()`);
       await settled(page);
       const said = await k.toasts();
-      if (!shown || shown[0] !== shown[1] || !said.includes("Initial value of SavedVar: An integer is from -2147483648 to 2147483647.")) fail(`SavedVar's initial value typed as 2147483648: box ${lit(shown)}, said "${said}"`);
+      if (!shown || shown[0] !== shown[1] || !said.includes("Initial value of SavedVar: Enter a whole number, like 12 or -3.")) fail(`SavedVar's initial value typed as 1-2: box ${lit(shown)}, said "${said}"`);
       if (await dirty(wtgPath)) fail("the refused initial value left the Trigger Editor unsaved");
       for (const args of [{ size: 0, array: true }, { size: 32769, array: true }, { initialValue: "2147483648" }]) {
         const r = await k.tool("add_trigger_variable", { name: "RefusedVar", type: "integer", ...args }).then(() => "added", (e) => e.message);

@@ -6,7 +6,7 @@ import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/s
 import { withColorTools } from "../../extensions/colortools";
 import { keyOf } from "../../lib/keys";
 import { paramText } from "../../lib/triggers/display";
-import { isTypedCode, literalProblem } from "../../lib/triggers/literals";
+import { filterTriggerTyping, isTypedCode, typedTriggerNumber } from "../../lib/triggers/literals";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
 import { focusAfterClick, h } from "../../workbench/dom";
@@ -132,9 +132,9 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       const problem = (v: string): string | null => {
         if (isTypedCode(type, v)) return null;
         if (base !== "integer" && base !== "real") return null;
-        const bad = literalProblem(base, v);
-        if (bad) return /code$/.test(type) ? "Enter an object code of 4 characters, like hfoo." : bad;
-        const n = Number(v.trim());
+        const t = typedTriggerNumber(base, v);
+        if ("refused" in t || t.value === null) return /code$/.test(type) ? "Enter an object code of 4 characters, like hfoo." : "refused" in t ? t.refused : "Enter a number.";
+        const n = Number(t.value);
         const [min, max] = limits ?? [null, null];
         if (min !== null && n < min) return `The lowest value is ${min}.`;
         if (max !== null && n > max) return `The highest value is ${max}.`;
@@ -145,11 +145,17 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       const take = () => {
         const err = problem(input.value);
         if (err) { note.textContent = err; note.classList.add("error"); input.focus(); return; }
-        done({ type: VALUE, value: base === "integer" || base === "real" ? input.value.trim() : input.value });
+        // A typed number is kept as the World Editor keeps it (literals.ts typedTriggerNumber); a code as typed.
+        const n = base === "integer" || base === "real" ? typedTriggerNumber(base, input.value) : null;
+        done({ type: VALUE, value: n && "value" in n && n.value !== null && !isTypedCode(type, input.value) ? n.value : base === "integer" || base === "real" ? input.value.trim() : input.value });
       };
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
         onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") take(); },
-        oninput: () => { note.classList.remove("error"); } });
+        oninput: () => {
+          note.classList.remove("error");
+          const f = /code$/.test(type) ? input.value : filterTriggerTyping(base, input.value);
+          if (f !== input.value) input.value = f;
+        } });
       // A message the game shows gets the colour tools (the preview starts white, as the game's message text).
       return [isMessageType(data, type) ? withColorTools(input, { defaultColor: "FFFFFF" }) : input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: take }, "OK"))];
     } });

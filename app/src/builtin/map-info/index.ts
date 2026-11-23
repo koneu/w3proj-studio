@@ -14,7 +14,7 @@ import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/te
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { LOADING_TEXTS_UNUSED, loadingTextsUnused, mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
-import { INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
+import { filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingFiltered, infoTypingLimit, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
   addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
@@ -432,11 +432,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** A number field of war3map.w3i (numbers.ts): a value its stored type can't hold is refused with a word, and
          *  the box shows the value kept. `then`: after a value was taken. */
+        const numInputs = new Map<InfoNumberKey, HTMLInputElement>();
         const num = (key: InfoNumberKey, opts: { player?: number; then?: () => void } = {}) => {
           const kind = INFO_NUMBERS[key].kind;
           const shown = () => String(infoNumber(info, key, opts.player) ?? "");
-          const input = h("input.form-input.form-num", { type: "number", value: shown(), step: kind === "f32" ? "any" : "1" });
+          // A box that drops characters as they are typed ("-", ".") or holds only a few is a text one (a number box
+          // keeps what is typed until it changes); the others are number boxes.
+          const filtered = infoTypingFiltered(key);
+          const input = h("input.form-input.form-num", filtered
+            ? { type: "text", inputMode: "numeric", value: shown(), maxLength: infoTypingLimit(key) }
+            : { type: "number", value: shown(), step: kind === "f32" ? "any" : "1" });
           input.dataset.field = key;
+          if (opts.player === undefined) numInputs.set(key, input);
+          if (filtered) input.addEventListener("input", () => {
+            const f = filterInfoTyping(key, input.value);
+            if (f !== input.value) input.value = f;
+          });
           input.addEventListener("change", () => {
             const r = setInfoNumber(info, key, input.value, opts.player);
             if ("refused" in r) {
@@ -445,6 +456,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return;
             }
             input.value = shown(); // the value kept: the editor pulls some into range
+            // ...and keeps pairs in order (zoom, fog start/end, water opacity): the others may have moved.
+            for (const [k, other] of numInputs) if (other !== input && other.isConnected && opts.player === undefined) other.value = String(infoNumber(info, k) ?? "");
             opts.then?.();
             update();
           });
