@@ -77,7 +77,7 @@ import { CornerUndo, MAX_CLIFF_TYPES, cliffSlot } from "../../lib/terrain/cliffs
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -571,7 +571,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** One edit of the ground, as the terrain editor would make it: objects follow, derived files
    *  are rebuilt. `change` works on the terrain as it's saved, and gives the corners it changed. */
-  const editGround = async (title: string, change: (t: Terrain) => number[]) => {
+  const editGround = async (title: string, change: (t: Terrain) => number[], cliffs = false) => {
     const { root } = requireProject(w3);
     const path = projectTerrain(w3);
     if (!path) throw new Error("This project has no war3map.w3e.");
@@ -584,7 +584,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const own = await ownGroundLists();
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
     const states = { before: null as { terrain: Terrain; doodads: Placed[] } | null, after: null as { terrain: Terrain; doodads: Placed[] } | null };
-    let corners = 0, moved = 0;
+    let corners = 0, moved = 0, specialsRemoved = 0;
     const changed = await edits.edit(title, async (read) => {
       const text = await read(path);
       if (text === null) throw new Error("This project has no war3map.w3e.");
@@ -617,7 +617,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const count = followGround(list, terrain, touched, key === "doodads", floats, radius);
         if (key === "doodads") states.after.doodads = list;
         moved += count;
-        if (count) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
+        // A cliff change takes the specials that no longer fit their cliff out, in the same step (as a brush stroke).
+        let dropped = 0;
+        if (cliffs && key === "doodads") {
+          const specials = specialsOf(parsed);
+          const sizes = specials.length ? await specialFootprints(w3, specials, (p) => readFile(w3, { path } as EditorDocument, p, terrain.tileset)).catch(() => new Map<string, PathImage>()) : new Map<string, PathImage>();
+          dropped = dropFallenSpecials(parsed, terrain, (id) => sizes.get(id), partialNow ? (i) => partialNow.corners[i] === OPEN_CORNER : undefined).length;
+          specialsRemoved += dropped;
+        }
+        if (count || dropped) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
       }
       return files;
     }, async (undoing) => {
@@ -625,7 +633,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (from) rebuildSoon(() => from);
     });
     // Pathing, shadows and the minimap follow a moment after the last edit.
-    return { changed, corners, objectsMoved: moved };
+    return { changed, corners, objectsMoved: moved, ...(specialsRemoved ? { specialsRemoved } : {}) };
   };
 
   /** A place a tool names: [x, y], or a region's middle. */
@@ -1003,7 +1011,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!area) throw new Error("set_cliff_level needs a region, or left, bottom, right and top.");
       const kinds = await cliffKinds(), own = await ownGroundLists();
       const target = { level: level as number | undefined, by: by as number | undefined };
-      return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile, own.get(t.tileset)));
+      return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile, own.get(t.tileset)), true);
     }),
     w3.mcp.registerTool("set_cliff_type", async (args) => {
       const { tile } = args;
@@ -1020,7 +1028,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const place = area ?? { points: points!, width };
       const kinds = await cliffKinds();
       const where = area ? area.name ?? "an area" : "a line";
-      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds));
+      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds), true);
     }),
     w3.mcp.registerTool("rebuild_map", async () => {
       // Only the derived files are written, without the GPU: it works on a lost view too.

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { generatePathing, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import { planCliffs } from "./cliffs";
-import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
+import { dropFallenSpecials, groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
@@ -471,4 +471,19 @@ test("wrong unit choices are refused before anything changes", () => {
   assert.deepEqual(e0.itemSets, [[{ id: "YkI0", chance: 100 }], [{ id: "YYI/", chance: 100 }], [{ id: "YlI/", chance: 100 }]]);
   assert.throws(() => setUnitChoices({ drops: [{ level: 2, kind: "epic" }] }), /kind is one of any, permanent/);
   assert.throws(() => setUnitChoices({ drops: "YiI2" }), /must be a list/);
+});
+
+test("dropFallenSpecials takes the specials out whose cliff a tool's change removed, and keeps those that still fit", () => {
+  // A one-layer step up to the east over 1 × 2 tiles, as a short cliff model's pathing texture draws it.
+  const step = { width: 4, height: 8, rgba: Uint8ClampedArray.from({ length: 4 * 8 * 4 }, (_, i) => (i % 4 === 3 ? ((i >> 2) % 4 < 2 ? 0 : 127) : 0)) };
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  const file: Record<string, unknown> = { specials: [{ id: "YCl2", x: 7, y: 10 }, { id: "YCx9", x: 7, y: 10 }, "odd"] };
+  const tex = (id: string) => (id === "YCl2" ? step : null);
+  assert.deepEqual(dropFallenSpecials(file, t, tex), [], "the cliff is there: it fits");
+  assert.equal((file.specials as unknown[]).length, 3);
+  setCliffs(t, block, "box", { level: 2 }, kinds);
+  assert.deepEqual(dropFallenSpecials(file, t, tex), ["YCl2"]);
+  assert.deepEqual(file.specials, [{ id: "YCx9", x: 7, y: 10 }, "odd"], "the unknown type and the odd entry stay");
+  assert.deepEqual(dropFallenSpecials({}, t, tex), [], "a file without specials");
 });
