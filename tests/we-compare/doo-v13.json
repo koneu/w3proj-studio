@@ -1,0 +1,67 @@
+[
+  {
+    "name": "doo-v13-autumn",
+    "description": "smoketest_maps blizzard/(2)AutumnLeaves_S2_v2.0.w3x (war3map.doo version 8 / subversion 11 with skin ids, 6277 doodads, 55 specials) opened and saved after an empty edit: the editor's save writes the doodads file as version 13, subversion 11, the order and the specials kept, every doodad with preFlags 0xFFFFFFFF, editorId 0xFFFFFFFF and its creation number in trailer[0] (trailer [n, 0, 0]), no extras, its skin id kept; Studio's terrain-view save the same (lib/terrain/dooversion.ts, branch feat/doo-v13-upgrade): MATCH 2026-11-23. Ignored: the extras of the 29 doodads whose model has a light (LOlp, YOlp, LOtz, ITag, GPsh, ZZys, LOth), which the editor's save gives that light (one block, e.g. LOlp variation 1 white, intensity 12, Quadratic 0.0005, Damping 0.00001) and Studio's doesn't (an open point of its own, on version-13 files too)",
+    "input": { "map": "${MAIN}/smoketest_maps/blizzard/(2)AutumnLeaves_S2_v2.0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[25].extras","doodads[254].extras","doodads[289].extras","doodads[361].extras","doodads[423].extras","doodads[480].extras","doodads[505].extras","doodads[745].extras","doodads[871].extras","doodads[1296].extras","doodads[1304].extras","doodads[1305].extras","doodads[1374].extras","doodads[1383].extras","doodads[1694].extras","doodads[1735].extras","doodads[1812].extras","doodads[1816].extras","doodads[1871].extras","doodads[1879].extras","doodads[2077].extras","doodads[2362].extras","doodads[2387].extras","doodads[2396].extras","doodads[2685].extras","doodads[3180].extras","doodads[3297].extras","doodads[3313].extras","doodads[3531].extras"] }],
+    "limit": 30
+  },
+  {
+    "name": "doo-v13-autumn-noskin",
+    "description": "AutumnLeaves as a pre-Reforged editor saved it (make-units-v13.mjs autumn-noskin: editorVersion 6059, war3map.doo version 8 without skin ids): the editor's save writes version 13 with every doodad's type id as its skin id, the rest as in doo-v13-autumn; Studio's the same (dooversion.ts): MATCH 2026-11-23. The light doodads' extras ignored as in doo-v13-autumn",
+    "input": { "map": "${REPO}/target/units-v13/autumn-noskin.w3x", "make": "make-units-v13.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[25].extras","doodads[254].extras","doodads[289].extras","doodads[361].extras","doodads[423].extras","doodads[480].extras","doodads[505].extras","doodads[745].extras","doodads[871].extras","doodads[1296].extras","doodads[1304].extras","doodads[1305].extras","doodads[1374].extras","doodads[1383].extras","doodads[1694].extras","doodads[1735].extras","doodads[1812].extras","doodads[1816].extras","doodads[1871].extras","doodads[1879].extras","doodads[2077].extras","doodads[2362].extras","doodads[2387].extras","doodads[2396].extras","doodads[2685].extras","doodads[3180].extras","doodads[3297].extras","doodads[3313].extras","doodads[3531].extras"] }],
+    "limit": 30
+  },
+  {
+    "name": "doo-v13-autumn-v7",
+    "description": "AutumnLeaves with war3map.doo of version 7 (make-doo-v13.mjs autumn-doo-v7: editorVersion 6059, no item tables, item sets or skin ids; the units file version 8 without skin ids): the editor's save writes version 13 with itemTable -1 and no item sets besides the 3.0 fields of doo-v13-autumn-noskin; Studio's the same (dooversion.ts): MATCH 2026-11-23. The light doodads' extras ignored as in doo-v13-autumn",
+    "input": { "map": "${REPO}/target/doo-v13/autumn-doo-v7.w3x", "make": "make-doo-v13.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[25].extras","doodads[254].extras","doodads[289].extras","doodads[361].extras","doodads[423].extras","doodads[480].extras","doodads[505].extras","doodads[745].extras","doodads[871].extras","doodads[1296].extras","doodads[1304].extras","doodads[1305].extras","doodads[1374].extras","doodads[1383].extras","doodads[1694].extras","doodads[1735].extras","doodads[1812].extras","doodads[1816].extras","doodads[1871].extras","doodads[1879].extras","doodads[2077].extras","doodads[2362].extras","doodads[2387].extras","doodads[2396].extras","doodads[2685].extras","doodads[3180].extras","doodads[3297].extras","doodads[3313].extras","doodads[3531].extras"] }],
+    "limit": 30
+  },
+  {
+    "name": "doo-v13-autumn-v12",
+    "description": "AutumnLeaves with war3map.doo of version 12 (make-doo-v13.mjs autumn-doo-v12: skin ids, preFlags 0xFFFFFFFF, trailer [0, 0], no extras): the editor's save writes it as version 13 too, every doodad's trailer [its editorId, 0, 0] and editorId 0xFFFFFFFF; Studio's the same (dooversion.ts): MATCH 2026-11-23. The light doodads' extras ignored as in doo-v13-autumn",
+    "input": { "map": "${REPO}/target/doo-v13/autumn-doo-v12.w3x", "make": "make-doo-v13.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[25].extras","doodads[254].extras","doodads[289].extras","doodads[361].extras","doodads[423].extras","doodads[480].extras","doodads[505].extras","doodads[745].extras","doodads[871].extras","doodads[1296].extras","doodads[1304].extras","doodads[1305].extras","doodads[1374].extras","doodads[1383].extras","doodads[1694].extras","doodads[1735].extras","doodads[1812].extras","doodads[1816].extras","doodads[1871].extras","doodads[1879].extras","doodads[2077].extras","doodads[2362].extras","doodads[2387].extras","doodads[2396].extras","doodads[2685].extras","doodads[3180].extras","doodads[3297].extras","doodads[3313].extras","doodads[3531].extras"] }],
+    "limit": 30
+  },
+  {
+    "name": "doo-v13-autumn-drops",
+    "description": "AutumnLeaves (doo version 8 with skin ids) with item sets on two barricades (LTba, doodads 2303 and 2304) and flags 0, 1, 4 and 8 on four LPrs (make-doo-v13.mjs autumn-drops): the editor's save writes version 13 with the item sets and flags kept; Studio's the same (dooversion.ts): MATCH 2026-11-23. Ignored besides the light doodads' extras (as in doo-v13-autumn): the two barricades' flags, which the editor's save took from 3 to 1 (flag 2 off; the third barricade beside them, without item sets, kept 3, as both did in doo-v13-autumn; an open point of its own, Studio keeps 3)",
+    "input": { "map": "${REPO}/target/doo-v13/autumn-drops.w3x", "make": "make-doo-v13.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[2303].flags","doodads[2304].flags","doodads[25].extras","doodads[254].extras","doodads[289].extras","doodads[361].extras","doodads[423].extras","doodads[480].extras","doodads[505].extras","doodads[745].extras","doodads[871].extras","doodads[1296].extras","doodads[1304].extras","doodads[1305].extras","doodads[1374].extras","doodads[1383].extras","doodads[1694].extras","doodads[1735].extras","doodads[1812].extras","doodads[1816].extras","doodads[1871].extras","doodads[1879].extras","doodads[2077].extras","doodads[2362].extras","doodads[2387].extras","doodads[2396].extras","doodads[2685].extras","doodads[3180].extras","doodads[3297].extras","doodads[3313].extras","doodads[3531].extras"] }],
+    "limit": 30
+  }
+]
