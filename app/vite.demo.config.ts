@@ -1,4 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
+import { existsSync, renameSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // The web demo (docs/web-demo.md): the app's own code with the title bar swapped for a browser one and the Rust side
@@ -22,14 +24,17 @@ function demoTitleBar(): Plugin {
   };
 }
 
-/** demo.html is the entry; the site wants it as index.html. */
+/** demo.html is the entry; the site wants it as index.html. Renamed on disk once the bundle is written: assigning to
+ *  generateBundle's bundle (what this did before) is refused by Rolldown, which Vite 8 builds with. */
 function indexHtml(): Plugin {
+  let outDir = "";
   return {
     name: "demo-index",
     enforce: "post",
-    generateBundle(_o, bundle) {
-      const page = bundle["demo.html"];
-      if (page) { page.fileName = "index.html"; delete bundle["demo.html"]; bundle["index.html"] = page; }
+    configResolved(config) { outDir = resolve(config.root, config.build.outDir); },
+    closeBundle() {
+      const page = join(outDir, "demo.html");
+      if (existsSync(page)) renameSync(page, join(outDir, "index.html"));
     },
     configureServer(server) {
       server.middlewares.use((req, _res, next) => { if (req.url === "/") req.url = "/demo.html"; next(); });
