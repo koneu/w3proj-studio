@@ -18,12 +18,13 @@
 //   and keys.
 // - the custom script header is three spaces (a JASS whitespace-only header).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gamePath } from "../../gamepath.mjs";
 import { requireFresh } from "../../binfresh.mjs";
+import { setHeader } from "./trigger-folder.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
@@ -164,10 +165,8 @@ for (const [out, m] of Object.entries(MAPS)) {
     const strings = ["Subtitle 900", "Speaker 901", "Speaker 902", "Subtitle 903", "Speaker 904", "Speaker 905"]
       .map((t, k) => `STRING ${900 + k}\r\n{\r\n${t}\r\n}\r\n\r\n`).join("");
     writeFileSync(wtsFile, readFileSync(wtsFile, "utf8") + strings);
-    const wctFile = join(map, "war3map.wct.txt");
-    const wct = readFileSync(wctFile, "utf8");
-    if (!wct.includes("//== header (no text) ==\n")) throw new Error("flat.w3x's wct.txt has another header line");
-    if (m.header) writeFileSync(wctFile, wct.replace("//== header (no text) ==\n", `//== header ==\n${m.header}\n`));
+    if (existsSync(join(map, "triggers", "header.j"))) throw new Error("flat.w3x has a custom script header");
+    if (m.header) setHeader(dir, m.header);
     rmSync(join(map, "war3map.j"), { force: true }); // Studio writes one from the triggers, the editor too
     run("pack", dir, "-o", join(here, out), "--force-stale");
     console.log(`made ${join(here, out)}`);

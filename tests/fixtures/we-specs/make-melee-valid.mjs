@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { readCategory, renameCategory } from "./trigger-folder.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -218,11 +219,8 @@ function make(name, c) {
       writeFileSync(w3e, lines.join("\n"));
     }
     if (c.category) {
-      const wtg = join(map, "war3map.wtg.json");
-      const text = readFileSync(wtg, "utf8");
-      const from = '"name":"Initialization"';
-      if (!text.includes(from)) throw new Error(`${name}: no category Initialization in war3map.wtg.json`);
-      writeFileSync(wtg, text.replace(from, `"name":${JSON.stringify(c.category)}`));
+      if (readCategory(dir, "Initialization").name !== "Initialization") throw new Error(`${name}: no category Initialization in map/triggers/`);
+      renameCategory(dir, "Initialization", c.category);
     }
     const infoFile = join(map, "war3map.w3i.json");
     const info = JSON.parse(readFileSync(infoFile, "utf8"));

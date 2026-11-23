@@ -8,13 +8,14 @@
 //   echo-zeromasks.w3x  echo with every player's allyLow/allyHigh set to 0 in the w3i (the all-zero masks of a map saved with
 //                     Modify ally priorities off by another tool), packed as is (pack_as_is: `w3proj pack` would work them out)
 //   matrix.w3x        MatrixPCDefense_v4.3 (no war3map.wtg: the editor refuses it, "Trigger data missing or invalid") with
-//                     echo's war3map.wtg.json and war3map.wct.txt added, packed as is; its ally masks stay all zero
+//                     echo's triggers (map/triggers/, or its raw war3map.wtg and war3map.wct) added, packed as is; its ally masks stay all zero
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, mainCheckout } from "../../gamepath.mjs";
 import { requireFresh } from "../../binfresh.mjs";
+import { copyTriggers } from "./trigger-folder.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const main = mainCheckout();
@@ -57,7 +58,9 @@ writeFileSync(w3iPath, JSON.stringify(w3i, null, 2));
 packAsIs(join(out, "zeromasks"), join(out, "echo-zeromasks.w3x"));
 const matrixSrc = join(main, "smoketest_maps", "new(er)_maps", "MatrixPCDefense_v4.3.w3x");
 run("unpack", matrixSrc, join(out, "matrix"));
-for (const f of ["war3map.wtg.json", "war3map.wct.txt"]) cpSync(join(out, "base", "map", f), join(out, "matrix", "map", f));
+// The base's triggers: map/triggers/ (the unpack split them), else its raw war3map.wtg and war3map.wct.
+if (existsSync(join(out, "base", "map", "triggers"))) copyTriggers(join(out, "base"), join(out, "matrix"));
+else for (const f of ["war3map.wtg", "war3map.wct"]) cpSync(join(out, "base", "map", f), join(out, "matrix", "map", f));
 packAsIs(join(out, "matrix"), join(out, "matrix.w3x"));
 rmSync(final, { recursive: true, force: true });
 renameSync(out, final);

@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gamePath } from "../../gamepath.mjs";
 import { requireFresh } from "../../binfresh.mjs";
+import { addScriptTrigger } from "./trigger-folder.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
@@ -90,18 +91,9 @@ try {
   const unref = process.argv.includes("--unref");
   if (unref) run("pack", dir, "-o", join(here, "dest-tint-unref.w3x"), "--force-stale");
   const names = unref ? [] : list.map((d, k) => `gg_dest_${d.id}_${String(k + 1).padStart(4, "0")}`);
-  const wtgFile = join(map, "war3map.wtg.json");
-  const wtg = JSON.parse(readFileSync(wtgFile, "utf8"));
-  wtg.counts[3].count += 1;
-  wtg.items.push({
-    type: 8, name: "Names", description: "", isComment: 0, id: (3 << 24) | 1, enabled: true, isCustom: true,
-    initiallyOff: false, runOnInit: false, parent: 33554432, ecas: [],
-  });
-  writeFileSync(wtgFile, JSON.stringify(wtg, null, 1));
-  const wctFile = join(map, "war3map.wct.txt");
-  const wct = readFileSync(wctFile, "utf8").replace(/\r?\n$/, "");
   const body = names.map((n) => `    call SetDestructableLife(${n}, 1)`).join("\n");
-  writeFileSync(wctFile, `${wct}\n//== trigger 1: Names ==\nfunction InitTrig_Names takes nothing returns nothing\n${body}\nendfunction\n`);
+  addScriptTrigger(dir, { name: "Names", description: "", isComment: 0, enabled: true, initiallyOff: false, runOnInit: false },
+    `function InitTrig_Names takes nothing returns nothing\n${body}\nendfunction`);
   if (!unref) run("pack", dir, "-o", join(here, "dest-tint.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
