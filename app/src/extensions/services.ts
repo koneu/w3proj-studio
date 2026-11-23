@@ -646,6 +646,9 @@ export interface CheckedGroup { id: string; title: string; problems: Problem[]; 
 
 /** "w3.problems", provided by the Problems view: checks of the open project (like compiler
  *  errors), shown in a list and run before packing. Extensions add their own checks. */
+/** The graphics mode a Problems run used. */
+export type GraphicsMode = "sd" | "hd" | "de";
+
 export interface ProblemsService {
   registerCheck(check: ProblemCheck): { dispose(): void };
   /** Runs every check; the view shows the result. Resolves with all problems found. */
@@ -656,7 +659,9 @@ export interface ProblemsService {
    *  problems"); `w3proj check` prints them. Empty when the run's results weren't the open project's. */
   runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[];
     /** The checks the project's w3proj.toml [checks] switched off (they weren't run), and why that section can't be used. */
-    disabled: string[]; configError: string | null }>;
+    disabled: string[]; configError: string | null;
+    /** The graphics mode the run used (game.graphicsMode): the checks' answers depend on it. Absent when the run's results weren't the open project's. */
+    graphicsMode?: GraphicsMode }>;
   /** Why the melee tools (check_melee) must not run by the project's w3proj.toml `[checks] melee`, null when they may. */
   meleeRefusal(): Promise<string | null>;
   /** The result of the last run. */

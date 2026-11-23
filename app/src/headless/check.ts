@@ -12,7 +12,7 @@
 
 import { headless, type Message } from "./host";
 import type { ExtensionManifest } from "../extensions/api";
-import { PROBLEMS_SERVICE, TERRAIN_SERVICE, type CheckedGroup, type ProblemsService, type TerrainToolGroup } from "../extensions/services";
+import { PROBLEMS_SERVICE, TERRAIN_SERVICE, type CheckedGroup, type GraphicsMode, type ProblemsService, type TerrainToolGroup } from "../extensions/services";
 import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
@@ -20,6 +20,7 @@ import { MANIFEST_FILE, MELEE_SETTINGS, applySeverity, disabledIds, isDisabled, 
 import { DEFAULT_UNIT_SIZE } from "../builtin/terrain-viewer/pathcheck";
 import { meleeReport, pathReport, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
+import { graphicsModeOf } from "../builtin/problems/mode";
 import * as problemsExtension from "../builtin/problems/index";
 import * as pathingExtension from "../builtin/terrain-pathing/index";
 import problemsManifest from "../builtin/problems/extension.json";
@@ -63,6 +64,8 @@ export interface CheckReport {
   melee?: unknown;
   /** check_path's answer as the MCP tool gives it. */
   path?: unknown;
+  /** The graphics mode (game.graphicsMode) the checks ran under; the CLI prints it as "Graphics mode: sd|hd". */
+  graphicsMode: GraphicsMode;
   messages: Message[];
 }
 
@@ -78,7 +81,7 @@ export async function check(job: CheckJob): Promise<CheckReport> {
   const h = headless([problemsManifest, terrainManifest, pathingManifest] as ExtensionManifest[], job.settings);
   const { w3, workspace, messages } = h;
   await workspace.open(job.root);
-  const report: CheckReport = { rows: [], ignored: 0, ignoreError: null, sections: [], disabled: [], messages };
+  const report: CheckReport = { rows: [], ignored: 0, ignoreError: null, sections: [], disabled: [], graphicsMode: graphicsModeOf(w3.settings.get("game.graphicsMode")), messages };
   const rows = report.rows;
   const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }));
   report.disabled = disabledIds(cfg.config);
