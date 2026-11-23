@@ -120,6 +120,13 @@ test("parseArgs: the day and night fixed by default; --compare-ready refuses a t
   assert.throws(() => parseArgs(["--day-night", "cycle", "--map", "m.w3x", "--compare-ready"]), /day and night fixed/);
 });
 
+test("parseArgs: --wheel takes its notches, a position and a held key (+ctrl: Adjust Clipping), refused before the start", () => {
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--wheel", "-6@748,404", "--wheel", "28+ctrl", "--wheel", "2@1,2+shift"]).steps, [
+    ["--map", "m.w3x"], ["--wheel", { n: -6, at: "748,404", mod: null }], ["--wheel", { n: 28, at: null, mod: "ctrl" }], ["--wheel", { n: 2, at: "1,2", mod: "shift" }],
+  ]);
+  for (const bad of ["0", "x", "", "3+meta", "3+", "3@1", "1.5", "+ctrl", "99999"]) assert.throws(() => parseArgs(["--wheel", bad]), /--wheel/, bad);
+});
+
 test("parseArgs: --drag takes its two positions (and a duration) as one value; --drag-mod belongs to the next drag", () => {
   const H = DEFAULT_DRAG_HOLD;
   assert.equal(H, 250);
