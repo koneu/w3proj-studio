@@ -24,7 +24,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 }
 
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$NodeMajor = 22             # Vite 7 needs Node 20.19+ or 22.12+
+$NodeMajor = 26             # the current LTS (Vite 8 needs 20.19+ or 22.12+; CI and @types/node are 26)
 $ActionlintVersion = "1.7.7"
 
 $script:missing = @()

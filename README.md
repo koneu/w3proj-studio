@@ -454,7 +454,7 @@ Functionality one extension offers others goes through a service, not an import.
 
 ## Build & run
 
-Requires Rust (the toolchain version is pinned in `rust-toolchain.toml`), Node 22 (Vite 7 needs
+Requires Rust (the toolchain version is pinned in `rust-toolchain.toml`), Node 26 (the current LTS; Vite 8 needs
 20.19 or newer), and the system webview: WebView2 on Windows, WebKitGTK on Linux.
 
 ```sh
@@ -489,7 +489,7 @@ scripts\setup-windows.bat --check   :: what's there and what's missing; changes 
 scripts\setup-windows.bat           :: install what's missing (through winget)
 ```
 
-It checks or installs the MSVC C++ build tools, the WebView2 runtime, Rust (rustup, the pinned version), Node 22,
+It checks or installs the MSVC C++ build tools, the WebView2 runtime, Rust (rustup, the pinned version), Node 26,
 the optional sccache and actionlint (into `target/tools/bin/`, as on Linux), runs `npm ci` in `app/` (also when
 `node_modules` came from a Linux machine), and finds Warcraft III (`Program Files`, Battle.net's uninstall entry, the
 folder above the checkout) for `.game-path`. The work is in `scripts/setup-windows.ps1`; the `.bat` starts it.
@@ -512,7 +512,7 @@ It sets up:
 - **apt packages:** Tauri's build dependencies (`libwebkit2gtk-4.1-dev`, `libssl-dev`, `libxdo-dev`,
   `libayatana-appindicator3-dev`, `librsvg2-dev`, `build-essential`, …), plus `webkit2gtk-driver` and `xvfb`.
 - **Rust** through rustup, at the pinned version.
-- **Node 22** through [nvm](https://github.com/nvm-sh/nvm), not apt: Ubuntu's `nodejs` package is too old.
+- **Node 26** through [nvm](https://github.com/nvm-sh/nvm), not apt: Ubuntu's `nodejs` package is too old.
 - **`tauri-driver`** (`cargo install tauri-driver --locked`, into `~/.cargo/bin`, which must be on `PATH`).
 - **`npm ci`** in `app/`.
 

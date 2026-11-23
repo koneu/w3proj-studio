@@ -28,7 +28,7 @@ third-party maps aren't in the repository; worktrees find it through the main ch
 `W3PROJ_CORPUS=<folder>`: put `.w3x`, `.w3m` and `.w3n` files there, sub-folders are fine. The game's install folder is
 read from `.game-path` in the main checkout (git-ignored; `scripts/setup-linux.sh` or `scripts/setup-windows.ps1` write
 it) or `W3PROJ_GAME=<folder>`. Without them the commit gate still passes and the corpus tier fails: it never skips
-silently. Minimum on a fresh clone: Node 22+, `npm ci` in `app/`, the Rust toolchain.
+silently. Minimum on a fresh clone: Node 26+, `npm ci` in `app/`, the Rust toolchain.
 
 ## What can go wrong, worst first
 

@@ -26,7 +26,7 @@ while (( $# )); do
 done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE_MAJOR=22           # Vite 7 needs Node 20.19+ or 22.12+
+NODE_MAJOR=26           # the current LTS (Vite 8 needs 20.19+ or 22.12+; CI and @types/node are 26)
 NVM_VERSION=v0.40.3
 ACTIONLINT_VERSION=1.7.7
 
