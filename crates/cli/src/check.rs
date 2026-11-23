@@ -138,6 +138,9 @@ pub fn lines(report: &Value) -> Vec<String> {
         ));
     }
     out.push(summary);
+    if let Some(mode) = report["graphicsMode"].as_str() {
+        out.push(format!("Graphics mode: {mode}"));
+    }
     out
 }
 
@@ -203,7 +206,10 @@ mod tests {
         assert_eq!(l[1], "warning  melee/camps: few camps");
         assert_eq!(l[2], "skipped  path: needs two points");
         assert_eq!(l[3], "1 error, 1 warning; 3 reports ignored by the project (.w3proj/problems-ignore.json)");
-        assert_eq!(l.len(), 4);
+        assert_eq!(l.len(), 4, "control: a report without a mode prints no mode line");
+        let mut with = r.clone();
+        with["graphicsMode"] = json!("sd");
+        assert_eq!(lines(&with).last().unwrap(), "Graphics mode: sd");
         let ran = json!({ "rows": [], "ignored": 0, "sections": [{ "section": "melee", "ran": true, "note": "forced on (--melee = on), whatever the Melee flag says" }] });
         assert_eq!(lines(&ran)[0], "note     melee: forced on (--melee = on), whatever the Melee flag says");
     }

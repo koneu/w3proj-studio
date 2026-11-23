@@ -6,7 +6,8 @@
 // checks first (map-project).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
+import { PROBLEMS_SERVICE, type CheckedGroup, type GraphicsMode, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
+import { graphicsModeOf, modeLine } from "./mode";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
 import { MANIFEST_FILE, MELEE_SETTINGS, MINIMAL_MANIFEST, addDisabled, setMelee, type MeleeSetting, applySeverity, disabledIds, isDisabled, meleeToolRefusal, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
@@ -25,6 +26,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The project root the results are for. */
   let ranFor: string | null = null;
   let ran = false;
+  /** The graphics mode of the last run, as shown in the view's header. */
+  let ranMode: GraphicsMode = "hd";
   /** The run going on: `root` is the project it checks, `adopted` whether its results became the
    *  shown ones (not when the project was closed or changed meanwhile). */
   let running: Promise<{ root: string | null; adopted: boolean; problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[]; disabled?: string[]; configError?: string | null }> | null = null;
@@ -93,6 +96,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.workspace.filesReady();
       if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [], ignored: 0, ignoreError: null, checks: [] };
       const result: Group[] = [];
+      const mode = graphicsModeOf(w3.settings.get<string>("game.graphicsMode"));
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);
       const loaded = await readIgnore();
@@ -115,13 +119,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       config = cfg.config;
       configBad = cfg.error;
       ranFor = root;
+      ranMode = mode;
       ran = true;
       updateStatus();
       const byCheck = groups.map((g): CheckedGroup => {
         const shown = visible(g);
         return { id: g.check.id, title: g.check.title, problems: shown, ignored: g.problems.length - shown.length, ...(g.error ? { error: g.error } : {}) };
       });
-      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck, disabled: disabledIds(config), configError: configBad };
+      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck, disabled: disabledIds(config), configError: configBad, graphicsMode: mode };
     })().finally(() => {
       // The run's documents aren't kept: the next run reads the files as they are then.
       scope = new RunScope(w3, false);
@@ -255,6 +260,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ? h("button.problems-ignore-library", { title: "The Orc bonus chapters carry a quest library whose triggers nothing runs. Ignores these reports (here and in later runs); other triggers are still reported. Undo it from Show ignored.", onclick: run(() => changeIgnore((f) => ({ ...f, rules: [...f.rules, BONUS_QUEST_LIBRARY] }))) }, "Ignore the bonus campaign quest library") : null,
           ran && ignoredCount() ? h("button.problems-show-ignored", { title: "Lists the ignored reports too, each with an Un-ignore button", onclick: run(async () => { await w3.commands.execute("w3.problems.toggleIgnored"); }) }, `${showIgnored ? "Hide" : "Show"} ignored (${ignoredCount()})`) : null,
           h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${describeCounts(counted)}` : " No problems found.") : "")));
+        if (ran) el.append(h("div.muted.problems-mode", { title: "game.graphicsMode when the checks ran: some answers (models, textures) depend on it" }, modeLine(ranMode)));
         if (ran && configBad) el.append(h("div.view-empty.problems-failed", {}, `${configBad}. No check is switched off until it is fixed.`));
         else if (ran && disabledIds(config).length) el.append(h("div.view-empty.problems-disabled", { title: "Set in the [checks] section of w3proj.toml (disable = [...])" }, `Switched off by the project (w3proj.toml): ${disabledIds(config).join(", ")}`));
         if (ran && !configBad) el.append(h("div.problems-melee", { title: "w3proj.toml [checks] melee: whether check_melee (w3proj check, the AI tools) holds the map to the melee rules. Auto: only when war3map.w3i's Melee flag is on." },
