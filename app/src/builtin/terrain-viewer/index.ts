@@ -4626,6 +4626,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
         const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> => resizeHistory.exclusive(() => resizeLocked(change, complements));
+        /** Set when a resize starts writing the map's files: from then on this editor holds the old map, and is closed and
+         *  opened again on the new one (resizeLocked). It saves nothing, takes no destructable flags or file changes and
+         *  derives nothing meanwhile: a save of its old terrain landing among the resize's writes put the old size back
+         *  over the new one (on a split terrain the resize then failed on the pathing overrides' size and was rolled back;
+         *  on a flat one the terrain stayed old under a resized w3i). */
+        let superseded = false;
+        const SUPERSEDED = "The map is being resized: this terrain editor opens again on the new size, then saves.";
         /** The files a resize rewrites that are in the project but can't be read (absent ones are fine). */
         const resizeReadProblems = async (): Promise<string[]> => {
           const out: string[] = [];
@@ -4666,8 +4673,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // again: a save redoes pathing, shadows and the minimap, which takes minutes on a big map, and the resize
           // makes them anew below.
           if (mark.isDirty(at)) await editorApi.save?.();
+          // From here on this editor's in-memory map is the old one (see superseded); a save of it still running ends
+          // first (the save queue: this one is refused when its turn comes), before anything is kept or written.
+          superseded = true;
+          await editorApi.save?.().catch(() => {});
           // Every file the resize rewrites is kept, for Undo Resize (Map Size); if it fails halfway they go back.
-          const session = await beginResize(w3.workspace, doc.path, "Resize map", shownBefore);
+          // Nothing written yet when keeping them fails: the editor stays as it was.
+          const session = await beginResize(w3.workspace, doc.path, "Resize map", shownBefore).catch((e: unknown) => { superseded = false; throw e; });
           // The editor opens again on the new terrain (or, after a failure, on the old), still inside the lock: an undo
           // waiting for it finds the editor of the new files, not this one closing.
           const reopen = async () => {
@@ -6450,6 +6462,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
             await ready();
+            // Being resized: the derived files are the resize's, made from the new terrain.
+            if (superseded) return;
             minimapStale.set();
             // With unsaved edits in the editor, what's made has them: not what the files hold.
             const unsaved = mark.isDirty(at);
@@ -6468,7 +6482,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const placed = await Promise.race([ready().then(() => true), new Promise<false>((done) => { timer = window.setTimeout(() => done(false), FOLLOW_READY_MS); })]);
             clearTimeout(timer);
             if (!placed) return false;
-            if (disposed || !dooFile || !editable || openedBy.get(doc.path) !== record || w3.workspace.project()?.root !== record.root) return false;
+            // Being resized (superseded): the file is the caller's, the new one; this editor's list is the old map's.
+            if (disposed || superseded || !dooFile || !editable || openedBy.get(doc.path) !== record || w3.workspace.project()?.root !== record.root) return false;
             const f = dooFile;
             const changes = follow(f.list as unknown as Parameters<FollowFlags>[0]);
             // Not an edit of the user's: no undo step. The file follows the script as the World Editor's save writes it.
@@ -6575,6 +6590,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         let changes: Promise<boolean> = Promise.resolve(true);
         const reloadFile = (path: string) => {
+          // Being resized: the resize changes the files and opens the editor again on them; its lists aren't swapped
+          // under it meanwhile.
+          if (superseded) return Promise.resolve(true);
           // Imported art changed on disk: the loaded models and textures go and the objects are drawn anew (no undo or selection change).
           if (projectObjects && path !== doc.path.toLowerCase() && changesImports(path)) {
             importsChanged = true;
@@ -6605,6 +6623,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           // One save at a time, each taking its own snapshot: a later write can't be overtaken by an older one.
           save: editable ? serial(async () => {
+            // Its map is the old one while a resize writes the new files (superseded): saved, it would put that back.
+            if (superseded) throw new Error(SUPERSEDED);
             // The map-edge marks are written from the w3i, as the World Editor's save does (we-drive, 2026-11-13: a copy
             // of AutumnLeaves_S2 with other marks came back marked by its complements). The view goes by the w3i anyway.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[]; players?: StartPlayer[] }>(w3, "map/war3map.w3i.json").catch(() => null);
