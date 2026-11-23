@@ -12,8 +12,8 @@ checks below and holds the counts against `tests/script-baseline.json`: they may
 
 To look at differences, run a check by hand from `target/script-check`:
 
-    node --experimental-transform-types --import ../../app/scripts/script-check/tsregister.mjs ../../app/scripts/script-check/sections.mts <repo>/app/src/lib "<Section>" <diffs>
-    node --experimental-transform-types --import ../../app/scripts/script-check/tsregister.mjs ../../app/scripts/script-check/functions.mts <repo>/app/src/lib <diffs> [name filter]
+    node --import ../../app/scripts/script-check/tsregister.mjs ../../app/scripts/script-check/sections.mts <repo>/app/src/lib "<Section>" <diffs>
+    node --import ../../app/scripts/script-check/tsregister.mjs ../../app/scripts/script-check/functions.mts <repo>/app/src/lib <diffs> [name filter]
 
 `sections.mts` prints identical sections per banner title; `functions.mts` compares the
 trigger functions one by one and lists the most common first differences.

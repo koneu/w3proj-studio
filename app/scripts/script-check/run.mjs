@@ -15,11 +15,12 @@ import { fileURLToPath } from "node:url";
 import { mergeSections, mergeValid, printSections, printValid } from "./report.mjs";
 import { chosenGamePath } from "../../../tests/gamepath.mjs";
 
-// --experimental-transform-types (the checks run TypeScript directly) came with Node 22.7.
+// The checks run the app's TypeScript directly, through tsregister.mjs (esbuild: Node 26 dropped
+// --experimental-transform-types and strips types only).
 {
-  const [major, minor] = process.versions.node.split(".").map(Number);
-  if (major < 22 || (major === 22 && minor < 7)) {
-    console.error(`script check needs Node 22.7 or newer (this is ${process.versions.node})`);
+  const major = Number(process.versions.node.split(".")[0]);
+  if (major < 26) {
+    console.error(`script check needs Node 26 or newer (this is ${process.versions.node})`);
     process.exit(2);
   }
 }
@@ -109,7 +110,7 @@ async function check(script, shards, echo, ...args) {
     const out = join(work, `${script}.${i}.json`);
     rmSync(out, { force: true });
     return new Promise((done) => {
-      const p = spawn(process.execPath, ["--no-warnings", "--experimental-transform-types", "--import", new URL("./tsregister.mjs", import.meta.url).href, join(here, script), join(app, "src", "lib"), ...args], {
+      const p = spawn(process.execPath, ["--no-warnings", "--import", new URL("./tsregister.mjs", import.meta.url).href, join(here, script), join(app, "src", "lib"), ...args], {
         cwd: work, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SCRIPT_CHECK_JSON: out, SCRIPT_CHECK_SHARD: `${i}/${shards}` },
       });
       let stdout = "", stderr = "";

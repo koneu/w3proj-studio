@@ -342,7 +342,7 @@ async function newMaps(page, found) {
     if (r.status !== 0) throw new Error(`can't read ${path}`);
     writeFileSync(file, r.stdout);
   }
-  const check = spawnSync(process.execPath, ["--no-warnings", "--experimental-transform-types", "--import", new URL("./script-check/tsregister.mjs", import.meta.url).href,
+  const check = spawnSync(process.execPath, ["--no-warnings", "--import", new URL("./script-check/tsregister.mjs", import.meta.url).href,
     join(app, "scripts", "script-check", "check-scripts.mts"), join(app, "src", "lib"), common, blizzard, ...scripts], { encoding: "utf8" });
   if (check.status !== 0 || !check.stdout.includes(`${NEW_MAPS.length} scripts checked`)) found.push(`generated scripts: ${(check.stderr + check.stdout).trim().slice(0, 500)}`);
   return scripts.length;
