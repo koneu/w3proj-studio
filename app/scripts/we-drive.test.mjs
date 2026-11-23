@@ -1332,3 +1332,35 @@ test("parseArgs: --wait-window takes a title, --idle none", () => {
   assert.deepEqual(o.steps, [["--key", "F5"], ["--wait-window", "Sound Editor"], ["--idle", null], ["--sleep", "100"]]);
   assert.throws(() => parseArgs(["--wait-window"]));
 });
+
+test("memory cap: the command line, the fallback without a user scope, the size check, and the outcome's wording", () => {
+  const { program, args } = drive.capCommand("bwrap", ["--x", "y"], "1G", true);
+  assert.equal(program, "systemd-run");
+  assert.deepEqual(args, ["--user", "--scope", "--quiet", "-p", "MemoryMax=1G", "-p", "MemorySwapMax=0", "--", "bwrap", "--x", "y"]);
+  assert.ok(drive.capCommand("bwrap", [], "1G", true, "u1").args.includes("--unit=u1"));
+  assert.equal(drive.oomInJournal("u", () => ({ stdout: "x: A process of this unit has been killed by the OOM killer.\n" })), true);
+  assert.equal(drive.oomInJournal("u", () => ({ stdout: "Started run-r1.scope\n" })), false);
+  // Control: no scope, or no limit, runs the program as it is.
+  assert.deepEqual(drive.capCommand("bwrap", ["--x"], "1G", false), { program: "bwrap", args: ["--x"] });
+  assert.deepEqual(drive.capCommand("bwrap", ["--x"], null, true), { program: "bwrap", args: ["--x"] });
+  assert.equal(drive.parseArgs([]).opts.memoryMax, "20G");
+  assert.equal(drive.parseArgs(["--memory-max", "1g"]).opts.memoryMax, "1G");
+  assert.equal(drive.parseArgs(["--memory-max", "none"]).opts.memoryMax, null);
+  assert.throws(() => drive.parseArgs(["--memory-max", "lots"]), /--memory-max wants a size/);
+  // Without systemd-run the probe says no (the run is uncapped, with a note).
+  assert.equal(drive.memoryScopeAvailable(() => ({ error: new Error("ENOENT") })) && process.platform === "linux", false);
+  const s = Object.create(Session.prototype);
+  s.opts = { memoryMax: "1G" };
+  s.log = "w.log";
+  const wineserverCalls = [];
+  s.wineserver = (a) => { wineserverCalls.push(a[0]); return {}; };
+  s.editor = { memoryKilled: true };
+  assert.match(s.exitedError(" while opening").message, /exited while opening: killed by the memory cap \(1G\)/);
+  assert.deepEqual(wineserverCalls, ["-k", "-w"], "the prefix's leftovers are killed after a cap kill");
+  s.editor = { memoryKilled: false };
+  wineserverCalls.length = 0;
+  assert.doesNotMatch(s.exitedError("").message, /memory cap/);
+  assert.deepEqual(wineserverCalls, []);
+  const o = weOutcome(1, [{ step: "--map" }, { step: "--wait-ready", error: "the editor exited while opening: killed by the memory cap (1G) (see w.log)" }]);
+  assert.match(o.errors[0], /^World Editor: .*killed by the memory cap/);
+});

@@ -26,6 +26,10 @@
 //                       W3PROJ_WE_FRAME_CAP; 0 = none, the old behaviour). The editor redraws all the time, and under
 //                       lavapipe each frame costs the CPU (docs/testing/editor-tooling.md "Editor CPU"): settled pictures are the same
 //                       bytes, but --fps counts at most N, and what times frames (an animation's phase) can differ
+//   --memory-max SIZE   cap the editor's memory (all of its processes, Linux): a systemd user scope with MemoryMax=SIZE and
+//                       no swap (default 20G, or W3_WE_MEMORY_MAX; "none" = no cap). A run over it is killed by the
+//                       kernel and reported as "killed by the memory cap". Without systemd-run or a user session the
+//                       run is uncapped, with one note (docs/testing/editor-tooling.md "Memory cap")
 //   --renderer R        software (default, or W3PROJ_WE_RENDERER): Mesa's lavapipe, the same pictures on every
 //                       machine; gpu: the machine's Vulkan driver (NVIDIA presents into Xvfb since driver 595), a
 //                       fraction of the CPU, but pictures a few levels apart from lavapipe's (texture filtering).
@@ -391,6 +395,57 @@ export function closeAction(dialog, main) {
 /** The line we-drive prints when it found the crash dialog. */
 export const CRASH_MESSAGE = "the World Editor crashed; report dismissed without sending";
 
+export const DEFAULT_MEMORY_MAX = "20G";
+export const MEMORY_CAP_MESSAGE = "killed by the memory cap";
+
+/** A memory size for systemd's MemoryMax (a number with an optional K, M, G or T; "none" or "0" = no cap, null). */
+export function parseMemoryMax(v, name) {
+  const t = String(v).trim();
+  if (/^(none|off|0)$/i.test(t)) return null;
+  if (!/^[1-9]\d*(\.\d+)?[KMGT]?$/i.test(t)) throw new Error(`${name} wants a size like 20G or 1G (or none), not "${v}"`);
+  return t.toUpperCase();
+}
+
+/** The command that starts `program args` capped to `limit` (the systemd user scope; no swap), or as it is when
+ *  there is no limit or no scope (`scopeOk` false: systemd-run or the user session is missing). */
+export function capCommand(program, args, limit, scopeOk, unit = null) {
+  if (!limit || !scopeOk) return { program, args };
+  return { program: "systemd-run", args: ["--user", "--scope", "--quiet", ...(unit ? [`--unit=${unit}`] : []), "-p", `MemoryMax=${limit}`, "-p", "MemorySwapMax=0", "--", program, ...args] };
+}
+
+/** Whether a memory-capped user scope can be made here (a probe, once per process): Linux, systemd-run, a user session. */
+let scopeProbe;
+export function memoryScopeAvailable(run = spawnSync) {
+  if (process.platform !== "linux") return false;
+  if (scopeProbe === undefined) {
+    try {
+      const r = run("systemd-run", ["--user", "--scope", "--quiet", "-p", "MemoryMax=1G", "--", "true"], { stdio: "ignore", timeout: 15000 });
+      scopeProbe = !r.error && r.status === 0;
+    } catch { scopeProbe = false; }
+  }
+  return scopeProbe;
+}
+
+/** The kills by the memory limit counted in the cgroup of process `pid` (memory.events' oom_kill), or null when
+ *  it can't be read (no cgroup v2, the scope gone). */
+export function oomKills(pid, root = "/sys/fs/cgroup") {
+  try {
+    const line = readFileSync(`/proc/${pid}/cgroup`, "utf8").split("\n").find((l) => l.startsWith("0::"));
+    if (!line) return null;
+    const ev = readFileSync(join(root, line.slice(3), "memory.events"), "utf8");
+    const m = /^oom_kill (\d+)$/m.exec(ev);
+    return m ? Number(m[1]) : null;
+  } catch { return null; }
+}
+
+/** Whether the user journal says the kernel's OOM killer killed a process of the scope `unit`. */
+export function oomInJournal(unit, run = spawnSync) {
+  try {
+    const r = run("journalctl", ["--user", "--no-pager", "-q", "-u", `${unit}.scope`, "--since", "-1h"], { encoding: "utf8", timeout: 10000 });
+    return !r.error && /killed by the OOM killer/.test(String(r.stdout));
+  } catch { return false; }
+}
+
 export class EditorCrashed extends Error {
   constructor(dialogs, screen) {
     super(CRASH_MESSAGE);
@@ -461,6 +516,7 @@ export function parseArgs(argv) {
     else if (a === "--keep-prefs") opts.keepPrefs = true;
     else if (a === "--frame-cap") opts.frameCap = parseFrameCap(value());
     else if (a === "--renderer") opts.renderer = value();
+    else if (a === "--memory-max") opts.memoryMax = parseMemoryMax(value(), "--memory-max");
     else if (a === "--null-audio") opts.nullAudio = true;
     else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
     else if (a === "--expect-layout") opts.expectLayout = true;
@@ -472,6 +528,7 @@ export function parseArgs(argv) {
     else throw new Error(`unknown argument ${a} (see the top of we-drive.mjs)`);
   }
   // The slot's own work folder by default, so runs on two slots don't share one (slot 0: target/we-drive as before).
+  if (opts.memoryMax === undefined) opts.memoryMax = parseMemoryMax(process.env.W3_WE_MEMORY_MAX || DEFAULT_MEMORY_MAX, "W3_WE_MEMORY_MAX");
   opts.work ??= defaultWork(opts.slot ?? currentSlot());
   if (!["software", "gpu"].includes(opts.renderer)) throw new Error(`--renderer (or W3PROJ_WE_RENDERER) wants software or gpu, not "${opts.renderer}"`);
   if (opts.expectLayout && opts.screen && (opts.screen[0] !== SIZE[0] || opts.screen[1] !== SIZE[1])) throw new Error("--expect-layout checks the layout of the 1600x1000 display: leave out --screen");
@@ -925,6 +982,7 @@ export class Session {
   constructor(opts, game, deps = {}) {
     this.opts = opts;
     this.game = game;
+    this.deps = deps;
     this.proton = deps.proton ?? protonFor(game);
     this.clock = deps.clock ?? { now: Date.now, sleep };
     if (deps.x11) this.x11Impl = deps.x11;
@@ -1066,6 +1124,45 @@ export class Session {
     return { bw, env, fdArgs };
   }
 
+  /** Whether the memory cap can be set up; when not, one note (once) and the run is uncapped. */
+  memoryScope() {
+    const ok = this.deps?.memoryScope ? this.deps.memoryScope() : memoryScopeAvailable();
+    if (!ok && !this.capNoted) {
+      this.capNoted = true;
+      process.stderr.write(`we-drive: no memory cap (needs Linux with systemd-run and a user session): the editor runs uncapped (--memory-max ${this.opts.memoryMax})\n`);
+    }
+    return ok;
+  }
+
+  /** Marks child.memoryKilled when the kernel kills a process of the child's scope for the cap (polled: the scope's
+   *  counter is gone with the scope). */
+  watchMemoryCap(child, unit) {
+    const poll = () => {
+      if (child.pid && oomKills(child.pid)) child.memoryKilled = true;
+    };
+    const t = setInterval(poll, 100);
+    t.unref();
+    child.on("exit", () => {
+      poll();
+      clearInterval(t);
+      // The scope's counter is gone with the scope: its journal has the kernel's kill ("killed by the OOM killer").
+      if (!child.memoryKilled && oomInJournal(unit)) child.memoryKilled = true;
+      // What the scope still holds (the kernel killed one process: Wine's devices stay behind) goes with it.
+      spawnSync("systemctl", ["--user", "kill", "--signal=SIGKILL", `${unit}.scope`], { stdio: "ignore", timeout: 10000 });
+      // A scope the OOM killer ended stays listed as failed until reset.
+      spawnSync("systemctl", ["--user", "reset-failed", `${unit}.scope`], { stdio: "ignore", timeout: 10000 });
+    });
+  }
+
+  /** The error for an editor that exited during `what`; names the memory cap when that killed it. */
+  exitedError(what) {
+    const capped = !!this.editor?.memoryKilled;
+    // The kernel killed one process of the scope: the prefix's wineserver and its devices may stay behind.
+    if (capped && this.wineserver) this.killEditor();
+    const cap = capped ? `: ${MEMORY_CAP_MESSAGE} (${this.opts.memoryMax})` : "";
+    return new Error(`the editor exited${what}${cap} (see ${this.log})`);
+  }
+
   spawnWine(program, args, verb = "run") {
     mkdirSync(this.opts.work, { recursive: true });
     mkdirSync(sandboxCache(), { recursive: true });
@@ -1074,8 +1171,12 @@ export class Session {
     // locale's reg, another map's editor) add to it.
     const out = openSync(this.log, this.logStarted ? "a" : "w");
     this.logStarted = true;
-    const child = spawn("bwrap", bw, { cwd: join(farmDir(), "_retail_", "x86_64"), env, stdio: ["ignore", out, out, "pipe"], detached: true });
+    const scopeOk = !!this.opts.memoryMax && this.memoryScope();
+    const unit = `w3proj-we-${process.pid}-${(Session.scopeCount = (Session.scopeCount ?? 0) + 1)}`;
+    const cmd = capCommand("bwrap", bw, this.opts.memoryMax, scopeOk, unit);
+    const child = spawn(cmd.program, cmd.args, { cwd: join(farmDir(), "_retail_", "x86_64"), env, stdio: ["ignore", out, out, "pipe"], detached: true });
     closeSync(out);
+    if (cmd.program === "systemd-run") this.watchMemoryCap(child, unit);
     // A spawn that fails (no bwrap, EAGAIN) is an "error" event: without a listener it would end we-drive on the spot,
     // past its cleanup. Marked on the child; the callers' waits see it as an exit.
     child.on("error", (e) => { child.spawnError = e; child.exited = true; });
@@ -1349,7 +1450,7 @@ export class Session {
     let dialog = null;
     for (const end = this.now() + 20000; !dialog && this.now() < end;) {
       await this.wait(250);
-      if (this.editorExited) throw new Error(`the editor exited (see ${this.log})`);
+      if (this.editorExited) throw this.exitedError("");
       const fresh = this.windows().dialogs.filter((d) => !before.has(d.id));
       dialog = fresh.find((d) => d.title === OPEN_DIALOG) ?? null;
       const r = openQuestion(fresh.filter((d) => d !== dialog), false);
@@ -1368,7 +1469,7 @@ export class Session {
     let loading = false, closedAt = 0;
     for (const end = this.now() + 40000; this.now() < end;) {
       await this.wait(250);
-      if (this.editorExited) throw new Error(`the editor exited while opening (see ${this.log})`);
+      if (this.editorExited) throw this.exitedError(" while opening");
       const w = this.windows();
       if (w.dialogs.some((d) => d.title === PROGRESS_TITLE)) loading = true;
       const r = openQuestion(w.dialogs.filter((d) => d.id !== dialog.id), false);
@@ -1398,7 +1499,7 @@ export class Session {
     const deadline = this.now() + this.opts.timeout * 1000;
     let readySince = 0, dialogSince = 0, mainAt = null, progressPolls = 0, moduleSince = 0;
     for (;;) {
-      if (this.editorExited) throw new Error(`the editor exited while starting (see ${this.log})`);
+      if (this.editorExited) throw this.exitedError(" while starting");
       const { main, dialogs, palettes } = this.windows();
       if (main && !mainAt) mainAt = this.now() - this.startedAt;
       const unknown = this.answerKnown(dialogs, main);
@@ -1474,7 +1575,7 @@ export class Session {
     const t0 = this.now(), writes = [];
     while (this.now() < deadline) {
       await this.wait(500);
-      if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
+      if (this.editorExited) throw this.exitedError(" while saving");
       const { dialogs } = this.windows();
       // A module window the run opened itself (the Sound Editor, F5) stays beside the map: not a question.
       const questions = questionDialogs(dialogs).filter((d) => !isReopenedModule(d.title));
@@ -1565,7 +1666,7 @@ export class Session {
     let last = null, stillSince = 0;
     while (this.now() < deadline) {
       await this.wait(500);
-      if (this.editorExited) throw new Error(`the editor exited while exporting (see ${this.log})`);
+      if (this.editorExited) throw this.exitedError(" while exporting");
       const others = questionDialogs(this.windows().dialogs).filter((d) => d.title !== "Export Minimap");
       if (others.length) return { exported: false, dialogs: others.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("export") };
       let now = null;
@@ -1776,7 +1877,9 @@ export class Session {
 async function main() {
   const { opts, steps, looks } = parseArgs(process.argv.slice(2));
   if (opts.help || !steps.length) {
-    console.log("usage: node scripts/we-drive.mjs [options] <steps>; the steps and options are listed at the top of the file");
+    // The header comment of this file is the help text (options, then the steps).
+    const head = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n");
+    console.log(head.slice(0, Math.max(1, head.findIndex((l) => !l.startsWith("//")))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
     return 0;
   }
   const out = (o) => console.log(JSON.stringify(o));

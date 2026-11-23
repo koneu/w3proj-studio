@@ -148,6 +148,18 @@ MATCH (World Editor parts 267 s and 724 s). Parallel-safe: file-diff specs and p
 of a settled view; a spec whose World Editor part times something (a frame rate, an animation) gets `"serial": true`:
 we-compare runs it last on slot 0 with every slot's lock held (none is marked yet).
 
+**Memory cap** (branch fix/we-drive-memcap, 2026-11-23; a run once grew to 57 GB and the OOM killer took the whole
+session down). On Linux `spawnWine` starts the sandbox as `systemd-run --user --scope --quiet --unit=w3proj-we-<pid>-<n>
+-p MemoryMax=<limit> -p MemorySwapMax=0 -- bwrap ...`: a user scope, so the kernel kills only the editor's processes at
+the limit. Default `20G`; `--memory-max SIZE` or `W3_WE_MEMORY_MAX` (`none` = no cap). Without systemd-run or a user
+session the run is uncapped, with one note on stderr. The scope execs bwrap, so the detached process group, the kill
+and the lock work as before. After the run: the scope's journal ("killed by the OOM killer") makes the step's error
+`the editor exited while ...: killed by the memory cap (<limit>)` (it reaches we-compare's weOutcome as that spec's
+error); what the scope still holds (Wine's devices stay behind a kill) is killed and the failed scope reset.
+Proof: the smallest smoketest map (empty_map_on_newest_world_editor.w3m, about 17 KB) with `--memory-max 1G` was killed
+at the start, reported as above, left no wine process and no scope; with the default limit the same run reached
+`--wait-ready` and closed cleanly.
+
 **Editor CPU** (branch we-cpu, 2026-11-19; slot 1, slot 0 busy with a full run throughout, so numbers carry its
 contention; CPU is a user scope's cgroup over 20 s of `--sleep`, all of a run's processes: editor, Wine, Xvfb, node).
 Cause: the editor redraws its views all the time, idle or not, through DXVK on Mesa's **lavapipe** (16 `llvmpipe`
