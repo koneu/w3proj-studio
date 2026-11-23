@@ -1,0 +1,28 @@
+[
+  {
+    "name": "doo-lights-sd",
+    "description": "doo-lights.w3x (make-doo-lights.mjs: flat.w3x, doo version 13, 17 doodads whose models have lights and controls) opened and saved after an empty edit, SD (branch fix/doo-light-extras, 2026-11-23). The editor's save gives each doodad or destructable with extras [] one block per light of its variation's model: [index, 0, 0xFFrrggbb, intensity, shadow casting start, end, quadratic, linear falloff, damping], the light's fixed values (YOlp and LObz: intensity 0 under a KLAI track), the colour times 255 cut down (YOlp 0xFFFFF79E), two lights two blocks (YOf1, the destructable DTs0); the custom LightA.mdx's own values (shadow start 30, end 90, quadratic 0.002, linear 0.03, damping 0.0004; attenuation, ambient and shadow intensity unused), the version-800 text model LightB.mdl its colour reversed and 0, 0, 0.0005, 0, 0.00001; lights of the doodad's own kept, the tree and the barricade keep []. Studio (dooversion.ts lightBlocks, the terrain view's save): MATCH but D001, ignored: Studio reads no model named .mdl (objects.ts modelPath reads the .mdx; an open point of its own)",
+    "input": { "map": "${REPO}/target/doo-lights/doo-lights.w3x", "make": "make-doo-lights.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "game.graphicsMode": "sd" }, "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[15].extras"] }],
+    "limit": 40
+  },
+  {
+    "name": "doo-lights-hd",
+    "description": "doo-lights.w3x as doo-lights-sd, HD: the lights of the HD models (the lamp posts LOlp orange 0xFFFF883B, intensity 0; YOlp intensity 1; GRfc, YOf1, DTs0, ZZys and LOth none, their HD models have no light), the map's own models as in SD. Studio in HD the same: MATCH but D001, ignored as in doo-lights-sd",
+    "input": { "map": "${REPO}/target/doo-lights/doo-lights.w3x", "make": "make-doo-lights.mjs" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "game.graphicsMode": "hd" }, "steps": [
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "tolerance": 0.01, "ignore": ["doodads[15].extras"] }],
+    "limit": 40
+  }
+]

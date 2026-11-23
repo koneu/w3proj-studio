@@ -11,7 +11,7 @@
 // helpers, pivots, geoset animations) are read strictly and a fault in them refuses the model; in the others it
 // becomes a warning and the block is left out.
 
-import { parseMdx, type Extent, type Geoset, type GeosetAnim, type Interp, type Layer, type Material, type Model, type ModelLight, type Node, type ParticleEmitter2, type RibbonEmitter, type Sequence, type TextureAnim, type Track } from "./mdx";
+import { LIGHT_FIXED_DEFAULTS, parseMdx, type Extent, type Geoset, type GeosetAnim, type Interp, type Layer, type Material, type Model, type ModelLight, type Node, type ParticleEmitter2, type RibbonEmitter, type Sequence, type TextureAnim, type Track } from "./mdx";
 
 const enum T { End, Open, Close, Comma, Colon, Str, Word }
 
@@ -646,8 +646,12 @@ class MdlReader {
     let type = 0, attenuationStart = 0, attenuationEnd = 0, intensity = 0;
     let color: [number, number, number] = [1, 1, 1];
     let colorTrack: Track | undefined, intensityTrack: Track | undefined;
+    // Version 1600's casting range, falloffs and damping where the text has them (mdx.ts LightFixed).
+    const rest = { ...LIGHT_FIXED_DEFAULTS };
+    const REST: Record<string, keyof typeof rest> = { ShadowCastingStart: "shadowStart", ShadowCastingEnd: "shadowEnd", QuadraticFalloff: "quadratic", LinearFalloff: "linear", Damping: "damping" };
     const node = this.node("lite", 0x200, (k) => {
       if (LIGHT_TYPE[k] !== undefined) type = LIGHT_TYPE[k];
+      else if (Object.hasOwn(REST, k)) rest[REST[k]] = this.prop(1).value[0];
       else if (k === "AttenuationStart") attenuationStart = this.prop(1).value[0];
       else if (k === "AttenuationEnd") attenuationEnd = this.prop(1).value[0];
       else if (k === "Color") { const p = this.prop(3); color = [p.value[0], p.value[1], p.value[2]]; colorTrack = p.track; }
@@ -662,6 +666,8 @@ class MdlReader {
       const light: ModelLight = { node, type, attenuationStart, attenuationEnd, color: color.every(Number.isFinite) ? color : [1, 1, 1], intensity: Number.isFinite(intensity) ? intensity : 0 };
       if (colorTrack) light.colorTrack = colorTrack;
       if (intensityTrack) light.intensityTrack = intensityTrack;
+      // The World Editor reads a text model's colour the other way round from a binary one's (mdx.ts ModelLight.fixed).
+      light.fixed = { color: [color[2], color[1], color[0]], intensity, ...rest };
       (this.m.lights ??= []).push(light);
     }
   }

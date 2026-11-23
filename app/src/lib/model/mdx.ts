@@ -209,7 +209,27 @@ export interface ModelLight {
   intensity: number;
   colorTrack?: Track;
   intensityTrack?: Track;
+  /** The values the World Editor's save copies into a doodad's light block (lib/terrain/dooversion.ts lightBlocks): the
+   *  fixed ones as the file has them, also where a track animates them. `color` in the order the editor puts it into
+   *  the block's colour from the high byte down: a binary model's three values as stored, a text model's reversed
+   *  (measured, tests/we-compare/doo-lights.json). The shadow casting range, the falloffs and the damping exist from
+   *  version 1600 on; an older light has the editor's 0, 0, 0.0005, 0, 0.00001. */
+  fixed?: LightFixed;
 }
+
+/** A light's fixed values for the World Editor's doodad light block (ModelLight.fixed). */
+export interface LightFixed {
+  color: [number, number, number];
+  intensity: number;
+  shadowStart: number;
+  shadowEnd: number;
+  quadratic: number;
+  linear: number;
+  damping: number;
+}
+
+/** What a light without the shadow casting range and falloffs (before version 1600) gets in the editor's light block. */
+export const LIGHT_FIXED_DEFAULTS: Omit<LightFixed, "color" | "intensity"> = { shadowStart: 0, shadowEnd: 0, quadratic: Math.fround(0.0005), linear: 0, damping: Math.fround(0.00001) };
 
 export interface Model {
   version: number;
@@ -374,6 +394,14 @@ function readLight(r: Reader, node: Node, end: number, version: number): ModelLi
   const ok = (v: number) => Number.isFinite(v) && v >= 0 && v < 1e7;
   if (!ok(attenuationStart) || !ok(attenuationEnd) || type > 2) return null;
   const light: ModelLight = { node, type, attenuationStart, attenuationEnd, color: color.every(Number.isFinite) ? color : [1, 1, 1], intensity: Number.isFinite(intensity) ? intensity : 0 };
+  // After the ambient colour and intensity: version 1600's shadow intensity, casting range, falloffs and damping.
+  let rest = LIGHT_FIXED_DEFAULTS;
+  if (size === 72) {
+    r.p = start + 52;
+    const [shadowStart, shadowEnd, quadratic, linear, damping] = [r.f32(), r.f32(), r.f32(), r.f32(), r.f32()];
+    rest = { shadowStart, shadowEnd, quadratic, linear, damping };
+  }
+  light.fixed = { color: [...color], intensity, ...rest };
   // The tracks after the fixed values (none when they're damaged: the light keeps its fixed values). An animated
   // value's fixed one isn't used: its first key stands in, as mdl.ts reads it.
   const first = (t: Track, k: number) => (t.values.length > k && Number.isFinite(t.values[k]) ? t.values[k] : null);
