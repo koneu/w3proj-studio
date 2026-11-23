@@ -10,7 +10,7 @@
 import { randomVariation, type Corner, type Terrain } from "./w3e";
 import { inArea, type Area } from "./area";
 import { viewInCameraBounds } from "./cameras";
-import { namesToStrings, tableCantHold, textsToStrings, type InfoString } from "../formats/infostrings";
+import { editorInfoDefaults, mapTextsToStrings, namesToStrings, tableCantHold, type InfoString } from "../formats/infostrings";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -89,13 +89,9 @@ export function resizedCameraZoom(zoom: { default: number; max: number; min?: nu
  *  loading screen's crest race becomes 128 (64 and 3 did) and a game data set of -1 becomes 0 (1 stayed). Changes
  *  `info` in place; the new strings, for the caller to add to the string table (and the languages' tables). */
 export function infoAfterResize(info: Record<string, unknown>, first: number): InfoString[] {
-  const fields = [...["name", "suggestedPlayers", "description", "author"].map((key) => [info, key] as const),
-    ...["title", "subtitle", "text"].map((key) => [info.loadingScreen, key] as const)];
-  const added = textsToStrings(fields, first, undefined, tableCantHold);
+  const added = mapTextsToStrings(info, first);
   added.push(...namesToStrings(info, first + added.length, undefined, tableCantHold));
-  const screen = info.loadingScreen as Record<string, unknown> | undefined;
-  if (screen && typeof screen.crestRace === "number") screen.crestRace = 128;
-  if (typeof info.gameDataSet === "number" && info.gameDataSet >>> 0 === 0xffffffff) info.gameDataSet = 0;
+  editorInfoDefaults(info);
   return added;
 }
 
