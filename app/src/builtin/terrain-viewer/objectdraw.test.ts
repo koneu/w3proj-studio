@@ -135,3 +135,39 @@ test("a model whose read failed in passing is read again by the next load; one t
   assert.deepEqual(reads, ["Doodads\\Test\\Test.mdx"], "only the one that failed in passing");
   assert.deepEqual(second.problems.map((p) => p.items[0].id).sort(), ["D001", "D002"]);
 });
+
+test("a doodad whose model the map only has as .mdl is drawn from it, and its lights are found", async () => {
+  const { writeLightMdl } = await import("../../lib/model/dnclight");
+  const { lightBlocks } = await import("../../lib/terrain/dooversion");
+  const text = writeLightMdl({
+    version: 800, name: "OnlyMdl", blendTime: 150, globalSequences: [],
+    sequences: [{ name: "Stand", start: 0, end: 1000, moveSpeed: 0, nonLooping: false, rarity: 0 }],
+    lights: [{
+      name: "Lamp", objectId: 0, parentId: -1, flags: 0x200, type: 0, unknown: 0,
+      attenuationStart: { value: [80] }, attenuationEnd: { value: [200] }, intensity: { value: [1.5] },
+      color: { value: [1, 0.5, 0.25] }, ambIntensity: { value: [0] }, ambColor: { value: [1, 1, 1] },
+      shadowIntensity: 0, shadowCastingStart: 0, shadowCastingEnd: 0, quadraticFalloff: 0, linearFalloff: 0, damping: 0,
+    }],
+    pivots: [[0, 0, 0]],
+  });
+  const asked: string[] = [];
+  const files = new Map([["doodads\\test\\test.mdl", new TextEncoder().encode(text)]]);
+  const readFile = (path: string) => {
+    asked.push(path);
+    const f = files.get(path.toLowerCase());
+    return f ? Promise.resolve(f) : Promise.reject(Object.assign(new Error(`not found: ${path}`), { code: "ENOENT" }));
+  };
+  const loader = new ObjectLoader(fakeGl(), readFile, () => {});
+  const s = skin("w3d", 1, 1), p = placed("dOnl", [1, 1, 1]);
+  const gpu = await loader.modelFor(s, 0);
+  assert.ok(asked[0].toLowerCase().endsWith(".mdx"), "the .mdx is asked for first");
+  assert.equal(gpu.model.lights?.length, 1);
+  const blocks = lightBlocks(gpu.model.lights);
+  assert.ok(blocks && blocks.length === 1, "the model's light reaches the doodad light logic");
+  const out = await loader.load("doodads", [p], new Map([["dOnl", s]]), () => 0);
+  assert.equal(out.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed === p).length, 1, "drawn");
+  assert.deepEqual(out.problems, []);
+  // Control: with no .mdl either, it still fails.
+  files.clear();
+  await assert.rejects(new ObjectLoader(fakeGl(), readFile, () => {}).modelFor(s, 0));
+});
