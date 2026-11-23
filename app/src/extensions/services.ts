@@ -380,6 +380,10 @@ export interface TerrainObjects {
    *  and facing (Snap Doodads on Load), scale, flags and life (Fix Doodads on Load), as the settings are now. A tool's
    *  edit of the file starts from the doodads as the open editor holds them, not from the stored places. */
   openRules(entries: PlacedEntry[]): Promise<void>;
+  /** Gives a placement file's document (war3map.doo: "doodads", war3mapUnits.doo: "units") the version this editor's
+   *  save would write it in, in place: 13, as the World Editor's save (lib/terrain/dooversion.ts, unitsversion.ts);
+   *  left as it is on a partial load of a split terrain. A tool's edit of the file then writes what a save writes. */
+  saveVersion(doc: Record<string, unknown>, key: "doodads" | "units"): void;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a

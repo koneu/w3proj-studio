@@ -33,10 +33,10 @@
   },
   {
     "name": "special-paint-level-real",
-    "description": "smoketest_maps (2)AutumnLeaves_S2_v2.0.w3x, Level with Grass Cliff at size 2 at 748,500 at the opening camera (corners 62..66 x 65..67, no special near): all 55 specials stay in the editor, each placed by the editor on the cliff its pathing texture draws (special-paint-level's rule must keep them all). On a Level or Increase One on its cave (tile 108,55) the editor took out 4 and 8 specials, those the rule says (we-drive --look 5824,-960,1500, branch fix/cliff-level-removes-specials, 2026-11-23). Only the specials are compared: the editor's save writes the doodads in its own format 13 (Studio keeps 8 with its skin ids), and its w3e as version 12 with 8 corners of the stroke dry where Studio keeps them wet",
+    "description": "smoketest_maps (2)AutumnLeaves_S2_v2.0.w3x, Level with Grass Cliff at size 2 at 748,500 at the opening camera (corners 62..66 x 65..67, no special near): all 55 specials stay in the editor, each placed by the editor on the cliff its pathing texture draws (special-paint-level's rule must keep them all). On a Level or Increase One on its cave (tile 108,55) the editor took out 4 and 8 specials, those the rule says (we-drive --look 5824,-960,1500, branch fix/cliff-level-removes-specials, 2026-11-23). Only the specials and the header are compared: the doodads aren't the point here (both saves write the file as version 13 since branch feat/doo-v13-upgrade; the light doodads' extras differ, doo-v13.json), and the editor's w3e as version 12 with 8 corners of the stroke dry where Studio keeps them wet",
     "input": { "map": "${MAIN}/smoketest_maps/blizzard/(2)AutumnLeaves_S2_v2.0.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "1424,569"], ["--click", "748,500"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Thick Grass"], ["tool", "Level:"], ["size", 2], ["click", 748, 500]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["version", "skinIds", "doodads"] }]
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["doodads"] }]
   }
 ]

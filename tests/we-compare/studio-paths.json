@@ -217,7 +217,7 @@
   },
   {
     "name": "studio-paths-terrain-save",
-    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point); units 5, 13, 14, 18, 27, 32, 54, 67, 73, 75, 77, 81, 87, 88, 89, 92, 97 (measured 2026-11-17). Since the save's elevation sample points (objheights.ts unitGround, commit b1cb0a28) only two are left, the tavern ntav 13 (WE 426.89, Studio 426.84) and the mercenary camp nmer 54 (263.65 against 264.05), in two runs of branch we-compare-17 (2026-11-19); every other unit's height must match",
+    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save. war3map.doo: Studio's save writes it as version 13 (dooversion.ts, branch feat/doo-v13-upgrade), so only the extras of the doodads whose model has a light are ignored (the editor's save gives them the light, Studio's doesn't); the units file's ignores as before. Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point); units 5, 13, 14, 18, 27, 32, 54, 67, 73, 75, 77, 81, 87, 88, 89, 92, 97 (measured 2026-11-17). Since the save's elevation sample points (objheights.ts unitGround, commit b1cb0a28) only two are left, the tavern ntav 13 (WE 426.89, Studio 426.84) and the mercenary camp nmer 54 (263.65 against 264.05), in two runs of branch we-compare-17 (2026-11-19); every other unit's height must match",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-plain.w3x"
     },
@@ -263,11 +263,6 @@
         "file": "war3map.doo",
         "as": "parsed",
         "ignore": [
-          "version",
-          "skinIds",
-          "doodads[].preFlags",
-          "doodads[].editorId",
-          "doodads[].trailer",
           "doodads[].extras"
         ],
         "tolerance": 0.01
