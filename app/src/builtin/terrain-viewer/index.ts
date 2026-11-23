@@ -58,6 +58,7 @@ import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
+import { editorUnitsVersion } from "../../lib/terrain/unitsversion";
 import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -3001,7 +3002,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (disposed) return;
             // The facings the World Editor reads war3mapUnits.doo with (doodadedit.ts unitAnglesAsOpened), with the
             // doodads' (setting Snap Doodads on Load): not an edit either; the next save writes them.
-            if (uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(partial ? uf.list.filter(inOpenArea) : uf.list)) objectsTouched = unitAnglesUnsaved = true;
+            // A version-8 file too: the World Editor's save writes it as version 13 (unitsversion.ts), so the next save does.
+            const anglesFixed = !!uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(partial ? uf.list.filter(inOpenArea) : uf.list) > 0;
+            if (uf && unitsFile === uf && (anglesFixed || unitsUpgradeDue(uf))) objectsTouched = unitAnglesUnsaved = true;
             // Auto Cycle Random Groups: a group's objects are drawn as one of its lines from the start, a random one.
             if (autoCycleOn()) {
               const g = await readRandomGroups();
@@ -3023,6 +3026,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  and goes to the ground) keeps its height, and all do while the map's unit data can't be read. A height within
          *  unitZTolerance of the one wanted is left as it is (0.01; 32 where unitGround has no rule), so a map the World
          *  Editor saved isn't rewritten for rounding. True when one changed. */
+        /** A units file the save gives the World Editor's version 13 (unitsversion.ts): version 8, and the whole map
+         *  loaded (a partial load's save can't change the header the closed subterrains' files are read by). */
+        const unitsUpgradeDue = (f: PlacedFile) => !partial && Number(f.doc.version) === 8;
+        /** The units file in the World Editor's version, where a save may change it (unitsUpgradeDue); an entry an undo
+         *  put back after an earlier save upgraded the file gets the fields too. */
+        const upgradeUnits = (f: PlacedFile) => { if (!partial) editorUnitsVersion(f.doc); };
         const groundUnitsForSave = (): boolean => {
           if (!unitsFile || !objCtx || !unitMovesKnown) return false;
           if (!switchedOn(w3, "terrain.units.groundOnSave", SWITCH_DEFAULTS["terrain.units.groundOnSave"])) return false;
@@ -4785,6 +4794,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 removed += moved.removed;
               }
             }
+            if (f === unitsFile) upgradeUnits(f);
             await savePlacedFile(w3, f);
           }
           await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset), cliffGroundOf(next))), doc);
@@ -6539,6 +6549,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               savedStarts = startLocations(f.list);
               // As after the open (unitAnglesAsOpened): the facings the World Editor would read the file with.
               unitAnglesUnsaved = snapsDoodads() && unitAnglesAsOpened(partial ? f.list.filter(inOpenArea) : f.list) > 0;
+              if (unitsUpgradeDue(f)) unitAnglesUnsaved = true;
               if (unitAnglesUnsaved) objectsTouched = true;
             }
             if (selected || group.length) clearSelection();
@@ -6657,7 +6668,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 // With the flag 0 the tileset's own list, and the cliffs' ground tiles the list lacks, as the World
                 // Editor's save writes it (the terrain kept).
                 w3e: writeW3e(savedTerrain(terrain, ownTiles?.get(terrain.tileset), cliffGroundOf(terrain))),
-                placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => ({ f, text: placedText(f.doc) })) : [],
+                // The units file in the World Editor's version 13 (upgradeUnits), here where it is taken.
+                placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => {
+                  if (f === unitsFile) upgradeUnits(f);
+                  return { f, text: placedText(f.doc) };
+                }) : [],
                 starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,
                 doodads: dooFile ? structuredClone(dooFile.list) : null,
                 units: unitsFile ? structuredClone(unitsFile.list) : undefined,
