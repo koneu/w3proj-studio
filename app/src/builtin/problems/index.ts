@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
-import { MANIFEST_FILE, MELEE_SETTINGS, MINIMAL_MANIFEST, addDisabled, setMelee, type MeleeSetting, applySeverity, disabledIds, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
+import { MANIFEST_FILE, MELEE_SETTINGS, MINIMAL_MANIFEST, addDisabled, setMelee, type MeleeSetting, applySeverity, disabledIds, isDisabled, meleeToolRefusal, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
 import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
@@ -77,6 +77,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     },
     runChecked() {
       return runCurrent().then((r) => ({ problems: r.problems, ignored: r.ignored, ignoreError: r.ignoreError, checks: r.checks, disabled: r.disabled ?? [], configError: r.configError ?? null }));
+    },
+    async meleeRefusal() {
+      return meleeToolRefusal(await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) })));
     },
     problems: all,
   };

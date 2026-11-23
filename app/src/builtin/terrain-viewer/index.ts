@@ -14,7 +14,7 @@ import { openAreaTest } from "../../lib/terrain/openarea";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { errorText, isNotFoundError } from "../../lib/oserror";
-import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
+import { OBJECTS_SERVICE, PROBLEMS_SERVICE, type ProblemsService, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
@@ -1045,6 +1045,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
     }),
     w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
+      const problems = await w3.services.get<ProblemsService>(PROBLEMS_SERVICE).catch(() => null);
+      const refused = await problems?.meleeRefusal();
+      if (refused) throw new Error(`check_melee: ${refused}`);
       await refusePartial("check_melee");
       const { handle } = await liveEditor("read");
       return meleeReport(w3, walkSource(handle), typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);

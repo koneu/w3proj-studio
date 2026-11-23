@@ -657,6 +657,8 @@ export interface ProblemsService {
   runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[];
     /** The checks the project's w3proj.toml [checks] switched off (they weren't run), and why that section can't be used. */
     disabled: string[]; configError: string | null }>;
+  /** Why the melee tools (check_melee) must not run by the project's w3proj.toml `[checks] melee`, null when they may. */
+  meleeRefusal(): Promise<string | null>;
   /** The result of the last run. */
   problems(): Problem[];
 }

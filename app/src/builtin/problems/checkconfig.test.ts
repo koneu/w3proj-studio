@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
-import { MINIMAL_MANIFEST, addDisabled, meleeMode, setMelee, applySeverity, disabledIds, isDisabled, severityOverride, parseChecksConfig, readChecksConfig } from "./checkconfig";
+import { MINIMAL_MANIFEST, addDisabled, meleeMode, meleeToolRefusal, setMelee, applySeverity, disabledIds, isDisabled, severityOverride, parseChecksConfig, readChecksConfig } from "./checkconfig";
 import { blocksPacking, countProblems, describeCounts } from "../../lib/problemcount";
 import { activate } from "./index";
 import { readFixture } from "../../lib/testhelpers/testutil";
@@ -247,4 +247,13 @@ test("the Problems command writes [checks] melee and refuses an unreadable manif
   const bad = harness({ "w3proj.toml": '[checks]\nmelee = "x"\n' }, []);
   await assert.rejects(async () => bad.cmds.get("w3.problems.setMelee")!("on"), /\[checks\]/);
   assert.equal(bad.files["w3proj.toml"], '[checks]\nmelee = "x"\n');
+});
+
+test("check_melee's gate follows [checks] melee: off refuses naming the setting, on and auto run", async () => {
+  const gate = async (toml: string | null) => meleeToolRefusal(await readChecksConfig(async () => toml ?? "", async () => toml !== null));
+  assert.match((await gate('[checks]\nmelee = "off"\n')) ?? "", /switched off.*\[checks\] melee = off/);
+  assert.equal(await gate('[checks]\nmelee = "on"\n'), null);
+  assert.equal(await gate('[checks]\nmelee = "auto"\n'), null);
+  assert.equal(await gate(null), null, "no manifest is auto");
+  assert.match((await gate('[checks]\nmelee = "maybe"\n')) ?? "", /can't be used/, "unreadable refuses, it isn't taken as auto");
 });

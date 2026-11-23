@@ -39,6 +39,15 @@ export function meleeMode(o: { force?: MeleeSetting | null; asked: boolean; sett
   return pick(o.setting, `${MANIFEST_FILE} [checks] melee`);
 }
 
+/** The melee tools' (check_melee over MCP) gate, by the same decision as `w3proj check` (meleeMode): null to run, else
+ *  the reason it is refused. Off refuses, naming the setting; on runs whatever the w3i's Melee flag says; auto runs as
+ *  the tool always did (asked for by name, so no flag look-up). A manifest that can't be read refuses too. */
+export function meleeToolRefusal(cfg: { config: ChecksConfig; error: string | null }): string | null {
+  if (cfg.error) return `${cfg.error}; fix it (or remove [checks] melee) first.`;
+  const d = meleeMode({ asked: false, setting: cfg.config.melee });
+  return d.mode === "off" ? `the melee checks are switched off (${d.by} = off); set it to "auto" or "on" to run them.` : null;
+}
+
 /** `line` without a trailing comment (a # outside a string). */
 function stripComment(line: string): string {
   let quote = "";
