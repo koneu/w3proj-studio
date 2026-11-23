@@ -369,6 +369,9 @@ const ART: Record<string, { model: string; variations?: string }> = {
   w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
 };
 
+/** The field holding an object's name, per kind. */
+const NAME_FIELD: Record<string, string | undefined> = { w3u: "unam", w3t: "unam", w3b: "bnam", w3d: "dnam", w3a: "anam", w3h: "fnam" };
+
 /** A file path in an object's field: where (`at`, the object and field), what a click opens, and unless it is a path on
  *  someone's disk, what it is looked up as and how many numbered models it stands for (a doodad or destructable with
  *  several variations names its model without the number; the files are X0.mdx, X1.mdx…). */
@@ -418,6 +421,11 @@ async function readPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
     const vars = variationsField
       ? mergedValues(await Promise.all(objectFiles(kind).map((f) => s.doc<{ original?: Obj[]; custom?: Obj[] }>(f))), variationsField)
       : new Map<string, string>();
+    // The objects' own names, the skin file's where both have one.
+    const nameField = NAME_FIELD[kind];
+    const ownNames = nameField
+      ? mergedValues(await Promise.all(objectFiles(kind).map((f) => s.doc<{ original?: Obj[]; custom?: Obj[] }>(f))), nameField)
+      : new Map<string, string>();
     for (const file of objectFiles(kind)) {
       const data = await s.doc<{ original?: Obj[]; custom?: Obj[] }>(file);
       if (!data) continue;
@@ -425,7 +433,8 @@ async function readPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
       if (!meta) continue;
       for (const o of [...(data.custom ?? []), ...(data.original ?? [])]) {
         const id = o.id ?? o.base;
-        const name = meta.names.get(o.base) ?? id;
+        const own = ownNames.get(id)?.trim();
+        const name = own && !/^TRIGSTR_/i.test(own) ? own : meta.names.get(o.base) ?? id;
         const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)];
         for (const m of mods) {
           const f = meta.fieldById.get(m.field);
