@@ -127,12 +127,100 @@ export function generatorProblems(sources) {
     .map((f) => `${name}: names ${f}, which the unpack no longer writes (the triggers are map/triggers/; tests/fixtures/we-specs/trigger-folder.mjs edits them)`));
 }
 
+/** `source` with comments, strings, regex literals and the text parts of templates blanked (same length, same lines); `${…}` stays code. */
+export function blankNonCode(source) {
+  const out = source.split("");
+  const blank = (a, b) => { for (let i = a; i < b; i++) if (out[i] !== "\n") out[i] = " "; };
+  const braces = []; // per open template `${`: the brace depth to come back to
+  let depth = 0, last = "";
+  const template = (from) => { // scans template text from `from`; returns the index after it, or enters a `${`
+    let i = from;
+    for (; i < source.length; i++) {
+      const c = source[i];
+      if (c === "\\") { i++; continue; }
+      if (c === "`") { blank(from, i); return i + 1; }
+      if (c === "$" && source[i + 1] === "{") { blank(from, i); braces.push(depth); depth++; return i + 2; }
+    }
+    blank(from, i);
+    return i;
+  };
+  for (let i = 0; i < source.length;) {
+    const c = source[i];
+    if (c === "/" && source[i + 1] === "/") { const e = source.indexOf("\n", i); const end = e < 0 ? source.length : e; blank(i, end); i = end; continue; }
+    if (c === "/" && source[i + 1] === "*") { const e = source.indexOf("*/", i + 2); const end = e < 0 ? source.length : e + 2; blank(i, end); i = end; continue; }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < source.length && source[j] !== c && source[j] !== "\n") j += source[j] === "\\" ? 2 : 1;
+      blank(i + 1, j); i = j + 1; last = "x"; continue;
+    }
+    if (c === "`") { i = template(i + 1); last = "x"; continue; }
+    if (c === "/" && (last === "" || "(,=:[!&|?{};+-*%<>~^".includes(last))) { // a regex literal
+      let j = i + 1, cls = false;
+      while (j < source.length && source[j] !== "\n" && (cls || source[j] !== "/")) {
+        if (source[j] === "\\") j++;
+        else if (source[j] === "[") cls = true;
+        else if (source[j] === "]") cls = false;
+        j++;
+      }
+      blank(i + 1, j); i = j + 1; last = "x"; continue;
+    }
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (braces.length && braces[braces.length - 1] === depth) { braces.pop(); i = template(i + 1); last = "x"; continue; }
+    }
+    if (!/\s/.test(c)) last = /[\w$)\]]/.test(c) ? "x" : c;
+    i++;
+  }
+  return out.join("");
+}
+
+/**
+ * Calls of `run(` in a top-level function of app-smoke.mjs where `run` isn't declared inside that function (its own
+ * parameters, a `const run =`, a `function run`): there it is the module's `async function run()`, which starts a whole
+ * smoke run inside the current one and leaks an app and Xvfb. A deliberate call of that one carries `// top-level run`
+ * on its line. Calls at the module's top level are the program's own.
+ */
+export function smokeRunProblems(source) {
+  const code = blankNonCode(source);
+  const lines = source.split("\n");
+  const lineOf = (at) => code.slice(0, at).split("\n").length;
+  const problems = [];
+  for (const head of code.matchAll(/^(?:async )?function\s+(\w+)\s*\(/gm)) {
+    // The header's parameters up to the matching ")", then the body's braces.
+    let i = head.index + head[0].length, d = 1;
+    for (; i < code.length && d > 0; i++) d += code[i] === "(" ? 1 : code[i] === ")" ? -1 : 0;
+    const params = code.slice(head.index + head[0].length, i - 1);
+    const open = code.indexOf("{", i);
+    if (open < 0) continue;
+    let end = open;
+    for (d = 0; end < code.length; end++) {
+      if (code[end] === "{") d++;
+      else if (code[end] === "}" && --d === 0) break;
+    }
+    const body = code.slice(open, end + 1);
+    // Declared in the body: `const run`, `function run`, a destructured `{ run }`, an arrow's parameter `(run) =>` / `run =>`.
+    const declared = /\brun\b/.test(params)
+      || /\b(?:const|let|var|function)\s+run\b/.test(body)
+      || /\b(?:const|let|var)\s*[{[][^=;]*\brun\b[^=;]*[}\]]\s*=/.test(body)
+      || /\brun\s*=>|\([^()]*\brun\b[^()]*\)\s*=>/.test(body);
+    if (declared) continue;
+    for (const call of body.matchAll(/(?<![\w$.])run\(/g)) {
+      const line = lineOf(open + call.index);
+      if (/\/\/\s*top-level run/.test(lines[line - 1])) continue;
+      problems.push(`app-smoke.mjs:${line}: ${head[1]}() calls run( but declares no run: that is the top-level run(), which starts a whole smoke run (declare a local run, or mark a deliberate call with "// top-level run")`);
+    }
+  }
+  return problems;
+}
+
 /** Every problem of the repository's scripts, as messages. */
 export async function checkScripts(repo) {
   const files = scriptFiles(repo);
   const problems = (await syntaxProblems(files)).map((p) => `${relative(repo, p.file).split("\\").join("/")} doesn't load:\n    ${p.message.split("\n").join("\n    ")}`);
   const smoke = join(repo, "app", "scripts", "app-smoke.mjs");
-  problems.push(...smokeListProblems(readFileSync(smoke, "utf8")));
+  const smokeSource = readFileSync(smoke, "utf8");
+  problems.push(...smokeListProblems(smokeSource), ...smokeRunProblems(smokeSource));
   const specs = join(repo, "tests", "fixtures", "we-specs");
   problems.push(...generatorProblems(Object.fromEntries(readdirSync(specs).filter((f) => /^make-.*\.mjs$/.test(f)).map((f) => [`tests/fixtures/we-specs/${f}`, readFileSync(join(specs, f), "utf8")]))));
   return { files, problems };

@@ -7,7 +7,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
-import { checkScripts, generatorProblems, scriptFiles, smokeChecks, smokeListProblems, syntaxProblems } from "./check-scripts.mjs";
+import { checkScripts, generatorProblems, scriptFiles, smokeChecks, smokeListProblems, smokeRunProblems, syntaxProblems } from "./check-scripts.mjs";
 
 // The repository's root, found from the working directory up.
 const repo = dirname(dirname(repoPath("tests", "gate.mjs")));
@@ -73,4 +73,24 @@ test("a generator that names war3map.wtg.json or war3map.wct.txt is a problem", 
   const p = generatorProblems({ "make-a.mjs": 'join(map, "war3map.wtg.json")', "make-b.mjs": "// war3map.wct.txt and war3map.wtg.json" });
   assert.equal(p.length, 3);
   assert.ok(p[0].startsWith("make-a.mjs: names war3map.wtg.json"));
+});
+
+test("a function of app-smoke.mjs that calls run( without a local run is a problem", () => {
+  // The real file passes (the control), and takes the real local runs away: each function that declares one then fails.
+  assert.deepEqual(smokeRunProblems(smoke), []);
+  const stripped = smoke.replace("  const run = (id) => page.evaluate(`w3.commands.execute(${lit(id)})`);", "");
+  assert.notEqual(stripped, smoke);
+  assert.match(smokeRunProblems(stripped).join("\n"), /calls run\( but declares no run/);
+  const bad = "async function check(page) {\n  await run(\"x\");\n}\nasync function run() {}\nawait run();\n";
+  assert.equal(smokeRunProblems(bad).length, 1);
+  assert.match(smokeRunProblems(bad)[0], /^app-smoke\.mjs:2: check\(\)/);
+  // Declared locally in any way, named only in a string or comment, a method, or marked: all fine.
+  for (const ok of [
+    "async function c(page) {\n  const run = (id) => id;\n  await run(1);\n}",
+    "async function c(page, run) {\n  await run(1);\n}",
+    "async function c(page) {\n  const { run } = k;\n  await run(1);\n}",
+    "async function c(page) {\n  await k.run(1); // run(2)\n  const s = \"run(3)\", t = `run(4) ${k.run(5)}`;\n}",
+    "async function c(page) {\n  await run(1); // top-level run\n}",
+  ]) assert.deepEqual(smokeRunProblems(ok), [], ok);
+  assert.equal(smokeRunProblems("async function c(page) {\n  const t = `${run(1)}`;\n}").length, 1);
 });
