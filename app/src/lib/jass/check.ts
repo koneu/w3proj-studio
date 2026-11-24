@@ -71,7 +71,8 @@ function lex(src: string, diags: Diagnostic[]): Tok[] {
       const len = i - start - 1;
       if (src[i] !== "'") diags.push({ from: start, to: i, message: "Unclosed object code ('hfoo')", severity: "error" });
       else if (len !== 1 && len !== 4 && !src.slice(start + 1, i).includes("\\")) diags.push({ from: start, to: i + 1, message: "Object codes have 1 or 4 characters", severity: "error" });
-      i++;
+      // Unclosed: the line end stays (taking it joined the next line to this one).
+      if (src[i] === "'") i++;
       push("int", start, i);
       continue;
     }
@@ -212,7 +213,7 @@ class Checker {
       return;
     }
     if (this.accept("function")) { this.functionDef(constant); return; }
-    throw new SyntaxError(this.t, this.t.kind === "id" && this.is("(") ? "Code must be inside a function" : `Expected a function, globals or type, found "${this.t.text || "end of line"}"`);
+    throw new SyntaxError(this.t, this.t.kind === "id" && this.toks[this.p + 1]?.text === "(" ? "Code must be inside a function" : `Expected a function, globals or type, found "${this.t.text || "end of line"}"`);
   }
 
   private signature(): { params: { name: string; type: string; at?: number }[]; returns: string } {
@@ -304,7 +305,8 @@ class Checker {
       } catch (e) {
         if (!(e instanceof SyntaxError)) throw e;
         this.diags.push({ from: e.tok.from, to: Math.max(e.tok.to, e.tok.from + 1), message: e.message, severity: "error" });
-        this.skipLine();
+        // A block left open ("Missing endif") stops at endfunction: that still closes the function.
+        if (!this.is("endfunction")) this.skipLine();
       }
     }
     this.endLine();

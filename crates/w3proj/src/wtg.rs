@@ -557,4 +557,275 @@ mod tests {
             assert!(parse(&longer, &data()).is_err());
         }
     }
+
+    fn data_with_call() -> TriggerData {
+        TriggerData::parse("[TriggerActions]\nDoIt=0,string\nWait=0,nothing\n[TriggerCalls]\nGetX=0,1,real,string\n")
+    }
+
+    /// A Reforged file written by hand: counts (one with deleted ids), an array variable, a map
+    /// category, a folder, a trigger whose action has a child and a parameter with a call (taking a
+    /// parameter) and an array index, a variable's folder entry and a script item.
+    fn reforged() -> Vec<u8> {
+        let mut b = b"WTG!".to_vec();
+        let u = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_le_bytes());
+        let s = |b: &mut Vec<u8>, t: &[u8]| {
+            b.extend_from_slice(t);
+            b.push(0);
+        };
+        u(&mut b, MARKER);
+        u(&mut b, 7); // version
+        for k in 0..8 {
+            u(&mut b, 10 + k); // count
+            if k == 2 {
+                u(&mut b, 2);
+                u(&mut b, 0x0600_0001);
+                u(&mut b, 0x0600_0003);
+            } else {
+                u(&mut b, 0);
+            }
+        }
+        u(&mut b, 2); // unknown
+        u(&mut b, 1); // variables
+        s(&mut b, b"Heroes");
+        s(&mut b, b"unit");
+        u(&mut b, 1); // unknown
+        u(&mut b, 1); // array
+        u(&mut b, 12); // size
+        u(&mut b, 0); // not initialized
+        s(&mut b, b"");
+        u(&mut b, 0x0600_0002); // id
+        u(&mut b, 0x0200_0001u32); // parent
+        u(&mut b, 5); // items
+        // A map category, then a folder in it.
+        u(&mut b, 1);
+        u(&mut b, 0x0200_0000);
+        s(&mut b, b"map.w3x");
+        u(&mut b, 0);
+        u(&mut b, 1);
+        u(&mut b, u32::MAX);
+        u(&mut b, 4);
+        u(&mut b, 0x0200_0001);
+        s(&mut b, b"Folder");
+        u(&mut b, 0);
+        u(&mut b, 0);
+        u(&mut b, 0x0200_0000);
+        // A trigger.
+        u(&mut b, 8);
+        s(&mut b, b"Spawn");
+        s(&mut b, b"desc");
+        u(&mut b, 0); // is comment
+        u(&mut b, 0x0300_0001); // id
+        for v in [1, 0, 1, 0] {
+            u(&mut b, v); // enabled, custom, initially off, run on init
+        }
+        u(&mut b, 0x0200_0001); // parent
+        u(&mut b, 1); // one action
+        u(&mut b, 2); // kind
+        s(&mut b, b"DoIt");
+        u(&mut b, 1); // enabled
+        u(&mut b, 2); // parameter type: function
+        s(&mut b, b"GetX");
+        u(&mut b, 1); // a call
+        u(&mut b, 3); // kind: call
+        s(&mut b, b"GetX");
+        u(&mut b, 1); // with parameters
+        u(&mut b, 3); // its parameter: a string
+        s(&mut b, b"\"a\"");
+        u(&mut b, 0); // no call
+        u(&mut b, 0); // no index
+        u(&mut b, 9); // trailer
+        u(&mut b, 1); // an index
+        u(&mut b, 0); // the index: a preset
+        s(&mut b, b"1");
+        u(&mut b, 0);
+        u(&mut b, 0);
+        u(&mut b, 1); // one child
+        u(&mut b, 2); // kind
+        u(&mut b, 1); // group
+        s(&mut b, b"Wait");
+        u(&mut b, 0); // disabled
+        u(&mut b, 0); // no children
+        // The variable's entry in the tree, and a script item.
+        u(&mut b, 64);
+        u(&mut b, 0x0600_0002);
+        s(&mut b, b"Heroes");
+        u(&mut b, 0x0200_0001);
+        u(&mut b, 32);
+        s(&mut b, b"Lib");
+        s(&mut b, b"");
+        u(&mut b, 0);
+        u(&mut b, 0x0300_0002);
+        for v in [1, 1, 0, 0] {
+            u(&mut b, v);
+        }
+        u(&mut b, 0x0200_0000);
+        u(&mut b, 0); // no actions
+        b
+    }
+
+    #[test]
+    fn reforged_reads_every_kind_of_item_and_writes_the_same_bytes() {
+        let bytes = reforged();
+        let f = parse(&bytes, &data_with_call()).unwrap();
+        assert!(f.reforged);
+        assert_eq!((f.version, f.unknown, f.counts.len()), (7, 2, 8));
+        assert_eq!(f.counts[2], Count { count: 12, deleted: vec![0x0600_0001, 0x0600_0003] });
+        let v = &f.variables[0];
+        assert_eq!((v.name.as_str(), v.ty.as_str(), v.is_array, v.array_size, v.id, v.parent), ("Heroes", "unit", true, 12, 0x0600_0002, 0x0200_0001));
+        let kinds: Vec<u32> = f
+            .items
+            .iter()
+            .map(|i| match i {
+                Item::Category(c) => c.ty,
+                Item::Trigger(t) => t.ty,
+                Item::Element(e) => e.ty,
+            })
+            .collect();
+        assert_eq!(kinds, [1, 4, 8, 64, 32]);
+        let Item::Category(map) = &f.items[0] else { panic!() };
+        assert_eq!((map.expanded, map.parent), (1, -1));
+        let Item::Trigger(t) = &f.items[2] else { panic!() };
+        assert_eq!((t.enabled, t.is_custom, t.initially_off, t.run_on_init), (true, false, true, false));
+        let p = &t.ecas[0].params[0];
+        let call = p.call.as_ref().unwrap();
+        assert_eq!((call.name.as_str(), call.has_params, call.params.len(), call.trailer), ("GetX", true, 1, Some(9)));
+        assert_eq!(call.params[0].value, "\"a\"");
+        assert_eq!(p.index.as_ref().unwrap().value, "1");
+        let child = &t.ecas[0].children[0];
+        assert_eq!((child.group, child.name.as_str(), child.enabled), (Some(1), "Wait", false));
+        assert_eq!(t.ecas[0].group, None, "a top-level action has no group");
+        assert_eq!(write(&f), bytes);
+        // Control: the same file with one item fewer in its count is not read as the same.
+        let mut short = bytes.clone();
+        let at = short.windows(8).position(|w| w == [5, 0, 0, 0, 1, 0, 0, 0]).unwrap();
+        short[at] = 4;
+        assert!(parse(&short, &data_with_call()).is_err(), "the left-over item is trailing data");
+    }
+
+    /// Maps come from strangers: a file cut off anywhere is an error, never a panic or a partial read.
+    #[test]
+    fn a_file_cut_off_anywhere_is_an_error() {
+        for (bytes, data) in [(reforged(), data_with_call()), (classic(7), data()), (classic(4), data())] {
+            for n in 0..bytes.len() {
+                assert!(parse(&bytes[..n], &data).is_err(), "{n} of {} bytes read", bytes.len());
+            }
+        }
+    }
+
+    #[test]
+    fn bad_values_are_turned_away_with_what_is_wrong() {
+        let msg = |b: &[u8], d: &TriggerData| parse(b, d).unwrap_err().to_string();
+        assert!(msg(b"WTG", &data()).contains("header"));
+        assert!(msg(b"WTF!\x07\0\0\0", &data()).contains("header"));
+        let mut v5 = classic(7);
+        v5[4] = 5;
+        assert!(msg(&v5, &data()).contains("unsupported version 5"));
+        // A count larger than the file is refused before anything is allocated for it.
+        let mut huge = classic(7);
+        huge[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(msg(&huge, &data()).contains("count larger than the file"));
+        // A flag must be 0 or 1 (the trigger's "enabled" here).
+        let mut flag = classic(7);
+        let at = flag.windows(3).position(|w| w == b"T\0\0").unwrap() + 3 + 4;
+        flag[at] = 2;
+        assert!(msg(&flag, &data()).contains("flag 2"));
+        // A function TriggerData doesn't know: its parameter count is unknown, so reading stops.
+        assert!(msg(&classic(7), &TriggerData::parse("[TriggerActions]\nOther=0\n")).contains("DoIt"));
+        // An item type Reforged doesn't have.
+        let mut item = reforged();
+        let at = item.windows(4).position(|w| w == [64, 0, 0, 0]).unwrap();
+        item[at] = 65;
+        assert!(msg(&item, &data_with_call()).contains("unknown item type 65"));
+    }
+
+    /// A classic v7 trigger with `actions` actions of `DoIt("x")`, each nested `nest` deep in the one before.
+    fn many(actions: usize, nest: usize) -> Vec<u8> {
+        let mut f = parse(&classic(7), &data()).unwrap();
+        let Item::Trigger(t) = &mut f.items[1] else { panic!() };
+        let one = t.ecas[0].clone();
+        let mut deep = one.clone();
+        for _ in 1..nest {
+            let mut outer = one.clone();
+            let mut child = deep;
+            child.group = Some(0);
+            outer.children.push(child);
+            deep = outer;
+        }
+        t.ecas = vec![deep; actions];
+        write(&f)
+    }
+
+    /// The depth limit counts nesting, not how many things there are: siblings must not add up.
+    #[test]
+    fn many_actions_side_by_side_are_not_deep() {
+        let f = parse(&many(500, 1), &data()).unwrap();
+        let Item::Trigger(t) = &f.items[1] else { panic!() };
+        assert_eq!(t.ecas.len(), 500);
+        // 70 actions each holding one: well within the depth, but 140 levels if siblings counted.
+        parse(&many(70, 2), &data()).unwrap();
+    }
+
+    /// Exactly MAX_DEPTH levels are read, one more is not (the innermost action's parameter is a level).
+    #[test]
+    fn the_depth_limit_is_exact() {
+        let at = |levels: usize| {
+            std::thread::Builder::new()
+                .stack_size(64 << 20)
+                .spawn(move || parse(&many(1, levels - 1), &data()).map(drop).map_err(|e| e.to_string()))
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        at(MAX_DEPTH).unwrap();
+        assert!(at(MAX_DEPTH + 1).unwrap_err().contains("nested"));
+    }
+
+    #[test]
+    fn classic_triggers_are_numbered_in_order() {
+        let mut f = parse(&classic(7), &data()).unwrap();
+        let t = f.items[1].clone();
+        f.items.extend([t.clone(), t]);
+        let back = parse(&write(&f), &data()).unwrap();
+        let ids: Vec<u32> = back.items.iter().filter_map(|i| if let Item::Trigger(t) = i { Some(t.id) } else { None }).collect();
+        assert_eq!(ids, [0, 1, 2]);
+    }
+
+    /// A count as large as the file (not larger) gets as far as the data runs out.
+    #[test]
+    fn a_count_as_large_as_the_file_is_read_until_it_ends() {
+        let mut b = classic(7);
+        let len = b.len() as u32;
+        b[8..12].copy_from_slice(&len.to_le_bytes());
+        assert!(parse(&b, &data()).unwrap_err().to_string().contains("truncated"));
+        b[8..12].copy_from_slice(&(len + 1).to_le_bytes());
+        assert!(parse(&b, &data()).unwrap_err().to_string().contains("count larger than the file"));
+    }
+
+    /// Classic v4 has no array sizes, comments or per-variable ids: they come back as the app expects
+    /// (size 1, ids in order, no parent), and writing v4 leaves them out again.
+    #[test]
+    fn classic_v4_fills_in_what_it_does_not_store() {
+        let var = |name: &str, size: u32| Variable {
+            name: name.into(),
+            ty: "integer".into(),
+            unknown: 1,
+            is_array: false,
+            array_size: size,
+            initialized: true,
+            initial_value: "3".into(),
+            id: 0,
+            parent: -1,
+        };
+        let mut f = parse(&classic(4), &data()).unwrap();
+        f.variables = vec![var("a", 1), var("b", 1)];
+        let back = parse(&write(&f), &data()).unwrap();
+        assert_eq!(back.variables.iter().map(|v| (v.name.as_str(), v.id, v.parent)).collect::<Vec<_>>(), [("a", 0, -1), ("b", 1, -1)]);
+        // A size that v4 can't hold isn't written: it reads back as 1.
+        f.variables = vec![var("a", 8)];
+        assert_eq!(parse(&write(&f), &data()).unwrap().variables[0].array_size, 1);
+        // Control: v7 keeps it.
+        let mut f7 = parse(&classic(7), &data()).unwrap();
+        f7.variables = vec![var("a", 8)];
+        assert_eq!(parse(&write(&f7), &data()).unwrap().variables[0].array_size, 8);
+    }
 }

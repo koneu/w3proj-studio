@@ -5,6 +5,9 @@
 //!
 //! app/src/lib/formats/lossless.ts is the same thing for the editors.
 
+/// `FIRST + 0x100` is one past the last character there is and FIRST's low byte is 0, so mutation testing's
+/// `FIRST * 0x100` (the same range of real characters) and `v + FIRST` as u8 (the same low byte) survive: they are
+/// equivalent, not untested.
 const FIRST: u32 = 0x10_FF00;
 
 fn escape(b: u8) -> char {

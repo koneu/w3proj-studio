@@ -61,6 +61,112 @@ for (const [name, src] of correct) {
   test(`accepts: ${name}`, () => assert.deepEqual(messages(src), []));
 }
 
+// The rest of what the game's compiler refuses, each with the exact message (the Problems view shows it as it is).
+const exact: [string, string, string[]][] = [
+  ["a type extending an unknown one", "type foo extends bar\n", ["Unknown type bar"]],
+  ["nothing as a parameter type", "function F takes nothing x returns nothing\nendfunction\n", // A broken header leaves its body outside any function.
+    ["Expected \"returns\", found \"x\"", "Expected a function, globals or type, found \"endfunction\""]],
+  ["nothing as a local's type", fn("    local nothing x"), ["\"nothing\" isn't a type here"]],
+  ["code outside a function", "KillUnit(null)\n", ["Code must be inside a function"]],
+  ["a stray word at the top", "endif\n", ["Expected a function, globals or type, found \"endif\""]],
+  ["a function defined twice", "function F takes nothing returns nothing\nendfunction\nfunction F takes nothing returns nothing\nendfunction\n", ["F is already defined"]],
+  ["a global array with a value", "globals\n    integer array a = 1\nendglobals\n", ["Arrays can't have an initial value"]],
+  ["a local array with a value", fn("    local integer array a = 1"), ["Arrays can't have an initial value"]],
+  ["a constant without a value", "globals\n    constant integer C\nendglobals\n", ["Constants need a value"]],
+  ["a global of the wrong type", "globals\n    unit u = 5\nendglobals\n", ["u is unit, the value is integer"]],
+  ["globals never closed", "globals\n    integer a\n", ["Missing endglobals"]],
+  ["a function inside a function", fn("function G takes nothing returns nothing"),
+    ["Missing endfunction for T", "Expected a function, globals or type, found \"endfunction\""]],
+  ["calling a variable", fn("    local integer i\n    call i()"), ["i is a variable, not a function"]],
+  ["a function used as a value", fn("    local integer i = DoNothing"), ["DoNothing is a function: use DoNothing(…) or function DoNothing"]],
+  ["an unknown name indexed", fn("    local integer i = nope[1]"), ["Unknown variable nope"]],
+  ["an array read without an index", fn("    local integer array a\n    local integer i = a"), ["a is an array: a[index]"]],
+  ["an index on a plain local", fn("    local integer b\n    local integer i = b[0]"), ["b isn't an array"]],
+  ["a real index", fn("    local integer array a\n    local integer i = a[1.5]"), ["Array index must be integer, not real"]],
+  ["a real index in set", fn("    local integer array a\n    set a[1.5] = 1"), ["Array index must be integer, not real"]],
+  ["or on integers", fn("    if 1 or true then\n    endif"), ["\"or\" needs boolean values, not integer and boolean"]],
+  ["and on strings", fn('    if true and "x" then\n    endif'), ["\"and\" needs boolean values, not boolean and string"]],
+  ["less-than on strings", fn('    if "a" < "b" then\n    endif'), ["\"<\" compares numbers, not string and string"]],
+  ["multiplying a boolean", fn("    local integer i = 2 * true"), ["\"*\" needs numbers, not integer and boolean"]],
+  ["minus on a string", fn('    local string s = -"x"'), ["\"-\" needs a number, not string"]],
+  ["adding a unit to a string", fn('    local string s = "a" + GetTriggerUnit()'), ["Can't add string and unit"]],
+  ["a value missing", fn("    local integer i ="), ["Expected a value before the end of the line"]],
+  ["a keyword as a value", fn("    local integer i = endif"), ["Expected a value, found \"endif\""]],
+  ["something after a statement", fn("    call DoNothing() 1"), ["Unexpected \"1\""]],
+  ["a word that's no statement", fn("    loop2"), ["Expected a statement, found \"loop2\""]],
+  ["an unexpected character", fn("    local integer i = 1 # + 2"),["Unexpected character \"#\""]],
+  ["an object code never closed", fn("    local integer i = 'hfoo"), ["Unclosed object code ('hfoo')"]],
+  ["a function reference to an unknown one", fn("    call TimerStart(CreateTimer(), 1.0, false, function Nope)"), ["Unknown function Nope"]],
+  // A block left open is one mistake: endfunction still closes the function (it once also said "Missing endfunction").
+  ["missing endloop", fn("    loop\n    call DoNothing()"), ["Missing endloop"]],
+  ["missing endif, exactly", fn("    if true then\n    call DoNothing()"), ["Missing endif"]],
+  ["missing endif after else", fn("    if true then\n    else\n    call DoNothing()"), ["Missing endif"]],
+  // An unclosed object code ends at its line: the next line is read on its own (it once swallowed the line end).
+  ["an object code never closed, and the next line", fn("    local integer i = 'hfoo\n    local integer j = 'a'"), ["Unclosed object code ('hfoo')"]],
+];
+
+for (const [name, src, want] of exact) {
+  test(`reports exactly: ${name}`, () => assert.deepEqual(messages(src), want));
+}
+
+const alsoCorrect: [string, string][] = [
+  ["comments, a leading dot and $ hex", fn("    // a comment\n    local real r = .5 + 1.25 // and another\n    local integer i = $FF")],
+  ["elseif and else", fn("    if true then\n    elseif false then\n        call DoNothing()\n    else\n        call DoNothing()\n    endif")],
+  ["an integer compared with null (vJASS structs)", fn("    local integer this = 0\n    if this == null or null != this then\n    endif")],
+  ["debug before a statement", fn("    debug call DoNothing()")],
+  ["an escaped object code", fn("    local integer i = '\\\\'")],
+  ["a string with an escaped quote", fn('    local string s = "a\\"b"')],
+  ["a constant native and a constant function", "constant native C takes nothing returns integer\nconstant function D takes nothing returns integer\n    return C()\nendfunction\n"],
+  ["a type the script declares", "type thing extends handle\nfunction F takes thing t returns handle\n    return t\nendfunction\n"],
+  ["a global array set by index", "globals\n    integer array a\n    constant real R = 1\nendglobals\n" + fn("    set a[0] = 1\n    set a[1] = a[0] + 1")],
+];
+
+for (const [name, src] of alsoCorrect) {
+  test(`accepts: ${name}`, () => assert.deepEqual(messages(src), []));
+}
+
+test("one mistake doesn't hide the next: a broken line is skipped, the rest is still checked", () => {
+  const src = fn("    call KillUnit(\n    call KilUnit(null)") + fn("    set udg_Nope = 1", "function U takes nothing returns nothing");
+  const found = messages(src);
+  assert.equal(found.length, 3, found.join("; "));
+  assert.match(found[1], /KilUnit/);
+  assert.match(found[2], /udg_Nope/);
+});
+
+test("a whole script's own functions must come before their use; a fragment's needn't", () => {
+  const later = "function A takes nothing returns nothing\n    call TimerStart(CreateTimer(), 1.0, false, function B)\nendfunction\nfunction B takes nothing returns nothing\nendfunction\n";
+  assert.deepEqual(messages(later), ["B is defined further down: functions must come before their use"]);
+  // The map script's env already holds B (envFrom of the whole script): the order still counts.
+  const withB = envFrom(["function B takes nothing returns nothing\nendfunction\n"], env);
+  assert.deepEqual(checkJass(fn("    call B()") + "function B takes nothing returns nothing\nendfunction\n", withB).map((d) => d.message),
+    ["B is defined further down: functions must come before their use"]);
+  // A trigger's custom text is a fragment: what the env knows may come from anywhere.
+  assert.deepEqual(checkJass(fn("    call B()"), withB, { ordered: false }), []);
+});
+
+test("a syntax error points at a character even at the end of the text", () => {
+  const src = "function F takes nothing returns nothing";
+  const [d] = checkJass(src, env);
+  assert.equal(d.from, src.length);
+  assert.equal(d.to, src.length + 1, "never an empty range the editor can't show");
+});
+
+test("declarations skip syntax errors and report no semantic ones", () => {
+  const src = "function F takes integer a returns nothing\n    local unitt u\n    call Nope(1 2)\n    local integer late\nendfunction\nglobals\n    unit u = 5\nendglobals\n";
+  const names = declarations(src, env).map((d) => `${d.kind}:${d.name}`);
+  assert.deepEqual(names, ["function:F", "param:a", "local:u", "local:late", "global:u"]);
+});
+
+test("envWithout leaves the game's declarations and takes only the script's own out", () => {
+  const src = "globals\n    integer udg_X\nendglobals\nfunction Mine takes nothing returns nothing\nendfunction\n";
+  const full = envFrom([src], env);
+  const out = envWithout(full, src);
+  assert.ok(!out.functions.has("Mine") && !out.globals.has("udg_X"));
+  assert.ok(out.functions.has("KillUnit") && out.globals.has("bj_PI"));
+  // Not changed in place.
+  assert.ok(full.functions.has("Mine"));
+});
+
 // WoW Reforged's war3map.j (smoketest_models/wc3_wowr), which the game runs, has both of these.
 test("a comparison's right side may be a not", () => {
   assert.deepEqual(messages(fn("    if true == not false and false != not true then\n    endif")), []);
