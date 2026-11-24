@@ -363,7 +363,7 @@ mod tests {
     /// The writer never makes Huffman or ADPCM sectors, so nothing reaches those decoders unless a
     /// test aims at them: random damage to a fixture only does by luck, and loses that luck
     /// whenever the fixture changes. This proves they survive bad data, not that they decode
-    /// sound correctly: only the corpus has real sectors of these kinds.
+    /// sound correctly: only the corpus has real sectors of these kinds (`crates/cli/tests/mpq_sound_sectors.rs`).
     #[test]
     fn huffman_and_adpcm_sectors_survive_any_data() {
         let mut state = 0x9e37_79b9_u32;
