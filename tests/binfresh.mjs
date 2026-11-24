@@ -6,7 +6,8 @@
 // written) a binary built or copied before is refused: build again. Except a build of scripts/verify-build.mjs (its
 // verify.json names the commit): when the working tree's sources are that commit's, it is fresh whatever the mtimes.
 //
-// Override: --allow-stale on a tool's command line (where it parses its own flags), or W3_ALLOW_STALE=1.
+// Override: --allow-stale anywhere on a tool's command line (taken out of process.argv on import, so it never shifts
+// positional arguments), or W3_ALLOW_STALE=1.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -62,12 +63,26 @@ export function checkFresh(bin, { kind = "cli", root = defaultRoot, allowStale =
   if (src && src.mtimeMs > statSync(bin).mtimeMs) {
     const commit = builtCommit(bin);
     if (commit && sameSources(root, kind, commit)) return bin;
-    throw new Error(`${bin} is older than ${src.file} (${new Date(src.mtimeMs).toISOString()} vs ${statSync(bin).mtime.toISOString()}): rebuild it, or pass --allow-stale / set W3_ALLOW_STALE=1 to use it anyway`);
+    throw new Error(`${bin} is older than ${src.file} (${new Date(src.mtimeMs).toISOString()} vs ${statSync(bin).mtime.toISOString()}): rebuild it, or pass --allow-stale (anywhere on the command line) / set W3_ALLOW_STALE=1 to use it anyway (mtimes are compared: a clean tree whose files were just checked out also looks newer)`);
   }
   return bin;
 }
 
-export const staleAllowed = (env = process.env, argv = process.argv) => env.W3_ALLOW_STALE === "1" || argv.includes("--allow-stale");
+/** Removes every `--allow-stale` from `argv` in place (so positional arguments don't shift) and tells whether one was there. */
+export function takeAllowStale(argv) {
+  let seen = false;
+  for (let i = argv.length - 1; i >= 2; i--) {
+    if (argv[i] === "--allow-stale") { argv.splice(i, 1); seen = true; }
+  }
+  return seen;
+}
+
+// Importing this module is enough for a script's positional arguments to be free of the flag: it is taken out of
+// process.argv here, before the script reads its arguments (imports run first), and remembered.
+const flagGiven = takeAllowStale(process.argv);
+
+export const staleAllowed = (env = process.env, argv = process.argv) =>
+  env.W3_ALLOW_STALE === "1" || argv.includes("--allow-stale") || (argv === process.argv && flagGiven);
 
 /** For scripts: checks `bin` (a falsy path is left to the caller's own usage check) and exits 1 with the message. */
 export function requireFresh(bin, kind = "cli", opts = {}) {
