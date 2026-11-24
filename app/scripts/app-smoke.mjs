@@ -110,6 +110,10 @@ function freePort() {
 }
 
 const game = chosenGamePath();
+// The CLI and the app read the game from W3PROJ_GAME (else the Windows default install), not from .game-path: a run by
+// hand with only .game-path gives every `w3proj pack` the game the gate's W3PROJ_GAME gives it, so a pack makes a
+// generated map script again as in the gate (without, derivedAfterDeletes' pack refused the script as stale).
+if (game && !process.env.W3PROJ_GAME) process.env.W3PROJ_GAME = game;
 const installArgs = game ? ["--install", game] : [];
 
 /** worldEditorReal starts the real World Editor (we-launch.mjs, slot 0): only when asked for by name. The app is then
