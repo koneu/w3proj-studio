@@ -498,6 +498,7 @@ It checks or installs the MSVC C++ build tools, the WebView2 runtime, Rust (rust
 the optional sccache and actionlint (into `target/tools/bin/`, as on Linux), runs `npm ci` in `app/` (also when
 `node_modules` came from a Linux machine), and finds Warcraft III (`Program Files`, Battle.net's uninstall entry, the
 folder above the checkout) for `.game-path`. The work is in `scripts/setup-windows.ps1`; the `.bat` starts it.
+`--with-coverage-tools` also installs the optional coverage and mutation tools (see Linux below).
 
 A checkout shared with a Linux machine works on both: `.game-path` lists each machine's folder and the first that
 exists counts, and `.cargo/config.toml` names sccache by a path relative to the checkout. The hidden World Editor
@@ -526,6 +527,10 @@ It sets up:
   `target/tools/` and wired up by a local, git-ignored `.cargo/config.toml`. Delete that file to build without it.
 - **actionlint** (optional): checks the GitHub workflow files; a pinned release binary, checksum-verified, into
   `target/tools/bin/`.
+- **Coverage and mutation tools** (optional, off by default: long cargo builds): `--with-coverage-tools` (or
+  `W3PROJ_COVERAGE_TOOLS=1`) adds the `llvm-tools-preview` rustup component, `cargo-llvm-cov` and `cargo-mutants`
+  (`cargo install --locked`, skipped when present). `node tests/gate.mjs coverage` needs the first two; mutation testing
+  (TESTING.md "Coverage") the last. Without the flag, `--check` only notes them and doesn't count them as missing.
 - **Warcraft III:** finds the installs in Steam (Proton), Lutris/Battle.net and Wine prefixes, shows each one's
   build, and writes the newest to `.game-path` (git-ignored; `--game PATH` picks another). The gate and the test
   scripts read it when `W3PROJ_GAME` isn't set (`tests/gamepath.mjs`); on Windows, without either, they use the

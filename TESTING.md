@@ -67,7 +67,7 @@ real maps and game files can't go into the repository.
 
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
-node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov)
+node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov; scripts/setup-linux.sh --with-coverage-tools)
 node tests/gate.mjs corpus     # real maps and the game: about 8 minutes (the app smoke test's two halves set the pace)
 node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
@@ -241,6 +241,9 @@ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$PWD/tests/mutants-runner.sh \
 
 Last run (2026-11-24) on `lossless.rs`, `paths.rs`, `format/expr.rs` and `wtg.rs`: the survivors left are equivalent
 mutants, each explained where it is (`lossless.rs` FIRST, `paths.rs` percent_decode).
+
+`cargo-mutants`, `cargo-llvm-cov` and the `llvm-tools` rustup component are optional installs:
+`scripts/setup-linux.sh --with-coverage-tools` (or `scripts\setup-windows.bat --with-coverage-tools`).
 
 ## Rules for writing tests
 
