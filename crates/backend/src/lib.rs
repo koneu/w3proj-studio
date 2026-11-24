@@ -218,6 +218,16 @@ pub struct Stamp {
     /// Other files the write changed (a split terrain's flat file: the subterrain files it went into).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub also: Vec<flatview::Also>,
+    /// The file was written, but its size and time couldn't be read back (`stamp_or_unknown`): they mean nothing, and
+    /// the workspace takes what the disk has at its next check for its own write.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unknown: bool,
+}
+
+impl Stamp {
+    pub fn new(size: u64, modified: u64) -> Stamp {
+        Stamp { size, modified, also: Vec::new(), unknown: false }
+    }
 }
 
 pub fn modified_ms(meta: &std::fs::Metadata) -> u64 {
@@ -232,15 +242,23 @@ pub fn modified_ms(meta: &std::fs::Metadata) -> u64 {
 /// own save from a change by another program.
 pub fn stamp_of(path: &Path) -> CmdResult<Stamp> {
     let meta = std::fs::metadata(path).map_err(err)?;
-    Ok(Stamp { size: meta.len(), modified: modified_ms(&meta), also: Vec::new() })
+    Ok(Stamp::new(meta.len(), modified_ms(&meta)))
+}
+
+/// The stamp of a file a write has just landed in, by `read`: asked once more when that fails (a scanner holding it
+/// a moment), else `unknown`. The write did happen, so it is never an error: a failed save would be retried or
+/// reported for bytes already on disk.
+pub fn stamp_or_unknown(read: impl Fn() -> CmdResult<Stamp>) -> Stamp {
+    read().or_else(|_| read()).unwrap_or(Stamp { unknown: true, ..Stamp::new(0, 0) })
 }
 
 /// Every save of the app: the folders above are made, then the file is replaced in one step
 /// (`w3proj::atomic`: a temporary file renamed over it), so a write that fails partway (a full disk)
-/// leaves the old file whole. A link is written through to its file. Gives the stamp the file has after.
+/// leaves the old file whole. A link is written through to its file. Gives the stamp the file has after
+/// (`stamp_or_unknown`).
 pub fn write_file(path: &Path, fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>) -> CmdResult<Stamp> {
     w3proj::atomic::write_with(path, fill).map_err(err)?;
-    stamp_of(path)
+    Ok(stamp_or_unknown(|| stamp_of(path)))
 }
 
 /// A file path inside `root` (the open project), for deleting and renaming: its folder is resolved (links, `..`,
@@ -518,6 +536,40 @@ pub fn game_read(g: &casc::GameData, path: &str, mode_name: &str, tileset: &Opti
 /// Resolves a plain path (`Units\UnitData.slk`) to the stored full path.
 pub fn game_resolve(g: &casc::GameData, path: &str, mode_name: &str, tileset: &Option<String>) -> CmdResult<Option<String>> {
     Ok(g.resolve(path, mode(mode_name)?, tileset_letter(tileset)).map(str::to_string))
+}
+
+#[cfg(test)]
+mod stamp_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// A stamp that can't be read back after a write landed: asked once more, and when that fails too the write still
+    /// succeeds with an unknown stamp (serialized as `unknown: true`, which the workspace takes as "re-read"), never an
+    /// error. A stamp read that works is used as it is, with no `unknown` in its JSON (control).
+    #[test]
+    fn a_stamp_read_that_fails_after_a_write_gives_an_unknown_stamp_not_an_error() {
+        let calls = Cell::new(0);
+        let flaky = || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 { Err("locked".to_string()) } else { Ok(Stamp::new(5, 500)) }
+        };
+        let s = stamp_or_unknown(flaky);
+        assert_eq!((s.size, s.modified, s.unknown, calls.get()), (5, 500, false, 2), "the retry's stamp");
+        let calls = Cell::new(0);
+        let s = stamp_or_unknown(|| {
+            calls.set(calls.get() + 1);
+            Err("gone".to_string())
+        });
+        assert_eq!((s.unknown, calls.get()), (true, 2));
+        assert_eq!(serde_json::to_value(&s).unwrap()["unknown"], true);
+        assert!(serde_json::to_value(Stamp::new(1, 2)).unwrap().get("unknown").is_none(), "a known stamp's JSON is as before");
+        // write_file: a write that lands gives its stamp.
+        let dir = std::env::temp_dir().join(format!("w3proj-backend-stamp-{}", std::process::id()));
+        let file = dir.join("a.txt");
+        let s = write_file(&file, |f| f.write_all(b"abc")).unwrap();
+        assert_eq!((s.size, s.unknown), (3, false));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(test)]

@@ -15,6 +15,10 @@ const locked = new Map<string, string>();
 let normalizeGate: Promise<void> | null = null;
 /** Answers for a file written at once: what the listing then has. */
 const holds = new Map<string, Promise<void>>();
+/** Writes (by text) that wait before they land: the disk gets them only when the promise resolves. */
+const landLater = new Map<string, Promise<void>>();
+/** Writes (by text) that land but whose stamp read afterwards fails: the backend answers with an unknown stamp. */
+const statFails = new Set<string>();
 /** Entries whose listing lags: the directory shows these values, the file itself has the true ones. */
 const listingLag = new Map<string, { size: number; modified: number }>();
 /** A write lands: the file has this size, and a time that follows from it. */
@@ -31,6 +35,8 @@ const land = (path: string, size: number) => {
 };
 const reset = () => {
   holds.clear();
+  landLater.clear();
+  statFails.clear();
   listingLag.clear();
   backend.set(A, [{ path: "war3map.j", size: 1, modified: 1 }]);
   backend.set(B, [{ path: "other.txt", size: 1, modified: 1 }]);
@@ -69,7 +75,11 @@ g.__TAURI_INTERNALS__ = {
       case "path_normalize": if (normalizeGate) await normalizeGate; return String(args.path).replace(/tester~1/i, "Tester");
       case "fs_write_text": {
         if (gate) await gate;
-        const stamp = land(String(args.path), String(args.text).length);
+        const later = landLater.get(String(args.text));
+        if (later) await later;
+        const landed = land(String(args.path), String(args.text).length);
+        // backend::stamp_or_unknown: the file is written, its size and time couldn't be read back.
+        const stamp = statFails.has(String(args.text)) ? { size: 0, modified: 0, unknown: true } : landed;
         const hold = holds.get(String(args.text));
         if (hold) await hold; // the write has landed, its answer comes late
         return stamp;
@@ -463,14 +473,51 @@ test("overlapping writes to one file: the one that started last keeps the last w
   await ws.open(A);
   let release!: () => void;
   holds.set("A", new Promise<void>((r) => { release = r; }));
-  const first = ws.writeText("war3map.j", "A"); // lands first, answers last
+  const first = ws.writeText("war3map.j", "A"); // lands, its answer comes late
   await settle();
-  await ws.writeText("war3map.j", "BB"); // lands last
+  const second = ws.writeText("war3map.j", "BB"); // waits for the first, then lands last
+  await settle();
   release();
-  await first;
+  await Promise.all([first, second]);
   assert.equal((await ws.externalChanges()).size, 0, "the file is what the later write left");
   outside("war3map.j", 7, 777);
   assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"], "and a change after both is seen");
+});
+
+test("overlapping writes to one file reach the disk in the order they started: the later one's bytes stay, nothing is reported", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  let release!: () => void;
+  landLater.set("A", new Promise<void>((r) => { release = r; }));
+  const first = ws.writeText("war3map.j", "A"); // held before it reaches the disk
+  await settle();
+  const second = ws.writeText("war3map.j", "BB"); // must not land before the first
+  await settle();
+  release();
+  await Promise.all([first, second]);
+  assert.equal(backend.get(A)!.find((x) => x.path === "war3map.j")!.size, 2, "the disk has the write that started last");
+  assert.equal((await ws.externalChanges()).size, 0, "no spurious change");
+  outside("war3map.j", 7, 777);
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"], "a change after both is still seen (control)");
+});
+
+test("a write that landed but whose stamp couldn't be read back succeeds, keeps the file listed, and the next check re-reads it quietly", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  const saved: string[] = [];
+  ws.onDidSave.on((p) => saved.push(p));
+  statFails.add("// unknown stamp");
+  await ws.writeText("war3map.j", "// unknown stamp");
+  await ws.writeText("map/new.j", "// unknown stamp");
+  assert.deepEqual(saved, ["war3map.j", "map/new.j"], "told as saved");
+  assert.ok(ws.files().some((f) => f.path === "war3map.j"), "an existing file isn't taken for removed");
+  assert.ok(ws.files().some((f) => f.path === "map/new.j"), "a new file is listed");
+  assert.equal((await ws.externalChanges()).size, 0, "our own write, not someone else's");
+  assert.equal(ws.files().find((f) => f.path === "war3map.j")?.size, 16, "the list has what the disk has now");
+  outside("war3map.j", 7, 777);
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"], "a later outside change is reported (control)");
 });
 
 test("a write under way counts as ours", async () => {

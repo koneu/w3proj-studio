@@ -11,8 +11,13 @@ export interface Stamp {
   size: number; modified: number; hash?: string;
   /** Other files the write changed (absolute paths): a split terrain's flat file is written into the subterrain files
    *  it stands for (backend flatview.rs), and the other flat files made from them change with them. */
-  also?: { path: string; size: number; modified: number }[];
+  also?: { path: string; size: number; modified: number; unknown?: boolean }[];
+  /** A write's answer when the file was written but its size and time couldn't be read back (backend
+   *  `stamp_or_unknown`): size and time mean nothing; the next check takes the disk's as ours. */
+  unknown?: boolean;
 }
+/** A write's stamp as `noteOwn` takes it: null when the backend couldn't read it back. */
+const known = (s: { size: number; modified: number; unknown?: boolean }): Stamp | null => (s.unknown ? null : { size: s.size, modified: s.modified });
 import { timeLimit } from "./timelimit";
 import { validateSetting } from "./settingsvalidate";
 
@@ -303,7 +308,9 @@ export class WorkspaceService {
   /** Runs a write of project file `p` that answers with the size and time it left (every backend write
    *  of a project file does), and notes it: the file counts as ours while the write runs, and afterwards
    *  while the disk still has that size and time, so that a change by another program is told from it.
-   *  Of overlapping writes to one file the one that started last has the last word. A file the list
+   *  Overlapping writes to one file run one after another, in the order they started, so the one that started
+   *  last has the last word, on disk and here. An answer with an unknown stamp (written, not read back) counts as
+   *  ours until the next check, which takes what the disk has. A file the list
    *  doesn't have yet (an export into map/Scripts/) is added to it at once, alone: nothing else is
    *  re-read, so what others changed stays to be noticed. A write that ends after a project switch
    *  is not noted. `size`: what the file will be, for the list until the answer comes. Counted in `pending`. */
@@ -315,20 +322,29 @@ export class WorkspaceService {
     if (!at) { await write(target); return; }
     const seq = ++this.writeSeq;
     this.writing.set(at.key, (this.writing.get(at.key) ?? 0) + 1);
+    // Writes of one file go to the disk one after another, in the order they started: one that started later can't
+    // land first and be overwritten by the earlier one's bytes (which the stamps would then report as a change).
+    const queueKey = `${root}\n${at.key}`, before = this.writeQueue.get(queueKey);
+    let done!: () => void;
+    const mine = new Promise<void>((r) => { done = r; });
+    this.writeQueue.set(queueKey, mine);
     let stamp: Stamp | void;
     try {
+      if (before) await before;
       stamp = await write(target);
     } finally {
+      done();
+      if (this.writeQueue.get(queueKey) === mine) this.writeQueue.delete(queueKey);
       const left = (this.writing.get(at.key) ?? 1) - 1;
       if (left > 0) this.writing.set(at.key, left); else this.writing.delete(at.key);
     }
     if (this.info?.root !== root) return;
-    let listChanged = this.noteOwn(at, stamp ? { size: stamp.size, modified: stamp.modified } : null, size, seq, root);
+    let listChanged = this.noteOwn(at, stamp ? known(stamp) : null, size, seq, root);
     // The files the write went into besides (a split terrain's subterrain files, the trigger layout's files): ours
     // too, not another program's. One removed has size and time 0.
     for (const a of stamp?.also ?? []) {
       const other = this.keyOf(a.path, root);
-      if (other) listChanged = this.noteOwn(other, { size: a.size, modified: a.modified }, a.size, seq, root) || listChanged;
+      if (other) listChanged = this.noteOwn(other, known(a), a.size, seq, root) || listChanged;
     }
     if (listChanged) this.onDidChange.fire();
   }
@@ -383,7 +399,7 @@ export class WorkspaceService {
     let listChanged = false;
     for (const a of w.also) {
       const at = this.keyOf(a.path, root);
-      if (at) listChanged = this.noteOwn(at, { size: a.size, modified: a.modified }, a.size, seq, root) || listChanged;
+      if (at) listChanged = this.noteOwn(at, known(a), a.size, seq, root) || listChanged;
     }
     if (listChanged) this.onDidChange.fire();
     for (const p of [...w.written, ...w.deleted]) this.onDidSave.fire(p);
@@ -394,6 +410,8 @@ export class WorkspaceService {
   private writeSeq = 0;
   /** Own writes under way, per key. */
   private writing = new Map<string, number>();
+  /** The last write of each file (root + key) started: the next one waits for it (`trackedWrite`). */
+  private writeQueue = new Map<string, Promise<void>>();
   /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
   async delete(p: string) {
     if (!this.info) throw new Error("no project is open");
