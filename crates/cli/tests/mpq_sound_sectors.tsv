@@ -1,0 +1,36 @@
+# Files of the corpus stored with Huffman/ADPCM sectors, as mpq_sound_sectors.rs decodes them (tab-separated):
+# map relative to the corpus (" > " into a chapter map), file, sector masks, size, FNV-1a 64 of the decoded bytes.
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	cairnedeath1.wav	02,41	340178	b9dee983b3c1999c
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Sound\Interface\Warning\Orc\GruntNoFood1.wav	02,41	81526	f595c7a597825886
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	PigFarmWhat1.wav	02,41	137080	f80b4d7802480dd2
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeroTaurenChieftainPissed1.wav	02,41	159350	4d39e3f463148d8a
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeroTaurenChieftainPissed2.wav	02,41	107126	57e56c96e70ca1f6
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeroTaurenChieftainPissed3.wav	02,41	215158	37d3c621855634de
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeroTaurenChieftainPissed4.wav	02,41	270454	1d431a39ed99682c
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeroTaurenChieftainPissed5.wav	02,41	192630	c252fb2e5eff5ef7
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeroTaurenChieftainPissed6.wav	02,41	75126	b2731b484e2d0b16
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HeadHunterHit1.wav	02,41	51842	f9a7921589f099a2
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TaurenHit1.wav	02,41	28430	7f3385d1e6175d61
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	RaiderDeath.wav	02,41	114284	04aa4b7ee88479ca
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	RainOfFireLoop1.wav	02,41	176444	3d43eb968380f95a
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	CallStormTarget.wav	02,41	176648	1606a25bafd0bec7
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	EarthBindTarget.wav	02,41	165754	14d3c4d6460c490f
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Earthquake.wav	02,41	176724	09c2d0761be7c70d
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	SummonWaterElementalCaster.wav	02,41	88314	90fef349da55faa2
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	cairnedeath1.wav	02,41	340178	b9dee983b3c1999c
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Sound\Interface\Warning\Orc\GruntNoFood1.wav	02,41	81526	f595c7a597825886
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	PigFarmWhat1.wav	02,41	137080	f80b4d7802480dd2
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeroTaurenChieftainPissed1.wav	02,41	159350	4d39e3f463148d8a
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeroTaurenChieftainPissed2.wav	02,41	107126	57e56c96e70ca1f6
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeroTaurenChieftainPissed3.wav	02,41	215158	37d3c621855634de
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeroTaurenChieftainPissed4.wav	02,41	270454	1d431a39ed99682c
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeroTaurenChieftainPissed5.wav	02,41	192630	c252fb2e5eff5ef7
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeroTaurenChieftainPissed6.wav	02,41	75126	b2731b484e2d0b16
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HeadHunterHit1.wav	02,41	51842	f9a7921589f099a2
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TaurenHit1.wav	02,41	28430	7f3385d1e6175d61
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	RaiderDeath.wav	02,41	114284	04aa4b7ee88479ca
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	RainOfFireLoop1.wav	02,41	176444	3d43eb968380f95a
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	CallStormTarget.wav	02,41	176648	1606a25bafd0bec7
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	EarthBindTarget.wav	02,41	165754	14d3c4d6460c490f
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Earthquake.wav	02,41	176724	09c2d0761be7c70d
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	SummonWaterElementalCaster.wav	02,41	88314	90fef349da55faa2
