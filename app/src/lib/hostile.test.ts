@@ -47,6 +47,12 @@ const CASE_WALL_MS = 120000;
 const BEAT_MS = 50;
 /** Fails like a hang: a parser that fills the heap takes the app with it. */
 const HEAP_MB = 512;
+/**
+ * The child's whole memory (resident set) may grow to this; past it the child kills itself and the case is reported.
+ * The heap cap above doesn't count ArrayBuffers: a header's size taken at its word allocates outside the heap, and
+ * such a case could use up the machine's memory instead of failing.
+ */
+const MEM_MB = 1536;
 /** Enough to see what's wrong; a parser that fails on everything shouldn't take hours. */
 const MAX_FAILURES = 40;
 /** How much of a stopped child's stderr goes into its failure. */
@@ -349,7 +355,9 @@ function writeLine(write: (fd: number, b: Uint8Array) => number, fd: number, lin
 /**
  * The child's second thread. A parser stuck in a loop can't report anything itself, so this thread
  * says every BEAT_MS how much processor time the process has used: "cpu <ms>". When the parser is
- * done it is told (cell 0 is -1), says "done", and ends, and with it the process.
+ * done it is told (cell 0 is -1), says "done", and ends, and with it the process. Past MEM_MB of resident memory it
+ * says "mem <MB>" and kills the process itself: through the parent's pipe the case's allocation would run on while a
+ * busy parent reads.
  * (No backslashes in here: it's a string of code for the thread.)
  */
 const BEAT_THREAD = `
@@ -362,6 +370,11 @@ const cell = new Int32Array(workerData);
 for (;;) {
   Atomics.wait(cell, 1, 0, ${BEAT_MS});
   if (Atomics.load(cell, 0) < 0) break;
+  const rss = process.memoryUsage.rss();
+  if (rss > ${MEM_MB} * 1048576) {
+    writeLine(writeSync, 1, "mem " + Math.round(rss / 1048576));
+    process.kill(process.pid, "SIGKILL");
+  }
   const u = process.cpuUsage();
   writeLine(writeSync, 1, "cpu " + Math.round((u.user + u.system) / 1000));
 }
@@ -378,7 +391,8 @@ const cpuMs = () => {
  * first file), then from `start` on each case's number and the processor time before running it.
  */
 function work(start: number) {
-  const seeds = allSeeds(), total = seeds.length * ROUNDS;
+  // W3_HOSTILE_HOG: the memory watchdog's own test, one case that allocates as a header's size taken at its word does.
+  const seeds = process.env.W3_HOSTILE_HOG ? [HOG_SEED] : allSeeds(), total = seeds.length * ROUNDS;
   const cell = new Int32Array(new SharedArrayBuffer(8));
   new Worker(BEAT_THREAD, { eval: true, workerData: cell.buffer });
   writeLine(writeSync, 1, `ready ${cpuMs()}`);
@@ -386,7 +400,7 @@ function work(start: number) {
     writeLine(writeSync, 1, `${c} ${cpuMs()}`);
     const seed = seeds[Math.floor(c / ROUNDS)], round = c % ROUNDS;
     try {
-      TARGETS[seed.target](bytesOf(seed, round));
+      (seed === HOG_SEED ? hog : TARGETS[seed.target])(bytesOf(seed, round));
     } catch (e) {
       // Refusing a damaged file is right, with the parser's own error. A TypeError, RangeError or ReferenceError is
       // the parser's bug (an unchecked length, a missing field), not a refusal: the parent counts it as a failure.
@@ -398,13 +412,23 @@ function work(start: number) {
   Atomics.store(cell, 0, -1);
 }
 
+/** The memory watchdog's test case (W3_HOSTILE_HOG). */
+const HOG_SEED: Seed = { target: "hog", name: "hog", bytes: new Uint8Array(1) };
+
+/** One buffer of twice MEM_MB, filled: outside the heap, so only the memory watchdog stops it. */
+function hog() {
+  const b = new Uint8Array(2 * MEM_MB * 1048576);
+  b.fill(1);
+  return b[b.length - 1];
+}
+
 interface Failure { seed: string; round: number; what: string }
 
 /** One child from case `start` on: null if it got through them all, or where and how it stopped. */
-function runFrom(start: number, bad: Failure[], seeds: Seed[]): Promise<{ at: number; what: string } | null> {
+function runFrom(start: number, bad: Failure[], seeds: Seed[], env: Record<string, string> = {}): Promise<{ at: number; what: string } | null> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [`--max-old-space-size=${HEAP_MB}`, fileURLToPath(import.meta.url)], {
-      env: { ...process.env, W3_HOSTILE_START: String(start), NODE_TEST_CONTEXT: undefined },
+      env: { ...process.env, ...env, W3_HOSTILE_START: String(start), NODE_TEST_CONTEXT: undefined },
       stdio: ["ignore", "pipe", "pipe"],
     });
     // The end of what the child said on stderr: the reason when it stops by itself (out of memory, a crash, a
@@ -424,6 +448,7 @@ function runFrom(start: number, bad: Failure[], seeds: Seed[]): Promise<{ at: nu
           const c = Number(value), s = seeds[Math.floor(c / ROUNDS)];
           if (s) bad.push({ seed: `${s.target}: ${s.name}`, round: c % ROUNDS, what: line.split(" ").slice(2).join(" ") });
         } else if (word === "done") finished = true;
+        else if (word === "mem") kill(`over ${MEM_MB} MB of memory (${value} MB resident)`);
         else if (word === "cpu") {
           if (since !== null && Number(value) - since > LIMIT_MS) kill(`over ${LIMIT_MS} ms of processor time`);
         } else if (word === "ready") {
@@ -512,6 +537,13 @@ if (process.env.W3_HOSTILE_FLOOD) {
     child.stdout.resume();
     const code = await closed;
     assert.deepEqual({ code, lines, err }, { code: 0, lines: FLOOD_LINES, err: "" });
+  });
+  test("a case that allocates past the memory cap outside the heap is killed and reported", async () => {
+    const bad: Failure[] = [];
+    const end = await runFrom(0, bad, [HOG_SEED], { W3_HOSTILE_HOG: "1", W3_HOSTILE_ROUNDS: "1" });
+    assert.equal(end?.at, 0);
+    assert.match(end!.what, new RegExp(`^over ${MEM_MB} MB of memory \\(\\d+ MB resident\\)`));
+    assert.deepEqual(bad, []);
   });
   test(`damaged files can't hang the app (${seeds.length} seeds, ${ROUNDS} rounds each)`, async () => {
     assert.deepEqual(await run(seeds), []);
