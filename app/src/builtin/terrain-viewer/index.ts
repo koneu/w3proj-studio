@@ -56,7 +56,7 @@ import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { applyOpenRulesToProject, openRuleSourceOf } from "./openrules";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { Turns } from "./turns";
+import { RebuildJobs } from "./rebuildjob";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
@@ -251,19 +251,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const REBUILD_DELAY = 3000;
   /** `terrain` is left out when the edit didn't touch the ground. */
   type RebuildFrom = { terrain?: Terrain; doodads: Placed[] };
-  let rebuild: { key: string; from: RebuildFrom } | null = null, rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   /** After the edits stop: pathing, shadows and the minimap, in the background. `from` is the
    *  state before the first edit: shadows are updated from there. */
-  const rebuildSoon = (from: () => RebuildFrom) => {
-    const key = w3.workspace.project()?.root ?? "";
-    if (rebuild?.key !== key) rebuild = { key, from: from() };
-    clearTimeout(rebuildTimer);
-    // A failure is shown by the rebuild itself.
-    rebuildTimer = setTimeout(() => void runRebuild().catch(() => {}), REBUILD_DELAY);
-  };
+  const rebuildSoon = (from: () => RebuildFrom) => rebuilds.soon(from);
   /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back).
    *  A terrain editor's save updates them in this turn too. */
-  const rebuilding = new Turns();
+  const rebuilding = { run: <R,>(job: () => Promise<R>) => rebuilds.queue.run(job), runWithin: <R,>(job: () => Promise<R>, ms: number) => rebuilds.queue.runWithin(job, ms) };
   const rebuildFailed = (why: unknown) => {
     const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
     w3.window.showError(text);
@@ -282,31 +275,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       stillOpen: () => w3.workspace.project()?.root === key,
     }).catch((e) => { throw rebuildFailed(e); });
   };
-  const runRebuild = () => rebuilding.run(async () => {
-    const job = rebuild;
-    if (!job || job.key !== w3.workspace.project()?.root) return;
-    // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
-    // it stays closed: the files are made from the project's saved ones.
-    const editor = ownEditor();
-    if (!editor) {
-      const path = projectTerrain(w3);
-      if (!path) return;
-      rebuild = null;
-      await deriveSaved(job.key, path, job.from);
-      return;
-    }
-    // The wait was long enough for another project to be opened: its job and editor are not this one's.
-    if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
-    rebuild = null;
-    await editor.derive(job.from).catch((e) => { throw rebuildFailed(e); });
+  const rebuilds = new RebuildJobs<RebuildFrom>({
+    project: () => w3.workspace.project()?.root,
+    editorRoot: () => ownEditor()?.root ?? null,
+    terrainPath: () => projectTerrain(w3),
+    deriveOpen: (from) => ownEditor()!.derive(from).catch((e) => { throw rebuildFailed(e); }),
+    deriveSaved,
+    delayMs: REBUILD_DELAY,
   });
   ctx.subscriptions.push(
-    { dispose: () => clearTimeout(rebuildTimer) },
+    { dispose: () => rebuilds.stopTimer() },
     // What saves or packs the project first waits here: pathing, shadows and the minimap still due from the last edit
     // belong in it (an AI tool's edit is not an unsaved editor, so saving doesn't write them).
     w3.commands.register("w3.terrain.settle", async () => {
-      clearTimeout(rebuildTimer);
-      await runRebuild();
+      await rebuilds.settle();
     }),
     // Not in the manifest: the Map Script extension, after making the script, has the project's open terrain editor set
     // its destructables' flags (map-script followFlags). True when that editor holds war3map.doo (the file is its).
@@ -334,8 +316,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!path) throw new Error("This project has no terrain (war3map.w3e).");
       await w3.editors.saveAll();
       // A rebuild still due from the last edit first: the file is made from what's saved.
-      clearTimeout(rebuildTimer);
-      await runRebuild();
+      await rebuilds.settle();
       if (w3.workspace.project()?.root !== root) return null;
       const doc = { path } as EditorDocument;
       const { shd, stored, write, leftOut, problem } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
@@ -387,9 +368,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const root = w3.workspace.project()?.root;
       const path = projectTerrain(w3);
       if (!root || !path || (typeof forRoot === "string" && forRoot !== root)) return;
-      clearTimeout(rebuildTimer);
-      const due = rebuild?.key === root ? rebuild.from : null;
-      if (due) rebuild = null;
+      const due = rebuilds.take(root);
       return rebuilding.run(async () => {
         if (w3.workspace.project()?.root !== root) return;
         const before = due?.doodads ?? (Array.isArray(doodadsBefore) ? doodadsBefore as Placed[] : null);
@@ -418,8 +397,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
-      clearTimeout(rebuildTimer);
-      rebuild = null;
+      rebuilds.drop();
     }),
   );
 
