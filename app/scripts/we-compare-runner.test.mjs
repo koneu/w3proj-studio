@@ -113,7 +113,8 @@ test("expectPaths: every listed path must differ and nothing else may", () => {
 test("expectPaths in a spec: with expect differs only, on JSON kinds only; studio-paths-matrix-masks has them", () => {
   assert.deepEqual(entry({ file: "war3map.w3i", as: "parsed", expect: "differs", expectPaths: ["players[].start"] }).expectPaths, ["players[].start"]);
   assert.throws(() => entry({ file: "war3map.w3i", as: "parsed", expectPaths: ["players[].start"] }), /goes with "expect": "differs"/);
-  assert.throws(() => entry({ file: "war3map.j", as: "text", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "text"/);
+  assert.throws(() => entry({ file: "war3map.j", as: "text-set", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "text-set"/);
+  assert.throws(() => entry({ file: "x.bin", as: "bytes", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "bytes"/);
   assert.throws(() => entry({ file: "war3map.w3i", as: "parsed", expect: "differs", expectPaths: [] }), /expectPaths/);
   // The tests run from a copy of the scripts: the spec folder is found from where they run (app/ or the repository).
   const specs = core.parseSpecFile(readFileSync(repoPath("tests", "we-compare", "studio-paths.json"), "utf8"), "/r/tests/we-compare/studio-paths.json", { MAIN: "/m", REPO: "/r" }, { differsWithoutPaths: core.readDiffersAllowlist(resolve(repoPath("tests"), "..")) });
