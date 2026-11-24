@@ -54,7 +54,7 @@ export class GameService {
   backendReads = 0;
   /** Reads asked of this service, kept or not: an editor loading twice asks for everything twice (the app smoke's guard). */
   requests = 0;
-  /** Paths the backend said aren't there, in order (each once, as they're remembered): for the app smoke's guard. */
+  /** Paths the backend said aren't there, in order (each once, as they're remembered; `reload` empties it, as it forgets them): for the app smoke's guard. */
   readonly backendMisses: string[] = [];
   /** Reads waiting on the backend now, and the ones queued for a place (see MAX_READS_IN_FLIGHT). */
   private inFlight = 0;
@@ -87,6 +87,7 @@ export class GameService {
     this.protected.clear();
     this.cachedBytes = 0;
     this.protectedBytes = 0;
+    this.backendMisses.length = 0;
   }
 
   /** Bytes of game files kept at most. */

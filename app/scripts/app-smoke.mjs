@@ -11429,7 +11429,6 @@ async function gameReadsOnce(page, found) {
   })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
   const reads = () => page.evaluate(`w3Workbench.game.backendReads`);
-  const misses = () => page.evaluate(`w3Workbench.game.backendMisses.length`);
   // Textures made for the terrain view (each one decoded from a game file or made by the view).
   await page.evaluate(`(() => {
     if (window.__texturesMade !== undefined) return;
@@ -11452,7 +11451,7 @@ async function gameReadsOnce(page, found) {
   // The picture waits until every model and texture is in.
   // Nothing earlier checks read is kept: the scene's reads are the same alone as in the full run.
   await page.evaluate(`w3Workbench.game.reload()`);
-  const before = await reads(), missedBefore = await misses(), askedBefore = await asked();
+  const before = await reads(), askedBefore = await asked();
   const texturesBefore = await page.evaluate(`window.__texturesMade`);
   await tool("terrain_screenshot", { maxSize: 64 });
   await readsSettled();
@@ -11478,7 +11477,7 @@ async function gameReadsOnce(page, found) {
   if (askedFirst > RECORDED.asked) fail(`the first opening asked for ${askedFirst} game files, ${RECORDED.asked} when recorded`);
   if (texturesFirst > RECORDED.textures) fail(`the first opening made ${texturesFirst} textures, ${RECORDED.textures} when recorded`);
   // HD models name .tif textures; the game stores them as .dds only, and that is asked for first.
-  const tifMissed = await page.evaluate(`w3Workbench.game.backendMisses.slice(${missedBefore}).filter((p) => /\\.tif$/i.test(p))`);
+  const tifMissed = await page.evaluate(`w3Workbench.game.backendMisses.filter((p) => /\\.tif$/i.test(p))`);
   if (tifMissed.length) fail(`${tifMissed.length} reads asked the game for a .tif it doesn't have (${tifMissed.slice(0, 3).join(", ")})`);
   const storedTif = await page.evaluate(`w3.game.list().then((l) => l.filter((p) => /\\.tif$/i.test(p)).slice(0, 3))`);
   if (storedTif.length) fail(`the game stores .tif files now (${storedTif.join(", ")}): texpath.ts's neverStoredLast no longer holds`);
@@ -13149,12 +13148,11 @@ async function shadowTextureOrder(page, found) {
     await page.evaluate(`w3Workbench.game.reload()`);
     // An earlier step may have kept the banner's mesh (the cache is for the session): this calculation must read it again.
     await page.evaluate(`w3.commands.execute("w3.terrain.clearShadowCache")`);
-    // Misses of earlier steps (other maps' barrels) stay in the list: only the ones this calculation adds count.
-    const missedBefore = await page.evaluate(`w3Workbench.game.backendMisses.length`);
+    // game.reload() above emptied backendMisses: what is in it afterwards is this calculation's.
     const readsBefore = await page.evaluate(`w3Workbench.game.backendReads`);
     const cmd = await page.evaluate(`w3.commands.execute("w3.terrain.calculateShadows").then(() => null, (e) => String(e))`, { timeout: 180000 });
     if (cmd) { fail(`Calculate Shadows: ${cmd}`); return; }
-    const misses = await page.evaluate(`w3Workbench.game.backendMisses.slice(${missedBefore})`);
+    const misses = await page.evaluate(`w3Workbench.game.backendMisses.slice()`);
     const tifs = misses.filter((m) => /\.tif$/i.test(m));
     if (tifs.length) fail(`${tifs.length} .tif names asked for before their .dds: ${tifs.slice(0, 3).join(", ")}`);
     // The control: the banner's alpha texture was read (as .dds), or the check proves nothing.
