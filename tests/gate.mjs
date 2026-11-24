@@ -291,11 +291,14 @@ const steps = [
   // [Refactored] Fast commit-tier unit tests skip slow CASC game-file reads (W3PROJ_GAME=""); `tstestcorpus` runs them with W3PROJ_REQUIRE_CORPUS=1.
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 4, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_GAME: "" } }) },
   // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
+  // The CLI's Rust tests that read the game (rebuild.rs, roundtrip.rs) skip without it; here they fail instead. W3PROJ_GAME stays unset: they find the game by `.game-path`, and roundtrip.rs'
+  // mini map packs with a made-up TriggerData that the game's would reject.
+  { id: "rustcorpus", name: "Rust CLI tests on the corpus (nothing skipped)", tier: "corpus", weight: 4, after: ["cli"], locks: [["cargo", "w"]], run: needs(hasGame, "the game", shell("cargo test --release --locked -p w3proj-cli --quiet", { env: { W3PROJ_REQUIRE_CORPUS: "1" } })) },
   { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
 
 const tiers = {
   commit: ["commit"],
