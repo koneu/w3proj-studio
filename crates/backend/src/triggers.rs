@@ -495,14 +495,14 @@ fn apply(project: &Path, plan: Plan) -> CmdResult<Written> {
         let at = w3proj::paths::join_rel(project, path);
         crate::write_lands_inside(project, &at)?;
         let s = crate::write_file(&at, |f| std::io::Write::write_all(f, bytes))?;
-        also.push(Also { path: at.to_string_lossy().into_owned(), size: s.size, modified: s.modified });
+        also.push(Also::of(&at, &s));
     }
     let map_dir = project.join(w3proj::project::MAP_DIR);
     for path in &plan.delete {
         let at = w3proj::paths::join_rel(project, path);
         crate::write_lands_inside(project, &at)?;
         w3proj::folder_codec::remove_if_there(&at).map_err(|e| format!("{path} wasn't removed: {e}"))?;
-        also.push(Also { path: at.to_string_lossy().into_owned(), size: 0, modified: 0 });
+        also.push(Also::removed(&at));
         if let Some(rel) = path.strip_prefix(PREFIX) {
             tl::FOLDER.prune_above(&map_dir, rel);
         }
