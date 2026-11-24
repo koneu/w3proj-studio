@@ -59,6 +59,20 @@ test("a step past its timeout is killed with its tree, and fails", async () => {
   await until(() => !alive(pid), "the sleeper to be gone");
 });
 
+test("a timed-out step also ends a descendant that left its process group", { skip: process.platform === "win32" && "no setsid" }, async () => {
+  const dir = join(base, "setsid");
+  mkdirSync(dir);
+  const pidFile = join(dir, "pid");
+  const fd = openSync(join(dir, "log"), "w");
+  // setsid: the sleeper gets a group of its own, like tauri-driver's WebKitWebDriver or Xvfb.
+  const ok = await runShell(`setsid ${sleeper(pidFile)} & wait`, { cwd: dir, fd, write: () => {}, timeoutMs: 1500, live: new Set() });
+  closeSync(fd);
+  assert.equal(ok, false);
+  const pid = readPid(pidFile);
+  assert.ok(pid > 0, "the sleeper started");
+  await until(() => !alive(pid), "the setsid sleeper to be gone");
+});
+
 test("control: a command that ends in time passes, and a failing one fails", async () => {
   const fd = openSync(join(base, "log2"), "w");
   const run = (c) => runShell(c, { cwd: base, fd, write: () => {}, timeoutMs: 60000, live: new Set() });

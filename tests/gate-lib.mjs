@@ -4,12 +4,45 @@
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 
+/** The pids below `root` (POSIX, from `ps`); empty when `ps` is unavailable. */
+function descendants(root) {
+  const r = spawnSync("ps", ["-e", "-o", "pid=,ppid="], { encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string") return [];
+  const kids = new Map();
+  for (const line of r.stdout.split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (!pid || Number.isNaN(ppid)) continue;
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    kids.get(ppid).push(pid);
+  }
+  const found = [];
+  const stack = [root];
+  while (stack.length) for (const k of kids.get(stack.pop()) ?? []) if (!found.includes(k)) (found.push(k), stack.push(k));
+  return found;
+}
+
 /** Ends a step's process and all it started. */
 export function killTree(child) {
   if (child.pid === undefined) return;
   try {
     if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
-    else process.kill(-child.pid, "SIGKILL");
+    else {
+      // A descendant that made its own process group (setsid, detached: tauri-driver's WebKitWebDriver, Xvfb)
+      // is not in the step's group: collect the tree while it is still linked, then end all of it.
+      const rest = descendants(child.pid);
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // group already gone
+      }
+      for (const pid of rest) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+      }
+    }
   } catch {
     // already gone
   }
