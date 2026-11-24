@@ -233,6 +233,10 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     // A kind compared as text, bytes or cells has no use for these: refused, so a spec never believes it is applied.
     const kind = e.as ?? "auto";
     for (const opt of ["tolerance", "ignore", "expectPaths"]) {
+      if (opt === "expectPaths" && e[opt] !== undefined && POSITION_KINDS.includes(kind)) {
+        for (const p of e[opt]) if (!parsePosition(kind, p)) throw new Error(`${where}: compare[${i}].expectPaths: ${JSON.stringify(p)} is not ${kind === "wpm" ? 'a cell "x,y" or a box "x0,y0-x1,y1"' : 'a line "12" or a range "10-20"'} (as "${kind}")`);
+        continue;
+      }
       if (e[opt] !== undefined && kind !== "auto" && !JSON_KINDS.includes(kind)) throw new Error(`${where}: compare[${i}].${opt} has no effect on "as": "${kind}" (only on ${JSON_KINDS.join(", ")})`);
     }
     // "differs" without expectPaths passes on ANY difference, also when the World Editor's steps never applied:
@@ -629,21 +633,60 @@ export function diffBytes(a, b, limit = 10) {
   return { equal: count === 0, count, lengths: [a.length, b.length], diffs };
 }
 
-/** The pathing map (war3map.wpm: "MP3W", version, width, height, one flag byte per cell): differing cells with x, y and the flags. */
-export function diffWpm(a, b, limit = 10) {
+/** The kinds whose "expectPaths" are positions, not JSON paths: text and text-exact name lines ("12", "10-20": 1-based,
+ *  both ends included), wpm names cells ("3,4", "0,0-9,9": a box of cells, both corners included). */
+export const POSITION_KINDS = ["text", "text-exact", "wpm"];
+
+/** A position pattern of POSITION_KINDS as { lo, hi } (line range) or { lo: [x0, y0], hi: [x1, y1] } (cell box); null if malformed. */
+export function parsePosition(kind, p) {
+  if (kind === "wpm") {
+    const m = /^(\d+),(\d+)(?:-(\d+),(\d+))?$/.exec(p);
+    if (!m) return null;
+    const [x0, y0] = [+m[1], +m[2]], [x1, y1] = m[3] === undefined ? [x0, y0] : [+m[3], +m[4]];
+    return x0 <= x1 && y0 <= y1 ? { lo: [x0, y0], hi: [x1, y1] } : null;
+  }
+  const m = /^(\d+)(?:-(\d+))?$/.exec(p);
+  if (!m) return null;
+  const lo = +m[1], hi = m[2] === undefined ? lo : +m[2];
+  return lo >= 1 && lo <= hi ? { lo, hi } : null;
+}
+
+/** expectPaths of the position kinds: `hits` are all the differences ({ at: line number or [x, y] or null, text }).
+ *  Returns { expectMissing: the patterns no difference fell in, unexpected: { count, paths }: the differences in no
+ *  pattern }, as diffJson does. */
+function claimPositions(kind, patterns, hits, limit) {
+  const boxes = patterns.map((p) => parsePosition(kind, p));
+  const inside = (b, at) => (kind === "wpm" ? !!at && at[0] >= b.lo[0] && at[0] <= b.hi[0] && at[1] >= b.lo[1] && at[1] <= b.hi[1] : typeof at === "number" && at >= b.lo && at <= b.hi);
+  const used = new Set();
+  const unexpected = { count: 0, paths: [] };
+  for (const h of hits) {
+    const own = boxes.flatMap((b, i) => (b && inside(b, h.at) ? [i] : []));
+    for (const i of own) used.add(i);
+    if (!own.length) { unexpected.count++; if (unexpected.paths.length < limit) unexpected.paths.push(h.text); }
+  }
+  return { expectMissing: patterns.filter((p, i) => !used.has(i)), unexpected };
+}
+
+/** The pathing map (war3map.wpm: "MP3W", version, width, height, one flag byte per cell): differing cells with x, y and the flags.
+ *  `expectPaths`: cells ("3,4") or boxes of cells ("0,0-9,9") that must differ, and nothing else may. */
+export function diffWpm(a, b, limit = 10, expectPaths = []) {
   const head = (buf) => (buf.length >= 16 && buf.toString("latin1", 0, 4) === "MP3W" ? { version: buf.readUInt32LE(4), w: buf.readUInt32LE(8), h: buf.readUInt32LE(12) } : null);
   const ha = head(a), hb = head(b);
   if (!ha || !hb || ha.w !== hb.w || ha.h !== hb.h || a.length !== 16 + ha.w * ha.h || b.length !== 16 + hb.w * hb.h) {
     const r = diffBytes(a, b, limit);
-    return { ...r, note: "not two pathing maps of one size: compared as bytes" };
+    // No cells to name: with expectPaths every byte difference counts as outside them.
+    const out = expectPaths.length ? claimPositions("wpm", expectPaths, Array.from({ length: r.count }, (_, k) => ({ at: null, text: r.diffs[k]?.text ?? "byte differs" })), limit) : {};
+    return { ...r, ...out, note: "not two pathing maps of one size: compared as bytes" };
   }
   const cells = ha.w * ha.h;
   const diffs = [];
+  const hits = [];
   let count = 0;
   for (let i = 0; i < cells; i++) {
     const x = a[16 + i], y = b[16 + i];
     if (x !== y) {
       count++;
+      if (expectPaths.length) hits.push({ at: [i % ha.w, Math.floor(i / ha.w)], text: `cell (${i % ha.w}, ${Math.floor(i / ha.w)}): WE 0x${x.toString(16).padStart(2, "0")}, Studio 0x${y.toString(16).padStart(2, "0")}` });
       if (diffs.length < limit) {
         const cx = i % ha.w, cy = Math.floor(i / ha.w);
         diffs.push({ cell: [cx, cy], we: x, studio: y, text: `cell (${cx}, ${cy}): WE 0x${x.toString(16).padStart(2, "0")}, Studio 0x${y.toString(16).padStart(2, "0")}` });
@@ -651,22 +694,28 @@ export function diffWpm(a, b, limit = 10) {
     }
   }
   const versionDiffers = ha.version !== hb.version;
-  if (versionDiffers) { count++; diffs.unshift({ text: `version: WE ${ha.version}, Studio ${hb.version}` }); }
-  return { equal: count === 0, count, cells, size: [ha.w, ha.h], diffs: diffs.slice(0, limit) };
+  if (versionDiffers) { count++; diffs.unshift({ text: `version: WE ${ha.version}, Studio ${hb.version}` }); hits.push({ at: null, text: `version: WE ${ha.version}, Studio ${hb.version}` }); }
+  return { equal: count === 0, count, cells, size: [ha.w, ha.h], diffs: diffs.slice(0, limit), ...(expectPaths.length ? claimPositions("wpm", expectPaths, hits, limit) : {}) };
 }
 
 /** Text by line: { equal, count (differing lines, the extra ones included), lines, diffs }. `exact`: lines are split at
  *  LF only, so a CR stays part of its line and CRLF against LF differs (text-exact: specs that pin line endings). */
-export function diffText(a, b, limit = 10, exact = false) {
+export function diffText(a, b, limit = 10, exact = false, expectPaths = []) {
   const split = (t) => (exact ? t.split("\n") : t.split(/\r?\n/));
   const x = split(a), y = split(b);
   const n = Math.max(x.length, y.length);
   const diffs = [];
+  const hits = [];
   let count = 0;
   for (let i = 0; i < n; i++) {
-    if (x[i] !== y[i]) { count++; if (diffs.length < limit) diffs.push({ line: i + 1, text: `line ${i + 1}: WE ${show(x[i])}, Studio ${show(y[i])}` }); }
+    if (x[i] !== y[i]) {
+      count++;
+      const text = `line ${i + 1}: WE ${show(x[i])}, Studio ${show(y[i])}`;
+      if (diffs.length < limit) diffs.push({ line: i + 1, text });
+      if (expectPaths.length) hits.push({ at: i + 1, text });
+    }
   }
-  return { equal: count === 0, count, lines: [x.length, y.length], diffs };
+  return { equal: count === 0, count, lines: [x.length, y.length], diffs, ...(expectPaths.length ? claimPositions("text", expectPaths, hits, limit) : {}) };
 }
 
 /**
@@ -722,7 +771,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
   if (expectLines && kind !== "text-set") return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `expectLines has no effect on a file compared as ${kind} (only on text-set)` }] };
   if (expectCorners && kind !== "w3e") return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `expectCorners has no effect on a file compared as ${kind} (only on w3e)` }] };
   if (!JSON_KINDS.includes(kind)) {
-    const used = [toleranceUsed(tolerance) && "tolerance", ignore.length && "ignore", expectPaths.length && "expectPaths"].filter(Boolean);
+    const used = [toleranceUsed(tolerance) && "tolerance", ignore.length && "ignore", expectPaths.length && !POSITION_KINDS.includes(kind) && "expectPaths"].filter(Boolean);
     if (used.length) return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `${used.join(", ")} has no effect on a file compared as ${kind} (only on ${JSON_KINDS.join(", ")})` }] };
   }
   let r;
@@ -733,10 +782,10 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
     const tol = toleranceAt(tolerance);
     r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tol(path) : 0) : tol, ignore, expectPaths, expectCorners);
   }
-  else if (kind === "text") r = diffText(we.text, studio.text, limit);
-  else if (kind === "text-exact") r = diffText(we.text, studio.text, limit, true);
+  else if (kind === "text") r = diffText(we.text, studio.text, limit, false, expectPaths);
+  else if (kind === "text-exact") r = diffText(we.text, studio.text, limit, true, expectPaths);
   else if (kind === "text-set") r = diffTextSet(we.text, studio.text, limit, expectLines);
-  else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit);
+  else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit, expectPaths);
   else r = diffBytes(we.bytes, studio.bytes, limit);
   return { file, kind, status: r.equal ? "MATCH" : "DIFFERS", ...r };
 }
@@ -773,7 +822,7 @@ export function loadSide(r, file, kind, decodeImage, lines, minCount = null) {
     return { text: kept.join("\n") };
   }
   // The file's own bytes from the map (its line endings as saved) when the map holds it; a file only the unpack makes
-  // (war3map.wct.txt) is read as the unpack wrote it.
+  // is read as the unpack wrote it.
   if (kind === "text-exact") return { text: textOnly(r.listed(file) ? Buffer.from(r.bytes(file)).toString("utf8") : r.text(file), file) };
   return { bytes: r.bytes(file) };
 }

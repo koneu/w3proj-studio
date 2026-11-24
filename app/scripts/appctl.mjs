@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
-import { checkFresh, staleAllowed } from "../../tests/binfresh.mjs";
+import { checkFresh, staleAllowed, writeStamp } from "../../tests/binfresh.mjs";
 
 export const LINUX = process.platform === "linux";
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,6 +61,7 @@ export function ensureCli() {
   if (process.env.W3PROJ_BIN) throw new Error(`no w3proj at W3PROJ_BIN=${cli}`);
   const r = spawnSync("cargo", ["build", "--release", "-p", "w3proj-cli", "--quiet"], { cwd: repo, stdio: ["ignore", process.stderr, process.stderr] });
   if (r.status !== 0 || !existsSync(cli)) throw new Error("building the w3proj CLI failed");
+  writeStamp(cli, "cli");
   return cli;
 }
 

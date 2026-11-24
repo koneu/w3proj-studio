@@ -6,7 +6,7 @@
 //
 // Actions: tab NAME (the terrain editor's tab, "Terrain"); view SPEC (the terrain view at the editor's size, the camera "we" or "we:X,Y[,distance…]" as app-drive's
 // --camera); tool PREFIX (the toolbar button whose title starts so: "Paint:", "−2:"); texture TILE (a ground tile in the
-// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider, within its range); key KEY [CODE] (pressed on the view's canvas: "d" is code KeyD, "Numpad6" key 6 code Numpad6); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2[,MS] (the left button, at editor positions inside its view; MS the drag's time, 20 moves, else 30 ms a move); dragMod alt|shift|ctrl (held during the next drag, as we-drive's --drag-mod);
+// painter's options: the one titled exactly so, else the first whose title contains it); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider, within its range); key KEY [CODE] (pressed on the view's canvas: "d" is code KeyD, "Numpad6" key 6 code Numpad6); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2[,MS] (the left button, at editor positions inside its view; MS the drag's time, 20 moves, else 30 ms a move); dragMod alt|shift|ctrl (held during the next drag, as we-drive's --drag-mod);
 // sleep MS. Needs window.__driveEd (the "terrain" step). Positions and tool names are those of the page, not a copy.
 
 import { Hands, sleep } from "./cdp.mjs";
@@ -38,6 +38,12 @@ async function view(page, spec) {
   await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
 }
 
+/** The page expression of the `texture` action: clicks the ground tile whose title is exactly `text`, else the first
+ *  one whose title contains it ("Lgrs" alone would otherwise take whichever of "Lords…"/"Lgrs2" comes first). */
+export function textureScript(text) {
+  return `(() => { const tiles = [...document.querySelectorAll(".terrain-tex-thumb")]; const t = ${lit(text)}; const b = tiles.find((b) => b.title === t) ?? tiles.find((b) => b.title.includes(t)); if (!b) throw new Error("no tile " + t); b.click(); })()`;
+}
+
 /** A position of the editor's display as one of the page (the view sits at 156,79 there, at 0,0 here). */
 const at = (x, y) => ({ x: x - 156, y: y - 79 });
 
@@ -65,7 +71,7 @@ export async function uiStep(page, actions) {
       await settled();
     }
     else if (kind === "tool") await page.evaluate(`(() => { const b = [...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith(${lit(a[0])})); if (!b) throw new Error("no tool button " + ${lit(a[0])}); b.click(); })()`);
-    else if (kind === "texture") await page.evaluate(`(() => { const b = document.querySelector('.terrain-tex-thumb[title*=${lit(a[0])}]'); if (!b) throw new Error("no tile " + ${lit(a[0])}); b.click(); })()`);
+    else if (kind === "texture") await page.evaluate(textureScript(a[0]));
     else if (kind === "cliff") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Cliff type")); const o = s && [...s.options].find((o) => o.textContent.startsWith(${lit(a[0])})); if (!o) throw new Error("no cliff type " + ${lit(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     else if (kind === "shape") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Shape")); const o = s && [...s.options].find((o) => o.value === ${lit(a[0])}); if (!o) throw new Error("no brush shape " + ${lit(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     // The slider would clamp a size outside its range without a word: refused instead.

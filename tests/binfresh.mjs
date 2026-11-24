@@ -8,8 +8,9 @@
 //
 // Override: --allow-stale anywhere on a tool's command line (taken out of process.argv on import, so it never shifts
 // positional arguments), or W3_ALLOW_STALE=1.
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,6 +54,44 @@ export function sameSources(root, kind, commit) {
   }
 }
 
+/** A hash of the CONTENT of the tracked sources of `kind` in `root`'s working tree (git blob ids, so a touched but
+ *  unchanged file, or a fresh checkout, gives the same value; any real edit changes it). */
+export function sourceFingerprint(root = defaultRoot, kind = "cli") {
+  const files = execFileSync("git", ["ls-files", "-z", "--", ...SOURCES[kind]], { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 }).split("\0").filter(Boolean).filter((f) => existsSync(join(root, f)));
+  const ids = files.length ? execFileSync("git", ["hash-object", "--stdin-paths"], { cwd: root, input: files.join("\n") + "\n", encoding: "utf8", maxBuffer: 1 << 28 }).split("\n") : [];
+  const h = createHash("sha256");
+  files.forEach((f, i) => h.update(`${f}\0${ids[i]}\n`));
+  return h.digest("hex");
+}
+
+/** The same value for the sources as `commit` has them (what a build of verify-build.mjs, a git archive, was made from). */
+export function commitFingerprint(root, kind, commit) {
+  const out = execFileSync("git", ["ls-tree", "-r", "-z", commit, "--", ...SOURCES[kind]], { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 });
+  const h = createHash("sha256");
+  for (const e of out.split("\0").filter(Boolean)) {
+    const m = /^\d+ blob ([0-9a-f]+)\t(.*)$/s.exec(e);
+    if (m) h.update(`${m[2]}\0${m[1]}\n`);
+  }
+  return h.digest("hex");
+}
+
+export const stampPath = (bin) => `${bin}.srcstamp`;
+
+/** Records which sources `bin` was built from (call right after a build), so a later checkout or touch isn't "stale". */
+export function writeStamp(bin, kind, fingerprint = sourceFingerprint(defaultRoot, kind)) {
+  writeFileSync(stampPath(bin), JSON.stringify({ kind, fingerprint }));
+}
+
+/** Whether the stamp next to `bin` names exactly the sources `root` has now. */
+export function stampMatches(bin, kind, root) {
+  try {
+    const st = JSON.parse(readFileSync(stampPath(bin), "utf8"));
+    return st.kind === kind && typeof st.fingerprint === "string" && st.fingerprint === sourceFingerprint(root, kind);
+  } catch {
+    return false;
+  }
+}
+
 /** Throws when `bin` is missing or older than the newest source (unless allowed). Returns bin. A build of
  *  verify-build.mjs whose commit has the very sources of the working tree is fresh whatever the mtimes say (a checkout
  *  made after the build writes every file anew). */
@@ -63,7 +102,8 @@ export function checkFresh(bin, { kind = "cli", root = defaultRoot, allowStale =
   if (src && src.mtimeMs > statSync(bin).mtimeMs) {
     const commit = builtCommit(bin);
     if (commit && sameSources(root, kind, commit)) return bin;
-    throw new Error(`${bin} is older than ${src.file} (${new Date(src.mtimeMs).toISOString()} vs ${statSync(bin).mtime.toISOString()}): rebuild it, or pass --allow-stale (anywhere on the command line) / set W3_ALLOW_STALE=1 to use it anyway (mtimes are compared: a clean tree whose files were just checked out also looks newer)`);
+    if (stampMatches(bin, kind, root)) return bin; // built from these very contents: only the mtimes differ
+    throw new Error(`${bin} is older than ${src.file} (${new Date(src.mtimeMs).toISOString()} vs ${statSync(bin).mtime.toISOString()}): rebuild it, or pass --allow-stale (anywhere on the command line) / set W3_ALLOW_STALE=1 to use it anyway (mtimes are compared: a clean tree whose files were just checked out also looks newer, unless the binary has its .srcstamp)`);
   }
   return bin;
 }
