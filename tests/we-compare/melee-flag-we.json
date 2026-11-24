@@ -182,10 +182,29 @@
   {
     "name": "meleeflag-category-off",
     "description": "flat.w3x with the trigger category Initialization renamed Setup and the Melee flag cleared (0x9c10): the save turns it back on (branch we-batch-3; c4 measured only keeping it on). Input: tests/fixtures/we-specs/make-melee-valid.mjs category-off. A Studio-made input can't hold the flag off: its pack puts Melee back.",
-    "input": { "map": "${REPO}/target/melee-valid/melee-valid-category-off.w3x" },
-    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
-    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
-    "compare": ["war3map.w3i"]
+    "input": {
+      "map": "${REPO}/target/melee-valid/melee-valid-category-off.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "command": "w3.script.generate",
+          "args": {
+            "quiet": true
+          }
+        }
+      ]
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
   },
   {
     "name": "meleeflag-trigger-category",
@@ -198,7 +217,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"name\\\":\\\"Initialization\\\"\")) throw new Error('no ' + \"\\\"name\\\":\\\"Initialization\\\"\"); await w3.workspace.writeText(p, t.replace(\"\\\"name\\\":\\\"Initialization\\\"\", \"\\\"name\\\":\\\"Setup\\\"\"));"
+          "eval": "const p = \"map/triggers/Initialization/_category.json\"; let t = await w3.workspace.readText(p); const re0 = /\"name\": *\"Initialization\"/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"name\\\":\\\"Setup\\\"\"); await w3.workspace.writeText(p, t);"
         }
       ]
     },
@@ -223,7 +242,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"initiallyOff\\\": false\")) throw new Error('no ' + \"\\\"initiallyOff\\\": false\"); await w3.workspace.writeText(p, t.replace(\"\\\"initiallyOff\\\": false\", \"\\\"initiallyOff\\\": true\"));"
+          "eval": "const p = \"map/triggers/Initialization/Melee_Initialization.gui.json\"; let t = await w3.workspace.readText(p); const re0 = /\"initiallyOff\": *false/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"initiallyOff\\\": true\"); await w3.workspace.writeText(p, t);"
         }
       ]
     },
@@ -248,7 +267,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"runOnInit\\\": false\")) throw new Error('no ' + \"\\\"runOnInit\\\": false\"); await w3.workspace.writeText(p, t.replace(\"\\\"runOnInit\\\": false\", \"\\\"runOnInit\\\": true\"));"
+          "eval": "const p = \"map/triggers/Initialization/Melee_Initialization.gui.json\"; let t = await w3.workspace.readText(p); const re0 = /\"runOnInit\": *false/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"runOnInit\\\": true\"); await w3.workspace.writeText(p, t);"
         }
       ]
     },
@@ -302,7 +321,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"name\\\": \\\"MeleeGrantHeroItems\\\"\")) throw new Error('no ' + \"\\\"name\\\": \\\"MeleeGrantHeroItems\\\"\"); await w3.workspace.writeText(p, t.replace(\"\\\"name\\\": \\\"MeleeGrantHeroItems\\\"\", \"\\\"name\\\": \\\"MeleeStartingHeroLimit\\\"\"));"
+          "eval": "const p = \"map/triggers/Initialization/Melee_Initialization.gui.json\"; let t = await w3.workspace.readText(p); const re0 = /\"name\": *\"MeleeGrantHeroItems\"/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"name\\\": \\\"MeleeStartingHeroLimit\\\"\"); await w3.workspace.writeText(p, t);"
         }
       ]
     },
@@ -327,7 +346,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"description\\\": \\\"Default melee game initialization for all players\\\"\")) throw new Error('no ' + \"\\\"description\\\": \\\"Default melee game initialization for all players\\\"\"); await w3.workspace.writeText(p, t.replace(\"\\\"description\\\": \\\"Default melee game initialization for all players\\\"\", \"\\\"description\\\": \\\"Mine\\\"\"));"
+          "eval": "const p = \"map/triggers/Initialization/Melee_Initialization.gui.json\"; let t = await w3.workspace.readText(p); const re0 = /\"description\": *\"Default melee game initialization for all players\"/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"description\\\": \\\"Mine\\\"\"); await w3.workspace.writeText(p, t);"
         }
       ]
     },
@@ -352,12 +371,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n//hello"
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"//hello\");"
         }
       ]
     },

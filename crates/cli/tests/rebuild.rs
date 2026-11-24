@@ -390,6 +390,55 @@ fn rebuild_force_replaces_a_script_studio_did_not_write_and_says_so() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A map with no script at all (made without one, its script deleted) gets one written into map/ before the pack, as
+/// the app's packing does (map-script w3.script.forPack), whether its triggers are in map/triggers/ or it has none:
+/// the game can't run a map without one. Controls: --keep-script and a generator that can't run pack it without one,
+/// with the warnings.
+#[test]
+fn pack_writes_a_script_for_a_map_without_one() {
+    let Some(game) = game() else {
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("pack-no-script");
+    let missing = "warning: map/war3map.j is missing, so the packed map has no script";
+    for triggers in [true, false] {
+        let project = dir.join(format!("project-{triggers}"));
+        copy_dir(&fixture(), &project);
+        let script = project.join("map/war3map.j");
+        fs::remove_file(&script).unwrap();
+        if !triggers {
+            fs::remove_dir_all(project.join("map/triggers")).unwrap();
+        }
+        let pack = |label: &str, extra: &[&str], game: &str| {
+            let out = dir.join(format!("{label}-{triggers}.w3x"));
+            let mut args = vec!["pack", s(&project), "-o", s(&out)];
+            args.extend_from_slice(extra);
+            (w3proj(&args, game), out)
+        };
+
+        // Controls first: nothing made, packed without a script, and said so.
+        let (o, out) = pack("kept", &["--keep-script"], &game);
+        assert!(o.status.success() && text(&o).contains(missing), "{}", text(&o));
+        assert!(!script.exists() && !w3proj(&["ls", s(&out)], &game).stdout.windows(9).any(|w| w == b"war3map.j"));
+        let (o, _) = pack("no-game", &[], s(&dir.join("no-such-game")));
+        let said = text(&o);
+        assert!(o.status.success() && said.contains("warning: the map has no script and none could be made") && said.contains(missing), "{said}");
+        assert!(!script.exists());
+
+        let (o, out) = pack("made", &[], &game);
+        let said = text(&o);
+        assert!(o.status.success(), "{said}");
+        assert!(said.contains("written    map/war3map.j (the map had no script"), "{said}");
+        assert!(!said.contains(missing) && !said.contains("none could be made"), "{said}");
+        let made = fs::read_to_string(&script).unwrap();
+        assert!(made.contains("function main takes nothing returns nothing"), "{made}");
+        assert_eq!(made.contains("function InitTrig_Foo_Script takes nothing returns nothing"), triggers, "{made}");
+        assert_eq!(packed_script(&out, &game), made, "the pack took the script it made");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// `w3proj pack` says when the map has no script or no war3map.wtg, and packs it all the same (the library's
 /// pack_warnings.rs holds what goes into the archive).
 #[test]

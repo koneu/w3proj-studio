@@ -113,7 +113,8 @@ test("expectPaths: every listed path must differ and nothing else may", () => {
 test("expectPaths in a spec: with expect differs only, on JSON kinds only; studio-paths-matrix-masks has them", () => {
   assert.deepEqual(entry({ file: "war3map.w3i", as: "parsed", expect: "differs", expectPaths: ["players[].start"] }).expectPaths, ["players[].start"]);
   assert.throws(() => entry({ file: "war3map.w3i", as: "parsed", expectPaths: ["players[].start"] }), /goes with "expect": "differs"/);
-  assert.throws(() => entry({ file: "war3map.j", as: "text", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "text"/);
+  assert.throws(() => entry({ file: "war3map.j", as: "text-set", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "text-set"/);
+  assert.throws(() => entry({ file: "x.bin", as: "bytes", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "bytes"/);
   assert.throws(() => entry({ file: "war3map.w3i", as: "parsed", expect: "differs", expectPaths: [] }), /expectPaths/);
   // The tests run from a copy of the scripts: the spec folder is found from where they run (app/ or the repository).
   const specs = core.parseSpecFile(readFileSync(repoPath("tests", "we-compare", "studio-paths.json"), "utf8"), "/r/tests/we-compare/studio-paths.json", { MAIN: "/m", REPO: "/r" }, { differsWithoutPaths: core.readDiffersAllowlist(resolve(repoPath("tests"), "..")) });
@@ -383,10 +384,12 @@ test("text-exact keeps line endings: CRLF against LF differs, which text doesn't
   assert.equal(core.loadSide(r, "war3map.j", "text").text, lf, "control: text reads the unpacked text");
   const wct = { ...fakeReader({ "war3map.wct.txt": { text: crlf } }), listed: () => false };
   assert.equal(core.loadSide(wct, "war3map.wct.txt", "text-exact").text, crlf);
-  // The header specs pin their line endings with it.
+  // The header specs pin their line endings with it (the script; war3map.wct is the header's JSON, which keeps them in its string).
   const specs = core.parseSpecFile(readFileSync(repoPath("tests", "we-compare", "script-inputs-e.json"), "utf8"), "script-inputs-e.json", { REPO: "/r", MAIN: "/m" });
   for (const n of ["header-newlines", "header-newlines-lua", "header-spaces", "header-spaces-lua", "header-tab-lines"]) {
-    assert.ok(specs.find((s) => s.name === n).compare.every((c) => c.as === "text-exact"), n);
+    const compare = specs.find((s) => s.name === n).compare;
+    assert.ok(compare.filter((c) => c.file !== "war3map.wct").every((c) => c.as === "text-exact"), n);
+    assert.ok(compare.some((c) => c.file === "war3map.wct" && c.as === "parsed"), `${n}: the header's JSON`);
   }
 });
 

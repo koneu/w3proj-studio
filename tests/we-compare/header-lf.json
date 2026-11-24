@@ -10,12 +10,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n// one\n// two"
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"// one\\n// two\");"
         }
       ]
     },
@@ -45,8 +40,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30
@@ -62,12 +57,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n// one\n// two\n"
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"// one\\n// two\\n\");"
         }
       ]
     },
@@ -97,8 +87,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30

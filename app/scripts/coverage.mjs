@@ -21,7 +21,7 @@ import { LineHits, characterCounts, decodeMappings, percent } from "./coverage-c
 const app = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(app, "..");
 const src = join(app, "src");
-const work = join(repo, "target", "cov-ts");
+const work = join(repo, "target", "cov-ts", `run-${process.pid}`); // this run's own, so two runs don't clear each other
 const floorFile = join(repo, "tests", "coverage-floor.json");
 
 const walk = (dir, out = []) => {
@@ -81,6 +81,14 @@ function collect(raw, out) {
 
 async function measure() {
   const out = join(work, "bundles"), raw = join(work, "raw");
+  try {
+    return await measureIn(out, raw);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+async function measureIn(out, raw) {
   runTests(out, raw);
   const hits = collect(raw, out);
   if (!hits.files.size) throw new Error("no coverage was collected");

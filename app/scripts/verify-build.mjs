@@ -25,6 +25,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSy
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./appctl.mjs";
+import { commitFingerprint, writeStamp } from "../../tests/binfresh.mjs";
 import { mainCheckout } from "../../tests/gamepath.mjs";
 
 const here = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -204,12 +205,14 @@ export async function verifyBuild({ commit = "HEAD", cli = true, force = false, 
     buildApp(id, join(l.dir, "target", "verify-work"), appDir);
     time("app build", t);
     if (!existsSync(l.exe)) throw new Error(`the build left no ${l.exe}`);
+    writeStamp(l.exe, "app", commitFingerprint(root, "app", full));
     let cliPath = null;
     if (cli) {
       t = Date.now();
       const r = spawnSync("cargo", ["build", "--release", "-p", "w3proj-cli", "--quiet"], { cwd: l.dir, stdio: ["ignore", process.stderr, process.stderr] });
       if (r.status !== 0 || !existsSync(l.cli)) throw new Error("building the w3proj CLI failed");
       cliPath = l.cli;
+      writeStamp(l.cli, "cli", commitFingerprint(root, "cli", full));
       time("cli build", t);
     }
     rec = { commit: full, short: sha, id, exe: l.exe, cli: cliPath, builtAt: new Date().toISOString(), seconds: Math.round((Date.now() - t0) / 1000), steps };
