@@ -27,7 +27,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { inflateSync } from "node:zlib";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -85,6 +85,21 @@ function build() {
   writeFileSync(patch, JSON.stringify({ identifier: IDENTIFIER, app: { windows }, build: { beforeBuildCommand: "npm run build" } }));
   const r = spawnSync(`npx tauri build --debug --no-bundle --config "${patch}"`, { cwd: app, shell: true, stdio: "inherit" });
   if (r.status !== 0) throw new Error("the build failed");
+}
+
+/** The AI client setup of the app writes the path of the `w3proj` next to the app into the client's settings (and asks it
+ *  to answer `mcp --help` first): the debug app has none there, so the release CLI is copied next to it. Only inside this
+ *  repository (a prebuilt W3_APP_BIN elsewhere is left alone; the step then says it can't run). */
+const CLIENT_HOME = join(work, "client-home");
+const bridgeDir = () => dirname(exe);
+function placeBridge() {
+  const dest = join(bridgeDir(), `w3proj${exeName}`);
+  const rel = relative(repo, resolve(dest));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return;
+  if (process.argv.includes("--break-bridge")) { rmSync(dest, { force: true }); return; }
+  if (resolve(dest) === resolve(cli)) return;
+  copyFileSync(cli, dest);
+  chmodSync(dest, 0o755);
 }
 
 function freePort() {
@@ -8924,6 +8939,41 @@ async function testMapWithoutGame(page, found) {
   }
 }
 
+/** AI client setup: "Add it" for a client writes its settings file with the bridge next to the app. The app runs with
+ *  W3PROJ_TEST_CLIENT_HOME (a stand-in home under the run's folder), so no real client file is touched. */
+async function aiClientSetup(page, found) {
+  const fail = (what) => found.push(`ai client setup: ${what}`);
+  const bridge = join(bridgeDir(), `w3proj${exeName}`);
+  const rel = relative(repo, resolve(bridge));
+  if (rel.startsWith("..") || isAbsolute(rel)) { console.log("ai client setup: skipped, the app is outside the repository, so no CLI is copied next to it"); return; }
+  const home = CLIENT_HOME;
+  rmSync(home, { recursive: true, force: true });
+  try {
+    const clients = await page.evaluate(`w3.backend.invoke("mcp_clients")`);
+    const cursor = clients.find((c) => c.id === "cursor");
+    if (!cursor || resolve(cursor.path) !== resolve(join(home, "home", ".cursor", "mcp.json"))) return fail(`the clients aren't the stand-in's: ${lit(clients)}`);
+    if (cursor.found) fail("the stand-in client is found before it was made");
+    const refused = await page.evaluate(`w3.backend.invoke("mcp_client_setup", { id: "cursor" }).then(() => "done", (e) => String(e))`);
+    if (!/wasn't found/.test(refused)) fail(`a missing client got: ${refused}`);
+    if (existsSync(cursor.path)) fail("a client that isn't there got a file");
+    mkdirSync(join(home, "home", ".cursor"), { recursive: true });
+    writeFileSync(cursor.path, JSON.stringify({ mcpServers: { other: { command: "x" } } }));
+    const done = await page.evaluate(`w3.backend.invoke("mcp_client_setup", { id: "cursor" }).then((r) => r, (e) => ({ error: String(e) }))`);
+    if (done.error) return fail(`setup answered: ${done.error}`);
+    if (!done.changed || !done.backup || !existsSync(done.backup)) fail(`setup result: ${lit(done)}`);
+    const got = JSON.parse(readFileSync(cursor.path, "utf8"));
+    if (got.mcpServers?.other?.command !== "x") fail(`the other server was lost: ${lit(got)}`);
+    const entry = got.mcpServers?.w3proj;
+    if (!entry || resolve(entry.command) !== resolve(bridge) || JSON.stringify(entry.args) !== '["mcp"]') fail(`the entry is ${lit(entry)}, not ${bridge} mcp`);
+    const again = await page.evaluate(`w3.backend.invoke("mcp_client_setup", { id: "cursor" })`);
+    if (again.changed) fail("a second setup changed the file again");
+    const listed = (await page.evaluate(`w3.backend.invoke("mcp_clients")`)).find((c) => c.id === "cursor");
+    if (!listed?.found || !listed.configured) fail(`the client list after setup: ${lit(listed)}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
 /** A line placed right after the map opens (add-path ready): the pieces of a destructable with a pathing texture and a
  *  fixed rotation (LTlt, 270) are stored at 270° even though place_line comes before anything read the texture. */
 async function addPathReady(page, found) {
@@ -17154,6 +17204,7 @@ async function run() {
   if (process.argv.includes("--no-build") || prebuilt) checkFresh(exe, { kind: "app", allowStale: staleAllowed() });
   // The release CLI is built when it isn't there (unless W3PROJ_BIN names another).
   cli = ensureCli();
+  placeBridge();
 
   const project = join(work, "project");
   cpSync(FIXTURE, project, { recursive: true });
@@ -17168,7 +17219,8 @@ async function run() {
   const configDir = join(work, "config");
   // On Linux the webview keeps its storage (localStorage: the open tabs per project) by the build's identifier too: a
   // part has a folder of its own, else the other part's apps clear and rewrite it under this one's feet.
-  const configEnv = { W3PROJ_CONFIG_DIR: configDir, ...(ownFolders && process.platform !== "win32" ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}) };
+  // AI client setup (mcp_client_setup) writes into other programs' settings: the debug app is pointed at a stand-in home.
+  const configEnv = { W3PROJ_CONFIG_DIR: configDir, W3PROJ_TEST_CLIENT_HOME: CLIENT_HOME, ...(ownFolders && process.platform !== "win32" ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}) };
   rmSync(configDir, { recursive: true, force: true });
   for (const dir of [configEnv.XDG_DATA_HOME, configEnv.XDG_CACHE_HOME]) if (dir) rmSync(dir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
@@ -17250,6 +17302,7 @@ async function run() {
       // different lines and merge without conflicts.
       const onlyChecks = {
         addPathReady,
+        aiClientSetup,
         aiNumbersRefused,
         areaLevels,
         areaReplaceCt0,
@@ -17708,6 +17761,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "typedFieldSave", found);
   await aiNumbersRefused(page, found);
   await leftOpen(page, "aiNumbersRefused", found);
+  await aiClientSetup(page, found);
+  await leftOpen(page, "aiClientSetup", found);
   await lightNumbersRefused(page, found);
   await leftOpen(page, "lightNumbersRefused", found);
   await soundNumbersRefused(page, found);
