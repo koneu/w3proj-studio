@@ -14375,9 +14375,13 @@ async function triggersAndAi(page, found) {
     await soon(async () => /^None/.test((await shows()) ?? ""), 5000);
     if (!/^None/.test((await shows()) ?? "")) fail(`one undo of Import Custom Data shows ${lit(await shows())}`);
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await soon(async () => /units\.w3u/.test((await shows()) ?? ""), 5000);
+    if (!/units\.w3u/.test((await shows()) ?? "")) fail(`redo of Import Custom Data shows ${lit(await shows())}`);
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
     if (!readFileSync(wai).includes(Buffer.from("units.w3u"))) fail("the saved AI doesn't carry the custom data");
+    const aiUnsaved = await page.evaluate(`w3.editors.unsavedPaths().filter((p) => /\\.wai$/i.test(p))`);
+    if (aiUnsaved.length) fail(`the AI Editor still has unsaved changes after the save: ${lit(aiUnsaved)}`);
 
     // ---- A Lua trigger file as text: Lua, its functions listed (it was always JASS) ------------------------------------
     // Its own file in the trigger folders (a Lua map's custom text), opened in the text editor; removed again after.
