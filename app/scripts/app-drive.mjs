@@ -78,7 +78,7 @@ import { lit } from "./jslit.mjs";
 const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--window-size","--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key", "--click"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opts = { build: true, game: null, work: join(repo, "target", "app-drive"), settings: {}, strict: false };
   const steps = [];
   for (let i = 0; i < argv.length; i++) {

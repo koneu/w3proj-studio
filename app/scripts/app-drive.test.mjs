@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
-import { cameraOf, evalSource, isWeCamera, parseViewSize } from "./app-drive.mjs";
+import { cameraOf, evalSource, isWeCamera, parseArgs, parseViewSize } from "./app-drive.mjs";
 import { parseChord } from "./cdp.mjs";
 
 /** As the page answers: the script's value, awaited. */
@@ -60,4 +60,28 @@ test("--key: a chord as a person names it, as DevTools' key event takes it (cdp.
   assert.equal(parseChord("Numpad7").key, "7");
   assert.throws(() => parseChord("Hyper+A"), /isn't a modifier/);
   assert.throws(() => parseChord("Ctrl+Banana"), /no key named/);
+});
+
+test("arguments: options, repeatable --set (JSON or text), steps in order, and the refusals", () => {
+  const saved = process.env.W3_APP_BIN;
+  try {
+    const { opts, steps } = parseArgs(["--no-build", "--strict", "--game", "g", "--work", "w", "--set", "terrain.grid=true", "--set", "a.b=hello", "--set", "n={\"x\":1}",
+      "--project", "P", "--terrain", "--camera", "top", "--settle", "--mcp", "list_problems", "--eval", "1+1"]);
+    assert.equal(opts.build, false);
+    assert.equal(opts.strict, true);
+    assert.ok(opts.game.endsWith("g") && opts.work.endsWith("w"));
+    assert.deepEqual(opts.settings, { "terrain.grid": true, "a.b": "hello", n: { x: 1 } });
+    assert.deepEqual(steps, [["--project", "P"], ["--terrain", null], ["--camera", "top"], ["--settle", null], ["--mcp", "list_problems"], ["--eval", "1+1"]]);
+    assert.equal(parseArgs(["-h"]).opts.help, true);
+    assert.equal(parseArgs(["--allow-stale", "--terrain"]).steps.length, 1, "--allow-stale is read elsewhere");
+    parseArgs(["--app", "bin/app"]);
+    assert.ok(process.env.W3_APP_BIN.endsWith("app"), "--app sets W3_APP_BIN");
+    assert.equal(parseArgs([]).opts.build, true);
+  } finally {
+    if (saved === undefined) delete process.env.W3_APP_BIN; else process.env.W3_APP_BIN = saved;
+  }
+  assert.throws(() => parseArgs(["--shot"]), /--shot needs a value/);
+  assert.throws(() => parseArgs(["--set", "novalue"]), /KEY=JSON/);
+  assert.throws(() => parseArgs(["--set", "=1"]), /KEY=JSON/);
+  assert.throws(() => parseArgs(["--bogus"]), /unknown argument --bogus/);
 });

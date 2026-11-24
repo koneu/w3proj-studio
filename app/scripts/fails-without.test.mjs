@@ -89,3 +89,81 @@ test("a file without a test module now is refused, and nothing is run", () => {
   assert.match(r.out, /has no test module/);
   assert.equal(r.seen.length, 0);
 });
+
+// Exit codes and refusals, with --run commands that are node one-liners (no cargo, no npm test).
+function cli(args, setup = {}) {
+  const dir = scratchDir("fails-without-cli-");
+  try {
+    const git = (...a) => {
+      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { cwd: dir, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+    };
+    git("init", "-q", "-b", "dev");
+    writeFileSync(join(dir, "t.txt"), "test");
+    writeFileSync(join(dir, "src.txt"), setup.base ?? "old");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    writeFileSync(join(dir, "src.txt"), setup.now ?? "new");
+    const r = spawnSync(process.execPath, [script, ...args], { cwd: dir, encoding: "utf8" });
+    return { status: r.status, out: `${r.stdout}${r.stderr}`, after: readFileSync(join(dir, "src.txt"), "utf8") };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const check = (expr) => ["--run", `"${process.execPath}" -e "${expr}"`];
+const readsNew = `process.exit(require('fs').readFileSync('src.txt','utf8')==='new'?0:1)`;
+
+test("exit 0 only for pass-then-fail; the file is put back", () => {
+  const r = cli([...check(readsNew), "t.txt", "src.txt"]);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /fails without the fix and passes with it/);
+  assert.equal(r.after, "new");
+});
+
+test("exit 1: the check passes without the fix too, or doesn't pass with it", () => {
+  const always = cli([...check("process.exit(0)"), "t.txt", "src.txt"]);
+  assert.equal(always.status, 1, always.out);
+  assert.match(always.out, /passes without the fix too/);
+  const never = cli([...check("process.exit(1)"), "t.txt", "src.txt"]);
+  assert.equal(never.status, 1, never.out);
+  assert.match(never.out, /doesn't pass with the fix/);
+});
+
+test("exit 3: without the fix it doesn't even build (weak evidence)", () => {
+  const r = cli([...check(`if(require('fs').readFileSync('src.txt','utf8')==='new')process.exit(0);console.error('Build failed with 1 error');process.exit(1)`), "t.txt", "src.txt"]);
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.out, /weak/);
+});
+
+test("exit 2: usage, the test among the sources, an unknown base, nothing differing, a missing value", () => {
+  assert.equal(cli([]).status, 2);
+  const one = cli(["t.txt"]);
+  assert.equal(one.status, 2);
+  assert.match(one.out, /usage/);
+  const self = cli([...check("process.exit(0)"), "t.txt", "t.txt"]);
+  assert.equal(self.status, 2);
+  assert.match(self.out, /test file can't be one of the source files/);
+  const base = cli(["--base", "nonesuch", ...check("process.exit(0)"), "t.txt", "src.txt"]);
+  assert.equal(base.status, 2);
+  assert.match(base.out, /nonesuch isn't a commit/);
+  const same = cli([...check("process.exit(0)"), "t.txt", "src.txt"], { base: "x", now: "x" });
+  assert.equal(same.status, 2);
+  assert.match(same.out, /nothing to take away/);
+});
+
+test("--keep-rust-tests is refused for a file that isn't on the base", () => {
+  const dir = scratchDir("fails-without-new-");
+  try {
+    const run = (...a) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, encoding: "utf8" });
+    run("init", "-q", "-b", "dev");
+    writeFileSync(join(dir, "t.txt"), "t");
+    run("add", ".");
+    run("commit", "-q", "-m", "b");
+    writeFileSync(join(dir, "n.rs"), "#[cfg(test)]\nmod tests {}\n");
+    const r = spawnSync(process.execPath, [script, "--keep-rust-tests", ...check("process.exit(0)"), "t.txt", "n.rs"], { cwd: dir, encoding: "utf8" });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /isn't on dev/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
