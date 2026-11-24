@@ -2,6 +2,7 @@ import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { outside, rangeNote } from "../../lib/objects/limits";
 import { keyOf } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { History } from "../../lib/undo";
 import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits, type GameplayLimits } from "../../lib/objects/constlimits";
 import { OBJECTS_SERVICE, type LiveObjectData } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
@@ -384,20 +385,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const serialize = () => JSON.stringify({ ...file, original: file.original.filter(hasMods) });
         let saved = "";
         // Undo/redo: every change ends in markDirty, which records the whole file (snapshots;
-        // object data files are small). Restoring maps the selection back by id.
+        // object data files are small). Restoring maps the selection back by id. 200 states are kept
+        // (199 undo steps and the state now). Unsaved is judged by isDirty, not by the history.
         const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: wts.snapshot() });
-        const history = [snapshot()];
-        let at = 0;
+        const history = new History(snapshot, (s) => restore(s), { limit: 199 });
         /** Other modules hear of each edit, undo and redo here (ObjectsService.onDidEdit). */
         const told = () => { if (liveData.get(doc.path)?.data === liveNow) edits.fire(kind); };
-        const record = () => {
-          const s = snapshot();
-          if (s === history[at]) return;
-          history.splice(at + 1, history.length, s);
-          if (history.length > 200) history.shift();
-          at = history.length - 1;
-          told();
-        };
+        const record = () => { if (history.commit()) told(); };
         /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
         const isDirty = () => isDirtyNow(serialize(), saved, hasWts && wts.dirty);
         const markDirty = () => { record(); doc.setDirty(isDirty()); };
@@ -416,12 +410,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderDetail();
           told();
         };
-        const step = (dir: -1 | 1) => {
-          const to = at + dir;
-          if (to < 0 || to >= history.length) return;
-          at = to;
-          restore(history[at]);
-        };
+        const step = (dir: -1 | 1) => { if (dir < 0) history.undo(); else history.redo(); };
 
         /** Set when this editor is closed: a paste that was asking something doesn't go on into it. */
         let closed = false;
