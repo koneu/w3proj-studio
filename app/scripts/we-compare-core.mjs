@@ -773,7 +773,7 @@ export function loadSide(r, file, kind, decodeImage, lines, minCount = null) {
     return { text: kept.join("\n") };
   }
   // The file's own bytes from the map (its line endings as saved) when the map holds it; a file only the unpack makes
-  // (war3map.wct.txt) is read as the unpack wrote it.
+  // is read as the unpack wrote it.
   if (kind === "text-exact") return { text: textOnly(r.listed(file) ? Buffer.from(r.bytes(file)).toString("utf8") : r.text(file), file) };
   return { bytes: r.bytes(file) };
 }

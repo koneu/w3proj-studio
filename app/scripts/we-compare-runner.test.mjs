@@ -383,10 +383,12 @@ test("text-exact keeps line endings: CRLF against LF differs, which text doesn't
   assert.equal(core.loadSide(r, "war3map.j", "text").text, lf, "control: text reads the unpacked text");
   const wct = { ...fakeReader({ "war3map.wct.txt": { text: crlf } }), listed: () => false };
   assert.equal(core.loadSide(wct, "war3map.wct.txt", "text-exact").text, crlf);
-  // The header specs pin their line endings with it.
+  // The header specs pin their line endings with it (the script; war3map.wct is the header's JSON, which keeps them in its string).
   const specs = core.parseSpecFile(readFileSync(repoPath("tests", "we-compare", "script-inputs-e.json"), "utf8"), "script-inputs-e.json", { REPO: "/r", MAIN: "/m" });
   for (const n of ["header-newlines", "header-newlines-lua", "header-spaces", "header-spaces-lua", "header-tab-lines"]) {
-    assert.ok(specs.find((s) => s.name === n).compare.every((c) => c.as === "text-exact"), n);
+    const compare = specs.find((s) => s.name === n).compare;
+    assert.ok(compare.filter((c) => c.file !== "war3map.wct").every((c) => c.as === "text-exact"), n);
+    assert.ok(compare.some((c) => c.file === "war3map.wct" && c.as === "parsed"), `${n}: the header's JSON`);
   }
 });
 

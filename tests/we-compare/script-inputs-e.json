@@ -43,7 +43,7 @@
   },
   {
     "name": "trigger-init-off",
-    "description": "Run on Map Init on an initially off trigger (test.md): the Melee Initialization trigger has Initially On off and Run on Map Initialization on; the input is a Studio new map with both flags edited into war3map.wtg.json; Studio sets the two flags in war3map.wtg.json and saves, the WE opens that save and saves it again; the trigger file",
+    "description": "Run on Map Init on an initially off trigger (test.md): the Melee Initialization trigger has Initially On off and Run on Map Initialization on; the input is a Studio new map with both flags edited into map/triggers/Initialization/Melee_Initialization.gui.json; Studio sets the two flags in map/triggers/Initialization/Melee_Initialization.gui.json and saves, the WE opens that save and saves it again; the trigger file",
     "input": {
       "new": {
         "name": "TrigInitOff",
@@ -58,7 +58,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes('\"initiallyOff\": false')) throw new Error('no initiallyOff flag'); t = t.replace('\"initiallyOff\": false', '\"initiallyOff\": true'); if (!t.includes('\"runOnInit\": false')) throw new Error('no runOnInit flag'); t = t.replace('\"runOnInit\": false', '\"runOnInit\": true'); await w3.workspace.writeText(p, t);"
+          "eval": "const p = \"map/triggers/Initialization/Melee_Initialization.gui.json\"; let t = await w3.workspace.readText(p); const re0 = /\"initiallyOff\": *false/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"initiallyOff\\\": true\"); const re1 = /\"runOnInit\": *false/; if (!re1.test(t)) throw new Error('no match for ' + re1); t = t.replace(re1, \"\\\"runOnInit\\\": true\"); await w3.workspace.writeText(p, t);"
         },
         {
           "command": "w3.script.generate"
@@ -99,7 +99,7 @@
       },
       "steps": [
         {
-          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes('\"runOnInit\": false')) throw new Error('no runOnInit flag'); t = t.replace('\"runOnInit\": false', '\"runOnInit\": true'); await w3.workspace.writeText(p, t);"
+          "eval": "const p = \"map/triggers/Initialization/Melee_Initialization.gui.json\"; let t = await w3.workspace.readText(p); const re0 = /\"runOnInit\": *false/; if (!re0.test(t)) throw new Error('no match for ' + re0); t = t.replace(re0, \"\\\"runOnInit\\\": true\"); await w3.workspace.writeText(p, t);"
         },
         {
           "command": "w3.script.generate"
@@ -134,12 +134,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n   "
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"   \");"
         }
       ]
     },
@@ -169,8 +164,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30
@@ -186,12 +181,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n\n\t\n  "
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"\\n\\t\\n  \");"
         }
       ]
     },
@@ -221,8 +211,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30
@@ -238,12 +228,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n\n\n"
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"\\n\\n\");"
         }
       ]
     },
@@ -273,8 +258,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30
@@ -290,12 +275,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n\n\n"
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.lua\", \"\\n\\n\");"
         },
         {
           "mcp": "edit_text_file",
@@ -333,8 +313,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30
@@ -350,12 +330,7 @@
       },
       "steps": [
         {
-          "mcp": "edit_text_file",
-          "args": {
-            "path": "map/war3map.wct.txt",
-            "find": "//== header (no text) ==",
-            "replace": "//== header ==\n   "
-          }
+          "eval": "await w3.workspace.writeText(\"map/triggers/header.lua\", \"   \");"
         },
         {
           "mcp": "edit_text_file",
@@ -393,8 +368,8 @@
         "as": "text-exact"
       },
       {
-        "file": "war3map.wct.txt",
-        "as": "text-exact"
+        "file": "war3map.wct",
+        "as": "parsed"
       }
     ],
     "limit": 30
