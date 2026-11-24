@@ -229,11 +229,18 @@ mutation testing (changing the code and seeing whether a test notices) found `mp
 passed every test, so reading encrypted files had no real test at all. Over the four files tried,
 84% of mutants were detected before that fix.
 
-Mutation testing is too slow for each commit, so run it now and then on small critical files:
+Mutation testing is too slow for each commit, so run it now and then on small critical files. Never uncapped: a
+mutant that turns `i += 1` into `i *= 1` loops while allocating, and one filled the machine's 62 GB. The runner caps
+each test binary, the scope the whole run (Linux; cargo-mutants can live in `target/tools`):
 
 ```sh
-cargo mutants -f crates/mpq/src/crypto.rs -p mpq
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$PWD/tests/mutants-runner.sh \
+  systemd-run --user --scope -p MemoryMax=18G -p MemorySwapMax=0 -- \
+  cargo mutants -j 3 --timeout 60 -f crates/mpq/src/crypto.rs -p mpq
 ```
+
+Last run (2026-11-24) on `lossless.rs`, `paths.rs`, `format/expr.rs` and `wtg.rs`: the survivors left are equivalent
+mutants, each explained where it is (`lossless.rs` FIRST, `paths.rs` percent_decode).
 
 ## Rules for writing tests
 
