@@ -67,7 +67,7 @@ real maps and game files can't go into the repository.
 
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
-node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov)
+node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov; scripts/setup-linux.sh --with-coverage-tools)
 node tests/gate.mjs corpus     # real maps and the game: about 8 minutes (the app smoke test's two halves set the pace)
 node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
@@ -234,6 +234,9 @@ Mutation testing is too slow for each commit, so run it now and then on small cr
 ```sh
 cargo mutants -f crates/mpq/src/crypto.rs -p mpq
 ```
+
+`cargo-mutants`, `cargo-llvm-cov` and the `llvm-tools` rustup component are optional installs:
+`scripts/setup-linux.sh --with-coverage-tools` (or `scripts\setup-windows.bat --with-coverage-tools`).
 
 ## Rules for writing tests
 

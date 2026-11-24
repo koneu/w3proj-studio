@@ -3,6 +3,8 @@
 #
 #   --check       only report what's there and what's missing; changes nothing
 #   --game PATH   use this Warcraft III folder (else the one already chosen, else the newest install found)
+#   --with-coverage-tools   also install cargo-llvm-cov, cargo-mutants and the llvm-tools component (long cargo builds;
+#                           also on with the environment variable W3PROJ_COVERAGE_TOOLS=1)
 #
 # Safe to run again: anything already installed is left alone, and a chosen game folder is kept.
 # Installs go through winget (App Installer, part of Windows 10/11). What it sets up is in README.md ("Windows").
@@ -14,11 +16,13 @@ $ErrorActionPreference = "Stop"
 
 $CheckOnly = $false
 $GameArg = ""
+$WithCoverage = ($env:W3PROJ_COVERAGE_TOOLS -eq "1")
 for ($i = 0; $i -lt $args.Count; $i++) {
   switch ($args[$i]) {
     "--check" { $CheckOnly = $true }
+    "--with-coverage-tools" { $WithCoverage = $true }
     "--game" { $i++; if ($i -ge $args.Count) { Write-Error "--game needs a folder" }; $GameArg = $args[$i] }
-    { $_ -in "-h", "--help" } { Get-Content $PSCommandPath -TotalCount 9 | Select-Object -Skip 2 | ForEach-Object { $_ -replace "^# ?", "" }; exit 0 }
+    { $_ -in "-h", "--help" } { Get-Content $PSCommandPath -TotalCount 11 | Select-Object -Skip 2 | ForEach-Object { $_ -replace "^# ?", "" }; exit 0 }
     default { Write-Host "unknown option: $($args[$i]) (see --help)"; exit 2 }
   }
 }
@@ -169,6 +173,27 @@ if (Test-Path $Actionlint) { Ok "actionlint" } else {
       } else { Write-Host "  actionlint $v didn't match its checksum; skipped (optional)" }
     } catch { Write-Host "  couldn't download actionlint ${v}: $($_.Exception.Message); skipped (optional)" }
     finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+  }
+}
+
+# --- coverage and mutation tools --------------------------------------------------------------
+# Optional and off by default (each is a long cargo build), as on Linux: `node tests/gate.mjs coverage` needs
+# cargo-llvm-cov and rustup's llvm-tools component; mutation testing (TESTING.md "Coverage") needs cargo-mutants.
+Step "coverage and mutation tools (optional: --with-coverage-tools)"
+function Cov-Missing($what) {
+  if ($WithCoverage) { Miss $what } else { Write-Host "  not installed  $what (optional)" -ForegroundColor Yellow }
+}
+if ((Have rustup) -and ((& rustup component list --installed 2>$null) -match "^llvm-tools")) { Ok "llvm-tools (rustup component)" } else {
+  Cov-Missing "llvm-tools (rustup component)"
+  if ($WithCoverage -and -not $CheckOnly -and (Have rustup)) { & rustup component add llvm-tools-preview }
+}
+foreach ($tool in "cargo-llvm-cov", "cargo-mutants") {
+  if ((Have $tool) -or (Test-Path (Join-Path $env:USERPROFILE ".cargo\bin\$tool.exe"))) { Ok $tool } else {
+    Cov-Missing $tool
+    if ($WithCoverage -and -not $CheckOnly -and (Have cargo)) {
+      Push-Location ([IO.Path]::GetTempPath())
+      try { & cargo install --locked $tool } finally { Pop-Location }
+    }
   }
 }
 
