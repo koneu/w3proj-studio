@@ -5,6 +5,7 @@ import type { W3Api } from "../../extensions/api";
 import { checkpointIfOn, forgetCheckpointsOffWarning } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
 import { mcpErrorText } from "../../extensions/mcp";
+import { ResizeHistory } from "../../lib/terrain/resizeundo";
 
 function setup(start: Record<string, string> = {}) {
   const files = new Map(Object.entries(start));
@@ -20,7 +21,7 @@ function setup(start: Record<string, string> = {}) {
     checkpoint: async () => { state.checkpoints++; if (state.failCheckpoint) throw new Error("pack failed"); },
     log: (l) => state.logged.push(l),
   };
-  return { log: new EditLog(io), files, state };
+  return { log: new EditLog(io), files, state, io };
 }
 const put = (path: string, text: string) => async () => [{ path, text }];
 
@@ -108,6 +109,32 @@ test("a failed write puts back what was already written", async () => {
   await assert.rejects(log.edit("Both", async () => [{ path: "map/a", text: "new a" }, { path: "map/b", text: "new b" }]), /disk full/);
   assert.deepEqual([files.get("map/a"), files.get("map/b")], ["old a", "old b"]);
   assert.equal(log.list().length, 0);
+});
+
+test("while a map resize rewrites the files, edits and undos are refused and write nothing", async () => {
+  const { log, files, io } = setup({ "map/a": "old" });
+  const resizes = new ResizeHistory();
+  // As the app wires it (mcp-server/index.ts): the resize lock says the files are busy.
+  io.busy = () => (resizes.busy ? "the map is being resized" : null);
+  await log.edit("Before", put("map/a", "mid"));
+  await resizes.exclusive(async () => {
+    await assert.rejects(log.edit("During", put("map/a", "new")), /Not changed: the map is being resized/);
+    await assert.rejects(log.undo(), /Not undone: the map is being resized/);
+  });
+  assert.equal(files.get("map/a"), "mid");
+  assert.equal(log.list().length, 1);
+  // A resize that starts while an edit works out its change (read from the old files): the edit writes nothing.
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  let started!: () => void;
+  const reading = new Promise<void>((r) => { started = r; });
+  const edit = log.edit("Racing", async (read) => { const t = await read("map/a"); started(); await held; return [{ path: "map/a", text: `${t}+edit` }]; });
+  await reading;
+  const resize = resizes.exclusive(async () => { release(); await assert.rejects(edit, /Not changed: the map is being resized/); });
+  await resize;
+  assert.equal(files.get("map/a"), "mid");
+  // Afterwards edits go through again.
+  assert.equal(await log.edit("After", put("map/a", "new")), true);
 });
 
 test("undo refuses when the file changed since", async () => {

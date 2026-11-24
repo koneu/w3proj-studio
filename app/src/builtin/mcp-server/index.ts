@@ -12,6 +12,7 @@ import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 import { wtsStrayLines } from "../../lib/formats/wts";
 import { joinPath } from "../../lib/paths";
 import { checkpointIfOn } from "../../lib/checkpoint";
+import { resizeHistory } from "../../lib/terrain/resizeundo";
 import { SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP } from "../../lib/script/guard";
 
 /** One read_file answer; `offset` gets the rest. */
@@ -64,6 +65,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     derived: (changed) => (changed.some((p) => SCRIPT_INPUTS.test(p)) ? [...SCRIPT_FILES, SCRIPT_STAMP] : []),
     // (The Map Script extension can be off.)
     settle: () => w3.commands.execute("w3.script.settle").then(() => {}, () => {}),
+    // A map resize (or its undo) rewrites the map's files and reopens the terrain editor on them: an edit among its
+    // writes would be lost, or put the old size back.
+    busy: () => (resizeHistory.busy ? "the map is being resized (Map Size, or its undo or redo); try again when that is done." : null),
   });
   // Only this part changes with an edit: redrawing the view would flash everything else in it.
   /** Where a user's rules for a guide are, whether or not they exist yet. */

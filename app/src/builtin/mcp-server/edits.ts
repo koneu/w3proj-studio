@@ -36,6 +36,9 @@ export interface EditIO {
   derived?(changed: string[]): string[];
   /** Waits until that work is done (the map script due after a save is written). */
   settle?(): Promise<void>;
+  /** Why the map's files can't be edited now (a map resize rewriting them, which reopens the terrain editor on its own
+   *  files: an edit landing among its writes is lost or puts the old size back); null when they can. */
+  busy?(): string | null;
 }
 
 /** A file an edit may touch, normalized; throws for any other. */
@@ -103,6 +106,12 @@ export class EditLog {
     throw new AiWordedError(`${what} Save or discard them first, then try again.`, `${what} Ask the user to save or discard them first.`);
   }
 
+  /** Refuses while the map's files are being rewritten by something else (EditIO.busy): nothing written. */
+  private refuseBusy(what: string) {
+    const why = this.io.busy?.();
+    if (why) throw new Error(`${what}: ${why}`);
+  }
+
   /** Puts files back; a failure here is reported along with what caused it. */
   private async restore(files: { path: string; before: string | null }[]) {
     for (const f of [...files].reverse()) await this.io.write(f.path, f.before);
@@ -146,8 +155,9 @@ export class EditLog {
   /** `change` reads what it needs and gives the new texts. False if nothing changed. */
   edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<EditFile[]>, follow?: EditFollow): Promise<boolean> {
     return this.inTurn(async () => {
+      this.refuseBusy("Not changed");
       await this.refuseUnsaved();
-      const wanted = (await change((path) => this.io.read(editablePath(path)))).map((f) => ({ path: editablePath(f.path), text: f.text }));
+      const wanted =(await change((path) => this.io.read(editablePath(path)))).map((f) => ({ path: editablePath(f.path), text: f.text }));
       const files: EditRecord["files"] = [];
       for (const f of wanted) {
         const before = await this.io.read(f.path);
@@ -163,6 +173,8 @@ export class EditLog {
         await this.io.checkpoint().catch((e) => this.io.log(`no checkpoint before the first AI edit: ${String(e)}`));
         this.checkpointed = true;
       }
+      // A resize may have started while the change was worked out (it was read from the old files).
+      this.refuseBusy("Not changed");
       const done: EditRecord["files"] = [];
       try {
         for (const f of files) { done.push(f); await this.io.write(f.path, f.after); }
@@ -212,6 +224,7 @@ export class EditLog {
     return this.inTurn(async () => {
       const last = this.records.at(-1);
       if (!last) return null;
+      this.refuseBusy("Not undone");
       await this.refuseUnsaved();
       // Undoing closes a group: edits after this one wouldn't belong to anything.
       this.group = null;
@@ -227,6 +240,7 @@ export class EditLog {
         this.io.log(`${d.path} changed after "${last.title}", so undo doesn't put it back; it follows the restored files instead.`);
         return false;
       });
+      this.refuseBusy("Not undone");
       await this.restore(last.files);
       this.records.pop();
       const shown = this.past.find((p) => p.id === last.id);
