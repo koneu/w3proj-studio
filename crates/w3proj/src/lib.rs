@@ -5,6 +5,7 @@ pub mod allies;
 pub mod atomic;
 pub mod codec;
 pub mod derived;
+pub mod folder_codec;
 pub mod format;
 pub mod header;
 pub mod lossless;
