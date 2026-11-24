@@ -71,9 +71,13 @@ impl Folder {
         Ok(stale)
     }
 
-    /// Removes the sub-folder `sub` of the folder with the folders below it that are empty (one holding anything stays).
-    pub fn remove_empty(&self, map_dir: &Path, sub: &str) {
-        remove_empty_dir(&crate::paths::join_rel(map_dir, &format!("{}/{sub}", self.dir)));
+    /// Removes the folder (`sub` None) or its sub-folder `sub` with the folders below it that are empty (one holding
+    /// anything stays).
+    pub fn remove_empty(&self, map_dir: &Path, sub: Option<&str>) {
+        match sub {
+            Some(sub) => remove_empty_dir(&crate::paths::join_rel(map_dir, &format!("{}/{sub}", self.dir))),
+            None => remove_empty_dir(&map_dir.join(self.dir)),
+        }
     }
 }
 
@@ -170,10 +174,14 @@ mod tests {
         assert_eq!(F.remove_stale(&dir, &old, &new).unwrap(), vec!["terrain/b/y.txt"], "a file outside the folder stays");
         assert!(dir.join("other.txt").is_file());
         assert!(dir.join("terrain/b").is_dir());
-        F.remove_empty(&dir, "b");
+        F.remove_empty(&dir, Some("b"));
         assert!(!dir.join("terrain/b").exists());
-        F.remove_empty(&dir, "a");
+        F.remove_empty(&dir, Some("a"));
+        F.remove_empty(&dir, None);
         assert!(dir.join("terrain/a/x.txt").is_file(), "a folder holding a file stays");
+        std::fs::remove_file(dir.join("terrain/a/x.txt")).unwrap();
+        F.remove_empty(&dir, None);
+        assert!(!dir.join("terrain").exists(), "the folder goes once empty");
         let mut got = Files::new();
         read_if_there(&dir, &["other.txt", "missing.txt"], &mut got).unwrap();
         assert_eq!(got.keys().collect::<Vec<_>>(), ["other.txt"]);

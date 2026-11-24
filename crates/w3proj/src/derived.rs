@@ -76,12 +76,11 @@ fn read_sources(project: &Path, skip: &dyn Fn(&str) -> bool) -> Result<Sources> 
         out.insert(name, fingerprint(&bytes));
     }
     if crate::terrain_layout::is_split_on_disk(&map)? {
-        for rel in crate::project::walk(&map.join(crate::terrain_layout::DIR))? {
-            let path = format!("{}/{rel}", crate::terrain_layout::DIR);
+        for path in crate::terrain_layout::FOLDER.paths(&map)? {
             if skip(&path) {
                 continue;
             }
-            let bytes = fs::read(crate::paths::join_rel(&map, &path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+            let bytes = crate::folder_codec::read(&map, &path)?;
             out.insert(path, fingerprint(&bytes));
         }
     }

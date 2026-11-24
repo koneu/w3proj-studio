@@ -306,8 +306,7 @@ fn check_names(map_dir: &Path, layout: &Layout) -> Result<()> {
     for kind in KINDS.into_iter().filter(|k| layout.objects.has(*k)) {
         ours.extend(layout.subterrains.iter().map(|s| s.object_path(kind)));
     }
-    for rel in crate::project::walk(&map_dir.join(tl::DIR))? {
-        let path = format!("{}/{rel}", tl::DIR);
+    for path in tl::FOLDER.paths(map_dir)? {
         if !ours.contains(&path) {
             return Err(Error::Project(format!("map/{path} isn't part of the terrain layout (map/{}/ holds terrain.json and each subterrain's files only)", tl::DIR)));
         }
