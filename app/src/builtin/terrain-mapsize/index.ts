@@ -15,6 +15,7 @@ import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
 import { KEPT_SCRIPT_WORDS } from "../../lib/script/guard";
 import { checkpointOrStop } from "../../lib/checkpoint";
+import { withAllSubterrainsOpen } from "../../lib/terrain/openall";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
@@ -58,15 +59,21 @@ function stepResize(w3: W3Api, which: "undo" | "redo", quiet: boolean): () => Pr
     try {
       const ask = async (changed: string[]) =>
         (await w3.window.showWarning(`${word} the map resize? ${changed.length} file${changed.length === 1 ? " has" : "s have"} changed since (${changed.slice(0, 4).join(", ")}${changed.length > 4 ? ", …" : ""}); those changes are lost.`, `${word} anyway`, "Cancel")) === `${word} anyway`;
-      const done = await resizeHistory[which](workspaceIO(w3.workspace), project.root, ask);
+      // The kept files are the whole map's at its other size: with subterrains closed they are written with every one
+      // opened for it, which are closed again afterwards (lib/terrain/openall.ts).
+      const done = await withAllSubterrainsOpen(w3, `${word} Resize`, async () => {
+        const r = await resizeHistory[which](workspaceIO(w3.workspace), project.root, ask);
+        if (!r) return null;
+        await w3.workspace.refresh();
+        await w3.editors.close(r.editor);
+        // What was still due was for the terrain that was just replaced.
+        await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
+        await w3.commands.execute("w3.script.settle").catch(() => {});
+        withdrawScriptWarnings(r.shownBefore);
+        await w3.editors.open(r.editor, "w3.terrainViewer");
+        return r;
+      });
       if (!done) return false;
-      await w3.workspace.refresh();
-      await w3.editors.close(done.editor);
-      // What was still due was for the terrain that was just replaced.
-      await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
-      await w3.commands.execute("w3.script.settle").catch(() => {});
-      withdrawScriptWarnings(done.shownBefore);
-      await w3.editors.open(done.editor, "w3.terrainViewer");
       void w3.window.showInfo(`Map resize ${which === "undo" ? "undone" : "redone"}.`);
       return true;
     } catch (e) {

@@ -6571,7 +6571,18 @@ async function subterrains(page, found) {
       })()`);
       const was = layoutNow();
       const before = snapshot(map);
-      const grown = await tool("resize_map", { right: 32, top: 32 }).then(() => null, (e) => String(e.message ?? e)).finally(() => page.evaluate(`window.__subFollow?.restore()`));
+      // The new ground's variations are rolled (Math.random): seeded the same for this resize and the one with
+      // subterrains closed below, from the moment the resize reads the string table (just before it makes the terrain).
+      const seeded = () => page.evaluate(`(() => {
+        const ws = w3.workspace, read = ws.readText.bind(ws), random = Math.random;
+        let seed = 1;
+        Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+        ws.readText = (p, ...rest) => { if (p === "map/war3map.wts") seed = 1; return read(p, ...rest); };
+        window.__subSeed = { restore: () => { ws.readText = read; Math.random = random; } };
+      })()`);
+      const unseeded = () => page.evaluate(`window.__subSeed?.restore()`);
+      await seeded();
+      const grown = await tool("resize_map", { right: 32, top: 32 }).then(() => null, (e) => String(e.message ?? e)).finally(() => page.evaluate(`(() => { window.__subFollow?.restore(); window.__subSeed?.restore(); })()`));
       const follow = await page.evaluate(`({ asked: window.__subFollow?.asked, held: window.__subFollow?.held })`);
       if (!follow.asked) fail("the resize wrote no war3map.w3i.json, so the old editor was never asked for the flags (control)");
       else if (follow.held !== false) fail(`the terrain editor being resized took the destructables' flags in the middle of the resize: ${lit(follow.held)} (its save writes the old terrain)`);
@@ -6585,12 +6596,63 @@ async function subterrains(page, found) {
         if (lit(now.subterrains) !== lit(want)) fail(`the subterrains after the growth: ${lit(now.subterrains)}, not ${lit(want)}`);
         const r = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",join(folder, "subterrains-grown.w3x"), "--keep-script"], { encoding: "utf8" });
         if (r.status !== 0) fail(`\`w3proj pack\` after the growth: ${(r.stdout + r.stderr).trim().slice(-400)}`);
+        const grownAll = snapshot(map);
         const undone = await run("w3.terrainMapSize.undo");
         if (undone) fail(`Undo Resize failed: ${undone}`);
         await editorUp();
         await settled(page);
         const changed = differ(before, snapshot(map));
         if (changed.length) fail(`Undo Resize of the split terrain left ${changed.join(", ")} changed`);
+
+        // The same resize with only nw open (bug: refused, "open them all first"): every subterrain is opened for it and
+        // nw alone again afterwards; the map's files are those of the resize with all open. An AI edit landing among the
+        // resize's writes is refused, saying why, not lost. Undo Resize, also with nw alone open, puts every file back.
+        const choice = () => (existsSync(join(root, ".w3proj", "open-subterrains.json")) ? JSON.parse(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8")).open : "all");
+        const partialNow = () => page.evaluate(`!!document.querySelector(".terrain-partial-badge:not([hidden])")`);
+        const opened = await run("w3.terrainLayout.openSubterrains", { names: ["nw"] });
+        if (opened) fail(`Open Subterrains (nw) failed: ${opened}`);
+        await editorUp();
+        await settled(page);
+        if (!(await partialNow())) fail("with only nw open the terrain editor isn't partial (control)");
+        await page.evaluate(`(() => {
+          const ws = w3.workspace, write = ws.writeText.bind(ws);
+          window.__subMidEdit = { said: null, restore: () => { ws.writeText = write; } };
+          ws.writeText = async (p, text) => {
+            const r = await write(p, text);
+            if (p === "map/war3map.w3i.json" && window.__subMidEdit.said === null) {
+              window.__subMidEdit.said = "";
+              const edits = await w3.services.get("w3.mcpEdits");
+              window.__subMidEdit.said = await edits.edit("Mid-resize", async () => [{ path: "map/war3map.w3r.json", text: '{"regions": []}' }]).then(() => "written", (e) => String(e?.message ?? e));
+            }
+            return r;
+          };
+        })()`);
+        await seeded();
+        const grownPartial = await tool("resize_map", { right: 32, top: 32 }).then(() => null, (e) => String(e.message ?? e)).finally(() => page.evaluate(`(() => { window.__subMidEdit?.restore(); window.__subSeed?.restore(); })()`));
+        await unseeded();
+        const midEdit = await page.evaluate(`window.__subMidEdit?.said`);
+        if (grownPartial) fail(`resize_map with only nw open: ${grownPartial}`);
+        else {
+          await editorUp();
+          await settled(page);
+          if (midEdit === null || midEdit === undefined) fail("the resize with nw open wrote no war3map.w3i.json, so no AI edit was tried in the middle (control)");
+          else if (!/being resized/.test(midEdit)) fail(`an AI edit in the middle of the resize said ${lit(midEdit)}, not that the map is being resized`);
+          const vsAll = differ(grownAll, snapshot(map));
+          if (vsAll.length) fail(`the resize with only nw open left other files than the one with all open: ${vsAll.join(", ")}`);
+          if (lit(choice()) !== lit(["nw"])) fail(`after the resize the open subterrains are ${lit(choice())}, not nw again`);
+          if (!(await partialNow())) fail("after the resize the terrain editor isn't partial again");
+          const undonePartial = await run("w3.terrainMapSize.undo");
+          if (undonePartial) fail(`Undo Resize with only nw open failed: ${undonePartial}`);
+          await editorUp();
+          await settled(page);
+          const left = differ(before, snapshot(map));
+          if (left.length) fail(`Undo Resize with only nw open left ${left.join(", ")} changed`);
+          if (lit(choice()) !== lit(["nw"])) fail(`after Undo Resize the open subterrains are ${lit(choice())}, not nw again`);
+        }
+        const all = await run("w3.terrainLayout.openSubterrains", { all: true });
+        if (all) fail(`Open Subterrains (all) after the partial resize failed: ${all}`);
+        await editorUp();
+        await settled(page);
       }
       await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
     }

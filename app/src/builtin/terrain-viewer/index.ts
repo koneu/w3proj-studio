@@ -113,6 +113,7 @@ import { dropsBlock, randomItemEntries, type DropsUiHost, type ItemTableInfo } f
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
+import { withAllSubterrainsOpen } from "../../lib/terrain/openall";
 import { PendingWork } from "../../lib/settle";
 import { cameraBounds, camerasAfterResize, applyResizePathing, doodadStays, infoAfterResize, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
@@ -417,6 +418,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     locked: string | null;
     /** A partial load (Open Subterrains…): the corners no edit changes; null when every subterrain is open. */
     partial: PartialMask | null;
+    /** Map Size inside the resize lock already held (handle.resizeMap takes it): for the editor a partial one reopened
+     *  on the whole map to resize it (resizeAllOpen). */
+    resizeHeld: (change: Sides, complements: Sides) => Promise<{ removed: number }>;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -881,6 +885,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const result = {
         width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed,
         ...(grows ? { note: "New ground copies the map's edge beside it (height, cliff level, water and tiles), as the World Editor adds it. Paint and shape it afterwards." } : {}),
+        ...(handle.partial ? { closedSubterrains: "Some subterrains are closed: objectsRemoved counts the open ones' objects only. The resize opens every subterrain for itself (asking again if the closed ones hold more objects it removes) and closes them again afterwards." } : {}),
       };
       if (dryRun === true) return result;
       refuseLostView(projectTerrain(w3));
@@ -4641,7 +4646,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
-        const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> => resizeHistory.exclusive(() => resizeLocked(change, complements));
+        const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> =>
+          resizeHistory.exclusive(() => (partial ? resizeAllOpen(change, complements) : resizeLocked(change, complements)));
+        /** Map Size with subterrains closed: it changes every subterrain on the map's edges and writes the map at another
+         *  size, which this partial load can't. Every subterrain is opened for it (the editor reopens on the whole map,
+         *  which resizes), then the ones open now are opened again (withAllSubterrainsOpen). What the resize removes in
+         *  the closed subterrains wasn't counted when it was asked about (resizeRemovals sees the open ones): more is
+         *  asked about again. */
+        const resizeAllOpen = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
+          if (!editable) throw new Error(lockedText ?? "This map is read-only.");
+          const problem = resizeProblem(terrain, change, complements);
+          if (problem) throw new Error(problem);
+          const told = await resizeRemovals(change, complements);
+          // This editor's unsaved changes are saved first: it reopens on the whole map.
+          if (mark.isDirty(at)) await editorApi.save?.();
+          const root = w3.workspace.project()?.root;
+          return withAllSubterrainsOpen(w3, "Map Size", async () => {
+            // The editor opened again on the whole map (Open Subterrains reopens it).
+            let whole: OpenedEditor | null = null;
+            for (let n = 0; n < 600 && !whole; n++) {
+              if (w3.workspace.project()?.root !== root) throw new Error("Map Size: another project was opened. Nothing was changed.");
+              const e = editorOf(doc.path);
+              if (e && e !== record) { await e.ready(); if (editorOf(doc.path) === e) whole = e; }
+              else await new Promise((done) => setTimeout(done, 100));
+            }
+            if (!whole) throw new Error("Map Size: the terrain editor didn't open again on the whole map. Nothing was changed.");
+            if (whole.partial) throw new Error("Map Size: the terrain editor opened again with subterrains still closed. Nothing was changed.");
+            const removed = await whole.handle.resizeRemovals(change, complements);
+            if (removed > told) {
+              const more = removed - told;
+              const pick = await w3.window.showWarning(`The closed subterrains hold ${more} more object${more === 1 ? "" : "s"} the new map size removes (${removed} in all: doodads on or past the new edge, units and items outside the playable area, cameras outside the camera bounds). Resize anyway?`, "Resize", "Cancel");
+              if (pick !== "Resize") throw new Error("Map Size: cancelled. Nothing was changed.");
+            }
+            return whole.resizeHeld(change, complements);
+          });
+        };
         /** Set when a resize starts writing the map's files: from then on this editor holds the old map, and is closed and
          *  opened again on the new one (resizeLocked). It saves nothing, takes no destructable flags or file changes and
          *  derives nothing meanwhile: a save of its old terrain landing among the resize's writes put the old size back
@@ -4672,7 +4711,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error(lockedText ?? "This map is read-only.");
-          // A split terrain resizes every subterrain (the canvas, those on its edges, the cut ones): only with all open.
+          // A split terrain resizes every subterrain (the canvas, those on its edges, the cut ones): only with all open
+          // (resizeMap opens them for it: resizeAllOpen).
           if (partial) throw new Error("The map size changes every subterrain on its edges, and some are closed: open them all (Open Subterrains…) first. Nothing was changed.");
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
@@ -6478,7 +6518,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let handed = false;
         const record: OpenedEditor = {
           root: w3.workspace.project()?.root ?? "",
-          handle, ready, screenshot: takeScreenshot, locked: lockedText, partial,
+          handle, ready, screenshot: takeScreenshot, locked: lockedText, partial, resizeHeld: resizeLocked,
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
             await ready();

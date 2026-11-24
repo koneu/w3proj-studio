@@ -374,7 +374,10 @@ others takes a whole side off each (or all of one); a subterrain keeps its creat
 renamed (its folder is renamed), a joined one gets all of theirs, a new one the next block. Refused, nothing written,
 while anything is unsaved, when one would be cut in pieces, or when a corner left out differs from the default corner.
 **Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. **Map Size** works on a split
-terrain with every subterrain open: the subterrains keep their ground, those on an edge that grows reach the new edge
+terrain with every subterrain open; with some closed it opens all of them for the resize (and for Undo or Redo Resize),
+asks again when the closed ones hold more objects it removes, and opens the chosen ones alone again afterwards. An edge
+no subterrain reaches (its corners the default corner) can't grow: the resize says which side, nothing written. The
+subterrains keep their ground, those on an edge that grows reach the new edge
 (the ground Map Size adds copies that edge; each takes the strip along its own span, and a corner region added on two
 sides goes to the subterrain in that corner, so the rectangles stay rectangles and still cover the map), what is cut off
 goes as in a flat map (a subterrain cut off entirely with its folder; the checkpoint made first keeps it), pathing
