@@ -79,6 +79,28 @@ impl Folder {
             None => remove_empty_dir(&map_dir.join(self.dir)),
         }
     }
+
+    /// Removes the folders above the file `rel` (relative to `map/`) that are left empty, nearest first, up to the
+    /// folder itself, which stays; it stops at the first that holds anything or can't be removed. A path that isn't
+    /// below the folder, spelt as it, removes nothing.
+    pub fn prune_above(&self, map_dir: &Path, rel: &str) {
+        let top = map_dir.join(self.dir);
+        let mut dir = crate::paths::join_rel(map_dir, rel).parent().map(Path::to_path_buf);
+        while let Some(d) = dir {
+            if d == top || !d.starts_with(&top) || std::fs::remove_dir(&d).is_err() {
+                break;
+            }
+            dir = d.parent().map(Path::to_path_buf);
+        }
+    }
+}
+
+/// Removes the file `path` where it is there: one already gone is no error. Any other failure is.
+pub fn remove_if_there(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        r => r,
+    }
 }
 
 /// The file `path` (relative to `map_dir`), read; one that can't be is an error naming it.
@@ -185,6 +207,42 @@ mod tests {
         let mut got = Files::new();
         read_if_there(&dir, &["other.txt", "missing.txt"], &mut got).unwrap();
         assert_eq!(got.keys().collect::<Vec<_>>(), ["other.txt"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prunes_empty_folders_above_a_file_up_to_the_folder() {
+        let dir = scratch("prune");
+        for f in ["terrain/a/b/c/x.txt", "terrain/a/keep.txt", "other/d/y.txt"] {
+            let p = crate::paths::join_rel(&dir, f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"1").unwrap();
+        }
+        std::fs::remove_file(dir.join("terrain/a/b/c/x.txt")).unwrap();
+        F.prune_above(&dir, "terrain/a/b/c/x.txt");
+        assert!(!dir.join("terrain/a/b").exists(), "the empty folders above go");
+        assert!(dir.join("terrain/a/keep.txt").is_file(), "a folder holding a file stays, and pruning stops there");
+        std::fs::remove_file(dir.join("terrain/a/keep.txt")).unwrap();
+        F.prune_above(&dir, "terrain/a/keep.txt");
+        assert!(!dir.join("terrain/a").exists());
+        assert!(dir.join("terrain").is_dir(), "the folder itself stays, empty");
+        std::fs::remove_file(dir.join("other/d/y.txt")).unwrap();
+        F.prune_above(&dir, "other/d/y.txt");
+        assert!(dir.join("other/d").is_dir(), "a path outside the folder removes nothing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn removes_a_file_where_it_is_there() {
+        let dir = scratch("remove");
+        let f = dir.join("x.txt");
+        std::fs::write(&f, b"1").unwrap();
+        remove_if_there(&f).unwrap();
+        assert!(!f.exists());
+        remove_if_there(&f).expect("a file already gone is no error");
+        std::fs::create_dir_all(dir.join("d/e")).unwrap();
+        assert!(remove_if_there(&dir.join("d")).is_err(), "a failure other than not-found is one");
+        assert!(dir.join("d/e").is_dir());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

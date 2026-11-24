@@ -484,7 +484,12 @@ pub fn plan_json(p: &Plan) -> CmdResult<serde_json::Value> {
 pub fn write(root: &str, formats: &[PathBuf], save: &Save, create: bool) -> CmdResult<Written> {
     let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let plan = plan(root, formats, save, create)?;
-    let project = Path::new(root);
+    apply(Path::new(root), plan)
+}
+
+/// A plan's files written (each in one step, every one: the plan has left out the unchanged) and removed (one already
+/// gone is no error), with the folders left empty up to `map/triggers/`, which stays (`folder_codec`).
+fn apply(project: &Path, plan: Plan) -> CmdResult<Written> {
     let mut also = Vec::new();
     for (path, bytes) in &plan.write {
         let at = w3proj::paths::join_rel(project, path);
@@ -492,23 +497,14 @@ pub fn write(root: &str, formats: &[PathBuf], save: &Save, create: bool) -> CmdR
         let s = crate::write_file(&at, |f| std::io::Write::write_all(f, bytes))?;
         also.push(Also { path: at.to_string_lossy().into_owned(), size: s.size, modified: s.modified });
     }
-    let triggers_dir = project.join(w3proj::project::MAP_DIR).join(tl::DIR);
+    let map_dir = project.join(w3proj::project::MAP_DIR);
     for path in &plan.delete {
         let at = w3proj::paths::join_rel(project, path);
         crate::write_lands_inside(project, &at)?;
-        match std::fs::remove_file(&at) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("{path} wasn't removed: {e}")),
-        }
+        w3proj::folder_codec::remove_if_there(&at).map_err(|e| format!("{path} wasn't removed: {e}"))?;
         also.push(Also { path: at.to_string_lossy().into_owned(), size: 0, modified: 0 });
-        // Folders left empty go (up to map/triggers/, which stays).
-        let mut dir = at.parent().map(Path::to_path_buf);
-        while let Some(d) = dir {
-            if d == triggers_dir || !d.starts_with(&triggers_dir) || std::fs::remove_dir(&d).is_err() {
-                break;
-            }
-            dir = d.parent().map(Path::to_path_buf);
+        if let Some(rel) = path.strip_prefix(PREFIX) {
+            tl::FOLDER.prune_above(&map_dir, rel);
         }
     }
     Ok(Written {
@@ -727,6 +723,60 @@ mod tests {
         assert_eq!(r.stored.len(), 1, "{:?}", r.stored);
         let plan = plan(&root, &[], &save_of(&r), false).unwrap();
         assert!(plan.write.is_empty() && plan.delete.is_empty(), "{:?} {:?}", plan.write.keys(), plan.delete);
+    }
+
+    /// Saved unchanged: no file is touched and no stat goes back to the app.
+    #[test]
+    fn an_unchanged_save_touches_no_file() {
+        let p = project();
+        let root = p.path().to_string_lossy().to_string();
+        let r = read(&root, &[]).unwrap().unwrap();
+        let before = disk_times(p.path());
+        let w = write(&root, &[], &save_of(&r), false).unwrap();
+        assert!(w.also.is_empty() && w.written.is_empty() && w.deleted.is_empty(), "{:?}", w.also.iter().map(|a| &a.path).collect::<Vec<_>>());
+        assert_eq!(disk_times(p.path()), before);
+    }
+
+    /// Every file under map/triggers/ with its modified time.
+    fn disk_times(project: &Path) -> BTreeMap<String, std::time::SystemTime> {
+        let map = project.join("map");
+        tl::read_disk(&map).unwrap().into_keys().map(|k| {
+            let t = std::fs::metadata(w3proj::paths::join_rel(&map, &k)).unwrap().modified().unwrap();
+            (k, t)
+        }).collect()
+    }
+
+    /// A planned removal whose file is already gone (removed by hand since): no error, the app still gets it as removed
+    /// (size and time 0), and the folders left empty go up to map/triggers/, which stays even when empty.
+    #[test]
+    fn a_removal_already_gone_and_the_folders_left_empty() {
+        let p = project();
+        let all: Vec<String> = disk(p.path()).unwrap().into_keys().map(|k| format!("{PREFIX}{k}")).collect();
+        assert!(all.iter().any(|k| k.matches('/').count() >= 4), "the fixture has a nested folder: {all:?}");
+        let gone = all.iter().find(|k| k.ends_with("/Sub/Nested.gui.json")).unwrap().clone();
+        std::fs::remove_file(w3proj::paths::join_rel(p.path(), &gone)).unwrap();
+        let plan = Plan { delete: all.clone(), ..Plan::default() };
+        let w = apply(p.path(), plan).unwrap();
+        assert_eq!(w.deleted, all);
+        let a = w.also.iter().find(|a| a.path.ends_with("Nested.gui.json")).expect("the gone file is reported");
+        assert_eq!((a.size, a.modified), (0, 0));
+        assert_eq!(w.also.len(), all.len());
+        let triggers = p.path().join("map/triggers");
+        assert!(triggers.is_dir(), "map/triggers/ stays");
+        assert_eq!(std::fs::read_dir(&triggers).unwrap().count(), 0, "every folder below it left empty went");
+        assert!(p.path().join("map").is_dir());
+    }
+
+    /// A planned removal that fails for another reason than the file being gone stops the save with its message.
+    #[test]
+    fn a_removal_that_fails_is_an_error() {
+        let p = project();
+        let at = p.path().join("map/triggers/Blocker.j");
+        std::fs::create_dir_all(at.join("inside")).unwrap();
+        let plan = Plan { delete: vec!["map/triggers/Blocker.j".into()], ..Plan::default() };
+        let e = apply(p.path(), plan).unwrap_err();
+        assert!(e.starts_with("map/triggers/Blocker.j wasn't removed: "), "{e}");
+        assert!(at.join("inside").is_dir());
     }
 
     /// No map/triggers/: refused unless asked to create it; a tree that can't be read is never written over.
