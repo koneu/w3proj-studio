@@ -4,3 +4,6 @@ Helpers for text and string-table files (SLK, INI, `war3map.wts`, lossless strin
 binary layouts of the map files are not here: the list of every format, its codecs in Rust and
 TypeScript, its project form and its tests is in
 [crates/w3proj/formats/README.md](../../../../crates/w3proj/formats/README.md).
+
+`schemas.test.ts` here checks the JSON Schemas of the project's map JSON files
+([docs/schemas](../../../../docs/schemas/README.md)) against the format definitions, the mini-map and the corpus.

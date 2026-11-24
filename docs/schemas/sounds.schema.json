@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sounds (map/war3map.w3s.json)",
+  "description": "The project form of war3map.w3s, written by the format definition crates/w3proj/formats/sounds.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "version", "sounds"],
+  "properties": {
+    "format": { "const": "w3proj.sounds/1" },
+    "version": { "description": "1 classic, 2 with asset label and file, 3 Reforged with dialogue and facial animation", "enum": [1, 2, 3] },
+    "sounds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "file", "eaxEffect", "flags", "fadeInRate", "fadeOutRate", "volume", "pitch", "pitchVariance", "priority", "channel", "minDistance", "maxDistance", "distanceCutoff", "coneInside", "coneOutside", "coneOutsideVolume", "coneOrientation"],
+        "properties": {
+          "name": { "$ref": "#/$defs/cstring", "description": "variable name, gg_snd_<name>" },
+          "file": { "$ref": "#/$defs/cstring" },
+          "eaxEffect": { "$ref": "#/$defs/cstring", "description": "e.g. DefaultEAXON, CombatSoundsEAX, HeroAcksEAX" },
+          "flags": { "$ref": "#/$defs/u32", "description": "1 looping, 2 3D sound, 4 stop when out of range, 8 music, 16 imported" },
+          "fadeInRate": { "$ref": "#/$defs/u32" },
+          "fadeOutRate": { "$ref": "#/$defs/u32" },
+          "volume": { "$ref": "#/$defs/i32", "description": "0..127, -1 for the default" },
+          "pitch": { "$ref": "#/$defs/f32" },
+          "pitchVariance": { "$ref": "#/$defs/f32" },
+          "priority": { "$ref": "#/$defs/i32" },
+          "channel": { "$ref": "#/$defs/i32", "description": "-1 for the default" },
+          "minDistance": { "$ref": "#/$defs/f32", "description": "unset: 4294967296" },
+          "maxDistance": { "$ref": "#/$defs/f32", "description": "unset: 4294967296" },
+          "distanceCutoff": { "$ref": "#/$defs/f32", "description": "unset: 4294967296" },
+          "coneInside": { "$ref": "#/$defs/f32" },
+          "coneOutside": { "$ref": "#/$defs/f32" },
+          "coneOutsideVolume": { "$ref": "#/$defs/i32" },
+          "coneOrientation": { "type": "array", "items": { "$ref": "#/$defs/f32" }, "minItems": 3, "maxItems": 3 },
+          "variableName": { "$ref": "#/$defs/cstring", "description": "version 2 and later" },
+          "assetLabel": { "$ref": "#/$defs/cstring", "description": "version 2 and later: sound label (SLK entry), empty for a plain file" },
+          "assetFile": { "$ref": "#/$defs/cstring", "description": "version 2 and later" },
+          "dialogueTextKey": { "$ref": "#/$defs/i32", "description": "version 3: TRIGSTR id of the subtitle, -1 for none" },
+          "dialogueText": { "$ref": "#/$defs/cstring", "description": "version 3" },
+          "speakerNameKey": { "$ref": "#/$defs/i32", "description": "version 3: TRIGSTR id of the speaker's name, -1 for none" },
+          "speakerName": { "$ref": "#/$defs/cstring", "description": "version 3" },
+          "unknown1": { "$ref": "#/$defs/u32", "description": "version 3" },
+          "speakerUnitType": { "$ref": "#/$defs/cstring", "description": "version 3: unit type id (Hkal) or a script expression" },
+          "facialAnimationLabel": { "$ref": "#/$defs/cstring", "description": "version 3" },
+          "facialAnimationGroupLabel": { "$ref": "#/$defs/cstring", "description": "version 3" },
+          "facialAnimationSetFile": { "$ref": "#/$defs/cstring", "description": "version 3" },
+          "unknown2": { "$ref": "#/$defs/u32", "description": "version 3" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["version"], "properties": { "version": { "minimum": 2 } } },
+      "then": { "properties": { "sounds": { "items": { "required": ["variableName", "assetLabel", "assetFile"] } } } }
+    },
+    {
+      "if": { "required": ["version"], "properties": { "version": { "minimum": 3 } } },
+      "then": { "properties": { "sounds": { "items": { "required": ["dialogueTextKey", "dialogueText", "speakerNameKey", "speakerName", "unknown1", "speakerUnitType", "facialAnimationLabel", "facialAnimationGroupLabel", "facialAnimationSetFile", "unknown2"] } } } }
+    }
+  ],
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

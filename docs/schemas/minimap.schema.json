@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Minimap icons (map/war3map.mmp.json)",
+  "description": "The project form of war3map.mmp, written by the format definition crates/w3proj/formats/minimap.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "version", "icons"],
+  "properties": {
+    "format": { "const": "w3proj.minimap/1" },
+    "version": { "const": 0 },
+    "icons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "x", "y", "color"],
+        "properties": {
+          "type": { "$ref": "#/$defs/u32", "description": "0 gold mine, 1 neutral building, 2 player start location" },
+          "x": { "$ref": "#/$defs/u32", "description": "minimap pixel, from the left" },
+          "y": { "$ref": "#/$defs/u32", "description": "minimap pixel, from the top" },
+          "color": {
+            "type": "object",
+            "required": ["blue", "green", "red"],
+            "properties": {
+              "blue": { "$ref": "#/$defs/u8" },
+              "green": { "$ref": "#/$defs/u8" },
+              "red": { "$ref": "#/$defs/u8" },
+              "alpha": { "$ref": "#/$defs/u8", "description": "255 when missing" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

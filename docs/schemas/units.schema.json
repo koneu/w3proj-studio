@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Units (map/war3mapUnits.doo.json)",
+  "description": "The project form of war3mapUnits.doo (units, items and start locations), written by the format definition crates/w3proj/formats/units.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map). A split terrain's per-subterrain units.json has the same format tag but another shape; this schema is not for it.",
+  "type": "object",
+  "required": ["format", "magic", "version", "subversion", "units"],
+  "properties": {
+    "format": { "const": "w3proj.units/1" },
+    "magic": { "$ref": "#/$defs/id", "description": "\"W3do\"" },
+    "version": { "description": "7 Reign of Chaos, 8 The Frozen Throne to Reforged, 12 and 13 the 3.0 editor", "enum": [7, 8, 12, 13] },
+    "subversion": { "$ref": "#/$defs/u32", "description": "9 the older layout without item table and hero attributes, 11 with them" },
+    "skinIds": { "$ref": "#/$defs/variant", "description": "version 8: whether each unit has a skinId (Reforged). Missing means false." },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "variation", "position", "angle", "scale", "flags", "player", "unknown1", "unknown2", "hp", "mana", "itemSets", "gold", "targetAcquisition", "level", "inventory", "abilities", "randomType", "color", "waygate", "editorId"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "variation": { "$ref": "#/$defs/u32" },
+          "position": { "type": "array", "items": { "$ref": "#/$defs/f32" }, "minItems": 3, "maxItems": 3 },
+          "angle": { "$ref": "#/$defs/f32", "description": "radians" },
+          "scale": { "type": "array", "items": { "$ref": "#/$defs/f32" }, "minItems": 3, "maxItems": 3 },
+          "skinId": { "$ref": "#/$defs/id", "description": "version 12 and 13, and version 8 with skinIds" },
+          "preFlags": { "$ref": "#/$defs/u32", "description": "version 12 and 13" },
+          "flags": { "$ref": "#/$defs/u8" },
+          "player": { "$ref": "#/$defs/u32", "description": "low 16 bits the owner, bit 16 an Ancient placed uprooted" },
+          "unknown1": { "$ref": "#/$defs/u8" },
+          "unknown2": { "$ref": "#/$defs/u8" },
+          "hp": { "$ref": "#/$defs/i32", "description": "-1 = default" },
+          "mana": { "$ref": "#/$defs/i32", "description": "-1 = default" },
+          "itemTable": { "$ref": "#/$defs/i32", "description": "subversion 11 and later: map item table index, -1 none" },
+          "itemSets": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "chance"],
+                "properties": {
+                  "id": { "$ref": "#/$defs/id" },
+                  "chance": { "$ref": "#/$defs/u32" }
+                }
+              }
+            }
+          },
+          "gold": { "$ref": "#/$defs/u32", "description": "gold mines" },
+          "targetAcquisition": { "$ref": "#/$defs/f32", "description": "-1 normal, -2 camp" },
+          "level": { "$ref": "#/$defs/u32", "description": "heroes" },
+          "strength": { "$ref": "#/$defs/u32", "description": "subversion 11 and later" },
+          "agility": { "$ref": "#/$defs/u32", "description": "subversion 11 and later" },
+          "intelligence": { "$ref": "#/$defs/u32", "description": "subversion 11 and later" },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["slot", "id"],
+              "properties": {
+                "slot": { "$ref": "#/$defs/u32" },
+                "id": { "$ref": "#/$defs/id" }
+              }
+            }
+          },
+          "abilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "autocast", "level"],
+              "properties": {
+                "id": { "$ref": "#/$defs/id" },
+                "autocast": { "$ref": "#/$defs/u32" },
+                "level": { "$ref": "#/$defs/u32" }
+              }
+            }
+          },
+          "randomType": { "$ref": "#/$defs/u32", "description": "0 any by level, 1 from map group, 2 custom list" },
+          "randomLevel": { "type": "string", "pattern": "^[0-9a-fA-F]{6}$", "description": "randomType 0: three bytes as hex" },
+          "randomClass": { "$ref": "#/$defs/u8", "description": "randomType 0" },
+          "randomGroup": { "$ref": "#/$defs/u32", "description": "randomType 1" },
+          "randomPosition": { "$ref": "#/$defs/u32", "description": "randomType 1" },
+          "randomUnits": {
+            "description": "randomType 2",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "chance"],
+              "properties": {
+                "id": { "$ref": "#/$defs/id" },
+                "chance": { "$ref": "#/$defs/u32" }
+              }
+            }
+          },
+          "color": { "$ref": "#/$defs/i32", "description": "-1 = owner's colour" },
+          "waygate": { "$ref": "#/$defs/i32", "description": "region editor id, -1 none" },
+          "editorId": { "$ref": "#/$defs/u32" },
+          "trailer": { "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 2, "maxItems": 2, "description": "version 12 and 13, meaning unknown" },
+          "extras": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 9, "maxItems": 9 }, "description": "version 12 and 13: blocks of nine numbers, meaning unknown" }
+        },
+        "allOf": [
+          { "if": { "required": ["randomType"], "properties": { "randomType": { "const": 0 } } }, "then": { "required": ["randomLevel", "randomClass"] } },
+          { "if": { "required": ["randomType"], "properties": { "randomType": { "const": 1 } } }, "then": { "required": ["randomGroup", "randomPosition"] } },
+          { "if": { "required": ["randomType"], "properties": { "randomType": { "const": 2 } } }, "then": { "required": ["randomUnits"] } }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["subversion"], "properties": { "subversion": { "minimum": 11 } } },
+      "then": { "properties": { "units": { "items": { "required": ["itemTable", "strength", "agility", "intelligence"] } } } }
+    },
+    {
+      "if": { "required": ["version"], "properties": { "version": { "minimum": 12 } } },
+      "then": { "properties": { "units": { "items": { "required": ["skinId", "preFlags", "trailer", "extras"] } } } }
+    },
+    {
+      "if": { "required": ["version", "skinIds"], "properties": { "version": { "const": 8 }, "skinIds": { "const": true } } },
+      "then": { "properties": { "units": { "items": { "required": ["skinId"] } } } }
+    }
+  ],
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

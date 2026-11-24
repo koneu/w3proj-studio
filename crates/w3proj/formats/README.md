@@ -26,7 +26,9 @@ replaces the built-in one of the same `name`.
 
 The project keeps `format` strings of the form `w3proj.<name>/<major>` in its JSON documents. The definition engine refuses a document whose `format` differs from the definition's `jsonFormat`
 (`format/engine.rs`), and `triggers`, `terrain` and `pathing` refuse a different major version (tests in
-`trigger_layout.rs`, `terrain_layout.rs`, `terrain_pathing.rs` change `/1` to `/2` and expect a refusal). A raw JSON Schema file exists nowhere in the repository (see "Gaps").
+`trigger_layout.rs`, `terrain_layout.rs`, `terrain_pathing.rs` change `/1` to `/2` and expect a refusal). Hand-written JSON Schemas (draft 2020-12) for the project files of the ten definitions are in
+[docs/schemas](../../../docs/schemas/README.md), with a VS Code mapping; `app/src/lib/formats/schemas.test.ts` checks
+them against the definitions, the mini-map and the corpus.
 
 ## Map files, binary (Reign of Chaos to Reforged 3.0)
 
@@ -37,7 +39,7 @@ copy). The mini-map is `tests/fixtures/mini-map`.
 
 | File | Versions the code accepts | Rust | TypeScript | Project form, `format` tag | Spec / schema | Tests |
 |---|---|---|---|---|---|---|
-| `war3map.w3i` map info | 18, 25 to 39 | def `w3i.json` | none (reads the JSON) | `map/war3map.w3i.json`, `w3proj.mapinfo/1` | the definition; no schema | mini-map in `cli/tests/roundtrip.rs` `verify_finds_every_codec_at_work`; corpus 116 rows (`format:w3i`); 3 campaign chapter maps' w3i fall back to raw in the baseline (reason not looked up) |
+| `war3map.w3i` map info | 18, 25 to 39 | def `w3i.json` | none (reads the JSON) | `map/war3map.w3i.json`, `w3proj.mapinfo/1` | the definition; `docs/schemas/w3i.schema.json` (each of the ten has one) | mini-map in `cli/tests/roundtrip.rs` `verify_finds_every_codec_at_work`; corpus 116 rows (`format:w3i`); 3 campaign chapter maps' w3i fall back to raw in the baseline (reason not looked up) |
 | `war3map.doo` doodads | 7, 8, 12, 13 | def `doodads.json` | none | `map/war3map.doo.json`, `w3proj.doodads/1` | the definition | same test; corpus 128 |
 | `war3mapUnits.doo` units, items, starts | 7, 8, 12, 13 | def `units.json` | none | `map/war3mapUnits.doo.json`, `w3proj.units/1` | the definition | same test; corpus 116 |
 | `war3map.w3r` regions | 5, 7 | def `regions.json` | none | `.w3r.json`, `w3proj.regions/1` | the definition | same test; corpus 114 |
@@ -88,7 +90,7 @@ None of these has a Rust codec except the SLK reader in the CLI. They stay byte 
 
 | Gap | Facts | Suggested follow-up |
 |---|---|---|
-| **No JSON Schema** for any project JSON | `git ls-files` finds none (the only `$schema` hits are Tauri config and the extension API). `format` tags exist for the tagged documents above; field names are defined by the definitions (10 formats) or only by code (`objects`, `triggers`, `terrain`, `pathing`) | Decide whether to generate a schema from each definition (the engine already knows field names and types) and write by hand the four code-defined ones |
+| **JSON Schemas only for the ten definitions** | `docs/schemas/*.schema.json`, hand-written, kept in step with the definitions by `app/src/lib/formats/schemas.test.ts`. The code-defined project JSON (`objects`, `triggers`, `terrain`, `pathing`, the split terrain's per-subterrain object files) has none | write schemas for the code-defined ones |
 | **Layouts without a definition**: object data (w3u family), w3e, wtg, wct, wts, wai, w3o, wpm, shd, mdx, blp | hand-written Rust and/or TypeScript; their layout is documented in a header comment at best (`objdata.rs`, `w3e.rs`, `wtg.rs`, `wct.rs`, `w3o.rs`, `pathing.ts`, `shadows.ts`, `wai.ts`) | Either say "code is the spec" in this README or move the simpler ones (`wpm`, `shd`, `wai`) into definitions |
 | **Specs not in git**: `trigger-folders-spec.md`, `terrain-subterrains-spec.md` | only under local, git-ignored `openpoints/archive/` | Copy the parts that describe the stored files into `docs/` |
 | **Rust and TypeScript copies** | w3e, wtg/wct, wts and lossless text exist twice; `twin-check.mjs` compares w3e and triggers on real maps, `fragment` too. `app/scripts/wts-corpus.mjs` (Rust-vs-TS string pruning on real maps) is not named in `tests/` or TESTING.md | decide whether the gate should run it |
@@ -106,4 +108,5 @@ Short answer: no.
 - **A JSON form in the project:** for those 10, object data (`w3proj.objects/1`), the trigger tree
   (`w3proj.triggers/1`, plus `.gui.json` files), the split terrain (`w3proj.terrain/1`) and its
   objects. Terrain (flat) is text; strings, pathing, shadows, AI, models, images are raw.
-- **A JSON Schema:** none.
+- **A JSON Schema:** for the same 10, in `docs/schemas` (hand-written, tested against the definitions and the
+  corpus). Not for object data, triggers or the split terrain.

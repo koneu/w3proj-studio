@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lighting (map/war3map.w3l.json)",
+  "description": "The project form of war3map.w3l, written by the format definition crates/w3proj/formats/lights.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "magic", "version", "terrainModel", "unitModel", "terrainEnabled", "unitEnabled", "unknown"],
+  "properties": {
+    "format": { "const": "w3proj.lights/1" },
+    "magic": { "$ref": "#/$defs/id", "description": "\"W3L!\"" },
+    "version": { "const": 3 },
+    "terrainModel": { "$ref": "#/$defs/cstring", "description": "the edited terrain lighting model in the map, empty for the tileset's" },
+    "unitModel": { "$ref": "#/$defs/cstring", "description": "the edited unit lighting model in the map, empty for the tileset's" },
+    "terrainEnabled": { "$ref": "#/$defs/u32", "description": "1 when the terrain uses terrainModel" },
+    "unitEnabled": { "$ref": "#/$defs/u32", "description": "1 when units use unitModel" },
+    "unknown": { "$ref": "#/$defs/u32", "description": "0 in all samples" }
+  },
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}
