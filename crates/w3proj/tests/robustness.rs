@@ -14,7 +14,7 @@ use std::ops::Range;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, Once};
+use std::sync::{Arc, Mutex, Once, Weak};
 
 use mpq::Archive;
 use w3proj::Registry;
@@ -193,12 +193,81 @@ fn collect_panics() {
     });
 }
 
+/// The whole process's resident memory may grow to this many MB (`W3PROJ_ROBUSTNESS_MEM_MB` overrides it); past it
+/// the watchdog names the cases running then and ends the process. A case that allocates what a damaged header asks
+/// for would otherwise use up the machine's memory instead of failing (the TS hostile children have the same cap).
+const MEM_MB: u64 = 1536;
+
+/// The process's resident memory in MB, read from /proc (Linux only: elsewhere there is no cap).
+fn resident_mb() -> Option<u64> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmRSS:"))?;
+    let kb: u64 = line["VmRSS:".len()..].trim().trim_end_matches("kB").trim().parse().ok()?;
+    Some(kb / 1024)
+}
+
+/// The case each thread is running (empty between cases), for the watchdog's report. Weak: a finished thread's slot
+/// goes away with it.
+static CASES: Mutex<Vec<Weak<Mutex<String>>>> = Mutex::new(Vec::new());
+
+thread_local! {
+    /// This thread's slot in `CASES`.
+    static CASE: Arc<Mutex<String>> = {
+        let slot = Arc::new(Mutex::new(String::new()));
+        let mut cases = CASES.lock().unwrap_or_else(|e| e.into_inner());
+        cases.retain(|c| c.strong_count() > 0);
+        cases.push(Arc::downgrade(&slot));
+        slot
+    };
+    /// The loop of seeds this thread works for (`par_seeds`'s `what`), so the report names the test too.
+    static LOOP: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Starts the memory watchdog once: a thread that looks at the resident memory every 20 ms and, past the cap, prints
+/// the cases running and ends the process (a case can't be stopped from outside, and its memory is the problem).
+fn watch_memory() {
+    static WATCH: Once = Once::new();
+    WATCH.call_once(|| {
+        if resident_mb().is_none() {
+            return;
+        }
+        let limit = env_u64("W3PROJ_ROBUSTNESS_MEM_MB").unwrap_or(MEM_MB);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let Some(mb) = resident_mb() else { continue };
+            if mb <= limit {
+                continue;
+            }
+            let running: Vec<String> = CASES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .filter_map(Weak::upgrade)
+                .map(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                .filter(|case| !case.is_empty())
+                .collect();
+            // Straight to stderr: eprintln! in a thread a test started goes to the test's captured output, which the
+            // exit below throws away.
+            let report = format!("robustness: {mb} MB resident, over the cap of {limit} MB; the cases running then:\n  {}\n", running.join("\n  "));
+            std::io::Write::write_all(&mut std::io::stderr(), report.as_bytes()).ok();
+            fs::remove_dir_all(tmp_dir()).ok();
+            std::process::exit(1);
+        });
+    });
+}
+
 /// Runs `body` and records a panic under `what`.
 fn guarded(failures: &mut BTreeMap<String, String>, what: impl Fn() -> String, body: impl FnOnce()) {
     collect_panics();
+    watch_memory();
+    CASE.with(|slot| *slot.lock().unwrap_or_else(|e| e.into_inner()) = LOOP.with_borrow(|l| format!("{l}: {}", what())));
     GUARDED.set(true);
     let result = catch_unwind(AssertUnwindSafe(body));
     GUARDED.set(false);
+    CASE.with(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).clear());
     if result.is_err() {
         let message = SEEN.with_borrow_mut(|seen| seen.pop()).unwrap_or_default();
         // The same bug is met by many seeds: keep the first of each.
@@ -258,12 +327,15 @@ fn par_seeds<A: Send>(what: &str, seeds: Range<u64>, work: impl Fn(&Chunk) -> A 
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(starts.len());
     std::thread::scope(|scope| {
         for _ in 0..threads {
-            scope.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some(&start) = starts.get(i) else { return };
-                let chunk = Chunk { range: start..(start + CHUNK).min(seeds.end), count: Cell::new(0), hash: Cell::new(0) };
-                let made = work(&chunk);
-                done.lock().unwrap()[i] = Some((made, chunk.count.get(), chunk.hash.get()));
+            scope.spawn(|| {
+                LOOP.with_borrow_mut(|l| what.clone_into(l));
+                loop {
+                    let i = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(&start) = starts.get(i) else { return };
+                    let chunk = Chunk { range: start..(start + CHUNK).min(seeds.end), count: Cell::new(0), hash: Cell::new(0) };
+                    let made = work(&chunk);
+                    done.lock().unwrap()[i] = Some((made, chunk.count.get(), chunk.hash.get()));
+                }
             });
         }
     });
@@ -806,4 +878,37 @@ fn wts_pruning_survives_damaged_files() {
     if !single_seed() {
         assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} pruned, {rejected} kept");
     }
+}
+
+/// The memory watchdog's own test: this test program run again with `W3PROJ_ROBUSTNESS_HOG` set, where one case
+/// allocates twice a low cap (as a header's size taken at its word does) and then waits. The watchdog must end that
+/// run and name the case; without it the run passes.
+#[cfg(target_os = "linux")]
+#[test]
+fn memory_watchdog_names_the_case() {
+    const CAP_MB: u64 = 128;
+    if std::env::var_os("W3PROJ_ROBUSTNESS_HOG").is_some() {
+        par_seeds("hog", 0..1, |chunk| {
+            let mut found = Found::default();
+            for seed in chunk.seeds() {
+                guarded(&mut found.failures, || format!("allocating, seed {seed}"), || {
+                    let held: Vec<Vec<u8>> = (0..2 * CAP_MB).map(|_| vec![1u8; 1 << 20]).collect();
+                    std::hint::black_box(&held);
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                });
+            }
+            found
+        });
+        return;
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["memory_watchdog_names_the_case", "--exact", "--test-threads=1"])
+        .env("W3PROJ_ROBUSTNESS_HOG", "1")
+        .env("W3PROJ_ROBUSTNESS_MEM_MB", CAP_MB.to_string())
+        .env_remove("W3PROJ_ROBUSTNESS_SEED")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "the allocating case ran to its end: no watchdog\n{stderr}");
+    assert!(stderr.contains(&format!("over the cap of {CAP_MB} MB")) && stderr.contains("hog: allocating, seed 0"), "the report names the cap and the case:\n{stderr}");
 }
