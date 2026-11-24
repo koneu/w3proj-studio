@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
-import { checkFresh, newestSource, staleAllowed, takeAllowStale } from "../../tests/binfresh.mjs";
+import { checkFresh, commitFingerprint, newestSource, sourceFingerprint, writeStamp, staleAllowed, takeAllowStale } from "../../tests/binfresh.mjs";
 import { scratchDir } from "../../tests/scratch.mjs";
 
 // [Refactored] Share a single git repository across the test file instead of running `git init` + `git add` 9 separate times.
@@ -129,4 +129,30 @@ test("a generator importing binfresh sees its positional arguments without --all
   const run = (...a) => JSON.parse(execFileSync(process.execPath, [script, ...a], { encoding: "utf8", env: { ...process.env, W3_ALLOW_STALE: "" } }));
   assert.deepEqual(run("--allow-stale", "cli", "game"), [["cli", "game"], true]);
   assert.deepEqual(run("cli", "game"), [["cli", "game"], false]);
+});
+
+// A binary stamped with the content of its sources stays fresh when only mtimes differ (fresh checkout, touch), and is
+// stale again once a source really changes.
+test("a stamped binary survives touched-but-unchanged sources and is stale after a real edit", () => {
+  shared.resetTimes();
+  const { root } = shared;
+  const bin = join(root, "stamped");
+  writeFileSync(bin, "");
+  utimesSync(bin, 500, 500);
+  assert.throws(() => checkFresh(bin, { root }), /older than/, "control: no stamp");
+  writeStamp(bin, "cli", sourceFingerprint(root, "cli"));
+  assert.equal(checkFresh(bin, { root }), bin);
+  const lib = join(root, "crates", "x", "lib.rs");
+  writeFileSync(lib, "changed");
+  try {
+    assert.throws(() => checkFresh(bin, { root }), /older than crates\/x\/lib\.rs/);
+  } finally {
+    writeFileSync(lib, "");
+    utimesSync(lib, 1000, 1000);
+  }
+  assert.equal(checkFresh(bin, { root }), bin);
+  // The fingerprint of a commit equals the working tree's when they hold the same contents.
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  assert.equal(commitFingerprint(root, "cli", head), sourceFingerprint(root, "cli"));
+  assert.notEqual(sourceFingerprint(root, "cli"), sourceFingerprint(root, "app"));
 });
