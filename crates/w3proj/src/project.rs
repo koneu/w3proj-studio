@@ -502,7 +502,7 @@ fn split_triggers(files: &mut BTreeMap<String, Vec<u8>>, report: &mut UnpackRepo
         (Some(_), None) => Err(format!("the map has no {}", tl::WCT)),
         (None, Some(_)) => Err(format!("the map has no {}", tl::WTG)),
         (Some(wtg), Some(wct)) => {
-            if let Some(own) = files.keys().find(|k| k.to_ascii_lowercase().starts_with(&format!("{}/", tl::DIR))) {
+            if let Some(own) = tl::FOLDER.first_in(files) {
                 Err(format!("the map has a file of its own under {}\\ ({own})", tl::DIR))
             } else {
                 match codecs.trigger_data() {

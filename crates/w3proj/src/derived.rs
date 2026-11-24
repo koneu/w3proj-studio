@@ -365,10 +365,9 @@ pub fn script_sources(project: &Path) -> Result<Sources> {
         let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{MAP_DIR}/{name} can't be read: {e}")))?;
         out.insert(name, fingerprint(&bytes));
     }
-    for dir in [crate::trigger_layout::DIR, crate::terrain_layout::DIR] {
-        for rel in crate::project::walk(&map.join(dir))? {
-            let path = format!("{dir}/{rel}");
-            let bytes = fs::read(crate::paths::join_rel(&map, &path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+    for folder in [crate::trigger_layout::FOLDER, crate::terrain_layout::FOLDER] {
+        for path in folder.paths(&map)? {
+            let bytes = crate::folder_codec::read(&map, &path)?;
             out.insert(path, fingerprint(&bytes));
         }
     }

@@ -30,6 +30,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::codec::Registry;
+use crate::folder_codec::Folder;
 use crate::triggerdata::TriggerData;
 use crate::wct::{self, Wct};
 use crate::wtg::{self, Category, Count, Eca, Element, Item, Trigger, TriggerFile, Variable};
@@ -37,6 +38,8 @@ use crate::{Error, Result};
 
 /// The layout's folder under `map/`.
 pub const DIR: &str = "triggers";
+/// The layout's folder (`crate::folder_codec`: the file layer the split terrain uses too).
+pub const FOLDER: Folder = Folder::new(DIR);
 /// The layout's root file, relative to `map/`.
 pub const ROOT_FILE: &str = "triggers/triggers.json";
 const PREFIX: &str = "triggers/";
@@ -1643,7 +1646,7 @@ pub fn is_layout(files: &BTreeMap<String, Vec<u8>>, raw: &[String]) -> bool {
 
 /// Whether a project path is the layout's (below `map/triggers/`).
 pub fn is_layout_path(path: &str) -> bool {
-    path.starts_with(PREFIX)
+    FOLDER.holds_exact(path)
 }
 
 /// Errs on a GUI function the game's TriggerData doesn't know, or one given another number of parameters than it
@@ -1830,13 +1833,7 @@ pub fn set_script_mode(project: &Path, mode: ScriptMode) -> Result<ModeChange> {
 
 /// The layout's files on disk (keys relative to `map/`); none without `map/triggers/`. One that can't be read is an error.
 pub fn read_disk(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
-    let mut out = BTreeMap::new();
-    for rel in crate::project::walk(&map_dir.join(DIR))? {
-        let path = format!("{PREFIX}{rel}");
-        let bytes = std::fs::read(crate::paths::join_rel(map_dir, &path)).map_err(|e| Error::Project(format!("map/{path} can't be read: {e}")))?;
-        out.insert(path, bytes);
-    }
-    Ok(out)
+    FOLDER.read_disk(map_dir)
 }
 
 /// The map script of project files (relative to `map/`): its name and bytes.
