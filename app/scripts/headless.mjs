@@ -10,8 +10,9 @@
 // Bundling first means the CLI never runs older code than the checkout's: no step to forget after a change.
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { pruneBundles } from "./headless-prune.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -52,6 +53,8 @@ if (args[0] === "--out") {
   const hash = createHash("sha256").update(text).digest("hex").slice(0, 16);
   const file = join(app, "..", "target", "headless", `w3proj-headless-${hash}.mjs`);
   if (!existsSync(file)) writeWhole(file, text);
+  else utimesSync(file, new Date(), new Date()); // in use now: other runs' pruning keeps it
+  pruneBundles(dirname(file), basename(file));
   // The bundle reads its job from process.argv[2], which is this script's own argument.
   await import(pathToFileURL(file).href);
 } else {
