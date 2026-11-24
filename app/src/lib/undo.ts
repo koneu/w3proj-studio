@@ -22,6 +22,40 @@ export class StackSave {
   pushed(depth: number) { if (this.at > depth - 1) this.at = -1; }
 }
 
+/** Undo/redo of an editor that keeps whole states of its own (objects, not strings): `push` the state before each
+ *  change; one push is one step, whatever changed. Dirty is "the depth differs from the saved one" (StackSave), so an
+ *  edit made while a save writes stays unsaved, and so does an undo or redo meanwhile. */
+export class StateStack<T> {
+  private undos: T[] = [];
+  private redos: T[] = [];
+  private mark = new StackSave();
+
+  /** Records `before`, the state as it was before a change, as one step; the redo steps are dropped. */
+  push(before: T) {
+    this.undos.push(before);
+    this.redos = [];
+    this.mark.pushed(this.undos.length);
+  }
+  /** The state the next undo (or redo) would go back to, without moving. */
+  peek(step: "undo" | "redo"): T | undefined { return (step === "undo" ? this.undos : this.redos).at(-1); }
+  /** Takes the next undo (or redo) state; `current(next)` is the state now, kept for the way back. Undefined (and
+   *  nothing moves) when there is no step. */
+  move(step: "undo" | "redo", current: (next: T) => T): T | undefined {
+    const [from, to] = step === "undo" ? [this.undos, this.redos] : [this.redos, this.undos];
+    const next = from.pop();
+    if (next === undefined) return undefined;
+    this.mark.moved();
+    to.push(current(next));
+    return next;
+  }
+  /** The point the next save writes; `saved` with it once written. */
+  take() { return this.mark.take(this.undos.length); }
+  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); }
+  get dirty(): boolean { return this.undos.length !== this.mark.at; }
+  get canUndo(): boolean { return this.undos.length > 0; }
+  get canRedo(): boolean { return this.redos.length > 0; }
+}
+
 export class History {
   private undoStack: string[] = [];
   private redoStack: string[] = [];

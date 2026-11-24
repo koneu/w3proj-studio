@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { StackSave } from "../../lib/undo";
+import { StateStack } from "../../lib/undo";
 import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
@@ -177,9 +177,7 @@ interface State { text: string; texts: Map<number, string> }
 class SettingsView {
   private query = "";
   private changedOnly = false;
-  private undoStack: State[] = [];
-  private redoStack: State[] = [];
-  private mark = new StackSave();
+  private history = new StateStack<State>();
   /** Edited texts of war3map.wts (written on save). */
   private texts = new Map<number, string>();
   private folded = new Set<string>();
@@ -198,15 +196,14 @@ class SettingsView {
       const t = e.target as HTMLElement;
       if ((t instanceof HTMLInputElement && t.type !== "checkbox") || t instanceof HTMLTextAreaElement) return;
       const step = undoStepOf(w3.keybindings.commandsFor(e));
-      if (step === "undo") { this.step(this.undoStack, this.redoStack); e.preventDefault(); }
-      else if (step === "redo") { this.step(this.redoStack, this.undoStack); e.preventDefault(); }
+      if (step) { this.step(step); e.preventDefault(); }
     });
     this.render();
   }
 
   /** What the next save writes is of this point; `saved` with it once written (edits meanwhile stay unsaved). */
-  take() { return this.mark.take(this.undoStack.length); }
-  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.setDirty(this.undoStack.length !== this.mark.at); }
+  take() { return this.history.take(); }
+  saved(taken: ReturnType<StateStack<State>["take"]>) { this.history.saved(taken); this.setDirty(this.history.dirty); }
   /** Before a save: a text with a `}` would be cut by the game, and there is no way to keep it: the save stops with
    *  the reason, nothing changed. */
   async checkCuts() {
@@ -228,23 +225,20 @@ class SettingsView {
 
   private change(fn: () => void) {
     if (!this.editable) return;
-    this.undoStack.push({ text: this.text, texts: new Map(this.texts) });
-    this.redoStack = [];
-    this.mark.pushed(this.undoStack.length);
+    this.history.push(this.state());
     fn();
-    this.setDirty(this.undoStack.length !== this.mark.at);
+    this.setDirty(this.history.dirty);
     this.render();
   }
-  undo() { this.step(this.undoStack, this.redoStack); }
-  redo() { this.step(this.redoStack, this.undoStack); }
-  private step(from: State[], to: State[]) {
-    const s = from.pop();
+  private state(): State { return { text: this.text, texts: new Map(this.texts) }; }
+  undo() { this.step("undo"); }
+  redo() { this.step("redo"); }
+  private step(dir: "undo" | "redo") {
+    const s = this.history.move(dir, () => this.state());
     if (!s) return;
-    this.mark.moved();
-    to.push({ text: this.text, texts: new Map(this.texts) });
     this.text = s.text;
     this.texts = s.texts;
-    this.setDirty(this.undoStack.length !== this.mark.at);
+    this.setDirty(this.history.dirty);
     this.render();
   }
 

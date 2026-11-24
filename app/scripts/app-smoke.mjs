@@ -8640,6 +8640,15 @@ async function typedFieldSave(page, found) {
     if (meleeBefore) {
       await until("the Melee flag off", () => meleeFlag() === 0, 10000).catch(() => fail("a map with custom gameplay constants saved is still a melee map"));
     }
+    // Undo after the save takes the typed value back and leaves the tab unsaved; redo brings the saved state back,
+    // clean again (game-settings/index.ts on lib/undo StateStack).
+    const speedShown = () => page.evaluate(`(${speed})?.value ?? null`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the undone speed", async () => (await speedShown()) !== "432", 5000).catch(async () => fail(`Undo after the save still shows Max Unit Speed ${lit(await speedShown())}`));
+    if (!(await dirty(miscPath))) fail("Undo after saving Gameplay Constants left the tab without unsaved changes");
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await until("the redone speed", async () => (await speedShown()) === "432", 5000).catch(async () => fail(`Redo after the undo shows Max Unit Speed ${lit(await speedShown())}, not 432`));
+    if (await dirty(miscPath)) fail("Redo back to the saved Gameplay Constants left the tab unsaved");
 
     // ---- The Sound Editor: a sound's volume ----
     const w3s = "map/war3map.w3s.json";
