@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertInTable, checkFloors, runShell } from "../../tests/gate-lib.mjs";
+import { assertInTable, checkFloors, missingDeps, runShell } from "../../tests/gate-lib.mjs";
 
 // The tests run bundled elsewhere, so the repository is found from app/, where `npm test` starts.
 const repo = join(process.cwd(), "..");
@@ -155,4 +155,18 @@ test("the gate's own steps are all in its table (gate.mjs refuses to start other
   assert.ok(ids.length > 10);
   assert.doesNotThrow(() => assertInTable(ids.map((id) => ({ id })), table));
   assert.match(src, /assertInTable\(steps, table\)/);
+});
+
+test("missingDeps: a worktree without node_modules gets one line telling to run npm ci", () => {
+  const msg = missingDeps(join(base, "no-such-app"));
+  assert.match(msg, /npm ci/);
+  assert.equal(msg.includes("\n"), false);
+});
+
+test("missingDeps: a half-installed node_modules is named, a complete one passes", () => {
+  const onlyVite = (p) => /vite(\.cmd)?$/.test(p);
+  assert.match(missingDeps("/x/app", onlyVite), /tsc/);
+  assert.equal(missingDeps("/x/app", () => true), null);
+  // The real checkout this test runs from has its dependencies.
+  assert.equal(missingDeps(process.cwd()), null);
 });

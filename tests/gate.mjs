@@ -36,7 +36,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
-import { assertInTable, checkFloors, installSignalHandlers, killTree, runShell } from "./gate-lib.mjs";
+import { assertInTable, checkFloors, installSignalHandlers, killTree, missingDeps, runShell } from "./gate-lib.mjs";
 import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
@@ -52,6 +52,14 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(repo, "app");
 const exe = process.platform === "win32" ? ".exe" : "";
 const args = process.argv.slice(2);
+
+// A new git worktree has no app/node_modules: every step would fail with its own confusing error.
+const depsProblem = missingDeps(app);
+if (depsProblem) {
+  console.error(`gate: ${depsProblem}`);
+  console.log("GATE_EXIT=1");
+  process.exit(1);
+}
 
 /** The main checkout, also from a git worktree: that's where the ignored maps are. */
 function mainCheckout() {

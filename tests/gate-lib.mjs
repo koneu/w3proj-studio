@@ -2,7 +2,8 @@
 // a command with a timeout, ending its tree, the signal handlers, the coverage floors, the step table.
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
+import { join } from "node:path";
 
 /** The pids below `root` (POSIX, from `ps`); empty when `ps` is unavailable. */
 function descendants(root) {
@@ -116,4 +117,12 @@ export function checkFloors(areas, floors, say, updating = false) {
 /** A step missing from the table would be run but left out of the result. */
 export function assertInTable(steps, table) {
   for (const s of steps) if (!table.includes(s.id)) throw new Error(`gate: step "${s.id}" is not in the table`);
+}
+
+/** What a missing or half-installed app/node_modules looks like: one line to say, or null when it's complete enough. */
+export function missingDeps(appDir, exists = existsSync) {
+  const bin = join(appDir, "node_modules", ".bin");
+  const need = process.platform === "win32" ? ["vite.cmd", "tsc.cmd"] : ["vite", "tsc"];
+  const lacking = need.filter((n) => !exists(join(bin, n)));
+  return lacking.length === 0 ? null : `app/node_modules is missing or incomplete (no ${lacking.join(", ")}): run \`npm ci\` in app/ (also in every new git worktree), then run the gate again`;
 }
