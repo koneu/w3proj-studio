@@ -53,3 +53,37 @@ test("SOUND_LIMITS agree with every Sound Properties value recorded from the Wor
     for (const v of [min - step, max + step]) assert.ok("refused" in soundNumber(kinds[field], String(v), field, { min, max }), `${field} ${v}`);
   }
 });
+
+test("Sound Editor: the stored result and the refusal text of each field type", () => {
+  // stored results: leading zeros dropped, -0 stored as +0, fractions kept exactly as typed
+  assert.deepEqual(soundNumber("f32", "007.50", "Pitch"), { value: 7.5 });
+  assert.ok(Object.is((soundNumber("f32", "-0.0", "Pitch") as { value: number }).value, 0));
+  assert.ok(Object.is((soundNumber("u32", "-0", "Fade in rate") as { value: number }).value, 0));
+  assert.deepEqual(soundNumber("f32", "0.1", "Pitch", SOUND_LIMITS.pitch), { value: 0.1 });
+  assert.deepEqual(soundNumber("f32", "2", "Pitch", SOUND_LIMITS.pitch), { value: 2 });
+  assert.deepEqual(soundNumber("i32", "-2147483648", "Priority"), { value: -2147483648 });
+  assert.deepEqual(soundNumber("i32", "2147483647", "Priority"), { value: 2147483647 });
+  // a fraction ending in zeros is a fraction in a whole field; a comma decimal isn't understood
+  assert.ok("refused" in soundNumber("i32", "5.0", "Priority"));
+  assert.ok("refused" in soundNumber("f32", "0,5", "Pitch", SOUND_LIMITS.pitch));
+  assert.ok("refused" in soundNumber("u32", "4294967296", "Fade out rate"));
+  assert.ok("refused" in soundNumber("i32", "-2147483649", "Priority"));
+  // past the largest float, either way; the largest itself is fine
+  assert.ok("refused" in soundNumber("f32", "350000000000000000000000000000000000000", "Min distance"));
+  assert.ok("refused" in soundNumber("f32", "-350000000000000000000000000000000000000", "Min distance"));
+  assert.deepEqual(soundNumber("f32", "-100", "Min distance"), { value: -100 });
+  // limits are inclusive, refuse on both sides, and a refused limit text names the range
+  const lim = SOUND_LIMITS.pitch;
+  assert.ok("refused" in soundNumber("f32", "0.09", "Pitch", lim));
+  assert.ok("refused" in soundNumber("f32", "2.01", "Pitch", lim));
+  assert.equal((soundNumber("f32", "3", "Pitch", lim) as { refused: string }).refused, "Pitch must be a number from 0.1 to 2.");
+  assert.equal((soundNumber("u32", "0", "Fade in rate", SOUND_LIMITS.fadeInRate) as { refused: string }).refused, "Fade in rate must be a whole number from 1 to 127.");
+  // a form error inside the limits is refused too, with the same range text
+  assert.equal((soundNumber("i32", " 5", "Volume", SOUND_LIMITS.volume) as { refused: string }).refused, "Volume must be a whole number from 0 to 127.");
+  // only one limit given: the other end is the type's
+  assert.equal((soundNumber("u32", "-1", "Fade in rate", { max: 10 }) as { refused: string }).refused, "Fade in rate must be a whole number from 0 to 10.");
+  assert.deepEqual(soundNumber("i32", "-5", "Priority", { max: 10 }), { value: -5 });
+  // a limit that is in negative: the stored number keeps its sign
+  assert.deepEqual(soundNumber("i32", "-1", "Outside cone volume", { min: -1, max: 127 }), { value: -1 });
+  assert.ok("refused" in soundNumber("i32", "-2", "Outside cone volume", { min: -1, max: 127 }));
+});
