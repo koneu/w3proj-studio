@@ -490,7 +490,8 @@ enum Cmd {
     /// war3campaign.wts aren't pruned). Unless a map has "Modify ally priorities" on, its user
     /// players get the ally priorities in war3map.w3i the World Editor's save works out from their
     /// start locations. A map script W3Proj Studio wrote last is made again first (see
-    /// --keep-script), so it follows them.
+    /// --keep-script), so it follows them; a map with no script at all gets one written into
+    /// map/ first, as the app's packing does (the game can't run a map without one).
     Pack {
         project: PathBuf,
         /// Output map; defaults to [pack].output or build/<folder>.w3x.
@@ -520,7 +521,7 @@ enum Cmd {
         /// packs it as it is even when it doesn't (a missing script still stops the pack). Not for a release.
         #[arg(long)]
         allow_stale_script: bool,
-        /// Pack the map script as the project has it. Without it, a script that is the one W3Proj
+        /// Pack the map script as the project has it (a map without one is packed without one). Without it, a script that is the one W3Proj
         /// Studio wrote last is made again from the project's files first, as `w3proj rebuild
         /// --only script` makes it (so it follows changed players, start locations and ally
         /// priorities); a script edited by hand or from the World Editor stays as it is anyway.
@@ -898,11 +899,13 @@ fn run(cli: Cli) -> Result<ExitCode> {
             // allies.rs's check of it warns when its priorities aren't those.
             if !keep_script && game != "none" {
                 for (at, dir) in packed_projects(&project) {
-                    if let rebuild::PackScript::NotMade(why) = rebuild::script_for_pack(&dir, &at, &game, &extra) {
-                        eprintln!(
+                    match rebuild::script_for_pack(&dir, &at, &game, &extra) {
+                        rebuild::PackScript::NotMade(why) => eprintln!(
                             "warning: {at}map script not made again ({why}): packed as the project has it, so it may not follow \
                              the players, start locations and ally priorities of war3map.w3i (--keep-script packs it as it is without trying)"
-                        );
+                        ),
+                        rebuild::PackScript::NoneMade(why) => eprintln!("warning: {at}the map has no script and none could be made ({why})"),
+                        _ => {}
                     }
                 }
             }
