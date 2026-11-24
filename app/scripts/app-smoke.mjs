@@ -17343,6 +17343,7 @@ async function run() {
         editDuringSave,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
+        editorUndoStacks,
         floatingDoodads,
         flyingHeights,
         gameReadsOnce,
@@ -17872,6 +17873,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "campaignFieldFocus", found);
   await startDeleteUndo(page, found).catch((e) => found.push(`start delete and undo: ${e.message}`));
   await leftOpen(page, "startDeleteUndo", found);
+  await editorUndoStacks(page, found).catch((e) => found.push(`editor undo stacks: ${e.message}`));
+  await leftOpen(page, "editorUndoStacks", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
   await leftOpen(page, "contextLoss", found);
 }
@@ -18104,6 +18107,111 @@ async function campaignFieldFocus(page, found) {
 /** A start location of a real map (cliff.w3m), clicked in the terrain view, Delete, Ctrl+Z: the start is back with the same
  *  position, player and preview, and the saved files are as before. Twice: with its model loaded, and as a stray (the model
  *  file in the project is not a model, so the start has no model to draw). */
+/** The undo histories of the Object Editor and the Trigger Editor, as the user meets them (characterization: their
+ *  stacks moved onto lib/undo with the same behaviour). Object Editor: one step per change, a change that changes nothing
+ *  is none, a new change drops the redo steps, 200 states kept (the oldest go), unsaved judged by content against what
+ *  was saved (undoing back to it, or typing the saved value again, is saved). Trigger Editor: one step per change, no
+ *  limit, unsaved judged by the step the save was at (the same content reached by another step is unsaved). */
+async function editorUndoStacks(page, found) {
+  const fail = (what) => found.push(`editor undo stacks: ${what}`);
+  try {
+    const k = await heightKit(page, "UndoStacks");
+    const W3U = "map/war3map.w3u.json";
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.workspace.writeText(${lit(W3U)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ id: "h000", base: "hfoo", mods: [{ field: "unam", type: "string", value: "Orig" }] }] }))`);
+    await page.evaluate(`w3.workspace.refresh()`);
+    const dirty = (path) => page.evaluate(`w3.editors.isDirty(${lit(path)})`);
+    // ---- Object Editor ----
+    const name = () => page.evaluate(`(async () => (await w3.services.get("w3.objects")).liveObjects().get("w3u")?.names.get("h000") ?? null)()`);
+    const rename = (to) => page.evaluate(`w3.commands.execute("w3.objectEditor.objectAction", "w3u", "h000", "rename", ${lit(to)}).then(() => null, (e) => String(e))`);
+    // Undo and Redo as the Edit menu and the command palette run them (workbench.undo / workbench.redo).
+    const steps = (what, n) => page.evaluate(`(async () => { for (let i = 0; i < ${n}; i++) await w3.commands.execute("workbench.${what}"); })()`);
+    await page.evaluate(`w3.editors.open(${lit(W3U)})`);
+    // Renaming needs the game data: retried until the editor has it.
+    await until("the Object Editor with its game data", async () => (await rename("A")) === null, 60000);
+    await settled(page);
+    if (await name() !== "A") return fail(`the rename gave ${lit(await name())} (control)`);
+    await rename("B");
+    await rename("B"); // changes nothing: no step
+    await steps("undo", 1);
+    if (await name() !== "A") fail(`Object Editor: one undo after A, B and B again gave ${lit(await name())} (a change that changes nothing was a step)`);
+    await steps("undo", 1);
+    if (await name() !== "Orig") fail(`Object Editor: two undos gave ${lit(await name())}`);
+    if (await dirty(W3U)) fail("Object Editor: undone back to the file's content, the tab is unsaved");
+    await steps("undo", 3);
+    if (await name() !== "Orig") fail(`Object Editor: undo past the first state gave ${lit(await name())}`);
+    await steps("redo", 5);
+    if (await name() !== "B") fail(`Object Editor: redoing all gave ${lit(await name())}`);
+    if (!(await dirty(W3U))) fail("Object Editor: after redo the tab isn't unsaved");
+    await k.save();
+    if (await dirty(W3U)) fail("Object Editor: unsaved after the save");
+    await rename("C");
+    if (!(await dirty(W3U))) fail("Object Editor: a rename after the save isn't unsaved");
+    await rename("B");
+    if (await dirty(W3U)) fail("Object Editor: renamed back to the saved name (a new step), the tab is unsaved (unsaved is by content)");
+    await steps("undo", 1);
+    if (await name() !== "C" || !(await dirty(W3U))) fail(`Object Editor: undo of the rename back gave ${lit(await name())}, unsaved ${await dirty(W3U)}`);
+    await rename("D");
+    await steps("redo", 1);
+    if (await name() !== "D") fail(`Object Editor: a new change kept a redo step (${lit(await name())})`);
+    // 205 more states: 200 kept, the oldest reachable one is the sixth of them.
+    for (let i = 0; i < 205; i++) await rename(`n${i}`);
+    await steps("undo", 300);
+    if (await name() !== "n5") fail(`Object Editor: undoing all after 205 renames gave ${lit(await name())}, not n5 (200 states kept)`);
+    await steps("redo", 300);
+    if (await name() !== "n204") fail(`Object Editor: redoing all gave ${lit(await name())}`);
+    await k.save();
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Trigger Editor ----
+    const TRIG = "map/triggers";
+    const enabled = () => page.evaluate(`(async () => (await w3.services.get("w3.triggers")).liveTriggers()?.items.find((i) => i.name === "Melee Initialization")?.enabled ?? null)()`);
+    const toggle = () => k.run("w3.triggers.toggleTriggerEnabled");
+    const trigSteps = steps;
+    const tdirty = () => page.evaluate(`w3.editors.unsavedPaths().some((p) => p.toLowerCase().startsWith("map/triggers") || p.toLowerCase().endsWith(".wtg"))`);
+    if (await k.run("w3.triggers.reveal", "Melee Initialization")) return fail("the new map has no Melee Initialization trigger (control)");
+    await until("the Trigger Editor", () => page.evaluate(`(async () => (await w3.services.get("w3.triggers")).liveTriggers() !== null)()`), 30000);
+    await settled(page);
+    const on = await enabled();
+    if (on !== true) return fail(`Melee Initialization is enabled ${lit(on)} (control)`);
+    const err = await toggle();
+    if (err) return fail(`Toggle Trigger Enabled: ${err}`);
+    await toggle();
+    if (await enabled() !== true) fail("Trigger Editor: two toggles didn't give the trigger back enabled (control)");
+    if (!(await tdirty())) fail("Trigger Editor: two toggles back to the file's content left the tab saved (unsaved is by step, not content)");
+    await trigSteps("undo", 1);
+    if (await enabled() !== false) fail("Trigger Editor: one undo of two toggles didn't give it disabled");
+    await trigSteps("undo", 3);
+    if (await enabled() !== true || await tdirty()) fail(`Trigger Editor: undoing all gave enabled ${await enabled()}, unsaved ${await tdirty()}`);
+    await trigSteps("redo", 1);
+    if (await enabled() !== false || !(await tdirty())) fail(`Trigger Editor: one redo gave enabled ${await enabled()}, unsaved ${await tdirty()}`);
+    await k.save();
+    if (await tdirty()) fail("Trigger Editor: unsaved after the save");
+    await trigSteps("undo", 1);
+    if (!(await tdirty())) fail("Trigger Editor: an undo past the save isn't unsaved");
+    await trigSteps("redo", 1);
+    if (await tdirty()) fail("Trigger Editor: redone back to the saved step, the tab is unsaved");
+    // Undo, then the same change as a new step: the same content as saved, but another step.
+    await trigSteps("undo", 1);
+    await toggle();
+    if (await enabled() !== false) fail("Trigger Editor: the toggle after the undo didn't disable it (control)");
+    if (!(await tdirty())) fail("Trigger Editor: the saved content reached by a new step left the tab saved (unsaved is by step)");
+    await trigSteps("redo", 1);
+    if (await enabled() !== false) fail("Trigger Editor: a new change kept a redo step");
+    await k.save();
+    // 201 steps from the saved one: all undoable (no limit), back to the saved step.
+    for (let i = 0; i < 201; i++) await toggle();
+    await trigSteps("undo", 201);
+    if (await tdirty()) fail("Trigger Editor: 201 undos after 201 toggles didn't reach the saved step (a step limit?)");
+    await trigSteps("redo", 201);
+    if (await enabled() !== true || !(await tdirty())) fail(`Trigger Editor: redoing 201 toggles gave enabled ${await enabled()}, unsaved ${await tdirty()}`);
+    await k.save();
+    await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 async function startDeleteUndo(page, found) {
   try {
   const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
