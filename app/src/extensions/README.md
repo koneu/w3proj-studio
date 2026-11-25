@@ -7,7 +7,7 @@ The host that loads and runs extensions. Built-ins live in `../builtin/<name>/`;
 - `graph.ts`: which extensions rest on which (from `extensionDependencies`).
 - `services.ts`: typed services extensions offer each other (`w3.mcpEdits`, `w3.objects`, `w3.terrain`, `w3.triggers`, ...).
 - `mcp.ts`: the MCP tool registry; tools are declared in manifests and listed without loading their extension.
-- `lib.ts`: `await w3.lib()`, the parsers, writers and checks for extensions without a build step.
+- `lib.ts`: `await w3.lib()`, the parsers, writers and checks for extensions without a build step, and `keys.keyOf` (the key of a keyboard event for shortcuts, which also names WebKitGTK's "Unidentified" chords; use it instead of `e.key`).
 - `colortools.ts`: colour-tag toolbar and preview for text fields.
 
 Every built-in folder has a README.md; `npm run check` fails when one lacks it.
