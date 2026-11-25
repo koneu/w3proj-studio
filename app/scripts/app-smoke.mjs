@@ -3110,6 +3110,46 @@ async function objectEditorColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** A war3map.wts in an old map's code page (not UTF-8: GBK and CP949 bytes here, as Chinese and Korean maps have): the
+ *  Object Editor shows its strings as lossless text (lib/formats/lossless.ts) instead of their TRIGSTR keys, and an edit of
+ *  one writes that string's bytes and keeps every other byte of the file (lib/formats/wts.ts readWts, writeWts). */
+async function codePageStrings(page, found) {
+  const fail = (what) => found.push(`code page string table: ${what}`);
+  try {
+    const k = await heightKit(page, "CodePageWts");
+    const wtsFile = join(k.root, "map", "war3map.wts");
+    const enc = (s) => [...Buffer.from(s, "utf8")];
+    const gbk = [0xd6, 0xd0, 0xce, 0xc4], cp949 = [0xc7, 0xd1, 0xb1, 0xb9];
+    const head = [...readFileSync(wtsFile)];
+    const block = (n, text) => [...enc(`STRING ${n}\r\n{\r\n`), ...text, ...enc("\r\n}\r\n\r\n")];
+    const bytes = [...head, ...block(7, gbk), ...block(8, [...enc("Ork "), ...cp949])];
+    await page.evaluate(`w3.workspace.writeBytes("map/war3map.wts", new Uint8Array(${lit(bytes)}))`);
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: "TRIGSTR_007" }, { field: "utip", value: "TRIGSTR_008" }] });
+    const cell = ".obj-table .obj-value-cell", input = `${cell} input:not(.color-tools-picker)`;
+    const show = async (code) => {
+      await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(unit)})`);
+      await until("the unit's fields", () => page.evaluate(`!!document.querySelector("input.obj-field-search") && document.querySelectorAll(${lit(cell)}).length >= 1`), 30000);
+      await retype(k.hands, "input.obj-field-search", code);
+      await until(`the ${code} field`, () => page.evaluate(`document.querySelectorAll(${lit(input)}).length === 1`), 5000);
+    };
+    const value = () => page.evaluate(`document.querySelector(${lit(input)})?.value ?? null`);
+    // Each byte that isn't UTF-8 as U+10FF00 + byte (the key, TRIGSTR_007, is what an unreadable table shows).
+    const lossless = (b) => b.map((x) => String.fromCodePoint(0x10ff00 + x)).join("");
+    await show("unam");
+    if ((await value()) !== lossless(gbk)) fail(`the name shows ${lit(await value())}, not string 7's text`);
+    await show("utip");
+    // CP949's D1 B1 in the middle happens to be UTF-8 (U+0471), and is read as such: the bytes come back all the same.
+    if ((await value()) !== `Ork ${lossless([0xc7])}ѱ${lossless([0xb9])}`) fail(`the tooltip shows ${lit(await value())}, not string 8's text`);
+    await show("unam");
+    await retype(k.hands, input, "Typed name");
+    await k.save();
+    const want = [...head, ...block(7, enc("Typed name")), ...block(8, [...enc("Ork "), ...cp949])];
+    const got = [...readFileSync(wtsFile)];
+    if (got.length !== want.length || got.some((b, i) => b !== want[i])) fail(`after the edit of string 7 war3map.wts holds ${lit(Buffer.from(got.slice(head.length)).toString("latin1"))}`);
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
  *  preview, a plain string's doesn't; the toolbar's colour lands in the value the dialog returns. */
 async function triggerParamColorTools(page, found) {
@@ -17606,6 +17646,7 @@ async function run() {
         classicRefusal,
         cliCheck,
         cliffTypeList,
+        codePageStrings,
         configSafety,
         contextLoss,
         dataSafety,
@@ -17949,6 +17990,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "mapInfoColorTools", found);
   await objectEditorColorTools(page, found).catch((e) => found.push(`Object Editor colour tools: ${e.message}`));
   await leftOpen(page, "objectEditorColorTools", found);
+  await codePageStrings(page, found).catch((e) => found.push(`code page string table: ${e.message}`));
+  await leftOpen(page, "codePageStrings", found);
   await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
   await leftOpen(page, "objectListSuffix", found);
   await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));
