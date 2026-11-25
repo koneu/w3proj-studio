@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { codeSpot, paramOf } from "./callsite";
-import { gameJassEnv, jassSymbols, mapJass, mapScriptJassEnv } from "./env";
+import { checkJass } from "./check";
+import { gameJassEnv, jassSymbols, mapJass, mapScriptJassEnv, projectJassEnv } from "./env";
 import { MINI_BLIZZARD_J, MINI_COMMON_J } from "./mini-game.fixture";
 
 const files: Record<string, string> = { "Scripts\\common.j": MINI_COMMON_J, "Scripts\\Blizzard.j": MINI_BLIZZARD_J };
@@ -115,4 +116,40 @@ test("paramOf reads a parameter of a signature", () => {
   assert.deepEqual(paramOf("native AddSpecialEffect takes string modelName, real x, real y returns effect", 2), { type: "real", name: "y" });
   assert.equal(paramOf("native F takes integer a returns nothing", 1), undefined);
   assert.equal(paramOf("not a signature", 0), undefined);
+});
+
+// The editors' check: the open project's own Scripts\common.j / Blizzard.j, else the game's.
+function project(own: Record<string, string>) {
+  const list = Object.keys(own).map((path) => ({ path }));
+  let reads = 0;
+  const w3 = {
+    game: { readText: read },
+    workspace: { files: () => list, readBytes: async (p: string) => { reads++; return new TextEncoder().encode(own[p]); } },
+  } as unknown as Parameters<typeof projectJassEnv>[0];
+  return { w3, reads: () => reads };
+}
+const unknownNames = (env: Awaited<ReturnType<typeof projectJassEnv>>, code: string) =>
+  checkJass(code, env).filter((d) => /Unknown function/.test(d.message));
+
+test("the editors' check takes a custom common.j's native; with the game's alone the call is unknown", async () => {
+  const code = "function F takes nothing returns nothing\n    call MyOwnNative()\nendfunction\n";
+  assert.equal(unknownNames(await projectJassEnv(project({}).w3), code).length, 1, "the game's: reported");
+  const own = `${MINI_COMMON_J}\nnative MyOwnNative takes nothing returns nothing\n`;
+  const p = project({ "map/Scripts/common.j": own });
+  assert.deepEqual(unknownNames(await projectJassEnv(p.w3), code), []);
+  // A map's own file found whatever its case; the map's trigger-script check and symbols see it too.
+  const m = mapJass(read, Promise.resolve(null), () => projectJassEnv(project({ "map/scripts/COMMON.J": own }).w3));
+  assert.deepEqual(unknownNames(await m.without(code), code), []);
+  assert.ok((await m.symbols("")).some((s) => s.name === "MyOwnNative"));
+});
+
+test("the editors' check takes a custom Blizzard.j's function, and keeps the last result while the files are unchanged", async () => {
+  const code = "function F takes nothing returns nothing\n    call MyBJ()\nendfunction\n";
+  const blizzard = `${MINI_BLIZZARD_J}\nfunction MyBJ takes nothing returns nothing\nendfunction\n`;
+  assert.equal(unknownNames(await projectJassEnv(project({}).w3), code).length, 1);
+  const p = project({ "map/Scripts/Blizzard.j": blizzard });
+  const env = await projectJassEnv(p.w3);
+  assert.deepEqual(unknownNames(env, code), []);
+  assert.equal(await projectJassEnv(p.w3), env, "same text: not parsed again");
+  assert.notEqual(await projectJassEnv(project({ "map/Scripts/Blizzard.j": `${blizzard}\n` }).w3), env, "changed text: a new environment");
 });

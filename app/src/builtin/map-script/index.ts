@@ -16,7 +16,7 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { capped, requireProject } from "../../lib/formats/mapdoc";
 import { checkJass } from "../../lib/jass/check";
-import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env";
+import { jassSymbols, projectJassEnv, triggerOfFunctions } from "../../lib/jass/env";
 import { checkLua } from "../../lib/lua/check";
 import { mapLuaNames } from "../../lib/lua/env";
 import { describeProblems, findSymbols } from "./scriptinfo";
@@ -678,7 +678,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const lua = await readScriptFile(w3.workspace, "map/war3map.lua").catch(() => null);
       const path = lua !== null ? "map/war3map.lua" : "map/war3map.j";
       const text = lua ?? await readScriptFile(w3.workspace, path);
-      const found = lua !== null ? checkLua(text, await mapLuaNames((p) => w3.game.readText(p), [])) : checkJass(text, await gameJassEnv((p) => w3.game.readText(p)));
+      const found = lua !== null ? checkLua(text, await mapLuaNames((p) => w3.game.readText(p), [])) : checkJass(text, await projectJassEnv(w3));
       return {
         // Not rebuilt: what's checked is the old script, so it can't say anything about the latest change.
         rebuilt: built, ...(built ? {} : { note: "The script wasn't rebuilt: it isn't the script Studio wrote last (changed by hand or by another program, or code the triggers don't make; the user can replace it from the warning in the app), or it's in a language no extension compiles. See the Map Script output in the app. What follows is about the old script." }),
@@ -687,7 +687,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("search_script_api", async ({ filter, kind, limit }) => {
       if (typeof filter !== "string" || !filter) throw new Error("search_script_api needs a filter.");
-      const env = await gameJassEnv((p) => w3.game.readText(p));
+      const env = await projectJassEnv(w3);
       return capped(findSymbols(jassSymbols(env, ""), filter, typeof kind === "string" ? kind : undefined), limit, 80);
     }),
     w3.workspace.onDidSave((path) => {
