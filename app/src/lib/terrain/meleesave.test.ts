@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtg, type TriggerFile } from "../triggers/wtg";
 import { TRIGGERS_ROOT } from "../triggers/project";
-import { MINE_CLEARANCE, meleeAfterSave, meleeSetBlockers, newStartPlaces, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsSurelyInvalid, startSurroundings, startsUnderWater, startVerdicts, surroundingsCache, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import { MINE_CLEARANCE, meleeAfterSave, meleeSetBlockers, newStartPlaces, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsSurelyInvalid, startSurroundings, startsUnderWater, startVerdicts, surroundingsFrom, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
 import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
@@ -293,28 +293,23 @@ test("each start location has its own verdict (the start previews follow it), on
   assert.equal(startsPlainlyValid(t, [B, E, placed[6]], around!), true);
   assert.equal(startsSurelyInvalid(t, [B, F], around!) || startsPlainlyValid(t, [B, F], around!), false, "unknown: neither");
 
-  // Only the starts' squares worked out (`near`), the game's files kept in a cache: the same verdicts, read once.
-  let reads = 0;
-  const WATER_SLK = 'ID;PWXL;N;E\nC;Y1;X1;K"waterID"\nC;X2;K"height"\nC;Y2;X1;K"LSha"\nC;X2;K-0.7\nE\n';
-  const withWater = async (p: string) => (p === "TerrainArt\\Water.slk" ? WATER_SLK : ws.gameText(p));
-  const counted = { gameText: async (p: string) => { reads++; return withWater(p); }, gameBytes: async (p: string) => { reads++; return gameBytes(p); } };
-  const cache = surroundingsCache();
+  // Only the starts' squares worked out (`near`): the same verdicts.
   const near = [A, B, C, D, E, F].map((s) => s.position);
-  const cut = await startSurroundings(counted, t, doodads, { cache, near });
+  const cut = await startSurroundings(ws, t, doodads, near);
   assert.deepEqual([...startVerdicts(t, placed, cut!).values()], [...verdicts.values()]);
   assert.ok(cut!.pathing.subarray(16).some((c) => c === 0) && around!.pathing.subarray(16).every((c) => c !== 0), "control: cells past the squares left out");
-  const first = reads;
-  await startSurroundings(counted, t, doodads, { cache, near });
-  assert.equal(reads, first, "the second call reads nothing from the game");
-  // Tables that can't all be read aren't kept: the next call reads them again.
-  const flaky = surroundingsCache();
-  let broken = true;
-  const once = { gameText: async (p: string) => { if (broken && p.includes("DestructableData.slk")) throw new Error("EIO"); return withWater(p); }, gameBytes };
-  const blind = await startSurroundings(once, t, doodads, { cache: flaky, near });
-  assert.equal(startVerdicts(t, placed, blind!).get(A), "unknown", "control: without DestructableData.slk the tree can't be told");
-  broken = false;
-  const again = await startSurroundings(once, t, doodads, { cache: flaky, near });
-  assert.deepEqual([...startVerdicts(t, placed, again!).values()], [...verdicts.values()], "read again once DestructableData.slk could be read");
+  // From what a caller holds (the terrain view's pathing data), nothing read from the game: the same verdicts.
+  const textures: string[] = [];
+  const source = {
+    tileRules: RULES, ownTiles: () => ["Ldrt", "Lrok"], waterOffset: () => undefined,
+    pathTex: (id: string) => ({ LTlt: "PathTextures\\4x4Default.tga" } as Record<string, string>)[id],
+    texture: async (p: string) => { textures.push(p); return { width: 4, height: 4, rgba: new Uint8Array(64).fill(255) }; },
+  };
+  const held = await surroundingsFrom(source, t, doodads, near);
+  assert.deepEqual([...startVerdicts(t, placed, held!).values()], [...verdicts.values()]);
+  assert.deepEqual(textures, ["PathTextures\\4x4Default.tga"], "the tree's texture from the source");
+  const blind = await surroundingsFrom({ ...source, pathTex: () => undefined }, t, doodads, near);
+  assert.equal(startVerdicts(t, placed, blind!).get(A), "unknown", "control: a tree the source can't tell");
 });
 
 test("the facts for putting the flag back come from the project; unreadable ones leave it", async () => {

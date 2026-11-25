@@ -61,7 +61,7 @@ import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type M
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
 import { editorDooVersion, lightBlocks, UPGRADED_DOO_VERSIONS, type DoodadLights } from "../../lib/terrain/dooversion";
-import { meleeAfterSave, meleeFiles, MINES, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, surroundingsCache, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, MINES, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, surroundingsFrom, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { readWts, StringTable, writeWts } from "../../lib/formats/wts";
@@ -2913,21 +2913,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let startRaces = new Map<number, number>();
         /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
         let previewKey = "";
-        /** The game's tables and pathing textures the judgements read, kept for the editor's life (a graphics mode
-         *  change opens it again). */
-        const judgeCache = surroundingsCache();
         /** The rest of the editor's rule for leaving a preview out (trees, doodads, pathing blockers, Lrok and cliffs in
-         *  the town hall's square, another start too close), judged on the game's pathing a while after an edit, off the
-         *  frame; until then the immediate checks (startPreviewHidden, the mines) answer alone. Only the starts' squares
-         *  are worked out (GoldRush: 36 ms a judgement, 313 ms for the whole map). A partial load isn't judged: the
-         *  closed subterrains' ground isn't there. */
+         *  the town hall's square, another start too close), judged on the view's pathing data (the tables and pathing
+         *  textures its placing already read: nothing read twice) a while after an edit, off the frame; until then the
+         *  immediate checks (startPreviewHidden, the mines) answer alone. Only the starts' squares are worked out
+         *  (surroundingsFrom's `near`). A partial load isn't judged: the closed subterrains' ground isn't there. */
         const startJudge = new StartJudge(async () => {
           if (partial || !unitsFile) return null;
           const ground = terrain;
-          // The places as they are now: an edit during the wait makes the result stale (StartJudge drops it).
+          // The places and doodads as they are now: an edit during the wait makes the result stale (StartJudge drops it).
           const placed = unitsFile.list.filter((u) => u.id === "sloc" || MINES.has(u.id)).map((u): Placed => ({ ...u, position: [...u.position] }));
           const near = placed.filter((u) => u.id === "sloc").map((u) => u.position);
-          const around = await startSurroundings(meleeFiles(w3), ground, dooFile ? JSON.stringify(dooFile.doc) : null, { cache: judgeCache, near });
+          const dooText = dooFile ? JSON.stringify(dooFile.doc) : null;
+          pathingData = pathing();
+          const data = await pathingData;
+          const around = await surroundingsFrom({
+            tileRules: data.tileRules, ownTiles: (ts) => data.ownTiles(ts), waterOffset: (ts) => data.waterOffset(ts), texture: (p) => data.texture(p),
+            pathTex: (id) => { const info = data.placedTex(id); return info ? (info.path ?? "") : undefined; },
+          }, ground, dooText, near);
           return around && !disposed ? judgedHidden(ground, placed, around) : null;
         }, redraw);
         const startHidden = (x: number, y: number) => startPreviewHidden(terrain, specialRects, x, y) || startJudge.hiddenAt(x, y);
