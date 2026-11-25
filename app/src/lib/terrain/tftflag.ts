@@ -49,6 +49,15 @@ export function tftUnitsLayout(doc: { subversion?: unknown; units?: unknown }): 
   return true;
 }
 
+/**
+ * tftUnitsLayout where a write of the units file goes with a w3i of flag 0x4000: `flags` are the w3i's as that write
+ * leaves it (not a number: it can't be read, and the file is left as it is). Every writer of war3mapUnits.doo goes
+ * through here, the terrain view's save and the AI tools' edits alike, so a map comes out the same whichever saved it.
+ */
+export function savedUnitsLayout(doc: { subversion?: unknown; units?: unknown }, flags: unknown): boolean {
+  return typeof flags === "number" && (flags & REQUIRES_TFT) !== 0 && tftUnitsLayout(doc);
+}
+
 /** Placed objects that aren't a type of the tables: start locations (version 0 for this rule: every melee map has one).
  *  Random units, buildings and items (uDNR, bDNR, iDNR …) and custom objects aren't in the tables either, so Studio
  *  can't tell them (typeVersions has no entry). */
