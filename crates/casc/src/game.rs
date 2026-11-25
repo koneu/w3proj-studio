@@ -51,6 +51,12 @@ fn normalize(p: &str) -> String {
     p.replace('\\', "/").to_ascii_lowercase()
 }
 
+/// A map's `_hd.w3mod/units/x.mdx` or `_locales/dede.w3mod/x.wav` (already normalized) in the form the game stores
+/// it in: a layer folder ends in `:` (`_hd.w3mod:units/x.mdx`). A path already in that form stays as it is.
+fn layer_form(p: &str) -> String {
+    p.replace(".w3mod/", ".w3mod:")
+}
+
 /// Extracts `"src": "…", "dest": "…"` pairs. The file is a flat array of
 /// small objects, so a scan is enough and avoids a JSON dependency.
 fn parse_aliases(json: &str) -> HashMap<String, String> {
@@ -130,7 +136,7 @@ impl GameData {
     /// `.blp` to `.dds` (Reforged ships DDS but data still names BLP) and
     /// from `.mdl` to `.mdx`.
     pub fn resolve(&self, path: &str, mode: Mode, tileset: Option<char>) -> Option<&str> {
-        let p = normalize(path);
+        let p = layer_form(&normalize(path));
         let mut candidates = vec![p.clone()];
         if let Some(dest) = self.aliases.get(&p) {
             candidates.push(dest.clone());
@@ -237,6 +243,15 @@ mod tests {
         assert_eq!(sd[0], "war3.w3mod:_tilesets/l.w3mod:");
         let de = layer_prefixes(Mode::De, None, "enus");
         assert_eq!(de.iter().filter(|l| l.as_str() == "war3.w3mod:_de.w3mod:").count(), 1);
+    }
+
+    #[test]
+    fn layer_form_turns_a_map_path_into_the_stored_one() {
+        let f = |p: &str| layer_form(&normalize(p));
+        assert_eq!(f("_HD.w3mod\\Units\\X.mdx"), "_hd.w3mod:units/x.mdx");
+        assert_eq!(f("_Locales\\deDE.w3mod\\X.wav"), "_locales/dede.w3mod:x.wav");
+        assert_eq!(f("_HD.w3mod:Units\\X.mdx"), "_hd.w3mod:units/x.mdx");
+        assert_eq!(f("Units\\X.mdx"), "units/x.mdx");
     }
 
     #[test]

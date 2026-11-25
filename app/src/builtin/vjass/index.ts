@@ -9,13 +9,13 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type CodeSymbol, type ScriptLanguagesService, type TriggerEditorHandle,
   type TriggersService } from "../../extensions/services";
 import type { TriggerItem } from "../../lib/triggers/wtg";
-import { mapJass } from "../../lib/jass/env";
+import { mapJass, projectJassEnv } from "../../lib/jass/env";
 import { commonJFor } from "../../lib/jass/owncommon";
 import { readImported } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
-import { checkMessages, markTexts, placeErrors } from "./check";
+import { checkMessages, lineProblems, markTexts, placeErrors } from "./check";
 import { runJassHelper } from "./run";
 import { vjassExports, vjassSymbols } from "./symbols";
 
@@ -80,7 +80,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** "Check with JassHelper": the map's script as it would be generated with the editor's triggers and texts as they
    *  are now, compiled, and what JassHelper says about it by the checked text's lines (check.ts). */
-  const checkText = async (ed: TriggerEditorHandle, t: TriggerItem): Promise<string> => {
+  const checkText = async (ed: TriggerEditorHandle, t: TriggerItem): Promise<{ status: string; problems: { line: number; message: string }[] }> => {
     if (!ed.file.items.includes(t)) throw new Error("This trigger is no longer in the map.");
     const nonce = Math.random().toString(36).slice(2);
     const texts = markTexts(ed.file, ed.customFile(), t, nonce);
@@ -92,11 +92,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const common = commonJFor(gameCommon, mapCommon === null ? null : new TextDecoder().decode(mapCommon));
     const r = await run(script, common.text, blizzardJ);
     const warn = common.warning ? ` · ${common.warning}` : "";
-    if ("output" in r) return `JassHelper: no errors (compiled in the map's script).${warn}`;
-    const { own, others } = checkMessages(placeErrors(r.log, script, r.current, nonce), texts);
+    if ("output" in r) return { status: `JassHelper: no errors (compiled in the map's script).${warn}`, problems: [] };
+    const errors = placeErrors(r.log, script, r.current, nonce);
+    const { own, others } = checkMessages(errors, texts);
     const list = (lines: string[]) => `${lines.slice(0, 8).join(" · ")}${lines.length > 8 ? ` · and ${lines.length - 8} more` : ""}`;
-    if (own.length) return `JassHelper: ${list(own)}${others.length ? ` · Also outside this text: ${list(others)}` : ""}${warn}`;
-    return `JassHelper stopped at errors outside this text, before it was through with this one: ${list(others)} (files in ${r.dir})${warn}`;
+    // Only this text's errors that have a line of their own are marked; the rest (other texts, the generated script) stay in the status line.
+    const problems = lineProblems(errors, texts.own);
+    if (own.length) return { status: `JassHelper: ${list(own)}${others.length ? ` · Also outside this text: ${list(others)}` : ""}${warn}`, problems };
+    return { status: `JassHelper stopped at errors outside this text, before it was through with this one: ${list(others)} (files in ${r.dir})${warn}`, problems };
   };
 
   void w3.services.get<ScriptLanguagesService>(SCRIPT_LANGUAGES_SERVICE).then((s) => {
@@ -142,6 +145,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let checking = false;
         /** Commits what the code editor still holds back while typing pauses: the check is of the text as shown. */
         let flush = () => {};
+        /** Marks the lines in the code editor (nothing with the plain textarea). */
+        let setProblems = (_: { line: number; message: string }[]) => {};
         const checkBtn = h("button.vjass-check", {
           title: "Compiles the map's script with this text in it, with JassHelper: the Trigger Editor's other texts and triggers as they are now (unsaved changes too), "
             + "and the globals the saved map makes (gg_ variables of placed objects, regions, cameras and sounds; udg_ variables). "
@@ -155,9 +160,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             status.textContent = "Compiling…";
             const text = ed.customText(t);
             try {
-              status.textContent = await checkText(ed, t);
+              const r = await checkText(ed, t);
+              status.textContent = r.status;
+              // Lines of an older text would mark the wrong ones.
               if (ed.customText(t) !== text) status.textContent += " (The text has changed since.)";
-            } catch (e) { status.textContent = e instanceof Error ? e.message : String(e); } finally { checking = false; }
+              else setProblems(r.problems);
+            } catch (e) { status.textContent = e instanceof Error ? e.message : String(e); setProblems([]); } finally { checking = false; }
           },
         }, "Check with JassHelper");
         el.append(h("div.trig-section", {}, "vJASS"));
@@ -176,7 +184,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const box = h("div.trig-code");
         el.append(box, h("div.trig-gui-toolbar", {}, checkBtn, status), hint);
         // Completion from the map script as last generated (JassHelper's output: libraries' functions too).
-        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null));
+        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null), () => projectJassEnv(w3));
         const editor = code.create(box, {
           value: ed.customText(t) ?? "", language: "jass", readOnly: !ed.editable,
           // The text's own declarations from the vJASS scanner; other texts' as they are now (saved or not,
@@ -186,6 +194,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
         });
         flush = () => editor.flush();
+        setProblems = (p) => editor.setProblems(p);
         return { dispose: () => editor.dispose(), flush: () => editor.flush() };
       },
     }));

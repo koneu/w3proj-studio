@@ -364,8 +364,10 @@ subterrain and changes nothing. `w3proj pack` of a split project runs it first a
 can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so. To run it after every git merge that
 brought together changes of two subterrains (or of `terrain.json`), install the opt-in hook once per clone:
 `w3proj terrain merge-hook MyMap/` writes `post-merge` into the repository's hooks folder (worktrees and
-`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` hook that is already
-there and isn't this one is left alone (the line to add to it is printed); `--remove` takes this one out again.
+`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` sh script that is
+already there (Git LFS writes one for a project with LFS rules) keeps all its text: this hook goes in as a marked block
+after its `#!` line and both run. One that isn't an sh script is left alone (the line to add to it is printed).
+`--remove` takes out only this hook's block.
 
 **New Subterrain…**, **Resize Subterrain…**, **Rename Subterrain…** and **Join Subterrains…** (palette, the
 Subterrains view; `w3proj terrain relayout --rect NAME[=OLD+OLD]:x,y,w,h …`) change the rectangles without changing the
@@ -374,7 +376,10 @@ others takes a whole side off each (or all of one); a subterrain keeps its creat
 renamed (its folder is renamed), a joined one gets all of theirs, a new one the next block. Refused, nothing written,
 while anything is unsaved, when one would be cut in pieces, or when a corner left out differs from the default corner.
 **Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. **Map Size** works on a split
-terrain with every subterrain open: the subterrains keep their ground, those on an edge that grows reach the new edge
+terrain with every subterrain open; with some closed it opens all of them for the resize (and for Undo or Redo Resize),
+asks again when the closed ones hold more objects it removes, and opens the chosen ones alone again afterwards. An edge
+no subterrain reaches (its corners the default corner) can't grow: the resize says which side, nothing written. The
+subterrains keep their ground, those on an edge that grows reach the new edge
 (the ground Map Size adds copies that edge; each takes the strip along its own span, and a corner region added on two
 sides goes to the subterrain in that corner, so the rectangles stay rectangles and still cover the map), what is cut off
 goes as in a flat map (a subterrain cut off entirely with its folder; the checkpoint made first keeps it), pathing
@@ -495,6 +500,7 @@ It checks or installs the MSVC C++ build tools, the WebView2 runtime, Rust (rust
 the optional sccache and actionlint (into `target/tools/bin/`, as on Linux), runs `npm ci` in `app/` (also when
 `node_modules` came from a Linux machine), and finds Warcraft III (`Program Files`, Battle.net's uninstall entry, the
 folder above the checkout) for `.game-path`. The work is in `scripts/setup-windows.ps1`; the `.bat` starts it.
+`--with-coverage-tools` also installs the optional coverage and mutation tools (see Linux below).
 
 A checkout shared with a Linux machine works on both: `.game-path` lists each machine's folder and the first that
 exists counts, and `.cargo/config.toml` names sccache by a path relative to the checkout. The hidden World Editor
@@ -523,6 +529,10 @@ It sets up:
   `target/tools/` and wired up by a local, git-ignored `.cargo/config.toml`. Delete that file to build without it.
 - **actionlint** (optional): checks the GitHub workflow files; a pinned release binary, checksum-verified, into
   `target/tools/bin/`.
+- **Coverage and mutation tools** (optional, off by default: long cargo builds): `--with-coverage-tools` (or
+  `W3PROJ_COVERAGE_TOOLS=1`) adds the `llvm-tools-preview` rustup component, `cargo-llvm-cov` and `cargo-mutants`
+  (`cargo install --locked`, skipped when present). `node tests/gate.mjs coverage` needs the first two; mutation testing
+  (TESTING.md "Coverage") the last. Without the flag, `--check` only notes them and doesn't count them as missing.
 - **Warcraft III:** finds the installs in Steam (Proton), Lutris/Battle.net and Wine prefixes, shows each one's
   build, and writes the newest to `.game-path` (git-ignored; `--game PATH` picks another). The gate and the test
   scripts read it when `W3PROJ_GAME` isn't set (`tests/gamepath.mjs`); on Windows, without either, they use the
@@ -706,7 +716,13 @@ The app reads the game's files straight from the CASC storage in `Data/`:
 - Extensions use `w3.game.read("Units\\UnitData.slk")` etc. Plain paths resolve like the
   game does: locale → art layer (`game.graphicsMode`: `hd`/`sd`/`de`) → base, with
   `FileAliases.json` and `.blp`→`.dds` fallback.
-- Settings: `game.installDir`, `game.graphicsMode`.
+- Settings: `game.installDir`, `game.graphicsMode`, `game.cacheMegabytes`, `game.fastTransfer`.
+- `game.fastTransfer` (off by default) reads game files over HTTP from a small server inside the app instead of
+  its internal messages: on 127.0.0.1 only, a port the system picks, a 128-bit secret token in every request,
+  only the app's own page (Host and Origin checked), GET of a game path only (never a filesystem path). It closes
+  with the app or when the setting goes off, and a request that fails is read the usual way. Measured on a 20 MB
+  file (debug build): Linux about 180 MB/s against 200 the usual way (no gain there); on Windows the spike measured
+  about 480 against 100–120.
 
 ### Model viewer
 

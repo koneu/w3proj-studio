@@ -963,6 +963,24 @@ test("weather, fog and water tint are written only when the map switches them on
   has(w, "    local weathereffect we");
 });
 
+test("the 3.0 terrain fog: Height Start and End after the density, Max Opacity, Draw Fog Over Sky, as the World Editor's war3map.j", () => {
+  // The World Editor's save of the made-up map (2026-11-25): fog style 3 (Height), z 3000..5000, density 0.5, colour
+  // (blue, green, red) 64, 128, 192, terrain fog words 250, -125, 1500, 6000, 0.75, 1.
+  const fog = { style: 3, start: 3000, end: 5000, density: 0.5, color: [64, 128, 192, 255] };
+  const terrainFog = { heightStart: 250, heightEnd: -125, linearStart: 1500, linearEnd: 6000, maxOpacity: 0.75, drawOverSky: 1 };
+  const want = ["    call SetTerrainFogExV( 3, 3000.0, 5000.0, 0.500, 250.0, -125.0, 1500.0, 6000.0, 0.753, 0.502, 0.251 )",
+    "    call BlzSetTerrainFogMaxLinearDensity( 0.8 )", "    call BlzSetTerrainFogDrawOverSky( true )"].join(EOL);
+  const block = (text: string) => assert.ok(text.includes(want + EOL), `no lines\n${want}\nin:\n${text}`);
+  block(mainSection(setup({ fog, terrainFog, flags: 0x2000 })));
+  has(mainSection(setup({ fog, terrainFog: { ...terrainFog, drawOverSky: 0 }, flags: 0x2000 })), "    call BlzSetTerrainFogDrawOverSky( false )");
+  // JSON written before the names (style and overSky: Height Start's and End's bits as i32; height: Draw Fog Over
+  // Sky's as f32) gives the same script.
+  const old = { style: 1132068864, overSky: -1023803392, linearStart: 1500, linearEnd: 6000, maxOpacity: 0.75, height: 1e-45 };
+  block(mainSection(setup({ fog, terrainFog: old, flags: 0x2000 })));
+  // The other styles pass their number on as it is (New Exponential 1 and 2: 4 and 5).
+  for (const style of [0, 1, 2, 4, 5]) has(mainSection(setup({ fog: { ...fog, style }, terrainFog, flags: 0x2000 })), `    call SetTerrainFogExV( ${style}, 3000.0, 5000.0, 0.500, 250.0, -125.0, 1500.0, 6000.0, 0.753, 0.502, 0.251 )`);
+});
+
 test("placement: custom forces use the map's settings, except from old editors", () => {
   has(configSection(setup({ flags: 0x40, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
   has(configSection(setup({ flags: 0x40, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");

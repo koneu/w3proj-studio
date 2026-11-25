@@ -3,6 +3,8 @@
 // Also the symbols code editors offer (completion, hover, go to definition).
 
 import { declarations, envFrom, envWithout, sigText, type JassEnv } from "./check";
+import type { W3Api } from "../../extensions/api";
+import { readImported } from "../imports";
 import { commonJFor } from "./owncommon";
 
 let game: Promise<JassEnv> | null = null;
@@ -26,16 +28,39 @@ export function gameJassEnv(read: (path: string) => Promise<string>): Promise<Ja
  *  map has none (a file that is there but can't be read rejects: it is never taken for the game's). */
 export async function mapScriptJassEnv(read: (path: string) => Promise<string>, own: (path: string) => Promise<string | null>, warn?: (message: string) => void): Promise<JassEnv> {
   const [mapCommon, ownBlizzard] = await Promise.all([own(COMMON_J), own(BLIZZARD_J)]);
-  let ownCommon = mapCommon;
+  if (mapCommon === null && ownBlizzard === null) return gameJassEnv(read);
+  // The last result is kept by the files' text and the game's environment: a code editor asks on every check.
+  const gameEnv = await gameJassEnv(read);
+  if (lastOwn && lastOwn.common === mapCommon && lastOwn.blizzard === ownBlizzard && lastOwn.game === gameEnv) {
+    if (lastOwn.warning) warn?.(lastOwn.warning);
+    return lastOwn.env;
+  }
+  let ownCommon = mapCommon, warning: string | undefined;
   if (mapCommon !== null) {
     const chosen = commonJFor(await read(COMMON_J), mapCommon);
-    if (chosen.warning) warn?.(chosen.warning);
+    warning = chosen.warning;
+    if (warning) warn?.(warning);
     if (chosen.from === "game") ownCommon = null;
   }
-  if (ownCommon === null && ownBlizzard === null) return gameJassEnv(read);
-  const label = (mine: string | null, path: string) => `${mine === null ? "game" : "map"}:${path}`;
-  const common = envFrom([ownCommon ?? await read(COMMON_J)], undefined, [label(ownCommon, COMMON_J)]);
-  return envFrom([ownBlizzard ?? await read(BLIZZARD_J)], common, [label(ownBlizzard, BLIZZARD_J)]);
+  let env: JassEnv;
+  if (ownCommon === null && ownBlizzard === null) env = gameEnv;
+  else {
+    const label = (mine: string | null, path: string) => `${mine === null ? "game" : "map"}:${path}`;
+    const common = envFrom([ownCommon ?? await read(COMMON_J)], undefined, [label(ownCommon, COMMON_J)]);
+    env = envFrom([ownBlizzard ?? await read(BLIZZARD_J)], common, [label(ownBlizzard, BLIZZARD_J)]);
+  }
+  lastOwn = { common: mapCommon, blizzard: ownBlizzard, game: gameEnv, env, warning };
+  return env;
+}
+let lastOwn: { common: string | null; blizzard: string | null; game: JassEnv; env: JassEnv; warning: string | undefined } | null = null;
+
+/** mapScriptJassEnv for the open project: the map's own Scripts\common.j and Blizzard.j are read from its files (as
+ *  listed, whatever their case); a map without them gets the game's environment as before. */
+export function projectJassEnv(w3: Pick<W3Api, "game" | "workspace">, warn?: (message: string) => void): Promise<JassEnv> {
+  return mapScriptJassEnv((p) => w3.game.readText(p), async (p) => {
+    const bytes = await readImported(w3, p);
+    return bytes === null ? null : new TextDecoder().decode(bytes);
+  }, warn);
 }
 
 /** The trigger each function of a generated map script belongs to (by its "// Trigger: " banner). */
@@ -55,9 +80,9 @@ export function triggerOfFunctions(script: string): Map<string, string> {
 
 /** For code inside a map: the game's environment plus what the map script declares (built once);
  *  `without(src)` leaves out what the checked text declares itself, `symbols(src)` names for editing it. */
-export function mapJass(read: (path: string) => Promise<string>, mapScript: Promise<string | null>) {
+export function mapJass(read: (path: string) => Promise<string>, mapScript: Promise<string | null>, baseEnv: () => Promise<JassEnv> = () => gameJassEnv(read)) {
   const base = (async () => {
-    const game = await gameJassEnv(read), script = await mapScript;
+    const game = await baseEnv(), script = await mapScript;
     return { env: script ? envFrom([script], game, ["map"]) : game, triggers: script ? triggerOfFunctions(script) : new Map<string, string>() };
   })();
   return {

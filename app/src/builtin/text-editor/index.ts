@@ -11,11 +11,12 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, type CompletionItem, type CompletionProvider, type CompletionRequest, type FileLanguage } from "../../extensions/services";
 import { checkJass, envWithout } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
+import { mapLuaNames } from "../../lib/lua/env";
 import { wtsStrayLines } from "../../lib/formats/wts";
 import { luaSymbols } from "../../lib/lua/symbols";
-import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
+import { gameJassEnv, jassSymbols, projectJassEnv } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
-import { linter } from "./lint";
+import { linter, lineDiagnostics } from "./lint";
 import { errorView, h } from "../../workbench/dom";
 import { jass } from "./jass";
 import { textViewIn, type TextViewState } from "./viewstate";
@@ -141,7 +142,8 @@ const codeEditors: CodeEditorService = {
     const eol = lineEnding(opts.value);
     let committed = opts.value, timer: ReturnType<typeof setTimeout> | undefined;
     const problems = h("div.cm-diag-list", { hidden: true });
-    const lint = opts.check ? linter(opts.check, problems) : null;
+    // Always there: setProblems (others' findings) shows through it, and an edit clears them.
+    const lint = linter(opts.check ?? (() => []), problems);
     const commit = () => {
       clearTimeout(timer);
       const v = view.state.sliceDoc();
@@ -155,7 +157,7 @@ const codeEditors: CodeEditorService = {
           EditorState.lineSeparator.of(eol),
           ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
           EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
-          ...(lint ? [lint.extension] : []),
+          lint.extension,
           ...(opts.symbols ? [symbolTools(opts.symbols, elsewhere(opts.openLocation?.bind(opts)), opts.language === "jass" || opts.language === "lua" ? extraCompletion : undefined, opts.language === "lua" ? "lua" : "jass")] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
@@ -165,12 +167,13 @@ const codeEditors: CodeEditorService = {
       }),
     });
     parent.append(problems);
-    lint?.start(view);
+    if (opts.check) lint.start(view);
     return {
       value: () => view.state.sliceDoc(),
       focus: () => view.focus(),
       flush: commit,
-      dispose: () => { commit(); lint?.stop(); view.destroy(); problems.remove(); },
+      setProblems: (list) => lint.show(view, lineDiagnostics(view.state.doc, list)),
+      dispose: () => { commit(); lint.stop(); view.destroy(); problems.remove(); },
     };
   },
 };
@@ -233,8 +236,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const jass = base ? base === "jass" : /\.j$/i.test(doc.path);
         const problems = h("div.cm-diag-list", { hidden: true });
         const lua = base ? base === "lua" : /\.lua$/i.test(doc.path);
-        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t))
-          : lua ? (t: string) => checkLua(t).map((d) => ({ ...d, severity: "error" as const })) : undefined;
+        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await projectJassEnv(w3), t))
+          // Lua names only in a whole map script (war3map.lua): a piece of one may call what the rest defines.
+          : lua ? async (t: string) => checkLua(t, /(?:^|\/)war3map\.lua$/i.test(doc.path) ? await mapLuaNames((p) => w3.game.readText(p), []) : null) : undefined;
         const lint = check ? linter(check, problems) : null;
         if (lint) el.classList.add("text-with-problems");
         const view = new EditorView({
@@ -246,7 +250,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...basics(language(base ? `x.${base === "jass" ? "j" : base}` : doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
               ...(jass ? [symbolTools(async (t) => {
-                const env = await gameJassEnv((p) => w3.game.readText(p));
+                const env = await projectJassEnv(w3);
                 // A claiming language's own declarations, then the game's (no JASS parse of its text).
                 return claim?.symbols ? [...claim.symbols(t), ...jassSymbols(env, "")] : jassSymbols(env, t);
               }, elsewhere(), extraCompletion)] : []),

@@ -9,6 +9,12 @@ export const GAME_SCHEME = "game:";
 export const GAME_CACHE_SETTING = "game.cacheMegabytes";
 export const GAME_CACHE_DEFAULT_MB = 1024;
 
+/** The setting that turns the fast game file transfer on (off by default; see GameService.fastRead). */
+export const FAST_TRANSFER_SETTING = "game.fastTransfer";
+
+/** Where the fast transfer's server is (backend `game_fast_transfer`). The token is for this page only: never log it. */
+interface FastEndpoint { port: number; token: string }
+
 /** Game reads waiting on the backend at most. Opening a big map asks for a thousand files at once;
  *  the backend reads them a few at a time anyway, and the rest only held memory and IPC there
  *  (about 315 in flight on GoldRush). Later ones wait here: the ones someone waits on first, each
@@ -54,7 +60,7 @@ export class GameService {
   backendReads = 0;
   /** Reads asked of this service, kept or not: an editor loading twice asks for everything twice (the app smoke's guard). */
   requests = 0;
-  /** Paths the backend said aren't there, in order (each once, as they're remembered): for the app smoke's guard. */
+  /** Paths the backend said aren't there, in order (each once, as they're remembered; `reload` empties it, as it forgets them): for the app smoke's guard. */
   readonly backendMisses: string[] = [];
   /** Reads waiting on the backend now, and the ones queued for a place (see MAX_READS_IN_FLIGHT). */
   private inFlight = 0;
@@ -68,6 +74,12 @@ export class GameService {
   /** Background reads running (see BACKGROUND_IN_FLIGHT). */
   private backgroundInFlight = 0;
 
+  /** The fast transfer's server while `game.fastTransfer` is on: asked once, null when it can't be had or failed. */
+  private fast: Promise<FastEndpoint | null> | null = null;
+  /** Backend reads the fast transfer answered, and ones that went to `game_read` after it failed (tests, the app smoke). */
+  fastReads = 0;
+  fastFallbacks = 0;
+
   /** Backend reads not finished yet, running or queued: the app smoke waits for none before it counts. */
   get readsPending(): number { return this.inFlight + this.queuedNow.length + this.queuedLater.length; }
 
@@ -76,17 +88,27 @@ export class GameService {
     settings.onDidChange((k) => {
       if (k === "game.installDir") this.reload();
       if (k === GAME_CACHE_SETTING) this.trim();
+      if (k === FAST_TRANSFER_SETTING) {
+        this.fast = null;
+        // Off: the server stops and its port closes (reads still running fall back to game_read).
+        if (!this.fastOn) backendInvoke("game_fast_transfer", { on: false }).catch(() => {});
+      }
     });
   }
 
-  /** Forgets every file read and the file list: the next reads ask the game's storage again. */
+  private get fastOn(): boolean { return this.settings.get<boolean>(FAST_TRANSFER_SETTING) === true; }
+
+  /** Forgets every file read and the file list: the next reads ask the game's storage again. A fast transfer that
+   *  failed is tried again too. */
   reload() {
+    this.fast = null;
     this.listCache = null;
     this.files.clear();
     this.probation.clear();
     this.protected.clear();
     this.cachedBytes = 0;
     this.protectedBytes = 0;
+    this.backendMisses.length = 0;
   }
 
   /** Bytes of game files kept at most. */
@@ -158,7 +180,7 @@ export class GameService {
       }
     } else {
       this.backendReads++;
-      const started = this.limited(key, background, () => this.invoke<ArrayBuffer>("game_read", { ...args, path, tileset: tileset ?? null })).then((b) => new Uint8Array(b));
+      const started = this.limited(key, background, () => this.backendRead(args, path, tileset));
       read = started;
       this.files.set(key, started);
       started.then((bytes) => this.keep(key, started, bytes.byteLength), (e) => {
@@ -171,6 +193,51 @@ export class GameService {
     }
     const bytes = await read;
     return shared ? bytes : bytes.slice();
+  }
+
+  /** One file from the backend: through the fast transfer when it's on and answers, else by `game_read`. */
+  private async backendRead(args: { install?: string; modeName?: string }, path: string, tileset?: string): Promise<Uint8Array> {
+    if (this.fastOn) {
+      const bytes = await this.fastRead(args, path, tileset);
+      if (bytes) {
+        this.fastReads++;
+        return bytes;
+      }
+      this.fastFallbacks++;
+    }
+    return new Uint8Array(await this.invoke<ArrayBuffer>("game_read", { ...args, path, tileset: tileset ?? null }));
+  }
+
+  /** The fast transfer (setting `game.fastTransfer`): an HTTP GET to the app's own server on 127.0.0.1 (backend
+   *  fastgame.rs), several times faster than the IPC for big files. Null whenever it doesn't give the file, and the
+   *  read goes to `game_read`: the server can't be had (no backend command, headless), the storage isn't open there
+   *  yet (409, game_read opens it), any other answer. A request that doesn't reach it (the port closed or blocked)
+   *  turns it off until the setting changes or `reload`. "Not found" is an answer: thrown as `game_read` throws it. */
+  private async fastRead(args: { install?: string; modeName?: string }, path: string, tileset?: string): Promise<Uint8Array | null> {
+    this.fast ??= backendInvoke<FastEndpoint | null>("game_fast_transfer", { on: true }).catch(() => null);
+    const asked = this.fast;
+    const endpoint = await asked;
+    if (!endpoint) return null;
+    const query = new URLSearchParams({ install: args.install ?? "", mode: args.modeName ?? "", path });
+    if (tileset) query.set("tileset", tileset);
+    let answer: Response;
+    try {
+      answer = await fetch(`http://127.0.0.1:${endpoint.port}/${endpoint.token}/read?${query}`, { cache: "no-store", credentials: "omit", redirect: "error" });
+    } catch {
+      if (this.fast === asked) this.fast = Promise.resolve(null);
+      return null;
+    }
+    try {
+      if (answer.status === 200) return new Uint8Array(await answer.arrayBuffer());
+      if (answer.status === 404) {
+        const text = await answer.text();
+        if (/^not found: /.test(text)) throw text;
+      }
+    } catch (e) {
+      if (typeof e === "string") throw e;
+      // The body broke off: game_read gives the whole file.
+    }
+    return null;
   }
 
   /** Runs a backend read when one of MAX_READS_IN_FLIGHT places is free; a finished read hands

@@ -76,10 +76,13 @@ test("the numbers new strings go after: every number of the languages' tables to
   assert.deepEqual(sorted(await stringNumbersTaken(fakeW3(files), ["map/war3map.w3i.json", "map/war3map.wts"])), [1]);
   assert.deepEqual(sorted(await stringNumbersTaken(fakeW3(files), Object.keys(files))), [1, 50]);
   const w3 = fakeW3(files);
-  const ws = w3.workspace as { readText: (p: string) => Promise<string> };
-  const plain = ws.readText;
-  ws.readText = async (p) => {
-    if (p === de) throw Object.assign(new Error("stream did not contain valid UTF-8"), { name: "NotUtf8Error" });
+  const ws = w3.workspace as { readBytes: (p: string) => Promise<Uint8Array> };
+  const plain = ws.readBytes;
+  // A table in an old code page (not UTF-8) is read all the same (lib/formats/wts readWts): its numbers count.
+  ws.readBytes = async (p) => (p === de ? new Uint8Array([...new TextEncoder().encode("STRING 51\n{\n"), 0xc7, 0xd1, 0xb1, 0xb9, 0x0a, 0x7d, 0x0a]) : plain(p));
+  assert.deepEqual(sorted(await stringNumbersTaken(w3, Object.keys(files))), [1, 51]);
+  ws.readBytes = async (p) => {
+    if (p === de) throw new Error("Permission denied (os error 13)");
     return plain(p);
   };
   await assert.rejects(stringNumbersTaken(w3, Object.keys(files)), /deDE\.w3mod\/war3map\.wts is there but can't be read/);

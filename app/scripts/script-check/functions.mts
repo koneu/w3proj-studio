@@ -5,6 +5,7 @@ const L = process.argv[2], showN = Number(process.argv[3] ?? 8), filter = proces
 const { parseTriggerData } = await import(pathToFileURL(L + "/triggers/triggerdata.ts").href);
 const W = await import(pathToFileURL(L + "/triggers/wtg.ts").href);
 const J = await import(pathToFileURL(L + "/script/jass.ts").href);
+const { decodeLossless } = await import(pathToFileURL(L + "/formats/lossless.ts").href);
 const data = parseTriggerData(readFileSync("TriggerData.txt", "utf8"));
 const fns = (s: string) => { const m = new Map<string, string>(); for (const x of s.matchAll(/^function (\w+) takes[\s\S]*?^endfunction/gm)) m.set(x[1], x[0].replace(/\r/g, "")); return m; };
 let ok = 0, total = 0, missing = 0, extra = 0, shown = 0;
@@ -19,7 +20,8 @@ for (const m of readdirSync("ws")) {
   } catch { continue; }
   const info = JSON.parse(readFileSync(`${d}/war3map.w3i.json`, "utf8"));
   const gen = J.generateSections({ info, data, triggers, custom }).get("Triggers") ?? "";
-  const orig = J.splitSections(readFileSync(`${d}/war3map.j`, "utf8")).get("Triggers") ?? "";
+  // As the app reads the script (readScriptFile): lossless, as the generator writes the strings of an old map's code page.
+  const orig = J.splitSections(decodeLossless(new Uint8Array(readFileSync(`${d}/war3map.j`)))).get("Triggers") ?? "";
   const a = fns(gen), b = fns(orig);
   for (const [name, body] of b) {
     if (!name.includes(filter)) continue;

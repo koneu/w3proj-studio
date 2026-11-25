@@ -306,6 +306,28 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown);
 }
 
+/// A script Studio wrote with strings from a table in an old code page (CP949 bytes, not UTF-8: the app's writeScriptFile)
+/// is Studio's all the same: its stamp is the hash of its lossless text, so a sync makes it generated, byte for byte.
+#[test]
+fn a_generated_script_in_a_code_page_is_studios_on_a_sync() {
+    let dir = workdir("generated-codepage");
+    let src = dir.join("source");
+    let (_, _, _) = sample_map(&dir, false, false);
+    let script = [b"// ".as_slice(), &[0xc7, 0xd1, 0xb1, 0xb9], b"\r\nfunction main takes nothing returns nothing\r\nendfunction\r\n"].concat();
+    assert!(std::str::from_utf8(&script).is_err());
+    fs::write(src.join("map/war3map.j"), &script).unwrap();
+    let map = dir.join("codepage.w3x");
+    assert!(pack(&src, &map, &[]).status.success());
+    let project = dir.join("project");
+    unpack(&map, &project);
+    assert!(fs::read_to_string(project.join("map/triggers/triggers.json")).unwrap().contains("\"script\": \"kept\""), "control: no stamp, kept");
+    fs::create_dir_all(project.join(".w3proj")).unwrap();
+    fs::write(project.join(w3proj::derived::SCRIPT_STAMP), format!("{}\n", w3proj::derived::script_hash(&w3proj::lossless::decode(&script)))).unwrap();
+    unpack(&map, &project);
+    assert!(fs::read_to_string(project.join("map/triggers/triggers.json")).unwrap().contains("\"script\": \"generated\""));
+    assert_eq!(fs::read(project.join(".w3proj/derived/war3map.j")).unwrap(), script);
+}
+
 /// Git in `repo`, with an identity and no signing (as the roundtrip tests run it); panics when it fails unless
 /// `may_fail` (a merge with conflicts).
 fn git(repo: &Path, args: &[&str], may_fail: bool) -> Output {

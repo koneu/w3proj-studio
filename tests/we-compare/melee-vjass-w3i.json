@@ -5,7 +5,7 @@
   "input": {
     "new": { "name": "MeleeVjass", "width": 64, "height": 64 },
     "steps": [
-      { "mcp": "edit_text_file", "args": { "path": "map/war3map.wct.txt", "find": "//== header (no text) ==", "replace": "//== header ==\n//! zinc\n//! endzinc" } }
+      { "eval": "await w3.workspace.writeText(\"map/triggers/header.j\", \"//! zinc\\n//! endzinc\");" }
     ]
   },
   "studio": {
@@ -14,5 +14,5 @@
       { "mcp": "place_objects", "args": { "kind": "doodads", "objects": [{ "id": "LTlt", "x": 2000, "y": 2000 }] } }
     ]
   },
-  "compare": ["war3map.w3i", { "file": "war3map.wct.txt", "as": "text" }]
+  "compare": ["war3map.w3i", { "file": "war3map.wct", "as": "parsed" }]
 }

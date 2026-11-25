@@ -323,3 +323,13 @@ test("the cache's size is a setting: a smaller one lets the oldest go at once", 
   set("game.cacheMegabytes", 0);
   assert.equal(game.cachedSize, 0);
 });
+
+test("reload empties backendMisses, so a miss after it is counted again from nothing", async () => {
+  const { game } = make();
+  await assert.rejects(game.read("Nothing.tif"), /not found/);
+  assert.deepEqual(game.backendMisses, ["Nothing.tif"]);
+  game.reload();
+  assert.deepEqual(game.backendMisses, [], "the list starts again with the reload");
+  await assert.rejects(game.read("Nothing.tif"), /not found/);
+  assert.deepEqual(game.backendMisses, ["Nothing.tif"], "the forgotten miss is asked and listed again");
+});

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trigger variable (one line of map/triggers/**/variables.json)",
+  "description": "variables.json holds one JSON object per line (JSON Lines), each a global variable placed in that folder (docs/trigger-folders-spec.md, section 4); this schema is for one line. Read and written by crates/w3proj/src/trigger_layout.rs. Unknown keys are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "type"],
+  "properties": {
+    "name": { "description": "without udg_; not empty, one line (order.txt lists it as $name), unique map-wide", "type": "string", "pattern": "^[^\\r\\n\\u0000]+$" },
+    "type": { "$ref": "#/$defs/text", "description": "the trigger type (integer, unit, …)" },
+    "isArray": { "type": "boolean", "description": "false when missing" },
+    "arraySize": { "$ref": "#/$defs/u32", "description": "1 when missing" },
+    "initialized": { "type": "boolean", "description": "false when missing" },
+    "initialValue": { "$ref": "#/$defs/text", "description": "empty when missing" },
+    "unknown": { "$ref": "#/$defs/u32", "description": "1 when missing" },
+    "id": { "$ref": "#/$defs/u32", "description": "Reforged, imported maps only" },
+    "node": { "type": "boolean", "description": "Reforged: whether the variable is a node of the tree (placed by order.txt's $name); true when missing" },
+    "parent": { "$ref": "#/$defs/i32", "description": "Reforged, a variable without a node: its parent id as stored; -1 when missing" }
+  },
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "text": { "description": "a value war3map.wtg stores: no zero character", "type": "string", "pattern": "^[^\\u0000]*$" }
+  }
+}

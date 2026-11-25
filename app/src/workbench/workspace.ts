@@ -11,8 +11,40 @@ export interface Stamp {
   size: number; modified: number; hash?: string;
   /** Other files the write changed (absolute paths): a split terrain's flat file is written into the subterrain files
    *  it stands for (backend flatview.rs), and the other flat files made from them change with them. */
-  also?: { path: string; size: number; modified: number }[];
+  also?: { path: string; size: number; modified: number; unknown?: boolean }[];
+  /** A write's answer when the file was written but its size and time couldn't be read back (backend
+   *  `stamp_or_unknown`): size and time mean nothing; the next check takes the disk's as ours. */
+  unknown?: boolean;
 }
+/** A write's stamp as `noteOwn` takes it: null when the backend couldn't read it back. */
+const known = (s: { size: number; modified: number; unknown?: boolean }): Stamp | null => (s.unknown ? null : { size: s.size, modified: s.modified });
+
+/** The files one write can change together, by the tag of their group (the `map/` folder's project folder in front):
+ *  a trigger save writes any of its layout's files (backend triggers.rs); a split terrain's flat files and its Pathing
+ *  file are written into the subterrain files and change the other flat files (backend flatview.rs `write_flat`,
+ *  `write_pathing`); a split project's derived files and generated script are its store's files (`write_derived`).
+ *  Matched in any case and in a flat project too: one group more only orders writes that needn't be. The outermost
+ *  `map/` counts (`??`: no folder in front is tried first), so a trigger folder named `map` stays in its layout's group. */
+const WRITE_GROUPS: [RegExp, string][] = [
+  [/^(?:(.*?)\/)??map\/triggers\//, "triggers"],
+  [/^(?:(.*?)\/)??(?:map\/terrain\/|map\/(?:war3map\.w3e\.txt|war3map\.doo\.json|war3mapunits\.doo\.json|war3map\.w3r\.json)$|\.w3proj\/pathing\.json$)/, "terrain"],
+  [/^(?:(.*?)\/)??(?:\.w3proj\/derived\/|map\/(?:war3map\.wpm|war3map\.shd|war3mapmap\.blp|war3map\.mmp|war3map\.mmp\.json|war3map\.j|war3map\.lua)$)/, "derived"],
+];
+/** The group of files (`WRITE_GROUPS`) a project file's key (`WorkspaceService.key`) belongs to, or null: writes of a
+ *  group's files are queued together (`trackedWrite`, `writeTriggers`), so two writes that may touch one file reach the
+ *  disk in the order they started. The NUL keeps a group apart from any file's key. Not a lock on the disk: a write
+ *  that doesn't go through the workspace (the backend's own, another program's) isn't ordered by it. */
+export function writeGroup(key: string): string | null {
+  const lower = key.toLowerCase();
+  for (const [re, tag] of WRITE_GROUPS) {
+    const m = re.exec(lower);
+    // In lower case: two folders that differ only in it share a group on Linux, which only orders more.
+    if (m) return `\0${m[1] ?? ""}/${tag}`;
+  }
+  return null;
+}
+/** A file of the root's trigger layout: its group is a root trigger save's. */
+const TRIGGERS_ROOT_FILE = "map/triggers/";
 import { timeLimit } from "./timelimit";
 import { validateSetting } from "./settingsvalidate";
 
@@ -303,7 +335,9 @@ export class WorkspaceService {
   /** Runs a write of project file `p` that answers with the size and time it left (every backend write
    *  of a project file does), and notes it: the file counts as ours while the write runs, and afterwards
    *  while the disk still has that size and time, so that a change by another program is told from it.
-   *  Of overlapping writes to one file the one that started last has the last word. A file the list
+   *  Overlapping writes to one file run one after another, in the order they started, so the one that started
+   *  last has the last word, on disk and here. An answer with an unknown stamp (written, not read back) counts as
+   *  ours until the next check, which takes what the disk has. A file the list
    *  doesn't have yet (an export into map/Scripts/) is added to it at once, alone: nothing else is
    *  re-read, so what others changed stays to be noticed. A write that ends after a project switch
    *  is not noted. `size`: what the file will be, for the list until the answer comes. Counted in `pending`. */
@@ -315,20 +349,23 @@ export class WorkspaceService {
     if (!at) { await write(target); return; }
     const seq = ++this.writeSeq;
     this.writing.set(at.key, (this.writing.get(at.key) ?? 0) + 1);
+    // Writes of one file go to the disk one after another, in the order they started: one that started later can't
+    // land first and be overwritten by the earlier one's bytes (which the stamps would then report as a change). A
+    // file that a write of another can change too (`writeGroup`) queues with its whole group.
     let stamp: Stamp | void;
     try {
-      stamp = await write(target);
+      stamp = await this.queued(`${root}\n${writeGroup(at.key) ?? at.key}`, () => write(target));
     } finally {
       const left = (this.writing.get(at.key) ?? 1) - 1;
       if (left > 0) this.writing.set(at.key, left); else this.writing.delete(at.key);
     }
     if (this.info?.root !== root) return;
-    let listChanged = this.noteOwn(at, stamp ? { size: stamp.size, modified: stamp.modified } : null, size, seq, root);
+    let listChanged = this.noteOwn(at, stamp ? known(stamp) : null, size, seq, root);
     // The files the write went into besides (a split terrain's subterrain files, the trigger layout's files): ours
     // too, not another program's. One removed has size and time 0.
     for (const a of stamp?.also ?? []) {
       const other = this.keyOf(a.path, root);
-      if (other) listChanged = this.noteOwn(other, { size: a.size, modified: a.modified }, a.size, seq, root) || listChanged;
+      if (other) listChanged = this.noteOwn(other, known(a), a.size, seq, root) || listChanged;
     }
     if (listChanged) this.onDidChange.fire();
   }
@@ -373,9 +410,11 @@ export class WorkspaceService {
     const root = this.info.root;
     const seq = ++this.writeSeq;
     this.writingTriggers++;
-    let w: TriggersWritten & { also: { path: string; size: number; modified: number }[] };
+    let w: TriggersWritten & { also: { path: string; size: number; modified: number; unknown?: boolean }[] };
     try {
-      w = await this.pending.track(invoke<TriggersWritten & { also: { path: string; size: number; modified: number }[] }>("triggers_write", { root, save, create: opts.create === true }));
+      // Queued with every write of a file of the root's trigger layout (`writeGroup`), in the order they started.
+      w = await this.pending.track(this.queued(`${root}\n${writeGroup(TRIGGERS_ROOT_FILE)!}`, () =>
+        invoke<TriggersWritten & { also: { path: string; size: number; modified: number; unknown?: boolean }[] }>("triggers_write", { root, save, create: opts.create === true })));
     } finally {
       this.writingTriggers--;
     }
@@ -383,7 +422,7 @@ export class WorkspaceService {
     let listChanged = false;
     for (const a of w.also) {
       const at = this.keyOf(a.path, root);
-      if (at) listChanged = this.noteOwn(at, { size: a.size, modified: a.modified }, a.size, seq, root) || listChanged;
+      if (at) listChanged = this.noteOwn(at, known(a), a.size, seq, root) || listChanged;
     }
     if (listChanged) this.onDidChange.fire();
     for (const p of [...w.written, ...w.deleted]) this.onDidSave.fire(p);
@@ -394,6 +433,24 @@ export class WorkspaceService {
   private writeSeq = 0;
   /** Own writes under way, per key. */
   private writing = new Map<string, number>();
+  /** The last write of each file (root + key) or group of files (root + `writeGroup`) started: the next one waits for it
+   *  (`queued`). */
+  private writeQueue = new Map<string, Promise<void>>();
+  /** Runs `run` once every write queued under `queueKey` before it has ended (landed or failed): writes under one key
+   *  reach the disk in the order they started. */
+  private async queued<T>(queueKey: string, run: () => Promise<T>): Promise<T> {
+    const before = this.writeQueue.get(queueKey);
+    let done!: () => void;
+    const mine = new Promise<void>((r) => { done = r; });
+    this.writeQueue.set(queueKey, mine);
+    try {
+      if (before) await before;
+      return await run();
+    } finally {
+      done();
+      if (this.writeQueue.get(queueKey) === mine) this.writeQueue.delete(queueKey);
+    }
+  }
   /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
   async delete(p: string) {
     if (!this.info) throw new Error("no project is open");
@@ -468,6 +525,7 @@ const CORE_SETTINGS: Record<string, ConfigurationProperty> = {
   "game.installDir": { type: "string", scope: "user", default: "C:\\Program Files (x86)\\Warcraft III", description: "Game install folder whose data (CASC) is read." },
   "game.graphicsMode": { type: "string", scope: "user", default: "hd", enum: ["sd", "hd", "de"], enumDescriptions: ["Classic", "Reforged HD", "Reforged (DE)"], description: "Art set used to resolve game files (models, textures)." },
   "game.cacheMegabytes": { type: "number", scope: "user", default: 1024, description: "Game files read are kept in memory up to this size, so a map opened again reads nothing from the game's storage. Less than what a map reads (GoldRush in HD: about 600 MB) keeps little of it. 0 keeps nothing." },
+  "game.fastTransfer": { type: "boolean", scope: "user", default: false, description: "Read game files over a local HTTP connection to the app itself (127.0.0.1, a random port and a secret token, served only to this app's pages) instead of the app's internal messages: several times faster for big models and textures. A request that fails is read the usual way." },
   "project.syncOnWorldEditorSave": { type: "string", scope: "user", default: "ask", enum: ["ask", "always", "never"], description: "Sync the project back when the World Editor saves the map." },
   "recentProjects": { type: "array", scope: "user", default: [], description: "Recently opened projects (Welcome page)." },
   "extensions.disabled": { type: "array", scope: "user", default: [], description: "Extension ids that aren't loaded (built-ins included). Applies after a reload." },

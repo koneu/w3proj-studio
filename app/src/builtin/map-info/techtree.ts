@@ -3,6 +3,7 @@
 // Techtree, Random Groups and Item Tables. The lists are edited as stored, so an untouched
 // entry keeps its bytes.
 
+import { addChance, scaleChances } from "../../lib/chances";
 import { ITEM_CLASSES, parseRandomId, randomChoices, randomIdLabel } from "../../lib/objects/randomids";
 import { h } from "../../workbench/dom";
 import { techGrid, upgradeGrid } from "./techgrid";
@@ -106,8 +107,8 @@ function playersCell(ctx: TechContext, get: () => number, set: (mask: number) =>
 
 const allPlayers = (ctx: TechContext) => ctx.players.reduce((m, p) => (m | (1 << p.id)) >>> 0, 0);
 /** The limits of the numbers typed here: an upgrade's level is shown from 1 and stored from 0 in a u32, a chance is a
- *  percentage (stored in a u32). */
-export const TECH_LIMITS = { level: { min: 1, max: 2 ** 32 }, chance: { min: 0, max: 100 } } as const;
+ *  percentage (stored in a u32); the World Editor's item box takes 1 at least (its group box 0). */
+export const TECH_LIMITS = { level: { min: 1, max: 2 ** 32 }, chance: { min: 0, max: 100 }, itemChance: { min: 1, max: 100 } } as const;
 /** A typed number within `limits`, else null (refused: the map stays as it was). */
 export function techNumber(typed: string, limits: { min: number; max: number }): number | null {
   const n = Number(typed);
@@ -209,18 +210,38 @@ export function addItemTable(info: TechInfo): ItemTable {
   info.itemTables.push(table);
   return table;
 }
-const chanceTotal = (chances: number[]) => {
-  const sum = chances.reduce((a, b) => a + b, 0);
-  return h(`span${sum === 100 ? ".muted" : ".techtree-warn"}`, { title: "Chances should add up to 100%" }, `total ${sum}%`);
-};
+/** The chance boxes of a random group's lines or an item set's items, and the total they show: a chance that takes
+ *  the total past 100 scales the others down as the World Editor does (lib/chances.ts), a lower one leaves them; the
+ *  other boxes and the total follow in place, and the whole change is one undo step. */
+function chanceBoxes(lines: { chance: number }[], ctx: TechContext, limits: { min: number; max: number }) {
+  const total = h("span.techtree-total", { title: "Chances should add up to 100%" });
+  const showTotal = () => {
+    const sum = lines.reduce((a, l) => a + l.chance, 0);
+    total.className = `techtree-total ${sum === 100 ? "muted" : "techtree-warn"}`;
+    total.textContent = `total ${sum}%`;
+  };
+  const inputs: HTMLInputElement[] = lines.map((line, k) => numberInput(() => line.chance, (n) => {
+    const out = scaleChances(lines.map((l) => l.chance), k, n, "cap");
+    lines.forEach((l, i) => {
+      l.chance = out[i];
+      if (i === k) return;
+      inputs[i].value = String(l.chance);
+      inputs[i].classList.remove("invalid");
+      inputs[i].title = "";
+    });
+    showTotal();
+  }, ctx, limits));
+  showTotal();
+  return { inputs, total };
+}
 
 function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
   return section(`Random groups (${info.unitTables.length})`,
     "Each line is chosen with its chance; its objects go to the group's positions (random units, buildings or items placed on the map).",
-    ...info.unitTables.map((g) => h("div.techtree-table", { "data-group": String(g.number) },
+    ...info.unitTables.map((g) => { const chances = chanceBoxes(g.lines, ctx, TECH_LIMITS.chance); return h("div.techtree-table", { "data-group": String(g.number) },
       h("div.techtree-table-head", {},
         h("input.form-input", { value: g.name, onchange: (e: Event) => { g.name = (e.target as HTMLInputElement).value; ctx.changed(); } }),
-        h("span.muted", {}, `#${g.number}`), chanceTotal(g.lines.map((l) => l.chance)),
+        h("span.muted", {}, `#${g.number}`), chances.total,
         removeButton("Remove the group", () => { info.unitTables.splice(info.unitTables.indexOf(g), 1); ctx.changed(true); })),
       h("table.form-table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "Chance %"),
@@ -229,11 +250,11 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
             select(POSITION_TYPES, () => g.positions[k], (v) => { g.positions[k] = v; }, ctx, true),
             removeButton("Remove this position", () => { g.positions.splice(k, 1); for (const l of g.lines) l.ids.splice(k, 1); ctx.changed(true); }))),
           h("th", {}, h("button", { title: "Add a position", onclick: () => { g.positions.push(0); for (const l of g.lines) l.ids.push(NONE); ctx.changed(true); } }, "+")))),
-        h("tbody", {}, ...g.lines.map((l) => h("tr", {},
-          h("td", {}, numberInput(() => l.chance, (n) => { l.chance = n; }, ctx, TECH_LIMITS.chance)),
+        h("tbody", {}, ...g.lines.map((l, row) => h("tr", {},
+          h("td", {}, chances.inputs[row]),
           ...l.ids.map((_, k) => h("td", {}, objectCell(ctx, KINDS_OF_POSITION[g.positions[k]] ?? ["w3u"], () => l.ids[k], (id) => { l.ids[k] = id; }, g.positions[k]))),
           h("td", {}, removeButton("Remove this line", () => { g.lines.splice(g.lines.indexOf(l), 1); ctx.changed(true); })))))),
-      h("button", { onclick: () => { g.lines.push({ chance: 0, ids: g.positions.map(() => NONE) }); ctx.changed(true); } }, "Add line"))),
+      h("button", { onclick: () => { g.lines.push({ chance: 0, ids: g.positions.map(() => NONE) }); ctx.changed(true); } }, "Add line")); }),
     h("button", { onclick: () => {
       info.unitTables.push({ number: nextNumber(info.unitTables), name: "Random Group", positions: [0], lines: [{ chance: 100, ids: [NONE] }] });
       ctx.changed(true);
@@ -249,19 +270,22 @@ function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
         h("input.form-input", { value: t.name, onchange: (e: Event) => { t.name = (e.target as HTMLInputElement).value; ctx.changed(); } }),
         h("span.muted", {}, `#${t.number}`),
         removeButton("Remove the table", () => { info.itemTables.splice(info.itemTables.indexOf(t), 1); ctx.changed(true); })),
-      ...t.sets.map((set, k) => h("div.techtree-set", {},
-        h("div.techtree-table-head", {}, h("strong", {}, `Set ${k + 1}`), chanceTotal(set.map((x) => x.chance)),
+      ...t.sets.map((set, k) => { const chances = chanceBoxes(set, ctx, TECH_LIMITS.itemChance); return h("div.techtree-set", {},
+        h("div.techtree-table-head", {}, h("strong", {}, `Set ${k + 1}`), chances.total,
           removeButton("Remove the set", () => { t.sets.splice(k, 1); ctx.changed(true); })),
-        ...set.map((x) => h("div.techtree-row", {},
-          numberInput(() => x.chance, (n) => { x.chance = n; }, ctx, TECH_LIMITS.chance), "% ",
+        ...set.map((x, row) => h("div.techtree-row", {},
+          chances.inputs[row], "% ",
           objectCell(ctx, ["w3t"], () => x.id, (id) => { x.id = id; }, 2),
           removeButton("Remove the item", () => { set.splice(set.indexOf(x), 1); ctx.changed(true); }))),
         h("button", { onclick: async () => {
           const id = await ctx.pick("Add an item", ["w3t"]);
           if (id === undefined) return;
-          set.push({ chance: set.length ? 0 : 100, id });
+          // The editor's New Item box starts at 100 and the set's other items scale down to the rest.
+          const out = addChance(set.map((x) => x.chance));
+          set.forEach((x, i) => { x.chance = out[i]; });
+          set.push({ chance: out[set.length], id });
           ctx.changed(true);
-        } }, "Add item…"))),
+        } }, "Add item…")); }),
       h("button", { onclick: () => { t.sets.push([]); ctx.changed(true); } }, "Add set"))),
     h("button", { onclick: () => { addItemTable(info); ctx.changed(true); } }, "Add item table"));
   el.dataset.anchor = ITEM_TABLES_ANCHOR;

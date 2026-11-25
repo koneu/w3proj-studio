@@ -8,8 +8,9 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type TriggerEditorHandle, type TriggersService } from "../../extensions/services";
 import type { TriggerItem } from "../../lib/triggers/wtg";
 import { checkJass } from "../../lib/jass/check";
-import { gameJassEnv, mapJass } from "../../lib/jass/env";
+import { gameJassEnv, mapJass, projectJassEnv } from "../../lib/jass/env";
 import { checkLua } from "../../lib/lua/check";
+import { mapLuaNames } from "../../lib/lua/env";
 import { luaSymbols } from "../../lib/lua/symbols";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
@@ -30,13 +31,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Typing is committed after a pause (one undo step each) without redrawing the editor.
         // JASS is checked against the game's scripts and the map script's declarations
         // (war3map.j as last generated; this trigger's own global may be newer).
-        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null));
+        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null), () => projectJassEnv(w3));
         const own = `gg_trg_${ident(t.name)}`;
+        // Lua names are checked against the game's API, war3map.lua as last generated (without it, e.g. a map
+        // never built, names aren't judged: the triggers' functions would be missing) and the custom texts as the
+        // editor holds them now (a function another trigger's text has just defined).
+        const luaScript = lua ? w3.workspace.readText("map/war3map.lua").catch(() => null) : null;
         const check = !lua ? async (text: string) => {
           const env = await map.without(text);
           if (trigger) env.globals.set(own, { type: "trigger", array: false, constant: false });
           return checkJass(text, env, { ordered: false });
-        } : (text: string) => checkLua(text).map((d) => ({ ...d, severity: "error" as const }));
+        } : async (text: string) => {
+          const script = await luaScript;
+          const texts = ed.customFile();
+          const names = script === null ? null : await mapLuaNames((p) => w3.game.readText(p), [script, texts.header, ...texts.texts.filter((x) => x !== text)]);
+          return checkLua(text, names);
+        };
         const editor = code.create(box, {
           value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable, check,
           symbols: lua ? async (text: string) => luaSymbols(await gameJassEnv((p) => w3.game.readText(p)), text) : map.symbols,

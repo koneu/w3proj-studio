@@ -1,0 +1,10 @@
+{
+  "format": "w3proj.imports/1",
+  "version": 1,
+  "files": [
+    {
+      "flags": 13,
+      "path": "war3mapImported\\listed.txt"
+    }
+  ]
+}

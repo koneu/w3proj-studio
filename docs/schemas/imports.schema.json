@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Imports (map/war3map.imp.json, war3campaign.imp.json)",
+  "description": "The project form of war3map.imp and war3campaign.imp (the Import Manager's list), written by the format definition crates/w3proj/formats/imports.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "version", "files"],
+  "properties": {
+    "format": { "const": "w3proj.imports/1" },
+    "version": { "const": 1 },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["flags", "path"],
+        "properties": {
+          "flags": { "$ref": "#/$defs/u8", "description": "5/8 standard path, 10/13 custom path (classic); Reforged maps also use 17, 21, 24, 25, 29" },
+          "path": { "$ref": "#/$defs/cstring", "description": "the file's path in the archive" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

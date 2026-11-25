@@ -143,6 +143,10 @@ export interface TerrainToolGroupInstance {
   changed?(what: { terrain: boolean; objects: boolean }): void;
   /** Adjusts the generated pathing map (flags per 32×32 cell, rows from the south) before it is shown or saved. */
   filterPathing?(cells: Uint8Array, width: number, height: number): void;
+  /** filterPathing as it is now, unchanged by later edits: taken by a save right before it calls `save`, for the derived
+   *  files it makes afterwards (which can wait behind a rebuild). Without it, the save's derived files use filterPathing
+   *  as it is when they're made. */
+  pathingFilterNow?(): (cells: Uint8Array, width: number, height: number) => void;
   /** A file the group keeps was saved elsewhere: takes it in place. Without this, the editor reopens. */
   reloadFile?(path: string): Promise<boolean>;
   /** The camera objects as the group holds them, unsaved edits included: the Camera Objects layer draws these, not the saved war3map.w3c. */
@@ -571,6 +575,10 @@ export interface CodeEditorHandle {
   /** Hands a change still waiting for the pause (see `debounce`) to onChange now; nothing when there is none.
    *  Called before anything reads what the editor's owner holds for a save. */
   flush(): void;
+  /** Shows findings of a check run elsewhere (JassHelper's) as underlines on whole lines and in the list below the editor,
+   *  where a click goes to the line. Lines are from 1; ones outside the text are dropped; an empty list clears. The next edit
+   *  clears them too (they were about the text before it). */
+  setProblems(problems: { line: number; message: string; severity?: "error" | "warning" }[]): void;
   dispose(): void;
 }
 

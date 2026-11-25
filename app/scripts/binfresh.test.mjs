@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
-import { checkFresh, newestSource, staleAllowed } from "../../tests/binfresh.mjs";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { after, test } from "node:test";
+import { checkFresh, commitFingerprint, newestSource, sourceFingerprint, writeStamp, staleAllowed, takeAllowStale } from "../../tests/binfresh.mjs";
 import { scratchDir } from "../../tests/scratch.mjs";
 
 // [Refactored] Share a single git repository across the test file instead of running `git init` + `git add` 9 separate times.
@@ -106,4 +108,51 @@ test("the override lets a stale binary through; a missing one is still refused",
   assert.equal(staleAllowed({}, ["node", "x", "--allow-stale"]), true);
   assert.equal(staleAllowed({}, ["node", "x"]), false);
   assert.throws(() => checkFresh(join(shared.root, "nope"), { root: shared.root, allowStale: true }), /no binary/);
+});
+
+test("--allow-stale is taken out of the arguments wherever it stands, so positional arguments don't shift", () => {
+  const argv = ["node", "make-x.mjs", "--allow-stale", "cli", "game", "--allow-stale", "far"];
+  assert.equal(takeAllowStale(argv), true);
+  assert.deepEqual(argv, ["node", "make-x.mjs", "cli", "game", "far"]);
+  const none = ["node", "make-x.mjs", "cli"];
+  assert.equal(takeAllowStale(none), false);
+  assert.deepEqual(none, ["node", "make-x.mjs", "cli"]);
+});
+
+test("a generator importing binfresh sees its positional arguments without --allow-stale, and the override applies", () => {
+  const code = `import { staleAllowed } from ${JSON.stringify(pathToFileURL(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() + "/tests/binfresh.mjs").href)};` +
+    `console.log(JSON.stringify([process.argv.slice(2), staleAllowed({}, process.argv)]));`;
+  const dir = mkdtempSync(join(tmpdir(), "binfresh-args-"));
+  const script = join(dir, "gen.mjs");
+  writeFileSync(script, code);
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const run = (...a) => JSON.parse(execFileSync(process.execPath, [script, ...a], { encoding: "utf8", env: { ...process.env, W3_ALLOW_STALE: "" } }));
+  assert.deepEqual(run("--allow-stale", "cli", "game"), [["cli", "game"], true]);
+  assert.deepEqual(run("cli", "game"), [["cli", "game"], false]);
+});
+
+// A binary stamped with the content of its sources stays fresh when only mtimes differ (fresh checkout, touch), and is
+// stale again once a source really changes.
+test("a stamped binary survives touched-but-unchanged sources and is stale after a real edit", () => {
+  shared.resetTimes();
+  const { root } = shared;
+  const bin = join(root, "stamped");
+  writeFileSync(bin, "");
+  utimesSync(bin, 500, 500);
+  assert.throws(() => checkFresh(bin, { root }), /older than/, "control: no stamp");
+  writeStamp(bin, "cli", sourceFingerprint(root, "cli"));
+  assert.equal(checkFresh(bin, { root }), bin);
+  const lib = join(root, "crates", "x", "lib.rs");
+  writeFileSync(lib, "changed");
+  try {
+    assert.throws(() => checkFresh(bin, { root }), /older than crates\/x\/lib\.rs/);
+  } finally {
+    writeFileSync(lib, "");
+    utimesSync(lib, 1000, 1000);
+  }
+  assert.equal(checkFresh(bin, { root }), bin);
+  // The fingerprint of a commit equals the working tree's when they hold the same contents.
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  assert.equal(commitFingerprint(root, "cli", head), sourceFingerprint(root, "cli"));
+  assert.notEqual(sourceFingerprint(root, "cli"), sourceFingerprint(root, "app"));
 });

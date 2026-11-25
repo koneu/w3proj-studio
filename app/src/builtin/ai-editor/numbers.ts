@@ -2,6 +2,7 @@
 // value past 4294967295 is refused (user decision 2026-11-15: refuse, never round, clamp or wrap), and so is a value
 // outside the editor's own limits for the field (a handicap of 50 to 100). The AI stays as it was.
 
+import { scaleChances } from "../../lib/chances";
 import { typedBetween } from "../../lib/formats/numbers";
 
 /** The typed value of a .wai number field: the value, or why it is refused. */
@@ -16,18 +17,8 @@ export const GAME_SPEED_LIMITS = { min: 1, max: 25 };
 export const repeatWavesLimits = (waves: number) => ({ min: 0, max: waves });
 
 /** The six hero chances after box `index` is set to `value` (0 to 100): the World Editor keeps them summing to 100, so
- *  the other five share what is left in proportion to what they held (largest remainder, ties to the earlier box;
- *  all five at 0: shared equally). Whole numbers always. */
+ *  the other five share what is left in proportion to what they held, rounded as the editor rounds (lib/chances.ts);
+ *  with all five at 0 the box goes back to 100. Whole numbers always. */
 export function rescaleChances(chances: readonly number[], index: number, value: number): number[] {
-  const rest = Math.max(0, 100 - value);
-  const others = chances.map((_, i) => i).filter((i) => i !== index);
-  const held = others.reduce((a, i) => a + chances[i], 0);
-  const exact = others.map((i) => (held > 0 ? (chances[i] * rest) / held : rest / others.length));
-  const out = chances.slice();
-  out[index] = value;
-  others.forEach((i, k) => { out[i] = Math.floor(exact[k]); });
-  let left = rest - others.reduce((a, i) => a + out[i], 0);
-  const order = others.map((_, k) => k).sort((a, b) => (exact[b] - Math.floor(exact[b])) - (exact[a] - Math.floor(exact[a])) || a - b);
-  for (const k of order) { if (left <= 0) break; out[others[k]]++; left--; }
-  return out;
+  return scaleChances(chances, index, value, "sum100");
 }

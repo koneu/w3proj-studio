@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mulberry32, readFixture } from "../testhelpers/testutil";
-import { StringTable, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsStrayLines } from "./wts";
+import { StringTable, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsStrayLines, readWts, writeWts, wtsBytes, wtsText, readTextFile, writeTextFile } from "./wts";
 
 /** Processor time of this process in ms: unlike the clock, it doesn't grow while other gates hold the machine. */
 const cpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
@@ -437,4 +437,62 @@ test("a text ending in a lone \\r can be saved: nothing in it is cut", () => {
   assert.deepEqual(wtsCutLines("a\n}b\r"), [2]);
   assert.deepEqual(wtsCutLines("a}\r\nSTRING 2\r\n{\r\nb"), [1]);
   assert.deepEqual(wtsCutLines("a}\nSTRING 2\n{\r\r\nb"), [1]);
+});
+
+test("a table in an old code page (not UTF-8): read, edited and written back with every other byte as it was", async () => {
+  const enc = (s: string) => [...new TextEncoder().encode(s)];
+  // GBK "中文", CP949 "한국", a GBK character whose second byte is `}` (81 7D: the text ends at it, as at any `}`).
+  const bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...enc("STRING 1\r\n{\r\n"), 0xd6, 0xd0, 0xce, 0xc4, ...enc("\r\n}\r\n\r\nSTRING 2\r\n// "),
+    0xc7, 0xd1, ...enc("\r\n{\r\nP "), 0xc7, 0xd1, 0xb1, 0xb9, ...enc("\r\n}\r\n\r\nSTRING 3\r\n{\r\ncut "), 0x81, 0x7d, ...enc("\r\n}\r\n")]);
+  assert.throws(() => new TextDecoder("utf-8", { fatal: true }).decode(bytes), "the control: it isn't UTF-8");
+  const files = new Map<string, Uint8Array>([["map/war3map.wts", bytes]]);
+  const io = { readBytes: async (p: string) => files.get(p)!, writeBytes: async (p: string, b: Uint8Array) => { files.set(p, b); } };
+  const text = await readWts(io, "map/war3map.wts");
+  const table = new StringTable(text);
+  assert.deepEqual([...table.entries()].map(([n, v]) => [n, [...wtsBytes(v)]]), [[1, [0xd6, 0xd0, 0xce, 0xc4]], [2, [...enc("P "), 0xc7, 0xd1, 0xb1, 0xb9]], [3, [...enc("cut "), 0x81]]]);
+  // Unedited: the file's own bytes.
+  await writeWts(io, "map/war3map.wts", table.serialize());
+  assert.deepEqual(files.get("map/war3map.wts"), bytes);
+  // An edit of string 2: its bytes change, no other byte does; the other strings read as they were.
+  table.set(2, "typed 中文");
+  await writeWts(io, "map/war3map.wts", table.serialize());
+  const out = files.get("map/war3map.wts")!;
+  const at = bytes.indexOf(0x50); // "P", the start of string 2's text
+  assert.deepEqual([...out.subarray(0, at)], [...bytes.subarray(0, at)]);
+  assert.deepEqual([...out.subarray(at, at + enc("typed 中文").length)], enc("typed 中文"));
+  assert.deepEqual([...out.subarray(at + enc("typed 中文").length)], [...bytes.subarray(at + 6)]);
+  const back = new StringTable(await readWts(io, "map/war3map.wts"));
+  assert.deepEqual([wtsBytes(back.get(1)!), back.get(2), wtsBytes(back.get(3)!)], [new Uint8Array([0xd6, 0xd0, 0xce, 0xc4]), "typed 中文", new Uint8Array([...enc("cut "), 0x81])]);
+});
+
+test("readTextFile reads a string table as lossless text and any other file as UTF-8 text", async () => {
+  const io = {
+    readText: async (p: string) => { if (p.endsWith(".wts")) throw Object.assign(new Error(`${p} is not valid UTF-8`), { name: "NotUtf8Error" }); return "json"; },
+    readBytes: async () => new Uint8Array([0x61, 0xc7, 0xd1]),
+    writeText: async (p: string, t: string) => { written.push([p, t]); },
+    writeBytes: async (p: string, b: Uint8Array) => { written.push([p, [...b]]); },
+  };
+  const written: [string, unknown][] = [];
+  assert.equal(await readTextFile(io, "map/_Locales/koKR.w3mod/war3map.WTS"), wtsText(new Uint8Array([0x61, 0xc7, 0xd1])));
+  assert.equal(await readTextFile(io, "map/war3map.w3i.json"), "json");
+  await writeTextFile(io, "map/war3map.wts", wtsText(new Uint8Array([0x61, 0xc7, 0xd1])));
+  await writeTextFile(io, "map/war3map.w3i.json", "{}");
+  assert.deepEqual(written, [["map/war3map.wts", [0x61, 0xc7, 0xd1]], ["map/war3map.w3i.json", "{}"]]);
+});
+
+test("readTextFile reads the map script as lossless text too, and writeTextFile gives its bytes back", async () => {
+  const io = {
+    readText: async (p: string): Promise<string> => { throw Object.assign(new Error(`${p} is not valid UTF-8`), { name: "NotUtf8Error" }); },
+    readBytes: async () => new Uint8Array([0x61, 0xc7, 0xd1]),
+    writeText: async (p: string, t: string) => { written.push([p, t]); },
+    writeBytes: async (p: string, b: Uint8Array) => { written.push([p, [...b]]); },
+  };
+  const written: [string, unknown][] = [];
+  const text = wtsText(new Uint8Array([0x61, 0xc7, 0xd1]));
+  assert.equal(await readTextFile(io, "map/war3map.j"), text);
+  assert.equal(await readTextFile(io, "map/War3Map.LUA"), text);
+  await writeTextFile(io, "map/war3map.j", text);
+  assert.deepEqual(written, [["map/war3map.j", [0x61, 0xc7, 0xd1]]]);
+  // Control: another file named like it is plain text.
+  await assert.rejects(readTextFile(io, "map/notwar3map.j"), /not valid UTF-8/);
 });

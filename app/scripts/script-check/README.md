@@ -20,7 +20,9 @@ trigger functions one by one and lists the most common first differences.
 
 It also reports what must stay silent on maps the World Editor made: `lib/script/guard.ts`
 (`guard:`, scripts that would be kept) and the Problems view's trigger references and Lua check
-(`problems:`, dead references in the game's own maps; the count may only fall).
+(`problems:`, dead references in the game's own maps; the count may only fall). The Lua check runs
+with names, against the game's API (common.j, Blizzard.j, common.ai's natives); `Lua check:` says in
+how many scripts names were judged (the others define globals it can't see), a count that may only rise.
 
 `sections.mts` also counts whole files that come out identical, `(whole file)`; pass that as the
 section to see where a file whose sections all match still differs. Sound durations come from the

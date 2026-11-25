@@ -11,14 +11,14 @@ import { campaignNumber } from "./numbers";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { StackSave } from "../../lib/undo";
+import { StateStack } from "../../lib/undo";
 import { BusyQueue } from "../../lib/busyqueue";
 import { joinPath } from "../../lib/paths";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { replaceQuestion, wouldDelete } from "../../lib/syncdeletes";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
-import { StringTable, WtsCutError, wtsCuts } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { parseIni } from "../../lib/formats/text";
 import { imagePresetOf, parseImagePresets, parsePresets, presetOptions, type ImagePreset, type Preset } from "./presets";
@@ -173,7 +173,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("button", { onclick: run(() => w3.commands.execute("w3.campaign.addMap")), title: "Add an existing .w3x/.w3m as the next chapter" }, "Add map…")));
         void (async () => {
           const info: CampaignInfo = JSON.parse(await w3.workspace.readText(FILE));
-          const wts = await w3.workspace.readText(WTS).catch(() => null);
+          const wts = await readWts(w3.workspace, WTS).catch(() => null);
           const strings = wts !== null ? new StringTable(wts) : null;
           const text = (v: string) => strings?.resolve(v) ?? v;
           list.replaceChildren(...info.chapters.map((c, i) => row(`${text(c.chapter)}: ${text(c.title)}`, run(() => open("chapters", i)),
@@ -189,7 +189,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const info: CampaignInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
-        const wtsText = await w3.workspace.readText(WTS).catch(() => null);
+        const wtsText = await readWts(w3.workspace, WTS).catch(() => null);
         const save = async () => {
           const root = w3.workspace.project()!.root;
           await view.checkCuts();
@@ -222,9 +222,7 @@ class CampaignView {
   private section: SectionId = "general";
   /** Edited texts of war3campaign.wts (written on save). */
   private texts = new Map<number, string>();
-  private undoStack: State[] = [];
-  private redoStack: State[] = [];
-  private mark = new StackSave();
+  private history = new StateStack<State>();
   private selected = -1;
   /** The game's presets once read; until then (or without them) the screen sections show the numbers. */
   private presets: PresetLists | null = null;
@@ -242,11 +240,11 @@ class CampaignView {
 
   /** A number typed into its field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
   private typing = false;
-  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.mark.at); }
+  private showDirty() { this.setDirty(this.typing || this.history.dirty); }
 
   // A number typed during the write stays unsaved.
-  take() { return this.mark.take(this.undoStack.length); }
-  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.showDirty(); }
+  take() { return this.history.take(); }
+  saved(taken: ReturnType<StateStack<State>["take"]>) { this.history.saved(taken); this.showDirty(); }
 
   /** Shows a section (and selects a chapter button). */
   show(section: SectionId, chapter?: number) {
@@ -266,7 +264,7 @@ class CampaignView {
     if (!this.strings || !this.texts.size) return;
     for (const [n, t] of this.texts) this.strings.set(n, t);
     if (!this.strings.dirty) return;
-    await this.w3.workspace.writeText(WTS, this.strings.serialize());
+    await writeWts(this.w3.workspace, WTS, this.strings.serialize());
     this.strings.markSaved();
   }
 
@@ -276,9 +274,7 @@ class CampaignView {
   /** `rerender`: false while typing (the field keeps focus). `files`: the map files this change moved already. */
   private change(fn: () => void, rerender = true, files?: FileStep) {
     if (!this.editable) return;
-    this.undoStack.push({ ...this.snapshot(), files });
-    this.redoStack = [];
-    this.mark.pushed(this.undoStack.length);
+    this.history.push({ ...this.snapshot(), files });
     fn();
     this.typing = false;
     this.showDirty();
@@ -291,23 +287,21 @@ class CampaignView {
   private readonly root: string | undefined;
   /** The editor closed: a map change waiting for a question or a file choice stops, waiting undo and redo steps too. */
   disposed = false;
-  undo() { this.queue.step(() => this.step(this.undoStack, this.redoStack, -1)); }
-  redo() { this.queue.step(() => this.step(this.redoStack, this.undoStack, 1)); }
-  private async step(from: State[], to: State[], dir: -1 | 1) {
-    const s = from.at(-1);
+  undo() { this.queue.step(() => this.step("undo")); }
+  redo() { this.queue.step(() => this.step("redo")); }
+  private async step(dir: "undo" | "redo") {
+    const s = this.history.peek(dir);
     if (!s) return;
     if (s.files) {
       // The files first: if they can't move back (something took their place), the step stays where it is
       // (and the steps waiting after it are dropped).
-      try { await (dir < 0 ? s.files.undo() : s.files.redo()); } catch (e) {
-        void this.w3.window.showError(`Can't ${dir < 0 ? "undo" : "redo"} the change of the campaign's maps: ${e instanceof Error ? e.message : e}`);
+      try { await (dir === "undo" ? s.files.undo() : s.files.redo()); } catch (e) {
+        void this.w3.window.showError(`Can't ${dir} the change of the campaign's maps: ${e instanceof Error ? e.message : e}`);
         return false;
       }
-      if (from.at(-1) !== s) return false;
+      if (this.history.peek(dir) !== s) return false;
     }
-    from.pop();
-    this.mark.moved();
-    to.push({ ...this.snapshot(), files: s.files });
+    this.history.move(dir, () => ({ ...this.snapshot(), files: s.files }));
     this.restore(s);
     this.typing = false;
     this.showDirty();
@@ -457,7 +451,7 @@ class CampaignView {
    *  campaign saved first (opening the map closes this editor). */
   async newMap() {
     if (!this.editable) return;
-    if (this.undoStack.length !== this.mark.at) {
+    if (this.history.dirty) {
       const c = await this.w3.window.showWarning("The campaign has unsaved changes. They are saved before the new map opens.", "Save and continue", "Cancel");
       if (c !== "Save and continue") return;
     }

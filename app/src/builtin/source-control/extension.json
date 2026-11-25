@@ -16,6 +16,8 @@
       { "id": "w3.scm.commit", "title": "Commit Ticked Changes…", "category": "Source Control" },
       { "id": "w3.scm.discardAll", "title": "Discard All Changes…", "category": "Source Control" },
       { "id": "w3.scm.branch", "title": "Switch or Create Branch…", "category": "Source Control" },
+      { "id": "w3.scm.deleteBranch", "title": "Delete Branch…", "category": "Git" },
+      { "id": "w3.scm.renameBranch", "title": "Rename Branch…", "category": "Git" },
       { "id": "w3.scm.merge", "title": "Merge Branch…", "category": "Source Control" },
       { "id": "w3.scm.mergeAbort", "title": "Abort Merge", "category": "Source Control" },
       { "id": "w3.scm.addRemote", "title": "Add Remote…", "category": "Source Control" },

@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertInTable, checkFloors, runShell } from "../../tests/gate-lib.mjs";
+import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, memAvailableMb, memoryBudget, missingDeps, runShell } from "../../tests/gate-lib.mjs";
 
 // The tests run bundled elsewhere, so the repository is found from app/, where `npm test` starts.
 const repo = join(process.cwd(), "..");
@@ -57,6 +57,20 @@ test("a step past its timeout is killed with its tree, and fails", async () => {
   const pid = readPid(pidFile);
   assert.ok(pid > 0, "the sleeper started");
   await until(() => !alive(pid), "the sleeper to be gone");
+});
+
+test("a timed-out step also ends a descendant that left its process group", { skip: process.platform === "win32" && "no setsid" }, async () => {
+  const dir = join(base, "setsid");
+  mkdirSync(dir);
+  const pidFile = join(dir, "pid");
+  const fd = openSync(join(dir, "log"), "w");
+  // setsid: the sleeper gets a group of its own, like tauri-driver's WebKitWebDriver or Xvfb.
+  const ok = await runShell(`setsid ${sleeper(pidFile)} & wait`, { cwd: dir, fd, write: () => {}, timeoutMs: 1500, live: new Set() });
+  closeSync(fd);
+  assert.equal(ok, false);
+  const pid = readPid(pidFile);
+  assert.ok(pid > 0, "the sleeper started");
+  await until(() => !alive(pid), "the setsid sleeper to be gone");
 });
 
 test("control: a command that ends in time passes, and a failing one fails", async () => {
@@ -141,4 +155,82 @@ test("the gate's own steps are all in its table (gate.mjs refuses to start other
   assert.ok(ids.length > 10);
   assert.doesNotThrow(() => assertInTable(ids.map((id) => ({ id })), table));
   assert.match(src, /assertInTable\(steps, table\)/);
+});
+
+test("every step of the gate has a memory estimate (mem, MB) for the scheduler's budget", () => {
+  const src = readFileSync(join(repo, "tests", "gate.mjs"), "utf8");
+  const lines = [...src.matchAll(/^\s*\{ id: "([a-z0-9]+)".*$/gm)];
+  assert.ok(lines.length > 10);
+  for (const [line, id] of lines) assert.match(line, /\bmem: \d+,/, `step ${id} has no mem`);
+});
+
+test("missingDeps: a worktree without node_modules gets one line telling to run npm ci", () => {
+  const msg = missingDeps(join(base, "no-such-app"));
+  assert.match(msg, /npm ci/);
+  assert.equal(msg.includes("\n"), false);
+});
+
+test("missingDeps: a half-installed node_modules is named, a complete one passes", () => {
+  const onlyVite = (p) => /vite(\.cmd)?$/.test(p);
+  assert.match(missingDeps("/x/app", onlyVite), /tsc/);
+  assert.equal(missingDeps("/x/app", () => true), null);
+  // The real checkout this test runs from has its dependencies.
+  assert.equal(missingDeps(process.cwd()), null);
+});
+
+// ---- the memory budget, on made-up files ----
+
+const GiB = 1024 * 1024 * 1024;
+/** A `read` that serves `files` and null for anything else. */
+const fakeFiles = (files) => (p) => files[p] ?? null;
+const scope = "/user.slice/user-1000.slice/user@1000.service/app.slice/run-u1.scope";
+
+test("cgroupPath: the v2 line of /proc/self/cgroup; none without one", () => {
+  assert.equal(cgroupPath(`0::${scope}\n`), scope);
+  assert.equal(cgroupPath(`12:memory:/user.slice\n0::/system.slice/x.service\n`), "/system.slice/x.service");
+  assert.equal(cgroupPath("12:memory:/user.slice\n"), null);
+  assert.equal(cgroupPath(null), null);
+});
+
+test("cgroupHeadroomMb: the tightest memory.max minus memory.current from the cgroup up; null without a limit", () => {
+  const root = "/sys/fs/cgroup";
+  const files = {
+    [`${root}${scope}/memory.max`]: `${20 * GiB}\n`,
+    [`${root}${scope}/memory.current`]: `${2 * GiB}\n`,
+    [`${root}/user.slice/memory.max`]: "max\n",
+  };
+  assert.equal(cgroupHeadroomMb(scope, fakeFiles(files)), 18 * 1024);
+  // A parent with less room wins.
+  files[`${root}/user.slice/user-1000.slice/memory.max`] = `${10 * GiB}`;
+  files[`${root}/user.slice/user-1000.slice/memory.current`] = `${4 * GiB}`;
+  assert.equal(cgroupHeadroomMb(scope, fakeFiles(files)), 6 * 1024);
+  // Control: no limit anywhere, or nothing readable.
+  assert.equal(cgroupHeadroomMb(scope, fakeFiles({ [`${root}${scope}/memory.max`]: "max\n" })), null);
+  assert.equal(cgroupHeadroomMb(scope, () => null), null);
+  assert.equal(cgroupHeadroomMb(scope, fakeFiles({ [`${root}${scope}/memory.max`]: "garbage" })), null);
+});
+
+test("memAvailableMb reads /proc/meminfo", () => {
+  assert.equal(memAvailableMb("MemTotal:       65751040 kB\nMemFree: 1 kB\nMemAvailable:   58311680 kB\n"), 56945);
+  assert.equal(memAvailableMb("MemTotal: 1 kB\n"), null);
+});
+
+test("memoryBudget: 80% of the smaller of MemAvailable and the cgroup's room; W3_GATE_MEM_MB wins; freemem off Linux", () => {
+  const files = {
+    "/proc/meminfo": `MemAvailable: ${50 * 1024 * 1024} kB\n`,
+    "/proc/self/cgroup": `0::${scope}\n`,
+    [`/sys/fs/cgroup${scope}/memory.max`]: `${20 * GiB}`,
+    [`/sys/fs/cgroup${scope}/memory.current`]: "0",
+  };
+  const freemem = () => 8 * GiB;
+  const limited = memoryBudget({ env: {}, platform: "linux", read: fakeFiles(files), freemem });
+  assert.equal(limited.mb, Math.floor(20 * 1024 * 0.8));
+  assert.match(limited.from, /cgroup limit leaves 20480 MB/);
+  // Control: without a cgroup limit, MemAvailable decides.
+  const free = memoryBudget({ env: {}, platform: "linux", read: fakeFiles({ ...files, [`/sys/fs/cgroup${scope}/memory.max`]: "max" }), freemem });
+  assert.equal(free.mb, Math.floor(50 * 1024 * 0.8));
+  assert.equal(memoryBudget({ env: { W3_GATE_MEM_MB: "12000" }, platform: "linux", read: fakeFiles(files), freemem }).mb, 12000);
+  // A bad override is ignored, not taken as 0 (that would run every step alone).
+  assert.equal(memoryBudget({ env: { W3_GATE_MEM_MB: "lots" }, platform: "linux", read: fakeFiles(files), freemem }).mb, limited.mb);
+  assert.equal(memoryBudget({ env: {}, platform: "win32", read: () => null, freemem }).mb, Math.floor(8 * 1024 * 0.8));
 });

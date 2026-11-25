@@ -56,15 +56,16 @@ import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { applyOpenRulesToProject, openRuleSourceOf } from "./openrules";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { Turns } from "./turns";
+import { RebuildJobs } from "./rebuildjob";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
+import { savedUnitsLayout } from "../../lib/terrain/tftflag";
+import { afterPlacedEdit, storedFlags } from "./placedsave";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
 import { editorDooVersion, lightBlocks, UPGRADED_DOO_VERSIONS, type DoodadLights } from "../../lib/terrain/dooversion";
-import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, MINES, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, surroundingsFrom, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
-import { StringTable } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts } from "../../lib/formats/wts";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { campsOf } from "./meleecheck";
@@ -93,7 +94,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { clearShadowMeshes, predictShadows, readSpecialShadows } from "./shadowmap";
-import { playerRaces, startPreviewHidden, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
+import { judgedHidden, playerRaces, StartJudge, startPreviewHidden, startPreviews, startPreviewKey, startsKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
@@ -104,7 +105,7 @@ import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from 
 import { cornersOpen, DERIVED_CLOSED_KEY, editableAt, loadOpenState, notOpenText, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
 import { specialsAfterCliffs } from "../../lib/terrain/specialfit";
 import { pictureTarget } from "./picturetarget";
-import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
@@ -113,6 +114,7 @@ import { dropsBlock, randomItemEntries, type DropsUiHost, type ItemTableInfo } f
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
+import { withAllSubterrainsOpen } from "../../lib/terrain/openall";
 import { PendingWork } from "../../lib/settle";
 import { cameraBounds, camerasAfterResize, applyResizePathing, doodadStays, infoAfterResize, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
@@ -251,19 +253,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const REBUILD_DELAY = 3000;
   /** `terrain` is left out when the edit didn't touch the ground. */
   type RebuildFrom = { terrain?: Terrain; doodads: Placed[] };
-  let rebuild: { key: string; from: RebuildFrom } | null = null, rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   /** After the edits stop: pathing, shadows and the minimap, in the background. `from` is the
    *  state before the first edit: shadows are updated from there. */
-  const rebuildSoon = (from: () => RebuildFrom) => {
-    const key = w3.workspace.project()?.root ?? "";
-    if (rebuild?.key !== key) rebuild = { key, from: from() };
-    clearTimeout(rebuildTimer);
-    // A failure is shown by the rebuild itself.
-    rebuildTimer = setTimeout(() => void runRebuild().catch(() => {}), REBUILD_DELAY);
-  };
+  const rebuildSoon = (from: () => RebuildFrom) => rebuilds.soon(from);
   /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back).
    *  A terrain editor's save updates them in this turn too. */
-  const rebuilding = new Turns();
+  const rebuilding = { run: <R,>(job: () => Promise<R>) => rebuilds.queue.run(job), runWithin: <R,>(job: () => Promise<R>, ms: number) => rebuilds.queue.runWithin(job, ms) };
   const rebuildFailed = (why: unknown) => {
     const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
     w3.window.showError(text);
@@ -282,31 +277,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       stillOpen: () => w3.workspace.project()?.root === key,
     }).catch((e) => { throw rebuildFailed(e); });
   };
-  const runRebuild = () => rebuilding.run(async () => {
-    const job = rebuild;
-    if (!job || job.key !== w3.workspace.project()?.root) return;
-    // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
-    // it stays closed: the files are made from the project's saved ones.
-    const editor = ownEditor();
-    if (!editor) {
-      const path = projectTerrain(w3);
-      if (!path) return;
-      rebuild = null;
-      await deriveSaved(job.key, path, job.from);
-      return;
-    }
-    // The wait was long enough for another project to be opened: its job and editor are not this one's.
-    if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
-    rebuild = null;
-    await editor.derive(job.from).catch((e) => { throw rebuildFailed(e); });
+  const rebuilds = new RebuildJobs<RebuildFrom>({
+    project: () => w3.workspace.project()?.root,
+    editorRoot: () => ownEditor()?.root ?? null,
+    terrainPath: () => projectTerrain(w3),
+    deriveOpen: (from) => ownEditor()!.derive(from).catch((e) => { throw rebuildFailed(e); }),
+    deriveSaved,
+    delayMs: REBUILD_DELAY,
   });
   ctx.subscriptions.push(
-    { dispose: () => clearTimeout(rebuildTimer) },
+    { dispose: () => rebuilds.stopTimer() },
     // What saves or packs the project first waits here: pathing, shadows and the minimap still due from the last edit
     // belong in it (an AI tool's edit is not an unsaved editor, so saving doesn't write them).
     w3.commands.register("w3.terrain.settle", async () => {
-      clearTimeout(rebuildTimer);
-      await runRebuild();
+      await rebuilds.settle();
     }),
     // Not in the manifest: the Map Script extension, after making the script, has the project's open terrain editor set
     // its destructables' flags (map-script followFlags). True when that editor holds war3map.doo (the file is its).
@@ -334,8 +318,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!path) throw new Error("This project has no terrain (war3map.w3e).");
       await w3.editors.saveAll();
       // A rebuild still due from the last edit first: the file is made from what's saved.
-      clearTimeout(rebuildTimer);
-      await runRebuild();
+      await rebuilds.settle();
       if (w3.workspace.project()?.root !== root) return null;
       const doc = { path } as EditorDocument;
       const { shd, stored, write, leftOut, problem } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
@@ -387,9 +370,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const root = w3.workspace.project()?.root;
       const path = projectTerrain(w3);
       if (!root || !path || (typeof forRoot === "string" && forRoot !== root)) return;
-      clearTimeout(rebuildTimer);
-      const due = rebuild?.key === root ? rebuild.from : null;
-      if (due) rebuild = null;
+      const due = rebuilds.take(root);
       return rebuilding.run(async () => {
         if (w3.workspace.project()?.root !== root) return;
         const before = due?.doodads ?? (Array.isArray(doodadsBefore) ? doodadsBefore as Placed[] : null);
@@ -418,8 +399,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
-      clearTimeout(rebuildTimer);
-      rebuild = null;
+      rebuilds.drop();
     }),
   );
 
@@ -439,6 +419,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     locked: string | null;
     /** A partial load (Open Subterrains…): the corners no edit changes; null when every subterrain is open. */
     partial: PartialMask | null;
+    /** Map Size inside the resize lock already held (handle.resizeMap takes it): for the editor a partial one reopened
+     *  on the whole map to resize it (resizeAllOpen). */
+    resizeHeld: (change: Sides, complements: Sides) => Promise<{ removed: number }>;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -567,23 +550,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (editor) await editor.handle.objects.openRules(list);
       // In the version the open editor's save writes (version 13), for the same reason.
       ownEditor()?.handle.objects.saveVersion(doc, key);
-      const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
-      // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
+      // The players and the w3i's flags, as the terrain view's save settles them (placedsave.ts).
       const infoPath = "map/war3map.w3i.json", infoText = key === "units" ? await read(infoPath).catch(() => null) : null;
-      type Info = { flags?: unknown; players?: unknown; forces?: unknown };
-      let info: Info | null = null;
-      try { info = infoText === null ? null : JSON.parse(infoText) as Info; } catch { /* left alone */ }
-      if (info && typeof info.flags === "number" && Array.isArray(info.players) && Array.isArray(info.forces)) {
-        let changed = false;
-        // Placed, moved or removed start locations add, move or remove the map's players, as the terrain editor's
-        // save does, in the same edit (one undo step).
-        if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
-        // Placing can make a player own something: Melee goes off as the save would take it off. The ground is the
-        // saved terrain's (a start under water).
-        const flags = info.flags as number, after = (await savedMelee(meleeFiles(w3), info as unknown as MeleeInfo, list)).flags;
-        if (after !== flags) { info.flags = after; changed = true; }
-        if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
-      }
+      const infoAfter = await afterPlacedEdit({ key, doc, list, infoText, startsBefore,
+        flagsAfter: async (info, placed) => (await savedMelee(meleeFiles(w3), info, placed)).flags });
+      const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
+      if (infoAfter !== null) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: infoAfter }) });
       return files;
     }, async () => {
       // Doodads block pathing and cast shadows. With no editor open the ground is the project's, as the rebuild finds it.
@@ -647,6 +619,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dropped = dropFallenSpecials(parsed, terrain, (id) => sizes.get(id), partialNow ? (i) => partialNow.corners[i] === OPEN_CORNER : undefined).length;
           specialsRemoved += dropped;
         }
+        // Units that followed the ground are written in the layout of flag 0x4000, as the terrain view's save writes them.
+        if (key === "units" && count) savedUnitsLayout(parsed, await storedFlags(read));
         if (count || dropped) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
       }
       return files;
@@ -903,6 +877,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const result = {
         width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed,
         ...(grows ? { note: "New ground copies the map's edge beside it (height, cliff level, water and tiles), as the World Editor adds it. Paint and shape it afterwards." } : {}),
+        ...(handle.partial ? { closedSubterrains: "Some subterrains are closed: objectsRemoved counts the open ones' objects only. The resize opens every subterrain for itself (asking again if the closed ones hold more objects it removes) and closes them again afterwards." } : {}),
       };
       if (dryRun === true) return result;
       refuseLostView(projectTerrain(w3));
@@ -1987,7 +1962,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const minimapStale = new Stale();
         /** Tool groups of other extensions, by group id. */
         const groupInsts = new Map<string, TerrainToolGroupInstance>();
-        const notifyGroups = (e: Edit) => { for (const g of groupInsts.values()) g.changed?.({ terrain: e.terrain, objects: e.objects }); };
+        /** Counts every change of the terrain or the placed objects (each goes past notifyGroups): the judged start
+         *  previews (StartJudge) are judged again after one. */
+        let edits = 0;
+        const notifyGroups = (e: Edit) => { edits++; for (const g of groupInsts.values()) g.changed?.({ terrain: e.terrain, objects: e.objects }); };
         /** The regions and cameras as the Regions and Cameras tabs hold them (unsaved ones included), for other modules
          *  (TerrainService.listedObjects): a list is null when its tab isn't there. */
         const liveLists = async () => {
@@ -2927,7 +2905,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let startRaces = new Map<number, number>();
         /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
         let previewKey = "";
-        const startHidden = (x: number, y: number) => startPreviewHidden(terrain, specialRects, x, y);
+        /** The rest of the editor's rule for leaving a preview out (trees, doodads, pathing blockers, Lrok and cliffs in
+         *  the town hall's square, another start too close), judged on the view's pathing data (the tables and pathing
+         *  textures its placing already read: nothing read twice) a while after an edit, off the frame; until then the
+         *  immediate checks (startPreviewHidden, the mines) answer alone. Only the starts' squares are worked out
+         *  (surroundingsFrom's `near`). A partial load isn't judged: the closed subterrains' ground isn't there. */
+        const startJudge = new StartJudge(async () => {
+          if (partial || !unitsFile) return null;
+          const ground = terrain;
+          // The places and doodads as they are now: an edit during the wait makes the result stale (StartJudge drops it).
+          const placed = unitsFile.list.filter((u) => u.id === "sloc" || MINES.has(u.id)).map((u): Placed => ({ ...u, position: [...u.position] }));
+          const near = placed.filter((u) => u.id === "sloc").map((u) => u.position);
+          const dooText = dooFile ? JSON.stringify(dooFile.doc) : null;
+          pathingData = pathing();
+          const data = await pathingData;
+          const around = await surroundingsFrom({
+            tileRules: data.tileRules, ownTiles: (ts) => data.ownTiles(ts), waterOffset: (ts) => data.waterOffset(ts), texture: (p) => data.texture(p),
+            pathTex: (id) => { const info = data.placedTex(id); return info ? (info.path ?? "") : undefined; },
+          }, ground, dooText, near);
+          return around && !disposed ? judgedHidden(ground, placed, around) : null;
+        }, redraw);
+        const startHidden = (x: number, y: number) => startPreviewHidden(terrain, specialRects, x, y) || startJudge.hiddenAt(x, y);
         let previewBatches: ObjectBatch[] = [];
         let previewGen = 0;
         function lookOfPreview<B extends { instances: ObjectInstance[] }>(b: B) {
@@ -2941,6 +2939,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ctx = nextCtx ?? objCtx;
           if (!ctx || !unitsFile) return;
           const units = unitsFile.list;
+          startJudge.changed(`${edits}|${startsKey(units)}`);
           const key = startPreviewKey(units, startRaces, startHidden);
           if (key === previewKey) return;
           previewKey = key;
@@ -4645,11 +4644,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         // ---- tool groups of other extensions ("w3.terrain") --------------------------
         /** wpm bytes (header + cells): applies every group's pathing filter. */
-        const filterPathing = (wpm: Uint8Array) => {
+        const filterWith = (wpm: Uint8Array, filters: Iterable<(cells: Uint8Array, width: number, height: number) => void>) => {
           const v = new DataView(wpm.buffer, wpm.byteOffset);
           const w = v.getUint32(8, true), hgt = v.getUint32(12, true);
-          for (const g of groupInsts.values()) g.filterPathing?.(wpm.subarray(16), w, hgt);
+          for (const f of filters) f(wpm.subarray(16), w, hgt);
         };
+        const filterPathing = (wpm: Uint8Array) =>
+          filterWith(wpm, [...groupInsts.values()].flatMap((g) => g.filterPathing ? [(c: Uint8Array, w: number, h: number) => g.filterPathing!(c, w, h)] : []));
         /** Latest ghost request (older model loads are dropped). */
         let ghostReq = 0;
         /** File each created entry goes to (set by objects.create). */
@@ -4663,7 +4664,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
-        const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> => resizeHistory.exclusive(() => resizeLocked(change, complements));
+        const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> =>
+          resizeHistory.exclusive(() => (partial ? resizeAllOpen(change, complements) : resizeLocked(change, complements)));
+        /** Map Size with subterrains closed: it changes every subterrain on the map's edges and writes the map at another
+         *  size, which this partial load can't. Every subterrain is opened for it (the editor reopens on the whole map,
+         *  which resizes), then the ones open now are opened again (withAllSubterrainsOpen). What the resize removes in
+         *  the closed subterrains wasn't counted when it was asked about (resizeRemovals sees the open ones): more is
+         *  asked about again. */
+        const resizeAllOpen = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
+          if (!editable) throw new Error(lockedText ?? "This map is read-only.");
+          const problem = resizeProblem(terrain, change, complements);
+          if (problem) throw new Error(problem);
+          const told = await resizeRemovals(change, complements);
+          // This editor's unsaved changes are saved first: it reopens on the whole map.
+          if (mark.isDirty(at)) await editorApi.save?.();
+          const root = w3.workspace.project()?.root;
+          return withAllSubterrainsOpen(w3, "Map Size", async () => {
+            // The editor opened again on the whole map (Open Subterrains reopens it).
+            let whole: OpenedEditor | null = null;
+            for (let n = 0; n < 600 && !whole; n++) {
+              if (w3.workspace.project()?.root !== root) throw new Error("Map Size: another project was opened. Nothing was changed.");
+              const e = editorOf(doc.path);
+              if (e && e !== record) { await e.ready(); if (editorOf(doc.path) === e) whole = e; }
+              else await new Promise((done) => setTimeout(done, 100));
+            }
+            if (!whole) throw new Error("Map Size: the terrain editor didn't open again on the whole map. Nothing was changed.");
+            if (whole.partial) throw new Error("Map Size: the terrain editor opened again with subterrains still closed. Nothing was changed.");
+            const removed = await whole.handle.resizeRemovals(change, complements);
+            if (removed > told) {
+              const more = removed - told;
+              const pick = await w3.window.showWarning(`The closed subterrains hold ${more} more object${more === 1 ? "" : "s"} the new map size removes (${removed} in all: doodads on or past the new edge, units and items outside the playable area, cameras outside the camera bounds). Resize anyway?`, "Resize", "Cancel");
+              if (pick !== "Resize") throw new Error("Map Size: cancelled. Nothing was changed.");
+            }
+            return whole.resizeHeld(change, complements);
+          });
+        };
         /** Set when a resize starts writing the map's files: from then on this editor holds the old map, and is closed and
          *  opened again on the new one (resizeLocked). It saves nothing, takes no destructable flags or file changes and
          *  derives nothing meanwhile: a save of its old terrain landing among the resize's writes put the old size back
@@ -4694,7 +4729,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error(lockedText ?? "This map is read-only.");
-          // A split terrain resizes every subterrain (the canvas, those on its edges, the cut ones): only with all open.
+          // A split terrain resizes every subterrain (the canvas, those on its edges, the cut ones): only with all open
+          // (resizeMap opens them for it: resizeAllOpen).
           if (partial) throw new Error("The map size changes every subterrain on its edges, and some are closed: open them all (Open Subterrains…) first. Nothing was changed.");
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
@@ -4776,7 +4812,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  is there but can't be read: before anything is written. */
         const resizeFirstString = async (): Promise<number> => {
           await w3.workspace.filesReady();
-          const wts = await w3.workspace.readText(RESIZE_WTS).catch((e) => {
+          const wts = await readWts(w3.workspace, RESIZE_WTS).catch((e) => {
             if (isNotFoundError(e)) return null;
             throw new Error(`${RESIZE_WTS} is there but can't be read (${errorText(e)}), so the map's texts can't be given string numbers.`);
           });
@@ -4792,12 +4828,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const addResizeStrings = async (added: { num: number; text: string }[]) => {
           if (!added.length) return;
           for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
-            const text = await w3.workspace.readText(path);
+            const text = await readWts(w3.workspace, path);
             const out = addLocaleStrings(path, text, added);
-            if (out !== text) await w3.workspace.writeText(path, out);
+            if (out !== text) await writeWts(w3.workspace, path, out);
           }
-          const wts = await w3.workspace.readText(RESIZE_WTS).catch((e) => { if (isNotFoundError(e)) return null; throw e; });
-          await w3.workspace.writeText(RESIZE_WTS, addLocaleStrings(RESIZE_WTS, wts ?? "﻿", added));
+          const wts = await readWts(w3.workspace, RESIZE_WTS).catch((e) => { if (isNotFoundError(e)) return null; throw e; });
+          await writeWts(w3.workspace, RESIZE_WTS, addLocaleStrings(RESIZE_WTS, wts ?? "﻿", added));
           if (wts === null) await w3.workspace.refresh();
         };
         const applyResize = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
@@ -6406,18 +6442,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         raf = requestAnimationFrame(tick);
 
+        /** The live state the derived files read besides terrain and doodads, as a save took it. `units` null: no units file. */
+        type DerivedTaken = {
+          units: Placed[] | null;
+          specials: ReturnType<typeof specialsOf>;
+          staleSet: boolean;
+          ctx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null;
+          filterPathing: (wpm: Uint8Array) => void;
+        };
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
-         *  `baseDoodads` are the state the shadows were last updated for. */
-        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take(), unsaved = false) => {
-          const icons = units ?? unitsFile?.list;
+         *  `baseDoodads` are the state the shadows were last updated for. What `taken` leaves out is read live (a
+         *  rebuild); a save passes what it took when it started, so an edit or reload made while it waits behind a
+         *  running rebuild doesn't reach the files it derives (it reaches the next save's). */
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, staleAt: number = minimapStale.take(), unsaved = false, taken: Partial<DerivedTaken> = {}) => {
+          const units = taken.units !== undefined ? taken.units : unitsFile ? unitsFile.list : null;
+          const ctx = taken.ctx !== undefined ? taken.ctx : objCtx;
           await writeDerived(w3, {
             unsaved, partial,
-            now, doodads, specials: specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
-            units: unitsFile && icons ? icons : null,
-            skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
+            now, doodads, specials: taken.specials ?? specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
+            units,
+            skins: ctx?.skins ?? new Map(), baseOf: (id) => ctx?.bases.get(id),
             read: (p) => readFile(w3, doc, p),
-            filterPathing,
-            minimapStale: minimapStale.isSet(),
+            filterPathing: taken.filterPathing ?? filterPathing,
+            minimapStale: taken.staleSet ?? minimapStale.isSet(),
             // Clean only for what the snapshot had: an edit made since keeps it set, and the next save redraws.
             minimapWritten: () => minimapStale.clear(staleAt),
           });
@@ -6515,7 +6562,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let handed = false;
         const record: OpenedEditor = {
           root: w3.workspace.project()?.root ?? "",
-          handle, ready, screenshot: takeScreenshot, locked: lockedText, partial,
+          handle, ready, screenshot: takeScreenshot, locked: lockedText, partial, resizeHeld: resizeLocked,
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
             await ready();
@@ -6524,7 +6571,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             minimapStale.set();
             // With unsaved edits in the editor, what's made has them: not what the files hold.
             const unsaved = mark.isDirty(at);
-            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, undefined, minimapStale.take(), unsaved);
+            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, minimapStale.take(), unsaved);
           },
           minimapSource: exportSource,
           followFlags: async (follow) => {
@@ -6727,11 +6774,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             if (objectsTouched) await settleMoved();
             // Saved with flag 0x4000 (Requires The Frozen Throne data), the units file gets the layout with item tables
-            // and hero attributes, as the World Editor's save writes it (tftflag.ts tftUnitsLayout): only written with
+            // and hero attributes, as the World Editor's save writes it (tftflag.ts savedUnitsLayout): only written with
             // the objects, and never back (a file of 11 keeps its tables). A w3i that can't be read leaves it as it is.
             if (objectsTouched && unitsFile && Number(unitsFile.doc.subversion) === 9 && typeof (edgeInfo as { flags?: unknown } | null)?.flags === "number") {
               const after = await savedMelee(meleeFiles(w3), edgeInfo as unknown as MeleeInfo, unitsFile.list).catch(() => null);
-              if (after && after.flags & REQUIRES_TFT) tftUnitsLayout(unitsFile.doc);
+              savedUnitsLayout(unitsFile.doc, after?.flags);
             }
             // The tilesets' own lists, which the w3e is written with under the flag 0 (savedTerrain).
             await ownReady;
@@ -6767,6 +6814,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 doodads: dooFile ? structuredClone(dooFile.list) : null,
                 units: unitsFile ? structuredClone(unitsFile.list) : undefined,
                 stale: minimapStale.take(),
+                // What else the derived files are made from, as it is now (updateDerived).
+                staleSet: minimapStale.isSet(),
+                specials: structuredClone(specialsOf(dooFile?.doc)),
+                ctx: objCtx,
               }),
               write: async (t) => {
                 // Placed or removed starts sync the players into war3map.w3i: an unreadable one refuses the whole save
@@ -6815,7 +6866,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (startsAdded.length) void rebuildObjects();
             // The tool groups' files first (the Pathing tool's overrides): in a split project they are map/terrain/*/pathing.txt,
             // sources of the derived files, so the record the derived files' update makes below has to see them written.
+            // Each group's pathing filter is taken as its save takes its files (pathingFilterNow): an override painted
+            // while this save waits behind a rebuild is the next save's, as in its files.
+            const savedFilters: ((cells: Uint8Array, width: number, height: number) => void)[] = [];
             for (const g of groupInsts.values()) {
+              const now = g.pathingFilterNow?.();
+              if (now) savedFilters.push(now);
+              else if (g.filterPathing) savedFilters.push((c, w, h) => g.filterPathing!(c, w, h));
               await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
             // The derived files follow what was written, not what an edit made meanwhile changed.
@@ -6825,7 +6882,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // One that doesn't end in time doesn't hold the save: the files are left as they are, and the state they
             // follow is kept, so the next save updates them from there (the minimap stays due).
             const derived = await rebuilding.runWithin(
-              () => updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units, snap.stale),
+              () => updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.stale, false, {
+                units: snap.units ?? null, specials: snap.specials, staleSet: snap.staleSet, ctx: snap.ctx,
+                filterPathing: (wpm) => filterWith(wpm, savedFilters),
+              }),
               SETTLE_LIMIT,
             );
             if (derived.ran) {
@@ -6864,6 +6924,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (openedBy.get(doc.path) === record) openedBy.delete(doc.path);
             disposed = true;
             stopAutoCycle();
+            startJudge.dispose();
             lastView = { key: viewKey, view: handle.view(), selection: selectionRefs() };
             stopLightWatch.dispose();
             stopObjectWatch.dispose();

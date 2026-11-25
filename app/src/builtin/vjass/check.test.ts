@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { generateScript, type ScriptInput } from "../../lib/script/jass";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, TriggerItem } from "../../lib/triggers/wtg";
-import { checkMessages, markTexts, placeErrors } from "./check";
+import { checkMessages, lineProblems, markTexts, placeErrors, splitLine } from "./check";
 
 const data = parseTriggerData(`
 [TriggerTypes]
@@ -129,4 +129,26 @@ test("later steps and pjass: lines of the script after step 1, found by the libr
   assert.equal(placeErrors(`x\r\nJASSHelper - Step 1 (textmacros, libraries, scopes)\r\nLine ${first}: Something\r\n1\r\n`, input, null, NONCE)[0].text, 2);
   // No line at all: what JassHelper said.
   assert.deepEqual(placeErrors("exit code 3", input, null, NONCE), [{ message: "exit code 3", text: null }]);
+});
+
+test("splitLine reads JassHelper's message shapes, Windows and Wine paths, and never throws on garbage", () => {
+  assert.deepEqual(splitLine("Line 12: Undeclared variable x"), { line: 12, message: "Undeclared variable x" });
+  assert.deepEqual(splitLine("C:\\maps\\war3map.j(34): Syntax error"), { line: 34, message: "Syntax error" });
+  assert.deepEqual(splitLine("Z:\\home\\u\\.wine\\drive_c\\a b\\war3map.j:7: Missing endif"), { line: 7, message: "Missing endif" });
+  assert.deepEqual(splitLine("/tmp/x/war3map.j:7: warning: unused"), { line: 7, message: "warning: unused" });
+  assert.deepEqual(splitLine("Line 3:"), { line: 3, message: "" });
+  for (const bad of ["", "Step 1: reading the script", "Line 0: x", "Line -4: x", "Line 99999999999999999999: x", "Line x: y", ":::", "(1): x", "a:b:c", "\0\u0001\ufffe(5", "x".repeat(100000) + ":1"]) {
+    assert.doesNotThrow(() => splitLine(bad), bad.slice(0, 20));
+  }
+  assert.equal(splitLine("Step 1: reading the script"), null);
+  assert.equal(splitLine("Line 0: x"), null);
+  assert.equal(splitLine("Line 99999999999999999999: x"), null);
+});
+
+test("placeErrors takes the alternative shapes too, and lineProblems keeps the checked text's lined errors", () => {
+  const input = "//w3proj-check n 1 begin\r\nlibrary A\r\nfoo\r\nendlibrary\r\n//w3proj-check n 1 end\r\n";
+  const errors = placeErrors("logs\\currentmapscript.j\r\nStep 1: library\r\nwar3map.j(3): Bad thing\r\nZ:\\a\\b.j:99: elsewhere\r\n2\r\n", input, null, "n");
+  assert.deepEqual(errors[0], { message: "Bad thing", text: 1, line: 2 });
+  assert.deepEqual(lineProblems(errors, 1), [{ line: 2, message: "Bad thing" }]);
+  assert.deepEqual(lineProblems(errors, 2), []);
 });

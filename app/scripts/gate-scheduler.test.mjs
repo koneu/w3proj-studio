@@ -6,17 +6,20 @@ import { Locks, schedule } from "../../tests/gate-scheduler.mjs";
  * The gate's scheduler on made-up steps that end when the test says so. `steps` as in
  * tests/gate.mjs; `end(id, ok)` ends a running step and lets the scheduler react.
  */
-function harness(steps, { jobs = 100, serial = false } = {}) {
+function harness(steps, { jobs = 100, serial = false, memBudget } = {}) {
   const locks = new Locks();
   const ends = new Map();
   const builts = new Map();
   const started = [];
   const skipped = new Map();
+  const memWaits = [];
   const result = schedule({
     steps,
     locks,
     serial,
     jobs,
+    memBudget,
+    onMemWait: (step, { used, budget }) => memWaits.push(`${step.id} ${used}/${budget}`),
     launch: (step, { built }) =>
       new Promise((resolve) => {
         started.push(step.id);
@@ -30,6 +33,7 @@ function harness(steps, { jobs = 100, serial = false } = {}) {
     locks,
     started,
     skipped,
+    memWaits,
     result,
     running: () => [...ends.keys()],
     settle,
@@ -184,6 +188,100 @@ test("serial: one step at a time, in the given order", async () => {
     assert.deepEqual(h.running(), [id]);
     await h.end(id);
   }
+  await h.result;
+});
+
+// ---- memory ----
+
+const memSteps = () => [
+  { id: "wts", weight: 1, mem: 4000 },
+  { id: "corpus", weight: 1, mem: 4000 },
+  { id: "seeds", weight: 1, mem: 4000 },
+];
+
+test("memory: a step starts only while the running steps' estimates stay within the budget, and says it waits once", async () => {
+  const h = harness(memSteps(), { memBudget: 10000 });
+  await h.settle();
+  assert.deepEqual(h.running(), ["wts", "corpus"]);
+  assert.deepEqual(h.memWaits, ["seeds 8000/10000"]);
+  await h.end("wts");
+  assert.deepEqual(h.running(), ["corpus", "seeds"]);
+  await h.end("corpus");
+  await h.end("seeds");
+  await h.result;
+  assert.deepEqual(h.memWaits, ["seeds 8000/10000"]);
+  assert.equal(h.skipped.size, 0);
+});
+
+test("memory, control: without a budget all start together and nobody waits", async () => {
+  const h = harness(memSteps());
+  await h.settle();
+  assert.deepEqual(h.running(), ["wts", "corpus", "seeds"]);
+  assert.deepEqual(h.memWaits, []);
+  for (const id of ["wts", "corpus", "seeds"]) await h.end(id);
+  await h.result;
+});
+
+test("memory: a step bigger than the whole budget runs alone instead of never", async () => {
+  const h = harness(
+    [
+      { id: "small", weight: 1, mem: 1000 },
+      { id: "big", weight: 1, mem: 8000 },
+      { id: "small2", weight: 1, mem: 1000 },
+    ],
+    { memBudget: 5000 },
+  );
+  await h.settle();
+  // Smaller ones pass the big one while it waits; it runs once nothing else does.
+  assert.deepEqual(h.running(), ["small", "small2"]);
+  await h.end("small");
+  await h.end("small2");
+  assert.deepEqual(h.running(), ["big"]);
+  await h.end("big");
+  const done = await h.result;
+  assert.equal(done.get("big").ok, true);
+  assert.equal(h.skipped.size, 0);
+});
+
+test("memory: a big step that comes first runs alone, the rest after it", async () => {
+  const h = harness(
+    [
+      { id: "big", weight: 1, mem: 8000 },
+      { id: "small", weight: 1, mem: 1000 },
+    ],
+    { memBudget: 5000 },
+  );
+  await h.settle();
+  assert.deepEqual(h.running(), ["big"]);
+  await h.end("big");
+  assert.deepEqual(h.running(), ["small"]);
+  await h.end("small");
+  await h.result;
+});
+
+test("memory: a step without an estimate counts as the default (1000 MB)", async () => {
+  const h = harness([{ id: "a", weight: 1 }, { id: "b", weight: 1 }], { memBudget: 1500 });
+  await h.settle();
+  assert.deepEqual(h.running(), ["a"]);
+  await h.end("a");
+  assert.deepEqual(h.running(), ["b"]);
+  await h.end("b");
+  await h.result;
+});
+
+test("memory: a step waiting for cores or a lock isn't said to wait for memory", async () => {
+  const h = harness(
+    [
+      { id: "a", weight: 1, mem: 4000, locks: [["cargo", "w"]] },
+      { id: "b", weight: 1, mem: 4000, locks: [["cargo", "w"]] },
+    ],
+    { memBudget: 5000 },
+  );
+  await h.settle();
+  assert.deepEqual(h.running(), ["a"]);
+  assert.deepEqual(h.memWaits, []);
+  await h.end("a");
+  await h.end("b");
   await h.result;
 });
 

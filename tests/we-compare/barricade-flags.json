@@ -1,0 +1,36 @@
+[
+  {
+    "name": "barricade-flags",
+    "description": "bugs.md 'The editor's save turned flags 3 into 1 on two barricades' (AutumnLeaves LTba 2303/2304, doo-v13-autumn-drops): barricade-flags.w3x (make-barricade-flags.mjs: flat.w3x, no trigger, no script, war3map.doo version 13, 37 doodads varying one thing at a time). The editor's save writes a destructable's flags as bit 0 = past the playable area (x 3712 of 3328: in 0 or 3 -> 3 without drops, 1 with), bit 1 = 'the game places it from the doo', off where its script creates it, which an unnamed one is when it drops items: an item set with an item (1 or 2 items, 2 sets, chance 0, a random YiI2 all -> 0; in 0, 1, 2, 3 alike) or the map's item table 0 (-> 0), not an empty set [[]] or a table the map hasn't (5) (-> 2); bits 2 and 3 kept (4 to 7 with drops -> 4). The same for a barricade, a tree (LTlt), crates (LTcr) and a barrel (LTbx); the input flags never decide (dest-flags). So AutumnLeaves' barricades at x 6400 (playable edge 6272) were 3 = outside + game placed, and their new item sets made the script create them: 1. Studio's script run (destructables.ts flagsToFollow, Studio's steps make the script) gives every flag the same: MATCH 2026-11-25. Expected difference: the editor's save drops the item sets of plain doodads (LPrs, 28-31, flags 2 like 32), Studio keeps them (bugs.md)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/barricade-flags.w3x", "make": "make-barricade-flags.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "setting": ["script.generateOnSave", true] },
+      { "terrain": true },
+      { "sleep": 2000 },
+      { "command": "w3.script.generate" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed",
+      "ignore": ["doodads[].preFlags", "doodads[].editorId", "doodads[].trailer", "doodads[].extras", "doodads[].position", "doodads[].angle", "doodads[].scale", "doodads[].life", "doodads[].variation"],
+      "expect": "differs", "expectPaths": ["doodads[28].itemSets[0]", "doodads[29].itemSets[0]", "doodads[30].itemSets[0]", "doodads[31].itemSets[0]"] }],
+    "limit": 80
+  },
+  {
+    "name": "barricade-flags-v8",
+    "description": "barricade-flags with war3map.doo version 8 (skin ids, the creation number in editorId: AutumnLeaves' version): the editor's save writes version 13 with the same flags and item sets as from version 13, Studio's the same: MATCH 2026-11-25, the plain doodads' item sets the expected difference as in barricade-flags",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/barricade-flags-v8.w3x", "make": "make-barricade-flags.mjs" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [
+      { "setting": ["script.generateOnSave", true] },
+      { "terrain": true },
+      { "sleep": 2000 },
+      { "command": "w3.script.generate" },
+      { "sleep": 2000 }
+    ] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed",
+      "ignore": ["version", "doodads[].preFlags", "doodads[].editorId", "doodads[].trailer", "doodads[].extras", "doodads[].position", "doodads[].angle", "doodads[].scale", "doodads[].life", "doodads[].variation"],
+      "expect": "differs", "expectPaths": ["doodads[28].itemSets[0]", "doodads[29].itemSets[0]", "doodads[30].itemSets[0]", "doodads[31].itemSets[0]"] }],
+    "limit": 80
+  }
+]

@@ -160,12 +160,11 @@ pub fn script_is_studios(root: &Path) -> Result<bool, String> {
     };
     for file in SCRIPT_FILES {
         let path = root.join(file);
+        // The hash is of the text as the app reads it (guard.ts readScriptFile: lossless, so a script whose strings came
+        // from a table in an old code page holds those bytes and is Studio's all the same).
         match std::fs::read(&path) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) if script_hash(&text) == stamp => return Ok(true),
-                Ok(_) => {}
-                Err(_) => return Err(format!("{file} isn't UTF-8 text")),
-            },
+            Ok(bytes) if script_hash(&w3proj::lossless::decode(&bytes)) == stamp => return Ok(true),
+            Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("{file} is there but can't be read ({e})")),
         }
@@ -176,7 +175,7 @@ pub fn script_is_studios(root: &Path) -> Result<bool, String> {
 /// What `w3proj pack` did with a project's map script before packing (`script_for_pack`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum PackScript {
-    /// Not Studio's own (or no script): packed as it is, the generator not started.
+    /// Not Studio's own (or a campaign's own archive, which has no script): packed as it is, the generator not started.
     NotStudios,
     /// A generated script that follows its sources: packed as it is, the generator not started.
     Fresh,
@@ -184,16 +183,21 @@ pub enum PackScript {
     Made,
     /// Studio's own, yet not made again (the generator kept it, failed or couldn't start): why.
     NotMade(String),
+    /// The map had no script and none was made (the generator failed or couldn't start): why. The pack goes on without
+    /// one and says so (w3proj `missing_map_files`).
+    NoneMade(String),
 }
 
 /// Makes the project's map script again from its files when it is the one Studio wrote last (`script_is_studios`),
 /// as `w3proj rebuild --only script` makes it, so a pack doesn't ship a script made from other players, start
 /// locations or ally priorities than war3map.w3i has. `at`: the project's place in the pack, for the lines printed
-/// ("" or "maps/<chapter>/"). A script that isn't Studio's (edited by hand, the World Editor's, vJASS) stays.
+/// ("" or "maps/<chapter>/"). A script that isn't Studio's (edited by hand, the World Editor's, vJASS) stays. A map with
+/// no script at all gets one written into map/, as the app's packing does.
 pub fn script_for_pack(project: &Path, at: &str, game: &str, formats: &[PathBuf]) -> PackScript {
     // A generated script (map/triggers/triggers.json "script": "generated", in .w3proj/derived/) is the generator's
     // whatever its stamp says: made again when it doesn't follow its sources, or isn't there (a fresh clone). `w3proj
     // pack` checks the record afterwards (main.rs check_script).
+    let mut missing = false;
     match w3proj::trigger_layout::script_mode_on_disk(&project.join(w3proj::project::MAP_DIR)) {
         Ok(Some(w3proj::trigger_layout::ScriptMode::Generated)) => {
             let stored = derived::read_script_store(project).map(|s| !s.is_empty());
@@ -201,6 +205,15 @@ pub fn script_for_pack(project: &Path, at: &str, game: &str, formats: &[PathBuf]
                 return PackScript::Fresh;
             }
         }
+        // No tracked script at all (a map made without one, its script deleted): made, as the app's packing makes it
+        // (map-script w3.script.forPack): the game can't run a map without one, and nothing is replaced.
+        // Only a map (war3map.w3i there): a campaign's own archive has none (its chapter maps are packed with theirs),
+        // and a folder without map info has nothing to make one from.
+        Ok(_) if no_script(project) => match is_map(project) {
+            Ok(true) => missing = true,
+            Ok(false) => return PackScript::NotStudios,
+            Err(e) => return PackScript::NoneMade(e),
+        },
         Ok(_) => match script_is_studios(project) {
             Ok(true) => {}
             Ok(false) => return PackScript::NotStudios,
@@ -208,32 +221,53 @@ pub fn script_for_pack(project: &Path, at: &str, game: &str, formats: &[PathBuf]
         },
         Err(e) => return PackScript::NotMade(e.to_string()),
     }
+    let not_made = |why: String| if missing { PackScript::NoneMade(why) } else { PackScript::NotMade(why) };
     let server = Server { root: project.to_path_buf(), formats: formats.to_vec(), game: backend::GameCache::default(), read_only: false };
     let job = json!({ "task": "rebuild", "root": project.to_string_lossy(), "parts": ["script"], "settings": { "game.installDir": game } });
     let report = match run_host(&job, &server) {
         Ok(r) => r,
-        Err(e) => return PackScript::NotMade(format!("{e:#}")),
+        Err(e) => return not_made(format!("{e:#}")),
     };
     if let Some(e) = report.get("error").and_then(Value::as_str) {
-        return PackScript::NotMade(e.to_string());
+        return not_made(e.to_string());
     }
     let Some(r) = report["parts"].as_array().and_then(|p| p.iter().find(|r| r["part"] == "script")) else {
-        return PackScript::NotMade("the generator reported nothing for it".into());
+        return not_made("the generator reported nothing for it".into());
     };
     let status = r["status"].as_str().unwrap_or("?");
     let note = r["note"].as_str().unwrap_or("");
     let files = r["files"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|f| format!("{at}{f}")).collect::<Vec<_>>().join(", ");
     let also = report["alsoChanged"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|f| format!("{at}{f}")).collect::<Vec<_>>();
-    if status == "written" {
+    if status == "written" && missing {
+        println!("written    {files} (the map had no script: made from the project's files before packing)");
+    } else if status == "written" {
         println!("written    {files} (map script made again from the project's files before packing)");
     }
     if !also.is_empty() {
         println!("also written: {} (as the app's save of the script writes it)", also.join(", "));
     }
     match status {
-        "written" | "unchanged" => PackScript::Made,
-        _ => PackScript::NotMade(if note.is_empty() { status.to_string() } else { note.to_string() }),
+        "written" | "unchanged" if !missing || !no_script(project) => PackScript::Made,
+        "written" | "unchanged" => PackScript::NoneMade("the generator wrote none".into()),
+        _ => not_made(if note.is_empty() { status.to_string() } else { note.to_string() }),
     }
+}
+
+/// Whether the project tracks no map script: neither file of `SCRIPT_FILES` is there. One that is there but can't be
+/// looked at counts as there (left alone; `script_is_studios` says why).
+fn no_script(root: &Path) -> bool {
+    SCRIPT_FILES.iter().all(|f| matches!(root.join(f).try_exists(), Ok(false)))
+}
+
+/// Whether the project is a map, not a campaign's own archive: it has map info (war3map.w3i, raw or as JSON) and no
+/// campaign info. Err: one of them can't be looked at.
+fn is_map(root: &Path) -> Result<bool, String> {
+    let map = root.join(w3proj::project::MAP_DIR);
+    let there = |name: &str| map.join(name).try_exists().map_err(|e| format!("{}/{name} can't be looked at ({e})", w3proj::project::MAP_DIR));
+    if w3proj::project::is_campaign_project(root).map_err(|e| e.to_string())? {
+        return Ok(false);
+    }
+    Ok(there("war3map.w3i")? || there("war3map.w3i.json")?)
 }
 
 struct Due {
@@ -710,8 +744,14 @@ mod tests {
         assert_eq!(script_is_studios(&dir), Ok(false), "edited since");
         std::fs::remove_file(dir.join("map/war3map.j")).unwrap();
         assert_eq!(script_is_studios(&dir), Ok(false), "no script");
+        // A script holding a name from a table in CP949 ("한국", not UTF-8), stamped by the app with the hash of its
+        // lossless text (readScriptFile), is Studio's; other bytes are not.
+        let korean = [b"// ".as_slice(), &[0xc7, 0xd1, 0xb1, 0xb9], b"\r\nfunction main takes nothing returns nothing\r\nendfunction\r\n"].concat();
+        std::fs::write(dir.join("map/war3map.j"), &korean).unwrap();
+        std::fs::write(dir.join(SCRIPT_STAMP), format!("{}\n", script_hash(&w3proj::lossless::decode(&korean)))).unwrap();
+        assert_eq!(script_is_studios(&dir), Ok(true), "a script in a code page");
         std::fs::write(dir.join("map/war3map.j"), [0xffu8, 0xfe]).unwrap();
-        assert!(script_is_studios(&dir).unwrap_err().contains("UTF-8"));
+        assert_eq!(script_is_studios(&dir), Ok(false), "other bytes");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,5 +1,6 @@
 // The number fields Map Properties types into war3map.w3i, with the type each has there (crates/w3proj/formats/w3i.json).
-// A typed value that type can't hold is refused and the map info stays as it was (user decision 2026-11-15).
+// A typed value that type can't hold is refused and the map info stays as it was (user decision 2026-11-15), except
+// in the boxes whose typing follows the World Editor's (TYPING): they take what the editor's box takes.
 
 import { typedNumber, type StoredNumber } from "../../lib/formats/numbers";
 
@@ -26,12 +27,12 @@ export const INFO_NUMBERS = {
   fogDensity: { label: "Fog density", kind: "f32", path: ["fog", "density"] },
   fogAlpha: { label: "Fog colour alpha", kind: "u8", path: ["fog", "color", 3] },
   waterTintAlpha: { label: "Water tint alpha", kind: "u8", path: ["waterTint", 3] },
-  terrainFogStyle: { label: "Terrain fog style", kind: "i32", path: ["terrainFog", "style"] },
-  terrainFogOverSky: { label: "Terrain fog draw over sky", kind: "i32", path: ["terrainFog", "overSky"] },
+  // The terrain fog struct in the file's order (its sixth word, Draw Fog Over Sky, is a checkbox).
+  terrainFogHeightStart: { label: "Terrain fog height start", kind: "f32", path: ["terrainFog", "heightStart"] },
+  terrainFogHeightEnd: { label: "Terrain fog height end", kind: "f32", path: ["terrainFog", "heightEnd"] },
   terrainFogLinearStart: { label: "Terrain fog linear start", kind: "f32", path: ["terrainFog", "linearStart"] },
   terrainFogLinearEnd: { label: "Terrain fog linear end", kind: "f32", path: ["terrainFog", "linearEnd"] },
   terrainFogMaxOpacity: { label: "Terrain fog max opacity", kind: "f32", path: ["terrainFog", "maxOpacity"] },
-  terrainFogHeight: { label: "Terrain fog height", kind: "f32", path: ["terrainFog", "height"] },
   waterMinOpacity: water("minOpacity", "min opacity"),
   waterMaxOpacity: water("maxOpacity", "max opacity"),
   waterReflectivity: water("reflectivity", "reflectivity"),
@@ -58,6 +59,9 @@ interface Clamp { readonly abs?: boolean; readonly round2?: boolean; readonly mi
 const WATER_CLAMP: Clamp = { min: 0, max: 100 };
 const FOG_CLAMP: Clamp = { round2: true, min: 0, max: 100000 };
 const ZOOM_CLAMP: Clamp = { min: 1250, max: 3000 };
+/** Height Start and End: the box shows two decimals but the file keeps what was typed (123.456 saved as typed;
+ *  measured 2026-11-25, docs/testing/numeric-limits-measured.md). */
+const HEIGHT_CLAMP: Clamp = { min: -100000, max: 100000 };
 export const INFO_CLAMPS: { readonly [K in InfoNumberKey]?: Clamp } = {
   waterMinOpacity: { abs: true, ...WATER_CLAMP },
   waterMaxOpacity: WATER_CLAMP,
@@ -67,10 +71,12 @@ export const INFO_CLAMPS: { readonly [K in InfoNumberKey]?: Clamp } = {
   waterEnvironmentMapReflectivity: WATER_CLAMP,
   waterWavesVertexDisplacement: WATER_CLAMP,
   waterWavesNormalMapStrength: WATER_CLAMP,
-  terrainFogMaxOpacity: { min: 0, max: 1 },
+  // 0.123 is 0.12 (measured 2026-11-25).
+  terrainFogMaxOpacity: { round2: true, min: 0, max: 1 },
   terrainFogLinearStart: FOG_CLAMP,
   terrainFogLinearEnd: FOG_CLAMP,
-  terrainFogHeight: { round2: true, min: -100000, max: 100000 },
+  terrainFogHeightStart: HEIGHT_CLAMP,
+  terrainFogHeightEnd: HEIGHT_CLAMP,
   fogStart: FOG_CLAMP,
   fogEnd: FOG_CLAMP,
   fogDensity: { round2: true, min: 0, max: 100 },
@@ -90,28 +96,51 @@ export function clampInfoNumber(key: InfoNumberKey, v: number): number {
   return v;
 }
 
-/** The text a field's box lets through as it is typed: some boxes drop "-" and "." and hold only so many characters. */
-const TYPING: { readonly [K in InfoNumberKey]?: { readonly drop?: string; readonly maxLength?: number } } = {
-  ...Object.fromEntries(WATER_NUMBERS.filter((k) => INFO_CLAMPS[k]).map((k) => [k, { drop: "-." }])),
-  zoomMin: { drop: "-.", maxLength: 4 },
-  zoomMax: { drop: "-.", maxLength: 4 },
-  zoomDefault: { drop: "-.", maxLength: 4 },
+/** The text a field's box lets through as it is typed (docs/testing/numeric-limits-measured.md, 2026-11-25):
+ *  - `digits`: the water and zoom boxes take digits only ("-5" is 5, "1e2" is 12, "abc" leaves the box empty), and the
+ *    zoom boxes hold 4;
+ *  - `decimal`: the fog boxes drop letters but keep the rest ("1e3" is 13, "1.5e2" 1.52, "-5" stays -5; "+5" and
+ *    "+7.5" stay, and are 0: see fogBoxValue). */
+type Typing = { readonly mode: "digits" | "decimal"; readonly maxLength?: number };
+const DECIMAL: Typing = { mode: "decimal" };
+const TYPING: { readonly [K in InfoNumberKey]?: Typing } = {
+  ...Object.fromEntries(WATER_NUMBERS.filter((k) => INFO_CLAMPS[k]).map((k) => [k, { mode: "digits" }])),
+  zoomMin: { mode: "digits", maxLength: 4 },
+  zoomMax: { mode: "digits", maxLength: 4 },
+  zoomDefault: { mode: "digits", maxLength: 4 },
+  // Map Options' terrain fog boxes: Z Start, Z End, Density, Max Opacity, Height Start/End, Linear Start/End.
+  fogStart: DECIMAL,
+  fogEnd: DECIMAL,
+  fogDensity: DECIMAL,
+  terrainFogMaxOpacity: DECIMAL,
+  terrainFogHeightStart: DECIMAL,
+  terrainFogHeightEnd: DECIMAL,
+  terrainFogLinearStart: DECIMAL,
+  terrainFogLinearEnd: DECIMAL,
 };
 
 /** What field `key`'s box holds after `text` was typed into it ("-5" is "5" in a water field, 12345 is 1234 in a zoom
- *  field). Fields with no rule give `text` back. */
+ *  field, "1e3" is "13" in a fog field). Fields with no rule give `text` back. */
 export function filterInfoTyping(key: InfoNumberKey, text: string): string {
   const t = TYPING[key];
   if (!t) return text;
-  let out = t.drop ? [...text].filter((c) => !t.drop!.includes(c)).join("") : text;
+  let out = t.mode === "digits" ? text.replace(/[^0-9]/g, "") : text.replace(/\p{L}/gu, "");
   if (t.maxLength !== undefined) out = out.slice(0, t.maxLength);
   return out;
+}
+
+/** The number a fog box's text is: a plain decimal ("-5", "12.5", ".5", "5.") is itself, anything else (empty, "+5",
+ *  "-", "1.2.3", a space) is 0, as the editor's box showed 0.00 for text, an empty box and "+5" / "+7.5" (measured). */
+function fogBoxValue(text: string): number {
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(text) ? Number(text) + 0 : 0;
 }
 
 /** The text field `key`'s box takes at most (for its maxlength), if limited. */
 export const infoTypingLimit = (key: InfoNumberKey): number | undefined => TYPING[key]?.maxLength;
 /** Whether field `key`'s box is a plain text one (its filter drops characters a number box would keep). */
 export const infoTypingFiltered = (key: InfoNumberKey): boolean => TYPING[key] !== undefined;
+/** Whether field `key`'s box keeps a sign and a decimal point (a fog box): for the keyboard it asks for. */
+export const infoTypingDecimal = (key: InfoNumberKey): boolean => TYPING[key]?.mode === "decimal";
 
 /** Fields the editor keeps in order after an edit: each group lists its fields lowest first; the edited field keeps
  *  its value (within the limits of its neighbours when it is a middle one) and the others are pushed. */
@@ -120,6 +149,8 @@ const ORDERED: readonly (readonly InfoNumberKey[])[] = [
   ["waterMinOpacity", "waterMaxOpacity"],
   ["fogStart", "fogEnd"],
   ["terrainFogLinearStart", "terrainFogLinearEnd"],
+  // The other way round: Height Start is kept at or above Height End (measured 2026-11-25).
+  ["terrainFogHeightEnd", "terrainFogHeightStart"],
 ];
 
 type Obj = Record<string | number, unknown>;
@@ -131,8 +162,9 @@ const place = (info: object, key: InfoNumberKey): [Obj, string | number] | undef
   return o && typeof o === "object" ? [o as Obj, path.at(-1)!] : undefined;
 };
 
-/** After `key` got a value: pulls the other fields of its group into order. A zoom default above the maximum is the
- *  maximum (the typed one gives way); every other edit pushes the others. The water pair only pulls Min down. */
+/** After `key` got a value: pulls the other fields of its group into order. A zoom default outside minimum..maximum
+ *  is pulled to the nearer one (the typed one gives way; measured: Min 2000, Max 2500, Default typed 1500 is 2000);
+ *  every other edit pushes the others (water Min typed 80 above Max 50 makes Max 80). */
 function keepOrder(info: object, key: InfoNumberKey): void {
   const group = ORDERED.find((g) => g.includes(key));
   if (!group) return;
@@ -141,8 +173,7 @@ function keepOrder(info: object, key: InfoNumberKey): void {
   const val = (i: number) => cells[i]![0][cells[i]![1]] as number;
   const put = (i: number, v: number) => { cells[i]![0][cells[i]![1]] = v; };
   const at = group.indexOf(key);
-  if (group[0] === "waterMinOpacity") { if (at === 1 && val(0) > val(1)) put(0, val(1)); return; }
-  if (key === "zoomDefault") { if (val(1) > val(2)) put(1, val(2)); if (val(1) < val(0)) put(0, val(1)); return; }
+  if (key === "zoomDefault") { if (val(1) > val(2)) put(1, val(2)); if (val(1) < val(0)) put(1, val(0)); return; }
   for (let i = at + 1; i < group.length; i++) if (val(i) < val(i - 1)) put(i, val(i - 1));
   for (let i = at - 1; i >= 0; i--) if (val(i) > val(i + 1)) put(i, val(i + 1));
 }
@@ -154,10 +185,15 @@ export function infoNumber(info: object, key: InfoNumberKey, player?: number): n
   return typeof o === "number" ? o : undefined;
 }
 
-/** Sets a typed value into `info`; a value the field's stored type can't hold is refused and `info` stays as it was. */
+/** Sets a typed value into `info`; a value the field's stored type can't hold is refused and `info` stays as it was.
+ *  A fog box refuses nothing: what it holds is a number or 0, pulled into its range (as the editor's). */
 export function setInfoNumber(info: object, key: InfoNumberKey, typed: string, player?: number): { value: number } | { refused: string } {
   const field = INFO_NUMBERS[key];
-  const t0 = typedNumber(field.kind, typed, field.label);
+  // An empty digits-only box is 0 to the editor (then pulled into range: water 0, zoom 1250).
+  if (TYPING[key]?.mode === "digits" && typed === "") typed = "0";
+  const t0 = TYPING[key]?.mode === "decimal"
+    ? { value: fogBoxValue(filterInfoTyping(key, typed)) }
+    : typedNumber(field.kind, typed, field.label);
   if ("refused" in t0) return t0;
   const t = { value: clampInfoNumber(key, t0.value) };
   const path = field.path.map((k) => step(k, player));

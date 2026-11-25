@@ -5,7 +5,7 @@
 // backend (git_status, git_show, git_size; tool_run for init/add/commit).
 
 import { goToNextChunk, goToPreviousChunk, MergeView, getChunks } from "@codemirror/merge";
-import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, LOG_FORMAT, parseBranches, parseCounts, parseLog, parseNameStatus, takeSide, type Branch, type Side, type Change, type Commit, type CommitFile } from "./git";
+import { addPage, BRANCH_FORMAT, branchProblem, chunks, commitPaths, deleteBranchArgs, diffTarget, discardPlan, lfsSize, logArgs, noFilter, notFullyMerged, PAGE, parseBranches, parseCounts, parseFilter, parseLog, parseNameStatus, renameBranchArgs, takeSide, type Branch, type Side, type Change, type Commit, type CommitFile } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { isFullPath } from "../../lib/paths";
@@ -36,6 +36,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let branches: Branch[] = [], remotes: string[] = [], counts: { behind: number; ahead: number } | null = null, merging = false;
   /** History: the commits, and the files of the one that's open. */
   let log: Commit[] = [], openCommit: string | null = null, openFiles: CommitFile[] = [];
+  /** More commits than listed; the search box's text; the list's element (the box isn't redrawn while typing). */
+  let moreLog = false, query = "", loadingMore = false, historyList: HTMLElement | null = null;
+  /** Changes with each search and each full reading: a page that comes back after it is dropped. */
+  let logGeneration = 0;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined, searchedIn: string | null | undefined;
   const item = w3.statusBar.add({ id: "w3.scm.status", text: "", command: "w3.scm.show", align: "left", priority: 50 });
   ctx.subscriptions.push(item);
 
@@ -55,7 +60,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const current = branches.find((b) => b.current);
     counts = current?.upstream ? parseCounts(await quiet("rev-list", "--left-right", "--count", "@{u}...HEAD")) : null;
     merging = (await quiet("rev-parse", "--verify", "-q", "MERGE_HEAD")).trim() !== "";
-    log = parseLog(await quiet("log", "-n", "200", `--format=${LOG_FORMAT}`, "--date=short", "--", "."));
+    // What's been paged in stays (up to the commits listed), and the search stays.
+    const generation = ++logGeneration;
+    const size = Math.max(PAGE, log.length);
+    const first = parseLog(await quiet(...logArgs(parseFilter(query), 0, size)));
+    if (generation !== logGeneration) return;
+    ({ commits: log, more: moreLog } = addPage([], first, size));
+    loadingMore = false;
+  };
+
+  /** Reads the next page of the history (or, with `restart`, the first one of a new search). */
+  const readHistory = async (restart: boolean) => {
+    const generation = ++logGeneration;
+    const have = restart ? [] : log;
+    const asked = query;
+    let fetched: Commit[];
+    try { fetched = parseLog(await git(...logArgs(parseFilter(asked), have.length, PAGE))); }
+    catch (e) { if (generation === logGeneration) { loadingMore = false; drawHistory(); } throw e; }
+    if (generation !== logGeneration) return;
+    ({ commits: log, more: moreLog } = addPage(have, fetched, PAGE));
+    if (restart) { openCommit = null; openFiles = []; }
+    loadingMore = false;
+    drawHistory();
+  };
+  const loadMore = () => {
+    if (loadingMore || !moreLog) return Promise.resolve();
+    loadingMore = true;
+    drawHistory();
+    return readHistory(false);
+  };
+  const searchSoon = (text: string) => {
+    query = text;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void readHistory(true).catch(failed), 300);
   };
 
   let refreshing: Promise<void> | null = null;
@@ -66,7 +103,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         status = r ? await w3.backend.invoke<Status | null>("git_status", { root: r }) : undefined;
         error = "";
         if (status) await readRepository();
-        else { branches = []; remotes = []; counts = null; merging = false; log = []; }
+        else { branches = []; remotes = []; counts = null; merging = false; log = []; moreLog = false; loadingMore = false; logGeneration++; }
+        // Another project: its history starts without the last one's search.
+        if (r !== searchedIn) { searchedIn = r; if (query) { query = ""; if (status) await readRepository(); } }
       } catch (e) {
         status = undefined;
         error = String(e instanceof Error ? e.message : e);
@@ -228,19 +267,76 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (c === "Merge") await mergeRef(current.upstream);
   };
 
+  /** Deleting a branch: not the current one; one with commits no other branch has only after a question. */
+  const deleteBranch = async (given?: string) => {
+    const name = given ?? (await w3.window.quickPick<string>(
+      branches.filter((b) => !b.current).map((b) => ({ label: b.name, description: b.upstream, value: b.name })),
+      { placeholder: "Delete which branch?" }))?.value;
+    if (!name) { if (given === undefined && branches.every((b) => b.current)) void w3.window.showInfo("There's no other branch to delete."); return; }
+    const b = branches.find((x) => x.name === name);
+    if (!b) throw new Error(`There's no branch ${name}.`);
+    if (b.current) throw new Error(`${name} is the branch the project is on: switch to another one first.`);
+    try {
+      await git(...deleteBranchArgs(name, false));
+    } catch (e) {
+      if (!notFullyMerged(e)) throw e;
+      const c = await w3.window.showWarning(`${name} has commits that no other branch has. Deleting it loses them (they stay findable in the reflog for a while). Delete it anyway?`, "Delete Branch", "Cancel");
+      if (c !== "Delete Branch") return;
+      await git(...deleteBranchArgs(name, true));
+    } finally {
+      await refresh();
+    }
+    void w3.window.showInfo(`Deleted branch ${name}.`);
+  };
+
+  /** Renaming a branch (the current one or another); the name is checked as git checks it. */
+  const renameBranch = async (given?: string) => {
+    const from = given ?? (await w3.window.quickPick<string>(
+      branches.map((b) => ({ label: b.name, description: b.current ? "current" : "", value: b.name })),
+      { placeholder: "Rename which branch?" }))?.value;
+    if (!from) return;
+    if (!branches.some((b) => b.name === from)) throw new Error(`There's no branch ${from}.`);
+    const to = (await w3.window.inputBox({ prompt: `New name of ${from}`, value: from }))?.trim();
+    if (!to || to === from) return;
+    if (branches.some((b) => b.name === to)) throw new Error(`There's a branch ${to} already.`);
+    // Checked before git is asked (renameBranchArgs refuses what git would take for an option).
+    const args = renameBranchArgs(from, to);
+    try { await git(...args); } finally { await refresh(); }
+    void w3.window.showInfo(`Renamed ${from} to ${to}.`);
+  };
+
   const toggleCommit = async (hash: string) => {
     if (openCommit === hash) { openCommit = null; openFiles = []; }
     else {
       openFiles = parseNameStatus(await git("show", "--relative", "--name-status", "-z", "--format=", hash, "--", "."));
       openCommit = hash;
     }
-    w3.views.refresh("w3.scm.history");
+    drawHistory();
+  };
+
+  /** The history's commits (and Load more) in the list element of the view as it's drawn now. */
+  const drawHistory = () => {
+    const el = historyList;
+    if (!el?.isConnected) return;
+    if (!log.length) {
+      el.replaceChildren(h("div.view-empty.scm-log-empty", {}, noFilter(parseFilter(query)) ? "No commits yet." : "No matches."));
+      return;
+    }
+    el.replaceChildren(h("div.tree", {}, ...log.flatMap((c) => [
+      h("div.scm-log-row", { title: `${c.hash}\n${c.author}, ${c.date}\n${c.subject}`, onclick: () => void toggleCommit(c.hash).catch(failed) },
+        h("span.tree-icon", {}, openCommit === c.hash ? "▾" : "▸"), h("span.scm-log-subject", {}, c.subject), h("small.muted", {}, c.date)),
+      ...(openCommit === c.hash ? openFiles.map((f) => h("div.scm-log-file", { title: f.from ? `${f.from} → ${f.path}` : f.path,
+        onclick: () => void w3.editors.open(`${DIFF}@${c.hash}:${f.path}`, "w3.diff").catch(failed) },
+        h("span.scm-status", {}, f.status), h("span", {}, f.path.split("/").pop() ?? f.path))) : []),
+    ])), ...(moreLog ? [h("div.camp-side-actions", {}, h("button.scm-log-more", {
+      disabled: loadingMore, title: `Shows the next ${PAGE} commits`, onclick: () => void loadMore().catch(failed),
+    }, loadingMore ? "Loading…" : "Load more"))] : []));
   };
 
   ctx.subscriptions.push(
     w3.workspace.onDidChange(() => void refresh()),
     w3.workspace.onDidSave(() => refreshSoon()),
-    { dispose: () => clearTimeout(timer) },
+    { dispose: () => { clearTimeout(timer); clearTimeout(searchTimer); } },
     w3.commands.register("w3.scm.show", async () => { await w3.views.show("scm"); await refresh(); }),
     w3.commands.register("w3.scm.refresh", () => refresh()),
     w3.commands.register("w3.scm.diff", (path: string) => w3.editors.open(`${DIFF}${path}`, "w3.diff")),
@@ -252,6 +348,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.scm.commit", () => commit()),
     w3.commands.register("w3.scm.discardAll", async () => { await refresh(); await discard(status?.changes ?? []); }),
     w3.commands.register("w3.scm.branch", async () => { await refresh(); await switchBranch(); }),
+    w3.commands.register("w3.scm.deleteBranch", async (name?: string) => { await refresh(); await deleteBranch(name); }),
+    w3.commands.register("w3.scm.renameBranch", async (name?: string) => { await refresh(); await renameBranch(name); }),
     w3.commands.register("w3.scm.merge", async () => { await refresh(); await merge(); }),
     w3.commands.register("w3.scm.mergeAbort", () => withClosedEditors(async () => { await git("merge", "--abort"); })),
     w3.commands.register("w3.scm.addRemote", () => addRemote()),
@@ -281,6 +379,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const current = branches.find((b) => b.current);
         el.append(h("div.scm-branch", {},
           h("button.scm-branch-name", { title: "Switch or create a branch", onclick: run("w3.scm.branch") }, `⎇ ${status.branch || "(no commits)"}`),
+          h("button", { title: "Rename a branch", onclick: run("w3.scm.renameBranch") }, "✎"),
+          h("button", { title: "Delete a branch", disabled: branches.length < 2, onclick: run("w3.scm.deleteBranch") }, "✕"),
           ...(counts ? [h("span.muted", { title: `${counts.ahead} to push, ${counts.behind} to pull` }, `↑${counts.ahead} ↓${counts.behind}`)] : []),
           ...(remotes.length
             ? [h("button", { title: "Push this branch", disabled: !current, onclick: run("w3.scm.push") }, "Push"), h("button", { title: "Pull (fast-forward only)", disabled: !current?.upstream, onclick: run("w3.scm.pull") }, "Pull")]
@@ -333,15 +433,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
     w3.views.register("w3.scm.history", {
       render(el) {
+        historyList = null;
         if (!root() || !status) { el.append(h("div.view-empty", {}, "No repository.")); return; }
-        if (!log.length) { el.append(h("div.view-empty", {}, "No commits yet.")); return; }
-        el.append(h("div.tree", {}, ...log.flatMap((c) => [
-          h("div.scm-log-row", { title: `${c.hash}\n${c.author}, ${c.date}\n${c.subject}`, onclick: () => void toggleCommit(c.hash).catch(failed) },
-            h("span.tree-icon", {}, openCommit === c.hash ? "▾" : "▸"), h("span.scm-log-subject", {}, c.subject), h("small.muted", {}, c.date)),
-          ...(openCommit === c.hash ? openFiles.map((f) => h("div.scm-log-file", { title: f.from ? `${f.from} → ${f.path}` : f.path,
-            onclick: () => void w3.editors.open(`${DIFF}@${c.hash}:${f.path}`, "w3.diff").catch(failed) },
-            h("span.scm-status", {}, f.status), h("span", {}, f.path.split("/").pop() ?? f.path))) : []),
-        ])));
+        if (!log.length && !query) { el.append(h("div.view-empty", {}, "No commits yet.")); return; }
+        const box = h("input.scm-log-search", {
+          type: "search", value: query, placeholder: "Search: message, author:name or path:file",
+          title: "Searches the commit messages; \"author:\" or \"path:\" in front searches the author or the commits that changed a file or folder",
+          oninput: () => searchSoon(box.value),
+        }) as HTMLInputElement;
+        historyList = h("div.scm-log-list");
+        el.append(h("div.scm-branch", {}, box), historyList);
+        drawHistory();
       },
     }),
 

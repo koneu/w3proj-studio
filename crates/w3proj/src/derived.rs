@@ -76,12 +76,11 @@ fn read_sources(project: &Path, skip: &dyn Fn(&str) -> bool) -> Result<Sources> 
         out.insert(name, fingerprint(&bytes));
     }
     if crate::terrain_layout::is_split_on_disk(&map)? {
-        for rel in crate::project::walk(&map.join(crate::terrain_layout::DIR))? {
-            let path = format!("{}/{rel}", crate::terrain_layout::DIR);
+        for path in crate::terrain_layout::FOLDER.paths(&map)? {
             if skip(&path) {
                 continue;
             }
-            let bytes = fs::read(crate::paths::join_rel(&map, &path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+            let bytes = crate::folder_codec::read(&map, &path)?;
             out.insert(path, fingerprint(&bytes));
         }
     }
@@ -113,6 +112,7 @@ pub fn record(project: &Path, sources: &Sources) -> Result<()> {
 /// the minimap follow, all a record said before the script had a group), and is an error for the script's group: written
 /// over, a record whose terrain group refused a pack would let it through.
 fn write_group(project: &Path, key: &str, sources: Option<&Sources>) -> Result<()> {
+    let _held = RecordLock::take(project);
     let path = project.join(STAMP_FILE);
     let old = match fs::read(&path) {
         Ok(b) => Some(b),
@@ -152,6 +152,36 @@ fn write_group(project: &Path, key: &str, sources: Option<&Sources>) -> Result<(
         return Ok(());
     }
     write_atomic(&path, text.as_bytes())
+}
+
+/// Held while a group of the record is read, changed and written back (`write_group`), so two writers (the app's
+/// `record` after making pathing, shadows and the minimap, a sync's `record_script`, in one process or the app and the
+/// CLI) never write back a record read before the other's write, losing that group. An OS lock on a file outside the
+/// project (in the temporary folder, named after the project's path: nothing turns up in its git status), which the OS
+/// lets go when a process ends however it ends. Where that file can't be opened or locked, a lock within the process.
+struct RecordLock {
+    _file: Option<fs::File>,
+    _inner: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+impl RecordLock {
+    fn take(project: &Path) -> RecordLock {
+        if let Some(file) = Self::lock_file(project) {
+            if file.lock().is_ok() {
+                return RecordLock { _file: Some(file), _inner: None };
+            }
+        }
+        static INNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        RecordLock { _file: None, _inner: Some(INNER.lock().unwrap_or_else(|e| e.into_inner())) }
+    }
+
+    fn lock_file(project: &Path) -> Option<fs::File> {
+        let full = fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
+        let dir = std::env::temp_dir().join("w3proj-locks");
+        fs::create_dir_all(&dir).ok()?;
+        let name = format!("derived-from-{}.lock", fingerprint(full.to_string_lossy().as_bytes()));
+        fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(dir.join(name)).ok()
+    }
 }
 
 /// Records the sources as they are now.
@@ -335,10 +365,9 @@ pub fn script_sources(project: &Path) -> Result<Sources> {
         let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{MAP_DIR}/{name} can't be read: {e}")))?;
         out.insert(name, fingerprint(&bytes));
     }
-    for dir in [crate::trigger_layout::DIR, crate::terrain_layout::DIR] {
-        for rel in crate::project::walk(&map.join(dir))? {
-            let path = format!("{dir}/{rel}");
-            let bytes = fs::read(crate::paths::join_rel(&map, &path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+    for folder in [crate::trigger_layout::FOLDER, crate::terrain_layout::FOLDER] {
+        for path in folder.paths(&map)? {
+            let bytes = crate::folder_codec::read(&map, &path)?;
             out.insert(path, fingerprint(&bytes));
         }
     }
@@ -681,6 +710,45 @@ mod tests {
         assert_eq!(fs::read(dir.join(STAMP_FILE)).unwrap(), b"{ not json");
         assert!(matches!(check_script(&dir).unwrap(), Freshness::Unreadable(_)));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The app's `record` (after making pathing, shadows and the minimap) and a sync's `record_script` running at once:
+    /// each rewrites the whole record, so without the lock one could write back a record it read before the other's
+    /// write and lose that group. Each writer is the only one writing its group (round numbers going up), so a record
+    /// read after a writer's round finished must hold that round or a later one in its group.
+    #[test]
+    fn the_terrains_and_the_scripts_writers_at_once_lose_no_group() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        use std::sync::Arc;
+        let dir = project("race");
+        const ROUNDS: i64 = 200;
+        // The last round each writer finished (files, script); -1: none yet.
+        let done = Arc::new([AtomicI64::new(-1), AtomicI64::new(-1)]);
+        let round_in = |doc: &serde_json::Value, g: usize| -> i64 {
+            let group = if g == 0 { doc.get("files") } else { doc.get("script").and_then(|s| s.get("files")) };
+            group.and_then(|f| f.get("war3map.w3e.txt")).and_then(serde_json::Value::as_str).map_or(-1, |s| s.parse().unwrap())
+        };
+        let writer = |g: usize| {
+            let (dir, done) = (dir.clone(), done.clone());
+            std::thread::spawn(move || {
+                for i in 0..ROUNDS {
+                    let sources = Sources::from([("war3map.w3e.txt".to_string(), i.to_string())]);
+                    if g == 0 { record(&dir, &sources) } else { record_script(&dir, &sources) }.unwrap();
+                    done[g].store(i, Ordering::SeqCst);
+                    let expected = [done[0].load(Ordering::SeqCst), done[1].load(Ordering::SeqCst)];
+                    let doc: serde_json::Value = serde_json::from_slice(&fs::read(dir.join(STAMP_FILE)).unwrap()).unwrap();
+                    for (k, name) in ["files", "script"].iter().enumerate() {
+                        let got = round_in(&doc, k);
+                        assert!(got >= expected[k], "the {name} group says round {got} after round {} was recorded: lost or written back old", expected[k]);
+                    }
+                }
+            })
+        };
+        let (a, b) = (writer(0), writer(1));
+        let (a, b) = (a.join(), b.join());
+        let _ = fs::remove_dir_all(&dir);
+        a.unwrap();
+        b.unwrap();
     }
 
     #[test]

@@ -178,7 +178,7 @@ pub fn resolve_empty_v8_skin_ids(
 
 /// Whether something is at `path`. A path that can't be checked (a folder above it may not be looked
 /// into) is an error, never "not there": what is taken for absent gets created or written over.
-fn there(path: &Path) -> Result<bool> {
+pub(crate) fn there(path: &Path) -> Result<bool> {
     path.try_exists()
         .map_err(|e| Error::Project(format!("{} can't be checked: {e}", path.display())))
 }
@@ -502,7 +502,7 @@ fn split_triggers(files: &mut BTreeMap<String, Vec<u8>>, report: &mut UnpackRepo
         (Some(_), None) => Err(format!("the map has no {}", tl::WCT)),
         (None, Some(_)) => Err(format!("the map has no {}", tl::WTG)),
         (Some(wtg), Some(wct)) => {
-            if let Some(own) = files.keys().find(|k| k.to_ascii_lowercase().starts_with(&format!("{}/", tl::DIR))) {
+            if let Some(own) = tl::FOLDER.first_in(files) {
                 Err(format!("the map has a file of its own under {}\\ ({own})", tl::DIR))
             } else {
                 match codecs.trigger_data() {
@@ -1091,6 +1091,10 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
             crate::derived::ensure_ignored(project)?;
         }
     }
+    // The agent file sits next to .gitignore: written when absent, never rewritten (`agent_file`).
+    if top {
+        crate::agent_file::ensure(project, crate::agent_file::Kind::of(project)?)?;
+    }
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
     crate::derived::record_now(project)?;
     // A generated script lives in the store, not in git, and follows the map's files as Studio wrote it; a kept one is
@@ -1242,10 +1246,18 @@ fn absolute(p: &Path) -> PathBuf {
 /// (`.w3n` archives have no map header). The files are written by the caller.
 /// Fails if the directory exists and isn't empty.
 pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
+    let campaign = header.is_none();
+    create_as(project, header, campaign)
+}
+
+/// `create`, with `campaign` said outright: a map saved by World Editor 3.0.1 has no header either, but is no
+/// campaign (the agent file describes the layout of the kind).
+pub fn create_as(project: &Path, header: Option<MapHeader>, campaign: bool) -> Result<()> {
     if there(project)? && fs::read_dir(project)?.next().is_some() {
         return Err(Error::Project(format!("{} is not empty", project.display())));
     }
     fs::create_dir_all(project.join(MAP_DIR))?;
+    let kind = if campaign { crate::agent_file::Kind::Campaign } else { crate::agent_file::Kind::Flat };
     let manifest = Manifest {
         format: FORMAT_VERSION,
         map: header,
@@ -1256,6 +1268,7 @@ pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
     for (name, text) in [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)] {
         write_atomic(&project.join(name), text.as_bytes())?;
     }
+    crate::agent_file::ensure(project, kind)?;
     Ok(())
 }
 
@@ -1333,10 +1346,18 @@ pub fn encode_files_noting(
 /// time and MD5) per block, is left out on purpose. Its values describe the original's blocks, so
 /// carried over it would be wrong for the new ones, and the game loads maps without it (every map of
 /// smoketest_maps that had one: only it went missing, 2026-11-16). (signature) is left out too: a
-/// signature over other bytes is worse than none. `tests/pack_meta_files.rs` pins both.
+/// signature over other bytes is worse than none. `tests/pack_meta_files.rs` pins both. `w3proj pack
+/// --attributes` writes a new one instead (`build_archive_with`).
 pub fn build_archive(manifest: &Manifest, prefix: &[u8], files: BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
+    build_archive_with(manifest, prefix, files, false)
+}
+
+/// `build_archive`; `attributes`: with a fresh (attributes) of the new blocks' CRC32s, as the World Editor's save
+/// has it (`mpq::WriteOptions::attributes`), so the map has the same entries as one it saved.
+pub fn build_archive_with(manifest: &Manifest, prefix: &[u8], files: BTreeMap<String, Vec<u8>>, attributes: bool) -> Result<Vec<u8>> {
     let mut builder = ArchiveBuilder::new(WriteOptions {
         sector_size_shift: manifest.archive.sector_size_shift,
+        attributes,
         ..WriteOptions::default()
     });
     for (name, data) in files {
@@ -1597,11 +1618,13 @@ fn imports_under_other_extension(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<Str
 /// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
 /// Chapter maps are packed as they are. Builds a project's archive (chapter maps under `maps/` are
 /// packed into it first); what the user should know about it goes into `warnings`.
+/// `attributes`: the archive and its chapter maps get an (attributes) (`build_archive_with`).
 fn pack_bytes_with(
     project: &Path,
     codecs: &Registry,
     prune: Option<&mut wts::PruneOutcome>,
     warnings: &mut Vec<String>,
+    attributes: bool,
 ) -> Result<(Vec<u8>, usize)> {
     let (manifest, prefix, mut files) = read_project(project)?;
     if let Some(outcome) = prune {
@@ -1642,12 +1665,12 @@ fn pack_bytes_with(
             )));
         }
         let mut inner = Vec::new();
-        let (bytes, _) = pack_bytes_with(&maps_dir.join(&dir), codecs, None, &mut inner)?;
+        let (bytes, _) = pack_bytes_with(&maps_dir.join(&dir), codecs, None, &mut inner, attributes)?;
         warnings.extend(inner.into_iter().map(|w| format!("{MAPS_DIR}/{dir}/{w}")));
         encoded.insert(name, bytes);
     }
     let count = encoded.len();
-    Ok((build_archive(&manifest, &prefix, encoded)?, count))
+    Ok((build_archive_with(&manifest, &prefix, encoded, attributes)?, count))
 }
 
 /// Builds an extracted archive again in memory (chapter maps included).
@@ -1669,14 +1692,28 @@ fn prefix_of(ex: &Extracted) -> Vec<u8> {
 /// Packs the project's files as they are (the app drops unused strings in the project first), with
 /// the ally priorities in war3map.w3i the World Editor's save works out (`allies`).
 pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
-    pack_to(project, output, codecs, false)
+    pack_with(project, output, codecs, PackOptions::default())
 }
 
 /// Packs with the strings nothing refers to left out of war3map.wts, as the World Editor's save
 /// and the app's packing drop them (`wts`); the project's files stay as they are. Chapter maps
 /// and war3campaign.wts aren't pruned.
 pub fn pack_pruned(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
-    pack_to(project, output, codecs, true)
+    pack_with(project, output, codecs, PackOptions { prune: true, ..PackOptions::default() })
+}
+
+/// How `pack_with` packs. The default is `pack`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackOptions {
+    /// As `pack_pruned`.
+    pub prune: bool,
+    /// The map (and its chapter maps) gets an (attributes) as a World Editor save has it: a CRC32 per block and no
+    /// time stamps, so packing twice still gives the same bytes (`build_archive_with`).
+    pub attributes: bool,
+}
+
+pub fn pack_with(project: &Path, output: Option<&Path>, codecs: &Registry, options: PackOptions) -> Result<PackReport> {
+    pack_to(project, output, codecs, options.prune, options.attributes)
 }
 
 /// Whether `project` is a chapter map of a campaign project (`<campaign>/maps/<chapter>`).
@@ -1688,7 +1725,7 @@ fn is_chapter_project(project: &Path) -> bool {
         .is_some_and(|campaign| campaign.join(MANIFEST).is_file())
 }
 
-fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool) -> Result<PackReport> {
+fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool, attributes: bool) -> Result<PackReport> {
     let manifest = Manifest::load(project)?;
     let mut outcome = wts::PruneOutcome::default();
     // A chapter map packed on its own comes out as the campaign packs it (and the app exports it).
@@ -1697,7 +1734,7 @@ fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool
         outcome.kept = Some("a campaign's chapter maps aren't pruned".into());
     }
     let mut warnings = Vec::new();
-    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome), &mut warnings)?;
+    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome), &mut warnings, attributes)?;
     let output = match output {
         Some(o) => o.to_path_buf(),
         None => default_output(project, &manifest)?,
@@ -1807,7 +1844,7 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
                 .files
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("war3map.wts") || k.eq_ignore_ascii_case("war3campaign.wts"))
-                .map(|(_, bytes)| wts::strings(&String::from_utf8_lossy(bytes)))
+                .map(|(_, bytes)| wts::strings(&crate::lossless::decode(bytes)))
                 .unwrap_or_default();
             unresolved.extend(refs.iter().filter(|n| !table.contains_key(n)).map(|n| format!("{at}TRIGSTR_{:0>3}", n.to_string())));
         }
@@ -2114,6 +2151,35 @@ mod tests {
         let dec = decode(&def_units, &non_empty).unwrap();
         assert_eq!(dec.value["skinIds"], true);
         assert_eq!(encode(&def_units, &dec.value).unwrap(), non_empty);
+    }
+
+    /// The w3i of a protected map, cut by its protector, stays raw and packs back unchanged. Every map of the
+    /// campaign "The Chosen Ones" (corpus, all four versions; protected: script moved to `scripts\war3map.j`, no
+    /// trigger files, files without names in some chapters) ends its v25 w3i after the forces with one byte 0xff
+    /// where the upgrade, techtree, random group and item table counts belong. No World Editor writes that, and a
+    /// typed form would hide that the tables are gone (adding one there would change the layout), so raw is
+    /// right; tests/corpus-baseline.tsv records them as `raw`.
+    #[test]
+    fn protector_cut_w3i_stays_raw_and_packs_back_unchanged() {
+        let codecs = Registry::with_formats(&[]).unwrap();
+        let whole = w3i_bytes(25, 6059);
+        // The four table counts (all zero here) are the last 16 bytes; the protector left one 0xff instead.
+        assert!(whole.ends_with(&[0; 16]));
+        let mut cut = whole[..whole.len() - 16].to_vec();
+        cut.push(0xff);
+        for (w3i, want) in [(&whole, Some("format:w3i")), (&cut, None)] {
+            let ar = make_archive(Some(w3i), &empty_v8_doo(false), &empty_v8_doo(true));
+            let ex = extract_with(&ar, &codecs, &[]);
+            let entry = ex.report.files.iter().find(|f| f.archive_name == "war3map.w3i").unwrap();
+            assert_eq!(entry.codec.as_deref(), want, "{entry:?}");
+            if want.is_none() {
+                assert_eq!(ex.files.get("war3map.w3i"), Some(w3i), "kept as the raw bytes");
+                assert!(!ex.files.contains_key("war3map.w3i.json"));
+                assert!(entry.note.as_deref().is_some_and(|n| n.contains("unexpected end of file")), "{entry:?}");
+            }
+            let repacked = Archive::from_bytes(pack_extracted(&ex, &codecs).unwrap()).unwrap();
+            assert_eq!(&repacked.read("war3map.w3i").unwrap(), w3i);
+        }
     }
 
     /// verify's split-terrain round trip (terrain and placed objects) passes a map whose files come back, and

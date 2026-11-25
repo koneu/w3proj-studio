@@ -29,6 +29,7 @@ function alive(pid) {
 }
 if (own) {
   mkdirSync(cache, { recursive: true });
+  rmSync(join(cache, "scripts"), { recursive: true, force: true }); // left by the older shared layout
   for (const name of readdirSync(cache)) {
     const pid = /^run-(\d+)$/.exec(name)?.[1];
     if (pid && Number(pid) !== process.pid && !alive(Number(pid))) rmSync(join(cache, name), { recursive: true, force: true });

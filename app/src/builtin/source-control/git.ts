@@ -118,3 +118,61 @@ export async function takeSide(git: (...args: string[]) => Promise<string>, side
   await git("checkout", `--${side}`, "--", path);
   await git("add", "--", path);
 }
+
+/** Commits in one page of the history. */
+export const PAGE = 200;
+
+/** What the history's search box asks for: plain text searches the messages; "author:" and "path:" in front search
+ *  the author's name or the commits that touched a file or folder (of the project). */
+export interface HistoryFilter { message: string; author: string; path: string }
+
+export function parseFilter(text: string): HistoryFilter {
+  const t = text.trim();
+  const f: HistoryFilter = { message: "", author: "", path: "" };
+  const m = /^(author|path):\s*(.*)$/i.exec(t);
+  if (m) f[m[1].toLowerCase() as "author" | "path"] = m[2].trim();
+  else f.message = t;
+  return f;
+}
+
+export const noFilter = (f: HistoryFilter) => !f.message && !f.author && !f.path;
+
+/** `git log` arguments for the page of `size` commits after `skip` of them. One more is asked for, so that the page
+ *  knows whether there is a next one (addPage). Text goes in as the value of an option, or after `--`, never alone. */
+export function logArgs(filter: HistoryFilter, skip: number, size: number): string[] {
+  return [
+    "log", `--skip=${Math.max(0, Math.floor(skip))}`, `--max-count=${Math.max(1, Math.floor(size)) + 1}`, `--format=${LOG_FORMAT}`, "--date=short",
+    ...(filter.message || filter.author ? ["--regexp-ignore-case", "--fixed-strings"] : []),
+    ...(filter.message ? [`--grep=${filter.message}`] : []),
+    ...(filter.author ? [`--author=${filter.author}`] : []),
+    "--", filter.path || ".",
+  ];
+}
+
+export interface HistoryPage { commits: Commit[]; more: boolean }
+
+/** The list after a page came in: `fetched` is what logArgs's command printed (up to size + 1). Commits already
+ *  listed (the history moved on between two pages) are not listed twice. */
+export function addPage(have: Commit[], fetched: Commit[], size: number): HistoryPage {
+  const seen = new Set(have.map((c) => c.hash));
+  const fresh = fetched.slice(0, size).filter((c) => !seen.has(c.hash));
+  return { commits: [...have, ...fresh], more: fetched.length > size };
+}
+
+/** `git branch` arguments to delete a branch (force: also one with commits that no other branch has). The name comes
+ *  after `--`, so it's a name and not an option; one that git can't take as a branch name is refused first. */
+export function deleteBranchArgs(name: string, force: boolean): string[] {
+  const problem = branchProblem(name);
+  if (problem) throw new Error(problem);
+  return ["branch", force ? "-D" : "-d", "--", name];
+}
+
+/** `git branch -m` arguments: both names after `--`. */
+export function renameBranchArgs(from: string, to: string): string[] {
+  for (const n of [from, to]) { const problem = branchProblem(n); if (problem) throw new Error(problem); }
+  return ["branch", "-m", "--", from, to];
+}
+
+/** Whether git refused `branch -d` because the branch has commits no other branch has. */
+export const notFullyMerged = (error: unknown) => /not fully merged/i.test(String(error instanceof Error ? error.message : error));
+

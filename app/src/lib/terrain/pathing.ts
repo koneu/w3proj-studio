@@ -57,6 +57,10 @@ export interface PathingInput {
   /** Whether painted Boundary blocks its tiles (default true, as the World Editor saves it). False for placing
    *  objects: doodads can stand on Boundary, and units and items are kept off it by every corner (onBoundary). */
   boundary?: boolean;
+  /** One byte a cell (rows from the bottom, as the cells): only the cells marked non-zero are worked out from the
+   *  ground; the others' ground is left 0 (stamps and the border still go on). Absent: every cell. For a caller that
+   *  reads a few cells of a large map (meleesave.ts startSurroundings' `near`). */
+  only?: Uint8Array;
 }
 
 /** Water deeper than this (world units) can't be walked. */
@@ -160,8 +164,10 @@ export function generatePathing(input: PathingInput): Uint8Array {
   const raise = read - (input.waterOffset ?? read);
   const depth = (k: Corner) => waterDepth(k) + raise - (lift.get(k) ?? 0);
 
+  const only = input.only?.length === w * h ? input.only : undefined;
   for (let cy = 0; cy < h; cy++) {
     for (let cx = 0; cx < w; cx++) {
+      if (only && !only[cy * w + cx]) continue;
       const tx = cx >> 2, ty = cy >> 2;
       const q: Corner[] = [C(tx, ty), C(tx + 1, ty), C(tx, ty + 1), C(tx + 1, ty + 1)];
       let p = NO_WATER;

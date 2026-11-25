@@ -7,12 +7,13 @@
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
-import { checkStringIds, compactStringIds, renumberStringRefs, StringTable } from "../../lib/formats/wts";
+import { checkStringIds, compactStringIds, readWts, renumberStringRefs, StringTable } from "../../lib/formats/wts";
 import { adjustStringTables, isLocaleWts, localeOnlyNumbers } from "../../lib/formats/localewts";
 import { readPrunedStrings, reservedStringIds } from "../../lib/formats/prunedstrings";
 import { resetTriggers } from "../../lib/triggers/defaults";
 import { keyOf } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { StepHistory } from "../../lib/undo";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -32,7 +33,7 @@ import { idKey, mergeReload, sameTree, type Merged, type ReloadSide } from "./re
 import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
-import { mapJass } from "../../lib/jass/env";
+import { mapJass, projectJassEnv } from "../../lib/jass/env";
 import { applyExpanded, childrenOf, collapsedOf, dropMode, moveItem, onlyFoldsUnsaved, pasteBlock, subtree, treeStructure, type DropMode } from "./tree";
 import { deleteVariable, nameField, nameFields, newVariable, renameVariable, variableParams, variablesTable, type NameField, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
@@ -374,7 +375,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.replaceChildren(errorView(`Can't read ${doc.path}: ${errorText(e)}`, folders ? null : h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
-        let wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let wtsText = game ? null : await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
         let strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
         // Ids that show up later (new parameters) are looked up on demand; the view redraws once.
@@ -508,7 +509,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           reloadFile: async (path: string) => {
             if (folders && isTriggerLayoutPath(path)) return reloadFolders();
             if (path !== WTS) return false;
-            const text = await w3.workspace.readText(WTS).catch(() => null);
+            const text = await readWts(w3.workspace, WTS).catch(() => null);
             if (view.closed) return true;
             if (text === null || text === wtsText) return true;
             wtsText = text;
@@ -629,7 +630,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === WTS);
   if (!listed) throw new Error("This map has no string table (war3map.wts).");
   // There but unreadable is an error, not an empty table.
-  const table = new StringTable(await w3.workspace.readText(WTS));
+  const table = new StringTable(await readWts(w3.workspace, WTS));
   // Numbers an earlier drop recorded stay free: a reference to one can come back (a record that can't be read refuses).
   const reserved = reservedStringIds(await readPrunedStrings(w3), table);
   // The languages' tables follow the same numbers (lib/formats/localewts); their own numbers stay, and stay free. One
@@ -637,7 +638,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const localePaths = w3.workspace.files().map((f) => f.path).filter(isLocaleWts);
   const locales: { path: string; wts: string }[] = [];
   for (const path of localePaths) {
-    const wts = await w3.workspace.readText(path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
+    const wts = await readWts(w3.workspace, path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
     locales.push({ path, wts });
   }
   const localeOnly = localeOnlyNumbers(table, locales);
@@ -778,14 +779,11 @@ class TriggerView {
   /** Custom text per trigger (war3map.wct is stored in trigger order). */
   private texts = new Map<TriggerItem, string | null>();
   private header: string | null;
-  /** `id`: the state after the step, unique, so a saved state is known again after undo and redo. */
-  private undo: { label: string; before: Snapshot; after: Snapshot; id: number; replaces?: boolean }[] = [];
-  private nextId = 1;
+  /** The undo steps (lib/undo StepHistory: a step's id is the state after it, so a saved state is known again after
+   *  undo and redo; no limit). */
+  private history = new StepHistory<{ before: Snapshot; after: Snapshot; replaces?: boolean }>();
   /** The state now: the id of the last step done, 0 for the state the editor opened with. */
-  private get state() { return this.at ? this.undo[this.at - 1].id : 0; }
-  private at = 0;
-  /** The state last saved (see `state`). */
-  private savedAt = 0;
+  private get state() { return this.history.state; }
   /** Categories expanded or collapsed by hand so far, and how many of those the last save had: a toggle is view state
    *  the file keeps (each category's `expanded`, as the World Editor saves it), so it makes the editor unsaved without
    *  being an undo step. */
@@ -1059,24 +1057,20 @@ class TriggerView {
   /** Whether the state now is the one after step `id`. */
   isState(id: number) { return this.state === id; }
   /** Whether step `id` is the one redo does next. */
-  isNext(id: number) { return this.at < this.undo.length && this.undo[this.at].id === id; }
+  isNext(id: number) { return this.history.isNext(id); }
   /** Whether everything unsaved came from followGlobals (or nothing is unsaved): saved with the objects it followed. */
   unsavedOnlyFollows(): boolean {
     this.flush();
-    for (let p = this.at; p >= 0; p--) {
-      if ((p ? this.undo[p - 1].id : 0) === this.savedAt) return true;
-      if (!this.follows.has(this.undo[p - 1]?.id ?? -1)) return false;
-    }
-    return false;
+    return this.history.sinceSaved()?.every((s) => this.follows.has(s.id)) ?? false;
   }
   get editable() { return this.handle.editable; }
   /** Whether the only unsaved change is an opened or closed category (see onlyFoldsUnsaved). */
   get onlyFoldsDirty(): boolean {
     this.flush();
-    return onlyFoldsUnsaved({ state: this.state, savedAt: this.savedAt, toggles: this.toggles, savedToggles: this.savedToggles, pendingName: !!this.pendingName() });
+    return onlyFoldsUnsaved({ state: this.state, savedAt: this.history.saved, toggles: this.toggles, savedToggles: this.savedToggles, pendingName: !!this.pendingName() });
   }
   /** Whether there are unsaved changes. */
-  get dirty() { return this.state !== this.savedAt || this.toggles !== this.savedToggles; }
+  get dirty() { return this.history.dirty || this.toggles !== this.savedToggles; }
   get closed() { return this.disposed; }
   /** Tells the tab whether it's unsaved: changes, or a name typed into the focused name field and not committed yet
    *  (a close then asks, and a save commits it: commitName). */
@@ -1155,7 +1149,7 @@ class TriggerView {
     return { file, custom: this.customFile(), step: this.state, toggles: this.toggles };
   }
   /** The state `step` and `toggles` (from mark) were saved; edits and toggles after it stay unsaved. */
-  markSaved(step = this.state, toggles = this.toggles) { this.savedAt = step; this.savedToggles = toggles; this.report(); }
+  markSaved(step = this.state, toggles = this.toggles) { this.history.markSaved(step); this.savedToggles = toggles; this.report(); }
 
   // ---- the trigger folders changed outside the app ----------------------------------
   /** Each item's file in the trigger folders (idKey → project path), as last read or saved; empty for a raw file. */
@@ -1187,14 +1181,12 @@ class TriggerView {
     put(file, custom.texts, custom.header);
     this.collapsed = collapsedOf(this.file);
     const theirs = this.snapshot();
-    this.undo = [];
-    this.at = 0;
+    // The files' state is the saved one; the changes kept over them are one step on top.
+    this.history.clear();
     if (merged) {
       put(merged.file, merged.texts, merged.header);
-      this.undo.push({ label: "Keep my changes over the trigger files changed outside the app", before: theirs, after: this.snapshot(), id: this.nextId++, replaces: true });
-      this.at = 1;
+      this.history.push("Keep my changes over the trigger files changed outside the app", { before: theirs, after: this.snapshot(), replaces: true });
     }
-    this.savedAt = 0;
     this.savedToggles = this.toggles;
     this.follows.clear();
     this.conflicts = new Set(merged?.conflicts ?? []);
@@ -1287,8 +1279,7 @@ class TriggerView {
     this.flush();
     const before = this.snapshot();
     change();
-    this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot(), id: this.nextId++, ...(opts.replaces ? { replaces: true } : {}) });
-    this.at = this.undo.length;
+    this.history.push(label, { before, after: this.snapshot(), ...(opts.replaces ? { replaces: true } : {}) });
     this.report();
     this.renderTree();
     if (!opts.keepView) this.renderDetail();
@@ -1297,15 +1288,11 @@ class TriggerView {
   step(dir: -1 | 1) {
     // Undo takes back what was typed a moment ago, rather than redrawing it away.
     this.flush();
-    if (dir < 0 && this.at > 0) {
-      const s = this.undo[--this.at];
-      if (s.replaces) applyExpanded(s.after.file, this.collapsed);
-      this.restore(s.before, s.replaces);
-    } else if (dir > 0 && this.at < this.undo.length) {
-      const s = this.undo[this.at++];
-      if (s.replaces) applyExpanded(s.before.file, this.collapsed);
-      this.restore(s.after, s.replaces);
-    } else return;
+    const s = (dir < 0 ? this.history.undo() : this.history.redo())?.data;
+    if (!s) return;
+    // The side left takes the tree as it is now (see above).
+    if (s.replaces) applyExpanded((dir < 0 ? s.after : s.before).file, this.collapsed);
+    this.restore(dir < 0 ? s.before : s.after, s.replaces);
     this.report();
     this.edited();
   }
@@ -1679,7 +1666,7 @@ class TriggerView {
         const box = h("div.trig-code");
         this.detail.replaceChildren(...heading, box);
         // JASS headers are checked like the map script they open (its own functions in order).
-        const map = mapJass((p) => this.w3.game.readText(p), this.w3.workspace.readText("map/war3map.j").catch(() => null));
+        const map = mapJass((p) => this.w3.game.readText(p), this.w3.workspace.readText("map/war3map.j").catch(() => null), () => projectJassEnv(this.w3));
         const jass = this.handle.language === "jass";
         const check = jass ? async (text: string) => checkJass(text, await map.without(text)) : undefined;
         const ed = this.code.create(box, {

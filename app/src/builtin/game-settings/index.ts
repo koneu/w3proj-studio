@@ -9,9 +9,9 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { StackSave } from "../../lib/undo";
+import { StateStack } from "../../lib/undo";
 import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { StringTable, WtsCutError, wtsCuts } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { settingsFiles, settingsOf } from "./files";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
@@ -145,7 +145,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const { mode, wts, campaign } = settingsOf(doc.path);
         el.append(h("div.muted.gs-loading", {}, "Loading game data…"));
-        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), w3.workspace.readText(wts).catch(() => null),
+        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), readWts(w3.workspace, wts).catch(() => null),
           w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null), loadColumns(w3).catch(() => ({ defense: [], attack: [] }))]);
         const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), objects, cols,
           wts, doc.path.replace(/\\/g, "/").split("/").pop() ?? doc.path, campaign);
@@ -177,9 +177,7 @@ interface State { text: string; texts: Map<number, string> }
 class SettingsView {
   private query = "";
   private changedOnly = false;
-  private undoStack: State[] = [];
-  private redoStack: State[] = [];
-  private mark = new StackSave();
+  private history = new StateStack<State>();
   /** Edited texts of war3map.wts (written on save). */
   private texts = new Map<number, string>();
   private folded = new Set<string>();
@@ -198,15 +196,14 @@ class SettingsView {
       const t = e.target as HTMLElement;
       if ((t instanceof HTMLInputElement && t.type !== "checkbox") || t instanceof HTMLTextAreaElement) return;
       const step = undoStepOf(w3.keybindings.commandsFor(e));
-      if (step === "undo") { this.step(this.undoStack, this.redoStack); e.preventDefault(); }
-      else if (step === "redo") { this.step(this.redoStack, this.undoStack); e.preventDefault(); }
+      if (step) { this.step(step); e.preventDefault(); }
     });
     this.render();
   }
 
   /** What the next save writes is of this point; `saved` with it once written (edits meanwhile stay unsaved). */
-  take() { return this.mark.take(this.undoStack.length); }
-  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.setDirty(this.undoStack.length !== this.mark.at); }
+  take() { return this.history.take(); }
+  saved(taken: ReturnType<StateStack<State>["take"]>) { this.history.saved(taken); this.setDirty(this.history.dirty); }
   /** Before a save: a text with a `}` would be cut by the game, and there is no way to keep it: the save stops with
    *  the reason, nothing changed. */
   async checkCuts() {
@@ -220,31 +217,28 @@ class SettingsView {
     const base = this.strings.serialize();
     const edited = new StringTable(base);
     for (const [n, t] of this.texts) edited.set(n, t);
-    const current = await this.w3.workspace.readText(this.wts).catch(() => base);
+    const current = await readWts(this.w3.workspace, this.wts).catch(() => base);
     const merged = StringTable.merge(base, edited, current);
-    if (merged !== current) await this.w3.workspace.writeText(this.wts, merged);
+    if (merged !== current) await writeWts(this.w3.workspace, this.wts, merged);
     this.strings.rebase(merged);
   }
 
   private change(fn: () => void) {
     if (!this.editable) return;
-    this.undoStack.push({ text: this.text, texts: new Map(this.texts) });
-    this.redoStack = [];
-    this.mark.pushed(this.undoStack.length);
+    this.history.push(this.state());
     fn();
-    this.setDirty(this.undoStack.length !== this.mark.at);
+    this.setDirty(this.history.dirty);
     this.render();
   }
-  undo() { this.step(this.undoStack, this.redoStack); }
-  redo() { this.step(this.redoStack, this.undoStack); }
-  private step(from: State[], to: State[]) {
-    const s = from.pop();
+  private state(): State { return { text: this.text, texts: new Map(this.texts) }; }
+  undo() { this.step("undo"); }
+  redo() { this.step("redo"); }
+  private step(dir: "undo" | "redo") {
+    const s = this.history.move(dir, () => this.state());
     if (!s) return;
-    this.mark.moved();
-    to.push({ text: this.text, texts: new Map(this.texts) });
     this.text = s.text;
     this.texts = s.texts;
-    this.setDirty(this.undoStack.length !== this.mark.at);
+    this.setDirty(this.history.dirty);
     this.render();
   }
 

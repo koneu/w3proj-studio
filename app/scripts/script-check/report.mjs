@@ -3,8 +3,9 @@
 // as if one process had gone over all the maps.
 
 /** sections.mts: `stats` per section as [identical, compared], and the problems found. */
-export function printSections({ stats, broken, guarded, asked = [], checked }) {
+export function printSections({ stats, broken, guarded, asked = [], checked, lua }) {
   for (const [k, [ok, n]] of Object.entries(stats)) console.log(`${(k || "(header)").padEnd(20)} ${ok}/${n}`);
+  if (lua) console.log(`Lua check: ${lua.checked} scripts, names judged in ${lua.judged} (the others define names it can't see)`);
   console.log(`problems: ${broken.length} in the game's maps`);
   for (const b of broken.slice(0, 20)) console.log(`  ${b}`);
   console.log(`guard: ${guarded.length} of ${checked} maps would keep their script`);
@@ -43,6 +44,7 @@ export function mergeSections(shards) {
     guarded: shards.flatMap((s) => s.guarded),
     asked: shards.flatMap((s) => s.asked ?? []),
     checked: shards.reduce((n, s) => n + s.checked, 0),
+    lua: { checked: shards.reduce((n, s) => n + (s.lua?.checked ?? 0), 0), judged: shards.reduce((n, s) => n + (s.lua?.judged ?? 0), 0) },
   };
 }
 

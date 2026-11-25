@@ -1,0 +1,18 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [
+    {
+      "base": "ratc",
+      "end": "ratc",
+      "mods": [
+        {
+          "field": "igol",
+          "type": "int",
+          "value": 450
+        }
+      ]
+    }
+  ],
+  "custom": []
+}

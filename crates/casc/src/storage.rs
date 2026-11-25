@@ -227,13 +227,23 @@ fn read_indices(dir: &Path) -> Result<HashMap<[u8; 9], Location>> {
 
 /// Decodes a BLTE stream (raw, zlib and nested frames).
 pub fn blte_decode(d: &[u8]) -> Result<Vec<u8>> {
+    blte_decode_at(d, 0)
+}
+
+/// How many frames may nest inside each other; real data nests at most once or twice.
+const MAX_BLTE_DEPTH: usize = 8;
+
+fn blte_decode_at(d: &[u8], depth: usize) -> Result<Vec<u8>> {
+    if depth > MAX_BLTE_DEPTH {
+        return Err(Error::Corrupt("BLTE frames nested too deep"));
+    }
     if d.len() < 8 || &d[..4] != b"BLTE" {
         return Err(Error::Corrupt("missing BLTE signature"));
     }
     let header_size = u32::from_be_bytes(d[4..8].try_into().unwrap()) as usize;
     let mut out = Vec::new();
     if header_size == 0 {
-        decode_chunk(&d[8..], &mut out)?;
+        decode_chunk(&d[8..], &mut out, depth)?;
         return Ok(out);
     }
     if d.len() < 12 {
@@ -249,13 +259,13 @@ pub fn blte_decode(d: &[u8]) -> Result<Vec<u8>> {
         let info = 12 + i * 24;
         let comp = u32::from_be_bytes(d[info..info + 4].try_into().unwrap()) as usize;
         let chunk = d.get(p..p + comp).ok_or(Error::Corrupt("BLTE chunk out of range"))?;
-        decode_chunk(chunk, &mut out)?;
+        decode_chunk(chunk, &mut out, depth)?;
         p += comp;
     }
     Ok(out)
 }
 
-fn decode_chunk(c: &[u8], out: &mut Vec<u8>) -> Result<()> {
+fn decode_chunk(c: &[u8], out: &mut Vec<u8>, depth: usize) -> Result<()> {
     let (&mode, body) = c.split_first().ok_or(Error::Corrupt("empty BLTE chunk"))?;
     match mode {
         b'N' => out.extend_from_slice(body),
@@ -264,7 +274,7 @@ fn decode_chunk(c: &[u8], out: &mut Vec<u8>) -> Result<()> {
                 .read_to_end(out)
                 .map_err(|_| Error::Corrupt("zlib chunk"))?;
         }
-        b'F' => out.extend(blte_decode(body)?),
+        b'F' => out.extend(blte_decode_at(body, depth + 1)?),
         b'E' => return Err(Error::Encrypted),
         m => return Err(Error::Storage(format!("unsupported BLTE chunk mode {:?}", m as char))),
     }
@@ -338,6 +348,24 @@ mod tests {
             d.extend(c);
         }
         assert_eq!(blte_decode(&d).unwrap(), b"abcdefdefdef");
+    }
+
+    /// A frame holding `levels` more frames, innermost holding "hi".
+    fn nested(levels: usize) -> Vec<u8> {
+        let mut d = [b"BLTE\0\0\0\0N".as_slice(), b"hi"].concat();
+        for _ in 0..levels {
+            d = [b"BLTE\0\0\0\0F".as_slice(), &d].concat();
+        }
+        d
+    }
+
+    #[test]
+    fn blte_nesting_is_limited() {
+        assert_eq!(blte_decode(&nested(0)).unwrap(), b"hi");
+        assert_eq!(blte_decode(&nested(2)).unwrap(), b"hi");
+        assert_eq!(blte_decode(&nested(MAX_BLTE_DEPTH)).unwrap(), b"hi");
+        assert!(matches!(blte_decode(&nested(MAX_BLTE_DEPTH + 1)), Err(Error::Corrupt(_))));
+        assert!(matches!(blte_decode(&nested(200_000)), Err(Error::Corrupt(_))));
     }
 
     #[test]

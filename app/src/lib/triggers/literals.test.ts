@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filterTriggerTyping, isTypedCode, literalProblem, realText, typedInitialValue, typedTriggerNumber } from "./literals";
+import { filterTriggerTyping, isTypedCode, limitTriggerNumber, literalProblem, realText, typedInitialValue, typedTriggerNumber } from "./literals";
 
 test("an integer parameter value the script can't hold (past 32 bits, not whole, an exponent) is refused; its edges are taken", () => {
   for (const typed of ["2147483648", "-2147483649", "99999999999", "0x80000000", "0xFFFFFFFF", "1.5", "1e5", "", "abc", "+5", "Infinity"]) {
@@ -64,6 +64,25 @@ test("a typed Real value is limited to 1e9 with two decimals as the World Editor
   }
   assert.match(typedIn("real", "-")!, /^refused/);
   assert.match(typedIn("real", "1-2")!, /^refused/);
+});
+
+// we-drive 2026-11-25 (docs/testing/numeric-limits-measured.md): typed into the Value dialog of an action whose
+// TriggerData.txt _Limits bound it, OK, saved, war3map.wtg read back.
+test("measured: a typed value past the function's limits (_Limits) is pulled to the nearer one", () => {
+  const limited = (base: "integer" | "real", text: string, limits: [number | null, number | null]) => {
+    const kept = typedIn(base, text);
+    return kept === null || kept.startsWith("refused") ? kept : limitTriggerNumber(base, kept, limits);
+  };
+  for (const [base, typed, limits, want] of [
+    ["real", "-5", [0, null], "0.00"], // Wait
+    ["integer", "150", [0, 100], "100"], // Set HD water min opacity
+    ["integer", "5", [0, 2], "2"], // Set ally color filter state
+    ["integer", "-5", [-1, null], "-1"], // Limit heroes
+    ["real", "0", [1, 10000], "1.00"], // Set handicap
+    ["real", "2000000000", [0, null], "1000000000.00"], // Wait: the 1e9 limit of every box
+    ["real", "50", [1, 10000], "50.00"],
+    ["integer", "1", [0, 2], "1"],
+  ] as const) assert.equal(limited(base, typed, [...limits]), want, `${base} ${typed} in ${limits}`);
 });
 
 test("the MCP path still refuses what the box would wrap or clamp (a typed edit is the only one that is pulled in)", () => {

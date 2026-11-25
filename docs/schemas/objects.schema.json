@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Object data (map/war3map.w3u.json, .w3t, .w3b, .w3d, .w3a, .w3h, .w3q)",
+  "description": "The project form of the object data files (units, items, destructables, doodads, abilities, buffs, upgrades; also war3mapSkin.* and war3campaign.*), written by crates/w3proj/src/objdata.rs. Keys the codec doesn't know are allowed: it ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "version", "original", "custom"],
+  "properties": {
+    "format": { "const": "w3proj.objects/1" },
+    "version": { "description": "1 and 2 older editors, 3 with sets (Reforged)", "enum": [1, 2, 3] },
+    "original": { "description": "changes to the game's own objects", "type": "array", "items": { "$ref": "#/$defs/object" } },
+    "custom": { "description": "objects made in the map", "type": "array", "items": { "$ref": "#/$defs/object" } }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["version"], "properties": { "version": { "enum": [1, 2] } } },
+      "then": {
+        "properties": {
+          "original": { "items": { "not": { "required": ["sets"] } } },
+          "custom": { "items": { "not": { "required": ["sets"] } } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "object": {
+      "type": "object",
+      "required": ["base"],
+      "properties": {
+        "base": { "$ref": "#/$defs/id", "description": "the object it is made from (custom) or changes (original)" },
+        "id": { "$ref": "#/$defs/id", "description": "a custom object's own id; missing means four zero bytes (an original object)" },
+        "end": { "$ref": "#/$defs/id", "description": "the token after each change, where a change has no `end` of its own; missing means four zero bytes" },
+        "sets": {
+          "description": "version 3, when the object has anything but one set with flag 0: its changes per set",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["flag", "mods"],
+            "properties": {
+              "flag": { "$ref": "#/$defs/u32" },
+              "mods": { "type": "array", "items": { "$ref": "#/$defs/mod" } }
+            }
+          }
+        },
+        "mods": { "description": "the changes (of the one set with flag 0 in version 3); missing means none", "type": "array", "items": { "$ref": "#/$defs/mod" } }
+      }
+    },
+    "mod": {
+      "type": "object",
+      "required": ["field", "type", "value"],
+      "properties": {
+        "field": { "$ref": "#/$defs/id", "description": "the field's id (e.g. unam)" },
+        "type": { "enum": ["int", "real", "unreal", "string"] },
+        "level": { "$ref": "#/$defs/u32", "description": ".w3d, .w3a, .w3q: the level (or variation); 0 when missing, not stored in the other files" },
+        "data": { "$ref": "#/$defs/u32", "description": ".w3d, .w3a, .w3q: the data column (A to F as 1 to 6); 0 when missing, not stored in the other files" },
+        "value": { "description": "an int, a real or unreal (stored as a 32-bit float) or a string, by `type`" },
+        "end": { "$ref": "#/$defs/id", "description": "only where it differs from the object's `end`" }
+      },
+      "allOf": [
+        { "if": { "required": ["type"], "properties": { "type": { "const": "int" } } }, "then": { "properties": { "value": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 } } } },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "enum": ["real", "unreal"] } } },
+          "then": { "properties": { "value": { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 } } }
+        },
+        { "if": { "required": ["type"], "properties": { "type": { "const": "string" } } }, "then": { "properties": { "value": { "type": "string", "pattern": "^[^\\u0000]*$" } } } }
+      ]
+    }
+  }
+}

@@ -47,6 +47,7 @@ function project() {
       readText: read,
       readBytes: async (p: string) => new TextEncoder().encode(await read(p)),
       writeText: async (p: string, t: string) => { written.set(p, t); },
+      writeBytes: async (p: string, b: Uint8Array) => { written.set(p, new TextDecoder().decode(b)); },
       onDidChange: () => none,
       onDidSave: (f: (path: string) => void) => { saved.push(f); return none; },
       readTriggers: async () => null,

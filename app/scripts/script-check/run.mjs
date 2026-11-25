@@ -65,7 +65,7 @@ function readTables() {
   for (const [path, file] of [
     ["UI/TriggerData.txt", "TriggerData.txt"], ["UI/WorldEditData.txt", "WorldEditData.txt"],
     ["Units/UnitBalance.slk", "UnitBalance.slk"], ["Units/ItemData.slk", "ItemData.slk"], ["Units/AbilityData.slk", "AbilityData.slk"], ["Units/unitUI.slk", "unitUI.slk"],
-    ["Scripts/common.j", "common.j"], ["Scripts/Blizzard.j", "Blizzard.j"],
+    ["Scripts/common.j", "common.j"], ["Scripts/Blizzard.j", "Blizzard.j"], ["Scripts/common.ai", "common.ai"],
   ]) extract(root + path, join(work, file));
 }
 
@@ -154,7 +154,7 @@ validRuns.shown();
 printValid(valid, { heads: true });
 mistakeRuns.shown();
 const measured = {
-  sections: { identical: sections.stats, problems: sections.broken.length, guarded: sections.guarded.length, asked: sections.asked.length, checked: sections.checked },
+  sections: { identical: sections.stats, problems: sections.broken.length, guarded: sections.guarded.length, asked: sections.asked.length, checked: sections.checked, lua: sections.lua },
   valid: { common: valid.common, blizzard: valid.blizzard, maps: valid.maps, clean: valid.clean, reports: valid.reports },
   mistakes,
 };
@@ -194,6 +194,12 @@ atMost("problems reported on the game's maps", measured.sections.problems, base.
 atMost("maps the guard would keep", measured.sections.guarded, base.sections.guarded);
 if (base.sections.asked === undefined) problems.push("scripts the guard asks about: not in the baseline");
 else atMost("scripts the guard asks about", measured.sections.asked, base.sections.asked);
+// The Lua check's names: judged in as many of the game's Lua maps as before (a script with dynamic globals isn't judged).
+if (base.sections.lua === undefined) problems.push("Lua scripts whose names are judged: not in the baseline");
+else {
+  if (measured.sections.lua.checked !== base.sections.lua.checked) problems.push(`${measured.sections.lua.checked} Lua scripts checked, was ${base.sections.lua.checked}`);
+  atLeast("Lua scripts whose names are judged", measured.sections.lua.judged, base.sections.lua.judged);
+}
 atMost("reports on common.j", measured.valid.common, base.valid.common);
 atMost("reports on Blizzard.j", measured.valid.blizzard, base.valid.blizzard);
 atMost("reports on valid maps", measured.valid.reports, base.valid.reports);

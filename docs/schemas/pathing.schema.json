@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hand-painted pathing (.w3proj/pathing.json)",
+  "description": "The Pathing tool's overrides, written by app/src/lib/terrain/resize.ts (pathingOverridesText) and checked by validPathingOverrides; crates/w3proj/src/terrain_pathing.rs reads and writes the same file for a split terrain. Keys of its own are allowed and kept by the app; a split terrain can't keep them (it refuses the file then).",
+  "type": "object",
+  "required": ["width", "height", "cells"],
+  "properties": {
+    "format": { "const": "w3proj.pathing/1", "description": "missing in files of older versions" },
+    "width": { "description": "the pathing map in cells: 4 per tile, (corners - 1) * 4; a file for another size is not used", "type": "integer", "minimum": 0 },
+    "height": { "description": "the pathing map in cells: 4 per tile, (corners - 1) * 4", "type": "integer", "minimum": 0 },
+    "cells": {
+      "description": "one override per cell: [x, y, set, clear], the pathing bits the cell gets and loses ((cell | set) & ~clear)",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "prefixItems": [
+          { "type": "integer", "minimum": 0, "description": "x, in cells from the west" },
+          { "type": "integer", "minimum": 0, "description": "y, in cells from the south" },
+          { "type": "integer", "minimum": 0, "maximum": 255, "description": "set: the bits the cell gets" },
+          { "type": "integer", "minimum": 0, "maximum": 255, "description": "clear: the bits the cell loses" }
+        ]
+      }
+    }
+  }
+}

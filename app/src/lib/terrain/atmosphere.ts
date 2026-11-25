@@ -3,6 +3,7 @@
 
 import { storable, storableText, type StoredNumber } from "../formats/numbers";
 import { setW3iColorHex, w3iColorHex } from "../formats/w3icolor";
+import { namedTerrainFog } from "../formats/terrainfog";
 
 /** An id from `choices` ([id, label]) for what was typed: the id or the label, ignoring case. Else an error that lists the choices. */
 export function resolveChoice(what: string, value: unknown, choices: readonly (readonly [string, string])[]): string {
@@ -13,7 +14,13 @@ export function resolveChoice(what: string, value: unknown, choices: readonly (r
   throw new Error(`Unknown ${what} "${String(value)}". Choices: ${shown}${choices.length > 60 ? `; … (${choices.length} in all)` : ""}.`);
 }
 
-export const FOG_STYLES: readonly (readonly [string, string])[] = [["0", "Linear"], ["1", "Exponential 1"], ["2", "Exponential 2"]];
+/** The World Editor's fog styles (Map Options' Style list, in its order) by the number w3i `fog.style` stores and the
+ *  script's SetTerrainFogEx(V) passes on (measured 2026-11-25, docs/testing/numeric-limits-measured.md: Height saved 3,
+ *  Exponential 1 saved 1). */
+export const FOG_STYLE_LABELS: readonly (readonly [number, string])[] = [
+  [0, "Linear"], [1, "Exponential 1"], [2, "Exponential 2"], [3, "Height"], [4, "New Exponential 1"], [5, "New Exponential 2"],
+];
+export const FOG_STYLES: readonly (readonly [string, string])[] = FOG_STYLE_LABELS.map(([n, label]) => [String(n), label] as const);
 /** w3i flags: "Use terrain fog", "Enable water tinting". */
 const FOG_FLAG = 0x2000, TINT_FLAG = 0x10000;
 /** Nothing, as the w3i stores it. */
@@ -73,7 +80,9 @@ export function applySky(doc: Doc, args: SkyArgs, lists: SkyLists): string[] {
   }
   if (args.overSky !== undefined) {
     if (!work.terrainFog) throw new Error("This map's format has no \"draw over sky\" setting (it needs the 3.0 terrain fog).");
-    const was = work.terrainFog.overSky; work.terrainFog.overSky = num("overSky", args.overSky, "i32"); set("fog drawn over the sky", was, work.terrainFog.overSky);
+    // Draw Fog Over Sky (older JSON's names read too).
+    const tf = work.terrainFog = namedTerrainFog(work.terrainFog);
+    const was = tf.drawOverSky; tf.drawOverSky = num("overSky", args.overSky, "i32"); set("fog drawn over the sky", was, tf.drawOverSky);
   }
   if (args.useFog !== undefined) flag(FOG_FLAG, args.useFog === true, "terrain fog");
   else if (fogGiven) flag(FOG_FLAG, true, "terrain fog");

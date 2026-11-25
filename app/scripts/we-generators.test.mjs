@@ -42,6 +42,7 @@ test("an unknown mode exits 2 and writes nothing", async () => {
     ["make-shadow-probes.mjs", ".", "shadow-slope"],
     ["make-melee-valid.mjs", "--out"], ["make-melee-valid.mjs", "--case"], ["make-melee-valid.mjs", "--case", "x"], ["make-melee-valid.mjs", "--case", "../x={}"],
     ["make-special-wpm.mjs", "grid"], ["make-special-wpm.mjs", "gird", "YCr1"], ["make-special-wpm.mjs", "grid", "../x"], ["make-special-wpm.mjs", "grid", "YCr1", "x"],
+    ["make-start-preview.mjs", "--out"], ["make-start-preview.mjs", "--map", "depth", "--map", "dpeth"], ["make-start-preview.mjs", "--map", "toString"], ["make-start-preview.mjs", "depth"],
   ];
   const results = await Promise.all(bad.map(([script, ...args]) => runAsync(script, ...args)));
   bad.forEach(([script, ...args], i) => {
@@ -57,7 +58,7 @@ test("control: a known mode is not refused (it gets as far as the missing tools)
   const known = [
     ["make-camps.mjs", "b"], ["make-camps.mjs", "far", "1700,2800"], ["make-fence.mjs", "dest"],
     ["make-neutral-facing.mjs", "neg"], ["make-doodad-snap.mjs", "misc"], ["make-custom-tilesets.mjs", "few3"],
-    ["make-minimap-tiles.mjs", "impulse"], ["make-special-wpm.mjs", "grid", "YCr1"],
+    ["make-minimap-tiles.mjs", "impulse"], ["make-special-wpm.mjs", "grid", "YCr1"], ["make-start-preview.mjs", "--map", "mine"],
   ];
   const results = await Promise.all(known.map(([script, ...args]) => runAsync(script, ...args)));
   known.forEach(([script, ...args], i) => {

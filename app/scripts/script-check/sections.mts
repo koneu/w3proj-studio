@@ -14,13 +14,18 @@ const J = await mod("/script/jass.ts");
 const G = await mod("/script/guard.ts");
 const O = await mod("/script/objects.ts");
 const R = await mod("/triggers/refs.ts");
-const { checkLua } = await mod("/lua/check.ts");
+const { checkLua, luaKnownNames, luaApiFrom } = await mod("/lua/check.ts");
+const { envFrom } = await mod("/jass/check.ts");
 const { StringTable } = await mod("/formats/wts.ts");
 const T = await mod("/terrain/w3e.ts");
 const { w3eFromText } = await mod("/terrain/w3etext.ts");
 const { parseIni, parseSlk } = await mod("/formats/text.ts");
 
+const { decodeLossless } = await mod("/formats/lossless.ts");
+
 const read = (f: string) => readFileSync(f, "utf8");
+/** A map's script or string table as the app reads it (readScriptFile, readWts): any encoding, lossless. */
+const readMapText = (f: string): string => decodeLossless(new Uint8Array(readFileSync(f)));
 const data = parseTriggerData(read("TriggerData.txt"));
 const wed = parseIni(read("WorldEditData.txt"));
 const light = (sec: string, t: string, kind: string) =>
@@ -53,11 +58,18 @@ const broken: string[] = [];
 const [shardI, shardN] = (process.env.SCRIPT_CHECK_SHARD ?? "0/1").split("/").map(Number);
 const allMaps = readdirSync("ws");
 const maps = allMaps.slice(Math.floor((shardI * allMaps.length) / shardN), Math.floor(((shardI + 1) * allMaps.length) / shardN));
+// Names too, as the Problems view checks them: against the game's Lua API (common.j, Blizzard.j, common.ai's natives).
+const luaApi = luaApiFrom(envFrom([read("Blizzard.j")], envFrom([read("common.j")])), read("common.ai"));
+let luaChecked = 0, luaNamesJudged = 0;
 for (const m of maps) {
   const f = `ws/${m}/map/war3map.lua`;
   if (!existsSync(f)) continue;
-  const p = checkLua(read(f));
-  if (p.length) luaBroken.push(`${m} lua: ${p[0].message}`);
+  const src = read(f);
+  const known = luaKnownNames(luaApi);
+  luaChecked++;
+  if (luaKnownNames(luaApi, [src])) luaNamesJudged++;
+  const p = checkLua(src, known);
+  for (const x of p) luaBroken.push(`${m} lua: ${x.message} (line ${src.slice(0, x.from).split("\n").length})`);
 }
 let shown = 0;
 const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
@@ -82,7 +94,7 @@ for (const m of maps) {
     const wctBytes = new Uint8Array(readFileSync(`${d}/war3map.wct`));
     const rc = (stats["(wct byte-exact)"] ??= [0, 0]); rc[1]++; if (same(W.writeWct(custom), wctBytes)) rc[0]++;
   }
-  const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
+  const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(readMapText(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e.txt`) ? T.parseW3e(w3eFromText(read(`${d}/war3map.w3e.txt`))) : existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg); as the app reads them.
   const unitFiles = [json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")];
@@ -109,10 +121,10 @@ for (const m of maps) {
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
     regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras, sounds: json(d, "war3map.w3s")?.sounds,
     // Sound lengths as the app takes them when it can't read the sound files: from the script there is.
-    soundDuration: J.scriptSoundDurations(read(scriptFile)), soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
+    soundDuration: J.scriptSoundDurations(readMapText(scriptFile)), soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
   };
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
-  const whole = J.generateScript(input), file = read(scriptFile);
+  const whole = J.generateScript(input), file = readMapText(scriptFile);
   // SCRIPT_CHECK_DUMP=<folder>: both scripts per map, to go through the differences (JASS and Lua).
   if (process.env.SCRIPT_CHECK_DUMP) writeFileSync(`${process.env.SCRIPT_CHECK_DUMP}/${m}.json`, JSON.stringify([norm(whole), norm(file)]));
   const inList = (a: any[] | undefined, f: (x: any) => string) => (a ?? []).map(f);
@@ -154,7 +166,7 @@ for (const m of maps) {
     }
   }
 }
-const detail = { stats, broken: [...luaBroken, ...broken], guarded, asked, checked, luaBroken, otherBroken: broken };
+const detail = { stats, broken: [...luaBroken, ...broken], guarded, asked, checked, luaBroken, otherBroken: broken, lua: { checked: luaChecked, judged: luaNamesJudged } };
 // Under run.mjs (SCRIPT_CHECK_SHARD set) nothing is printed here: it puts the shards' details together and prints that.
 if (!process.env.SCRIPT_CHECK_SHARD) printSections(detail);
 if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify(detail));

@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Map info (map/war3map.w3i.json)",
+  "description": "The project form of war3map.w3i, written by the format definition crates/w3proj/formats/w3i.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "version", "saves", "editorVersion", "name", "author", "description", "suggestedPlayers", "cameraBounds", "cameraComplements", "playableWidth", "playableHeight", "flags", "tileset", "loadingScreen", "gameDataSet", "prologue", "players", "forces", "upgrades", "techs", "unitTables"],
+  "properties": {
+    "format": { "const": "w3proj.mapinfo/1" },
+    "version": {
+      "description": "18 Reign of Chaos, 25 The Frozen Throne to 39 the 3.0 editor",
+      "anyOf": [{ "$ref": "#/$defs/u32", "const": 18 }, { "$ref": "#/$defs/u32", "minimum": 25, "maximum": 39 }]
+    },
+    "saves": { "$ref": "#/$defs/u32" },
+    "editorVersion": { "$ref": "#/$defs/u32" },
+    "gameVersion": { "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 4, "maxItems": 4, "description": "version 27 and later: major, minor, patch, build" },
+    "name": { "$ref": "#/$defs/cstring" },
+    "author": { "$ref": "#/$defs/cstring" },
+    "description": { "$ref": "#/$defs/cstring" },
+    "suggestedPlayers": { "$ref": "#/$defs/cstring" },
+    "cameraBounds": { "type": "array", "items": { "$ref": "#/$defs/f32" }, "minItems": 8, "maxItems": 8 },
+    "cameraComplements": { "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 4, "maxItems": 4 },
+    "playableWidth": { "$ref": "#/$defs/u32" },
+    "playableHeight": { "$ref": "#/$defs/u32" },
+    "flags": { "$ref": "#/$defs/u32" },
+    "tileset": { "$ref": "#/$defs/char" },
+    "loadingScreen": {
+      "type": "object",
+      "required": ["number", "text", "title", "subtitle"],
+      "properties": {
+        "number": { "$ref": "#/$defs/i32", "description": "-1 = none / custom model" },
+        "crestRace": { "$ref": "#/$defs/u32", "description": "version 39" },
+        "model": { "$ref": "#/$defs/cstring", "description": "version 25 and later" },
+        "text": { "$ref": "#/$defs/cstring" },
+        "title": { "$ref": "#/$defs/cstring" },
+        "subtitle": { "$ref": "#/$defs/cstring" }
+      }
+    },
+    "gameDataSet": { "$ref": "#/$defs/u32" },
+    "prologue": {
+      "type": "object",
+      "required": ["text", "title", "subtitle"],
+      "properties": {
+        "path": { "$ref": "#/$defs/cstring", "description": "version 25 and later" },
+        "text": { "$ref": "#/$defs/cstring" },
+        "title": { "$ref": "#/$defs/cstring" },
+        "subtitle": { "$ref": "#/$defs/cstring" }
+      }
+    },
+    "fog": {
+      "description": "version 25 and later",
+      "type": "object",
+      "required": ["style", "start", "end", "density", "color"],
+      "properties": {
+        "style": { "$ref": "#/$defs/u32" },
+        "start": { "$ref": "#/$defs/f32" },
+        "end": { "$ref": "#/$defs/f32" },
+        "density": { "$ref": "#/$defs/f32" },
+        "color": { "$ref": "#/$defs/rgba" }
+      }
+    },
+    "terrainFog": {
+      "description": "version 39: the World Editor's Height fog values (Map Options)",
+      "type": "object",
+      "required": ["linearStart", "linearEnd", "maxOpacity"],
+      "allOf": [
+        { "anyOf": [{ "required": ["heightStart"] }, { "required": ["style"] }] },
+        { "anyOf": [{ "required": ["heightEnd"] }, { "required": ["overSky"] }] },
+        { "anyOf": [{ "required": ["drawOverSky"] }, { "required": ["height"] }] }
+      ],
+      "properties": {
+        "heightStart": { "$ref": "#/$defs/f32", "description": "Height Start" },
+        "heightEnd": { "$ref": "#/$defs/f32", "description": "Height End" },
+        "linearStart": { "$ref": "#/$defs/f32" },
+        "linearEnd": { "$ref": "#/$defs/f32" },
+        "maxOpacity": { "$ref": "#/$defs/f32" },
+        "drawOverSky": { "$ref": "#/$defs/i32", "description": "Draw Fog Over Sky: 1 when ticked" },
+        "style": { "$ref": "#/$defs/i32", "description": "older JSON: heightStart's bytes as an i32" },
+        "overSky": { "$ref": "#/$defs/i32", "description": "older JSON: heightEnd's bytes as an i32" },
+        "height": { "$ref": "#/$defs/f32", "description": "older JSON: drawOverSky's bytes as an f32" }
+      }
+    },
+    "weather": { "$ref": "#/$defs/id", "description": "version 25 and later" },
+    "soundEnvironment": { "$ref": "#/$defs/cstring", "description": "version 25 and later" },
+    "lightEnvironment": { "$ref": "#/$defs/char", "description": "version 25 and later" },
+    "waterTint": { "$ref": "#/$defs/rgba", "description": "version 25 and later" },
+    "scriptType": { "$ref": "#/$defs/u32", "description": "version 28 and later: 0 JASS, 1 Lua" },
+    "supportedModes": { "$ref": "#/$defs/u32", "description": "version 31 and later" },
+    "gameDataVersion": { "$ref": "#/$defs/u32", "description": "version 31 and later" },
+    "cameraZoom": {
+      "description": "version 32 and later",
+      "type": "object",
+      "required": ["default", "max"],
+      "properties": {
+        "default": { "$ref": "#/$defs/i32" },
+        "max": { "$ref": "#/$defs/i32" },
+        "min": { "$ref": "#/$defs/i32", "description": "version 33 and later" }
+      }
+    },
+    "water": {
+      "description": "version 39",
+      "type": "object",
+      "required": ["minOpacity", "maxOpacity", "reflectivity", "emissivity", "edgeSoftness", "wavesVertexDisplacement", "wavesNormalMapStrength", "overrideColor", "environmentMapReflectivity", "unknown"],
+      "properties": {
+        "minOpacity": { "$ref": "#/$defs/i32" },
+        "maxOpacity": { "$ref": "#/$defs/i32" },
+        "reflectivity": { "$ref": "#/$defs/i32" },
+        "emissivity": { "$ref": "#/$defs/i32" },
+        "edgeSoftness": { "$ref": "#/$defs/i32" },
+        "wavesVertexDisplacement": { "$ref": "#/$defs/i32" },
+        "wavesNormalMapStrength": { "$ref": "#/$defs/i32" },
+        "overrideColor": { "$ref": "#/$defs/i32" },
+        "environmentMapReflectivity": { "$ref": "#/$defs/i32" },
+        "unknown": { "$ref": "#/$defs/i32" }
+      }
+    },
+    "playerHudSkins": { "$ref": "#/$defs/variant", "description": "version 39: whether players have hudSkin (editor builds from about 6128). Missing means editorVersion >= 6128." },
+    "players": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "controller", "race", "fixedStart", "name", "start", "allyLow", "allyHigh"],
+        "properties": {
+          "id": { "$ref": "#/$defs/u32" },
+          "controller": { "$ref": "#/$defs/u32", "description": "1 user, 2 computer, 3 neutral, 4 rescuable" },
+          "race": { "$ref": "#/$defs/u32", "description": "0 selectable, 1 human, 2 orc, 3 undead, 4 night elf" },
+          "hudSkin": { "$ref": "#/$defs/u32", "description": "version 39 with playerHudSkins; 0 when missing" },
+          "fixedStart": { "$ref": "#/$defs/u32", "description": "flag bits; bit 0 = fixed start position" },
+          "name": { "$ref": "#/$defs/cstring" },
+          "start": { "type": "array", "items": { "$ref": "#/$defs/f32" }, "minItems": 2, "maxItems": 2 },
+          "allyLow": { "$ref": "#/$defs/u32" },
+          "allyHigh": { "$ref": "#/$defs/u32" },
+          "enemyLow": { "$ref": "#/$defs/u32", "description": "version 31 and later; 0 when missing" },
+          "enemyHigh": { "$ref": "#/$defs/u32", "description": "version 31 and later; 0 when missing" }
+        }
+      }
+    },
+    "forces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["flags", "players", "name"],
+        "properties": {
+          "flags": { "$ref": "#/$defs/u32" },
+          "players": { "$ref": "#/$defs/u32", "description": "bit mask of member players" },
+          "name": { "$ref": "#/$defs/cstring" }
+        }
+      }
+    },
+    "upgrades": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["players", "id", "level", "availability"],
+        "properties": {
+          "players": { "$ref": "#/$defs/u32" },
+          "id": { "$ref": "#/$defs/id" },
+          "level": { "$ref": "#/$defs/u32" },
+          "availability": { "$ref": "#/$defs/u32" }
+        }
+      }
+    },
+    "techs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["players", "id"],
+        "properties": {
+          "players": { "$ref": "#/$defs/u32" },
+          "id": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "unitTables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["number", "name", "positions", "lines"],
+        "properties": {
+          "number": { "$ref": "#/$defs/u32" },
+          "name": { "$ref": "#/$defs/cstring" },
+          "positions": { "type": "array", "items": { "$ref": "#/$defs/i32" } },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["chance", "ids"],
+              "properties": {
+                "chance": { "$ref": "#/$defs/u32" },
+                "ids": { "type": "array", "items": { "$ref": "#/$defs/id" }, "description": "one per entry of positions (a schema can't compare the two lengths; the codec refuses a difference)" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "itemTables": {
+      "description": "version 25 and later",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["number", "name", "sets"],
+        "properties": {
+          "number": { "$ref": "#/$defs/u32" },
+          "name": { "$ref": "#/$defs/cstring" },
+          "sets": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["chance", "id"],
+                "properties": {
+                  "chance": { "$ref": "#/$defs/u32" },
+                  "id": { "$ref": "#/$defs/id" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["version"], "properties": { "version": { "minimum": 25 } } },
+      "then": {
+        "required": ["fog", "weather", "soundEnvironment", "lightEnvironment", "waterTint", "itemTables"],
+        "properties": { "loadingScreen": { "required": ["model"] }, "prologue": { "required": ["path"] } }
+      }
+    },
+    { "if": { "required": ["version"], "properties": { "version": { "minimum": 27 } } }, "then": { "required": ["gameVersion"] } },
+    { "if": { "required": ["version"], "properties": { "version": { "minimum": 28 } } }, "then": { "required": ["scriptType"] } },
+    { "if": { "required": ["version"], "properties": { "version": { "minimum": 31 } } }, "then": { "required": ["supportedModes", "gameDataVersion"] } },
+    { "if": { "required": ["version"], "properties": { "version": { "minimum": 32 } } }, "then": { "required": ["cameraZoom"] } },
+    { "if": { "required": ["version"], "properties": { "version": { "minimum": 33 } } }, "then": { "properties": { "cameraZoom": { "required": ["min"] } } } },
+    {
+      "if": { "required": ["version"], "properties": { "version": { "minimum": 39 } } },
+      "then": { "required": ["terrainFog", "water"], "properties": { "loadingScreen": { "required": ["crestRace"] } } }
+    }
+  ],
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

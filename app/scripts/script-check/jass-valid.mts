@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { printValid } from "./report.mjs";
 const L = process.argv[2], show = Number(process.argv[3] ?? 10);
 const C = await import(pathToFileURL(L + "/jass/check.ts").href);
+const { decodeLossless } = await import(pathToFileURL(L + "/formats/lossless.ts").href);
 const common = readFileSync("common.j", "utf8"), blizzard = readFileSync("Blizzard.j", "utf8");
 const lineOf = (src: string, pos: number) => src.slice(0, pos).split("\n").length;
 // A report's lines are printed here when run alone, and kept for run.mjs when run in shards.
@@ -34,7 +35,8 @@ const allMaps = readdirSync("ws");
 for (const m of allMaps.slice(Math.floor((shardI * allMaps.length) / shardN), Math.floor(((shardI + 1) * allMaps.length) / shardN))) {
   const f = `ws/${m}/map/war3map.j`;
   if (!existsSync(f)) continue;
-  const src = readFileSync(f, "utf8");
+  // As the Problems view reads it (readScriptFile): lossless.
+  const src = decodeLossless(new Uint8Array(readFileSync(f)));
   const d = C.checkJass(src, env);
   maps++; total += d.length; if (!d.length) clean++;
   for (const x of d) { const k = x.message.replace(/\b[A-Za-z_]\w*\b(?= is| takes|\))/g, "X").replace(/[A-Z]\w+_\w+/g, "X").slice(0, 60); kinds.set(k, (kinds.get(k) ?? 0) + 1); }

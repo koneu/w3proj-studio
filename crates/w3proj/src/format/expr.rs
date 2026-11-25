@@ -300,4 +300,124 @@ mod tests {
         assert_eq!(ev("abs(-5) <= 5"), Val::Bool(true));
         assert!(parse("version >=").is_err());
     }
+
+    fn num(src: &str) -> f64 {
+        ev(src).num()
+    }
+
+    #[test]
+    fn each_operator_does_its_own_thing() {
+        // Asymmetric operands, so swapped or replaced operators show.
+        assert_eq!(num("7 + 2"), 9.0);
+        assert_eq!(num("7 - 2"), 5.0);
+        assert_eq!(num("7 * 2"), 14.0);
+        assert_eq!(num("7 / 2"), 3.5);
+        assert_eq!(num("7 % 2"), 1.0);
+        assert_eq!(num("6 & 3"), 2.0);
+        assert_eq!(num("-7"), -7.0);
+        assert_eq!(num("abs(2 - 7)"), 5.0);
+        for (src, want) in [
+            ("2 == 2", true),
+            ("2 == 3", false),
+            ("2 != 3", true),
+            ("2 != 2", false),
+            ("2 < 3", true),
+            ("3 < 3", false),
+            ("3 <= 3", true),
+            ("4 <= 3", false),
+            ("3 > 2", true),
+            ("3 > 3", false),
+            ("3 >= 3", true),
+            ("2 >= 3", false),
+            ("!0", true),
+            ("!2", false),
+            ("true && false", false),
+            ("true && true", true),
+            ("false || false", false),
+            ("false || true", true),
+        ] {
+            assert_eq!(ev(src), Val::Bool(want), "{src}");
+        }
+    }
+
+    #[test]
+    fn precedence_and_grouping() {
+        assert_eq!(num("1 + 2 * 3"), 7.0);
+        assert_eq!(num("(1 + 2) * 3"), 9.0);
+        assert_eq!(num("10 - 4 - 3"), 3.0, "left to right");
+        assert_eq!(num("2 * 6 & 3"), 4.0, "& binds tighter than *");
+        assert_eq!(num("-2 * 3"), -6.0);
+        assert_eq!(ev("1 + 1 == 2"), Val::Bool(true));
+        assert_eq!(ev("false && false || true"), Val::Bool(true));
+        assert_eq!(ev("true || false && false"), Val::Bool(true));
+        assert_eq!(ev("!!1"), Val::Bool(true));
+    }
+
+    #[test]
+    fn values_and_numbers() {
+        assert_eq!(Val::Bool(true).num(), 1.0);
+        assert_eq!(Val::Bool(false).num(), 0.0);
+        assert!(Val::Num(-0.5).truthy());
+        assert!(!Val::Num(0.0).truthy());
+        assert_eq!(num("true + true"), 2.0);
+        assert_eq!(num("0x1F"), 31.0);
+        assert_eq!(num("0XfF"), 255.0);
+        assert_eq!(num("1.5e2"), 150.0);
+        assert_eq!(num(".25"), 0.25);
+        assert_eq!(num("  4\t"), 4.0);
+        // Short-circuit both ways: the unknown name on the right is never looked up.
+        assert_eq!(ev("false && nope"), Val::Bool(false));
+        assert_eq!(ev("true || nope"), Val::Bool(true));
+        // Bits of a negative number: two's complement, as the files store it.
+        assert_eq!(num("-1 & 255"), 255.0);
+        assert_eq!(num("flags & 4"), 4.0);
+        assert_eq!(num("len(positions)"), 3.0);
+    }
+
+    #[test]
+    fn names_with_dots_and_underscores() {
+        struct Dotted;
+        impl Scope for Dotted {
+            fn get(&self, n: &str) -> Option<Val> {
+                (n == "header.v_2").then_some(Val::Num(2.0))
+            }
+            fn len(&self, _: &str) -> Option<usize> {
+                None
+            }
+        }
+        assert_eq!(parse("header.v_2 * 2").unwrap().eval(&Dotted).unwrap(), Val::Num(4.0));
+        assert_eq!(parse("_x").unwrap(), Expr::Var("_x".into()));
+    }
+
+    #[test]
+    fn mistakes_are_errors_not_panics() {
+        for src in [
+            "", "1 +", "(1", "1)", "1 2", "abs(1", "abs 1", "len(1)", "len(x", "len x", "0x", "1..2", "1e", "a $ b", "#", "é",
+        ] {
+            assert!(parse(src).is_err(), "{src:?}");
+        }
+        let s = S(HashMap::new());
+        let e = parse("missing + 1").unwrap().eval(&s).unwrap_err().to_string();
+        assert!(e.contains("unknown name \"missing\""), "{e}");
+        let e = parse("len(other)").unwrap().eval(&s).unwrap_err().to_string();
+        assert!(e.contains("len(other)"), "{e}");
+        // An error inside a deeper expression comes out too, whichever side it is on.
+        for src in ["abs(missing)", "-missing", "!missing", "1 + missing", "missing + 1", "true && missing", "false || missing"] {
+            assert!(parse(src).unwrap().eval(&s).is_err(), "{src}");
+        }
+    }
+
+    #[test]
+    fn what_parse_builds() {
+        assert_eq!(
+            parse("!a && -1 < len(b)").unwrap(),
+            Expr::Bin(
+                Op::And,
+                Box::new(Expr::Not(Box::new(Expr::Var("a".into())))),
+                Box::new(Expr::Bin(Op::Lt, Box::new(Expr::Neg(Box::new(Expr::Num(1.0)))), Box::new(Expr::Len("b".into())))),
+            )
+        );
+        assert_eq!(parse("true").unwrap(), Expr::Bool(true));
+        assert_eq!(parse("false").unwrap(), Expr::Bool(false));
+    }
 }

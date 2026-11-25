@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GUI trigger (map/triggers/**/*.gui.json)",
+  "description": "A trigger made of events, conditions and actions (docs/trigger-folders-spec.md, section 3A), read and written by crates/w3proj/src/trigger_layout.rs; the ECAs are crates/w3proj/src/wtg.rs's. Unknown keys are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "type": { "const": 8, "description": "8 when missing" },
+    "id": { "$ref": "#/$defs/u32", "description": "imported maps only" },
+    "name": { "$ref": "#/$defs/text", "description": "the name the tree shows (gg_trg_<name>); the file's name is a slug of it" },
+    "description": { "$ref": "#/$defs/text", "description": "empty when missing" },
+    "isComment": { "$ref": "#/$defs/u32", "description": "0 when missing" },
+    "enabled": { "type": "boolean", "description": "true when missing" },
+    "initiallyOff": { "type": "boolean", "description": "false when missing" },
+    "runOnInit": { "type": "boolean", "description": "false when missing" },
+    "ecas": { "description": "the events, conditions and actions; none when missing", "type": "array", "items": { "$ref": "#/$defs/eca" } },
+    "wctText": { "type": "string", "description": "dormant custom text war3map.wct has for this trigger; missing means it has no text slot" }
+  },
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "text": { "description": "a name or value war3map.wtg stores: no zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "eca": {
+      "description": "an event, condition or action",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "enabled", "params", "children"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/u32", "description": "0 event, 1 condition, 2 action" },
+        "group": { "$ref": "#/$defs/u32", "description": "inside a block (if/then/else, loops, and/or): which of its parts the child is in" },
+        "name": { "$ref": "#/$defs/text", "description": "the TriggerData function" },
+        "enabled": { "type": "boolean" },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/eca" } }
+      }
+    },
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "$ref": "#/$defs/i32", "description": "0 preset, 1 variable, 2 function, 3 string, -1 invalid" },
+        "value": { "$ref": "#/$defs/text" },
+        "call": { "$ref": "#/$defs/call", "description": "type 2: the function called" },
+        "index": { "$ref": "#/$defs/param", "description": "an array variable's index" }
+      }
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "hasParams", "params"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/u32" },
+        "name": { "$ref": "#/$defs/text" },
+        "hasParams": { "type": "boolean" },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
+        "trailer": { "$ref": "#/$defs/u32" }
+      }
+    }
+  }
+}

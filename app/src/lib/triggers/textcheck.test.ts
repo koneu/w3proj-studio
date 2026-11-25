@@ -1,9 +1,10 @@
 // Per-file diagnostics of the trigger folders: each script file linted with its own lines (frontmatter line 1), vJASS
-// left to JassHelper, Lua syntax only, and the map script's findings in a copied text told once, at the file's line.
+// left to JassHelper, Lua's syntax and unknown calls, and the map script's findings in a copied text told once, at the file's line.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { envFrom } from "../jass/check";
+import { luaApiFrom, luaKnownNames } from "../lua/check";
 import { hasFrontmatter, lintTexts, placeScriptDiagnostics, type TriggerText } from "./textcheck";
 
 const GAME = envFrom(["type unit extends handle\nnative DoNothing takes nothing returns nothing\nnative CreateTrigger takes nothing returns trigger\ntype trigger extends handle\n"]);
@@ -41,6 +42,11 @@ test("vJASS files are left to JassHelper; Lua files get the syntax check only", 
   assert.deepEqual([found[0].path, found[0].line], ["map/triggers/S.lua", 2]);
   assert.match(found[0].message, /"function" isn't closed/);
   assert.deepEqual(lintTexts([{ path: "map/triggers/S.lua", text: lua.replace("  if x then\n", "") }], "lua", null, true), [], "names aren't looked at");
+  // With the names known (the game's API, the script's and the files' globals), an unknown call is a warning at its line.
+  const names = luaKnownNames(luaApiFrom(GAME, ""), ["function Defined() end\n"]);
+  const own = lua.replace("  if x then\n", "  Defined()\n");
+  const named = lintTexts([{ path: "map/triggers/S.lua", text: own }], "lua", null, true, names);
+  assert.deepEqual(named.map((d) => [d.line, d.severity, d.message]), [[4, "warning", "Unknown function UnknownName"]]);
 });
 
 test("a zero byte (U+10FF00 in the file) doesn't move a finding or make one", () => {

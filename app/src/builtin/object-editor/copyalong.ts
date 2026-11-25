@@ -7,7 +7,7 @@ import type { McpEditsService } from "../../extensions/services";
 import { MCP_EDITS_SERVICE } from "../../extensions/services";
 import { loadKind, nextFreeId, type KindData } from "../../lib/objects/metadata";
 import { planPaste, referencedBy, type Copied, type CopyObject, type CopySet, type HoldsIds, type PasteWorld, type Plan, type Policy } from "../../lib/objects/copydeps";
-import { StringTable } from "../../lib/formats/wts";
+import { readWts, StringTable } from "../../lib/formats/wts";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { joinPath } from "../../lib/paths";
 import { entryIds } from "../../lib/terrain/entryids";
@@ -79,7 +79,7 @@ export async function viewMap(w3: W3Api, live?: Live, root = w3.workspace.projec
   const wtsPath = joinPath(root, "map/war3map.wts");
   let wts: string | null = null;
   if (await w3.backend.invoke<boolean>("fs_exists", { path: wtsPath })) {
-    try { wts = await w3.workspace.readText(wtsPath); } catch { throw new Error("map/war3map.wts is there but can't be read."); }
+    try { wts = await readWts(w3.workspace, wtsPath); } catch { throw new Error("map/war3map.wts is there but can't be read."); }
   }
   const table = wts === null ? null : new StringTable(wts);
   const text = live?.text ?? ((v: string) => {

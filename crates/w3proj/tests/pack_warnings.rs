@@ -108,6 +108,8 @@ fn an_import_listed_under_another_extension_is_kept_with_a_warning() {
     let dir = scratch("extension");
     let project = dir.join("mini");
     copy_dir(&fixture(), &project);
+    // The lists below are written raw: the fixture's own list (as JSON) would be the same file twice.
+    fs::remove_file(project.join("map/war3map.imp.json")).unwrap();
     let imported = project.join("map/war3mapImported");
     fs::write(imported.join("Song.ogg"), b"OggS").unwrap();
     fs::write(imported.join("Fine.mdx"), b"MDLX").unwrap();

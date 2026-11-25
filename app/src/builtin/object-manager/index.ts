@@ -13,7 +13,7 @@ import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import type { TriggerFile } from "../../lib/triggers/wtg";
 import { readTriggerFiles, wtgPath } from "../../lib/triggers/project";
-import { StringTable } from "../../lib/formats/wts";
+import { readWts, StringTable } from "../../lib/formats/wts";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import {
@@ -396,7 +396,7 @@ async function contents(w3: W3Api, live: LiveSources, saved: Map<string, Promise
   const imp = await json<{ files: { path: string }[] }>("war3map.imp");
   const script = await cached("script", () => w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => ""));
   const w3i = await json<{ name?: string; playableWidth?: number; playableHeight?: number; tileset?: string }>("war3map.w3i");
-  const strings = await cached("wts", async () => new StringTable(await w3.workspace.readText("map/war3map.wts").catch(() => "")));
+  const strings = await cached("wts", async () => new StringTable(await readWts(w3.workspace, "map/war3map.wts").catch(() => "")));
   const savedUnits = await json<{ units: MapContents["units"] }>("war3mapUnits.doo");
   const savedDoodads = await json<{ doodads: MapContents["doodads"] }>("war3map.doo");
   const savedRegions = await json<{ regions: MapContents["regions"] }>("war3map.w3r");

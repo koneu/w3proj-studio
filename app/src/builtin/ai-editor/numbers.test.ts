@@ -8,7 +8,8 @@ test("AI Editor: setting one hero chance rescales the other five so the six keep
   assert.deepEqual(rescaleChances([17, 17, 16, 17, 17, 16], 0, 17), [17, 17, 16, 17, 17, 16]);
   assert.deepEqual(rescaleChances([50, 10, 10, 10, 10, 10], 0, 75), [75, 5, 5, 5, 5, 5]);
   assert.deepEqual(rescaleChances([20, 20, 20, 20, 20, 0], 5, 50), [10, 10, 10, 10, 10, 50]);
-  assert.deepEqual(rescaleChances([0, 0, 0, 0, 0, 100], 5, 40), [12, 12, 12, 12, 12, 40], "others at 0 share equally");
+  assert.deepEqual(rescaleChances([0, 0, 0, 0, 0, 100], 5, 40), [0, 0, 0, 0, 0, 100], "others at 0: the box goes back to 100, as in the editor");
+  assert.deepEqual(rescaleChances([17, 17, 16, 17, 17, 16], 0, 10), [10, 18, 18, 18, 18, 18], "rounded as the editor rounds (lib/chances.test.ts)");
   assert.deepEqual(rescaleChances([100, 0, 0, 0, 0, 0], 0, 100), [100, 0, 0, 0, 0, 0]);
   for (const [i, v] of [[1, 33], [3, 0], [2, 99], [4, 7]] as const) {
     const out = rescaleChances([17, 17, 16, 17, 17, 16], i, v);

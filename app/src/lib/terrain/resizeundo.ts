@@ -124,6 +124,9 @@ export class ResizeHistory {
     return run;
   }
 
+  /** Whether a resize, undo or redo is running (inside `exclusive`): the map's files are being rewritten. */
+  get busy(): boolean { return this.held; }
+
   record(r: ResizeRecord) {
     this.list.length = this.at;
     this.list.push(r);

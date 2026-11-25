@@ -267,6 +267,15 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     filterPathing(cells, width, height) {
       if (width === W && height === H) apply(cells);
     },
+    pathingFilterNow() {
+      // Not read yet: what the file holds once it is (painting waits for it too).
+      if (!found) return (cells, width, height) => { if (width === W && height === H) apply(cells); };
+      const taken = [...overrides].map(([i, o]) => [i, o.set, o.clear] as const);
+      return (cells, width, height) => {
+        if (width !== W || height !== H) return;
+        for (const [i, set, clear] of taken) cells[i] = (cells[i] | set) & ~clear;
+      };
+    },
     async save() {
       if (!unsaved || (!fileExists && !overrides.size)) return;
       // Never over a file that couldn't be used, unless the user chose to replace it: then it is backed up first.

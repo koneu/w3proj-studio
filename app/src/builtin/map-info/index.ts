@@ -2,7 +2,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { withColorTools } from "../../extensions/colortools";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { importStrings, StringTable, WtsCutError, wtsCutLines } from "../../lib/formats/wts";
+import { importStrings, readWts, StringTable, writeWts, wtsBytes, WtsCutError, wtsCutLines, wtsText } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
@@ -12,11 +12,13 @@ import { SCRIPT_FILES } from "../../lib/script/guard";
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { mapTextEdit } from "./textedit";
-import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { infoAsSaved } from "./save";
+import { applySky, FOG_STYLE_LABELS, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { namedTerrainFog, type TerrainFog } from "../../lib/formats/terrainfog";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { LOADING_TEXTS_UNUSED, loadingTextsUnused, mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
-import { filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingFiltered, infoTypingLimit, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
+import { filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingDecimal, infoTypingFiltered, infoTypingLimit, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
   addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
@@ -43,7 +45,7 @@ interface MapInfo {
   gameDataSet: number;
   prologue: { path: string; text: string; title: string; subtitle: string };
   fog: { style: number; start: number; end: number; density: number; color: number[] };
-  terrainFog?: { style: number; overSky: number; linearStart: number; linearEnd: number; maxOpacity: number; height: number };
+  terrainFog?: TerrainFog;
   weather: string; soundEnvironment: string; lightEnvironment: string; waterTint: number[];
   scriptType?: number; supportedModes?: number; gameDataVersion?: number;
   cameraZoom?: { default: number; max: number; min?: number };
@@ -113,7 +115,6 @@ const FORCE_FLAGS: [number, string][] = [
   [0x10, "Share unit control"],
   [0x20, "Share advanced unit control"],
 ];
-const FOG_STYLES = [[0, "Linear"], [1, "Exponential 1"], [2, "Exponential 2"]] as const;
 
 /** Labels from the game: tilesets, weather, loading screens. */
 interface GameLists {
@@ -323,24 +324,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // Strings go out as the map's own war3map.wts, a text file a translator can work in.
     w3.commands.register("w3.strings.export", async () => {
-      const text = await w3.workspace.readText(STRINGS).catch(() => null);
+      const text = await readWts(w3.workspace, STRINGS).catch(() => null);
       if (text === null) throw new Error("This map has no strings.");
       const path = await w3.window.pickSaveFile({ title: "Export strings", defaultPath: "strings.txt", filters: [{ name: "Strings (.txt)", extensions: ["txt"] }] });
       if (!path) return;
-      await w3.backend.writeBytes(path, new TextEncoder().encode(text));
+      await w3.backend.writeBytes(path, wtsBytes(text));
       void w3.window.showInfo(`Exported ${[...new StringTable(text).entries()].length} strings.`);
     }),
     // What the World Editor does to the texts when it saves (Studio's save keeps them): see movetexts.ts.
     w3.commands.register("w3.strings.moveToTable", () => moveTextsToStringTable(w3)),
     w3.commands.register("w3.strings.import", async () => {
-      const text = await w3.workspace.readText(STRINGS).catch(() => null);
+      const text = await readWts(w3.workspace, STRINGS).catch(() => null);
       if (text === null) throw new Error("This map has no strings.");
       const path = await w3.window.pickFile({ title: "Import strings", filters: [{ name: "Strings (.txt, .wts)", extensions: ["txt", "wts"] }] });
       if (!path) return;
-      const { text: next, changed, unknown } = importStrings(text, new TextDecoder().decode(await w3.backend.readBytes(path)));
+      const { text: next, changed, unknown } = importStrings(text, wtsText(await w3.backend.readBytes(path)));
       const extra = unknown ? ` ${unknown} in the file ${unknown === 1 ? "isn't" : "aren't"} in this map, and stay${unknown === 1 ? "s" : ""} out.` : "";
       if (!changed) { void w3.window.showInfo(`No strings to change.${extra}`); return; }
-      await w3.workspace.writeText(STRINGS, next);
+      await writeWts(w3.workspace, STRINGS, next);
       void w3.window.showInfo(`Imported ${changed} string${changed === 1 ? "" : "s"}.${extra}`);
     }),
     w3.views.register("w3.scenario.sections", {
@@ -364,9 +365,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const info: MapInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
+        // JSON written before the terrain fog words had names: the names, the same bytes (saved with them).
+        if (info.terrainFog) info.terrainFog = namedTerrainFog(info.terrainFog);
         // war3map.wts as read or last saved here: saving merges this editor's string edits onto
         // the file as it is then (other editors may have saved strings meanwhile).
-        let wtsBase = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let wtsBase = await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
         const strings = wtsBase !== null ? new StringTable(wtsBase) : null;
         const v = info.version;
         // Start locations (war3mapUnits.doo, either project form): players without one can't be added.
@@ -458,11 +461,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const num = (key: InfoNumberKey, opts: { player?: number; then?: () => void } = {}) => {
           const kind = INFO_NUMBERS[key].kind;
           const shown = () => String(infoNumber(info, key, opts.player) ?? "");
-          // A box that drops characters as they are typed ("-", ".") or holds only a few is a text one (a number box
+          // A box that drops characters as they are typed (digits only) or holds only a few is a text one (a number box
           // keeps what is typed until it changes); the others are number boxes.
           const filtered = infoTypingFiltered(key);
           const input = h("input.form-input.form-num", filtered
-            ? { type: "text", inputMode: "numeric", value: shown(), maxLength: infoTypingLimit(key) }
+            ? { type: "text", inputMode: infoTypingDecimal(key) ? "decimal" : "numeric", value: shown(), maxLength: infoTypingLimit(key) }
             : { type: "number", value: shown(), step: kind === "f32" ? "any" : "1" });
           input.dataset.field = key;
           if (opts.player === undefined) numInputs.set(key, input);
@@ -500,6 +503,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const box = h("input", { type: "checkbox", checked: (get() & mask) !== 0, disabled });
           box.addEventListener("change", () => { set(box.checked ? get() | mask : get() & ~mask); update(); });
           return h("label.form-check", {}, box, " ", label);
+        };
+        /** Draw Fog Over Sky, the terrain fog's sixth word: 1 when ticked, as the World Editor saves it (any number but 0
+         *  shows ticked and stays until the box is changed). */
+        const overSky = (tf: TerrainFog) => {
+          const box = h("input", { type: "checkbox", checked: tf.drawOverSky !== 0 });
+          box.dataset.field = "terrainFogDrawOverSky";
+          box.addEventListener("change", () => { if (info.terrainFog) info.terrainFog.drawOverSky = box.checked ? 1 : 0; update(); });
+          return h("label.form-check", {}, box, " ", "Draw fog over sky");
         };
         /** A w3i colour (stored blue, green, red, alpha): colour picker + alpha. */
         const color = (bgra: number[], alpha: InfoNumberKey) => {
@@ -631,19 +642,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Water tint", color(info.waterTint, "waterTintAlpha"), "Used when “Enable water tinting” is set (Options)."),
             ),
             section_("Fog",
-              row("Style", select(FOG_STYLES, () => info.fog.style, (n) => { info.fog.style = n; })),
+              row("Style", select(FOG_STYLE_LABELS, () => info.fog.style, (n) => { info.fog.style = n; })),
               row("Start Z", num("fogStart")),
               row("End Z", num("fogEnd")),
               row("Density", num("fogDensity")),
               row("Color", color(info.fog.color, "fogAlpha"), "Used when “Use terrain fog” is set (Options)."),
             ),
+            // The World Editor's Height fog values (Map Options), in the file's order.
             info.terrainFog ? section_("Terrain fog (3.0)",
-              row("Style", num("terrainFogStyle")),
-              row("Draw over sky", num("terrainFogOverSky")),
+              row("Height start", num("terrainFogHeightStart"), "Kept at or above Height end."),
+              row("Height end", num("terrainFogHeightEnd")),
               row("Linear start", num("terrainFogLinearStart")),
               row("Linear end", num("terrainFogLinearEnd")),
               row("Max opacity", num("terrainFogMaxOpacity")),
-              row("Height", num("terrainFogHeight")),
+              h("div.form-checks", {}, overSky(info.terrainFog)),
             ) : null,
             info.water ? section_("Water rendering (3.0)",
               ...WATER_NUMBERS.filter((k) => infoNumber(info, k) !== undefined).map((k) => row(INFO_NUMBERS[k].label, num(k)))) : null,
@@ -833,8 +845,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // A text with a `}` would be cut by the game (the field says so): nothing is saved.
             const cuts = strings?.cuts() ?? [];
             if (cuts.length) throw new WtsCutError(cuts);
-            // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
-            // undo isn't mixed up with the save.
+            // The ally priorities (shown so above) and a camera zoom of 0 as the World Editor saves them (save.ts); the
+            // editor's own values stay, so an undo isn't mixed up with the save.
             const taken = history.mark();
             // What is saved is taken now: an edit made while the save waits stays unsaved (and the editor dirty).
             const saved = structuredClone(info);
@@ -849,16 +861,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const next = writeMapExtra(base, JSON.parse(extraNow) as MapExtra);
               if (next !== base && !(now.text === null && next === "")) extraWrite = next;
             }
-            applyAllyPriorities(saved as unknown as PlayerInfo & { flags: number });
+            infoAsSaved(saved);
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(saved) });
             await doc.writeText(text);
             if (extraWrite !== null) await w3.workspace.writeText(MAP_EXTRA_PATH, extraWrite);
             extraSaved = extraNow;
             if (strings && wtsBase !== null) {
               const base = wtsBase;
-              const current = await w3.workspace.readText("map/war3map.wts").catch(() => base);
+              const current = await readWts(w3.workspace, "map/war3map.wts").catch(() => base);
               const merged = StringTable.merge(base, strings, current);
-              if (merged !== current) await w3.workspace.writeText("map/war3map.wts", merged);
+              if (merged !== current) await writeWts(w3.workspace, "map/war3map.wts", merged);
               strings.rebase(merged);
               wtsBase = merged;
             }

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trigger folder (map/triggers/**/_category.json)",
+  "description": "A folder of the trigger tree: a category or a library (docs/trigger-folders-spec.md, section 2), read and written by crates/w3proj/src/trigger_layout.rs. Unknown keys are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "type": { "description": "4 a category, 2 a library; 4 when missing", "enum": [2, 4] },
+    "id": { "$ref": "#/$defs/u32", "description": "imported maps only, as stored (two folders may share one)" },
+    "name": { "$ref": "#/$defs/text", "description": "the name the tree shows; the folder's name is a slug of it" },
+    "isComment": { "$ref": "#/$defs/u32", "description": "0 when missing" },
+    "expanded": { "$ref": "#/$defs/u32", "description": "Reforged: 1 open, 0 folded; 1 when missing" }
+  },
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "text": { "description": "a name war3map.wtg stores: no zero character", "type": "string", "pattern": "^[^\\u0000]*$" }
+  }
+}

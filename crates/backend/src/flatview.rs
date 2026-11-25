@@ -32,7 +32,7 @@ impl Flat {
                 modified = modified.max(modified_ms(&meta));
             }
         }
-        Stamp { size, modified, also: Vec::new() }
+        Stamp::new(size, modified)
     }
 
     /// A hash of the files it is made from, names and bytes: tells a change the size and time leave alike. An error
@@ -157,9 +157,15 @@ fn pathing_paths(project: &Path) -> CmdResult<Vec<PathBuf>> {
 /// The stamp of a split project's `.w3proj/pathing.json`: the size and last write of its subterrains' `pathing.txt`
 /// (`Flat::stamp`); None when there is none.
 pub fn pathing_stamp(project: &Path) -> Option<Stamp> {
-    let paths = pathing_paths(project).ok()?;
+    pathing_stamp_checked(project).ok().flatten()
+}
+
+/// `pathing_stamp`, with an error where it can't be told (the layout or the file can't be read) instead of None.
+fn pathing_stamp_checked(project: &Path) -> CmdResult<Option<Stamp>> {
+    let paths = pathing_paths(project)?;
     if paths.is_empty() {
-        return crate::stamp_of(&w3proj::terrain_pathing::json_path(project)).ok();
+        let json = w3proj::terrain_pathing::json_path(project);
+        return if exists_checked(&json)? { crate::stamp_of(&json).map(Some) } else { Ok(None) };
     }
     let (mut size, mut modified) = (0, 0);
     for p in &paths {
@@ -168,7 +174,7 @@ pub fn pathing_stamp(project: &Path) -> Option<Stamp> {
             modified = modified.max(modified_ms(&meta));
         }
     }
-    Some(Stamp { size, modified, also: Vec::new() })
+    Ok(Some(Stamp::new(size, modified)))
 }
 
 /// Whether a split project's `.w3proj/pathing.json` is there: a subterrain has a `pathing.txt` (or the file itself is
@@ -189,16 +195,17 @@ fn write_pathing(project: &Path, bytes: &[u8]) -> CmdResult<Stamp> {
     let (written, removed) = layout::write_pathing(project, bytes).map_err(|e| format!("{} wasn't saved into map/terrain/: {e}", w3proj::terrain_pathing::JSON_NAME))?;
     let map_dir = project.join(w3proj::project::MAP_DIR);
     let mut also = Vec::new();
+    // Written, so a stamp that can't be read back is unknown, not an error (`stamp_or_unknown`).
     for rel in &written {
         let at = join_rel(&map_dir, rel);
-        let s = crate::stamp_of(&at)?;
-        also.push(Also { path: at.to_string_lossy().into_owned(), size: s.size, modified: s.modified });
+        also.push(Also::of(&at, &crate::stamp_or_unknown(|| crate::stamp_of(&at))));
     }
     // A file removed: listed with size and time 0, as gone.
     for rel in &removed {
-        also.push(Also { path: join_rel(&map_dir, rel).to_string_lossy().into_owned(), size: 0, modified: 0 });
+        also.push(Also::removed(&join_rel(&map_dir, rel)));
     }
-    let mut stamp = pathing_stamp(project).unwrap_or(Stamp { size: 0, modified: 0, also: Vec::new() });
+    // None left: gone, size and time 0.
+    let mut stamp = crate::stamp_or_unknown(|| pathing_stamp_checked(project).map(|s| s.unwrap_or(Stamp::new(0, 0))));
     stamp.also = also;
     Ok(stamp)
 }
@@ -213,7 +220,8 @@ fn write_derived(project_file: &Path, real: &Path, bytes: &[u8]) -> CmdResult<St
     if new_store {
         let _ = w3proj::derived::ensure_ignored(project);
     }
-    Ok(Stamp { size: s.size, modified: s.modified, also: vec![Also { path: real.to_string_lossy().into_owned(), size: s.size, modified: s.modified }] })
+    let also = vec![Also::of(real, &s)];
+    Ok(Stamp { also, ..s })
 }
 
 /// What a project path stands for in a split project: one of its flat files, a derived file in the store, the Pathing
@@ -318,6 +326,20 @@ pub struct Also {
     pub path: String,
     pub size: u64,
     pub modified: u64,
+    /// Written, its size and time unknown (`Stamp::unknown`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unknown: bool,
+}
+
+impl Also {
+    /// The file at `path`, with the stamp it was left with.
+    pub fn of(path: &Path, s: &Stamp) -> Also {
+        Also { path: path.to_string_lossy().into_owned(), size: s.size, modified: s.modified, unknown: s.unknown }
+    }
+    /// The file at `path`, removed: size and time 0.
+    pub fn removed(path: &Path) -> Also {
+        Also::of(path, &Stamp::new(0, 0))
+    }
 }
 
 /// `rel` (a `/`-separated path under `map/`, as the layout names its files) joined to `base` one component at a time, so
@@ -332,16 +354,17 @@ fn join_rel(base: &std::path::Path, rel: &str) -> std::path::PathBuf {
 pub fn write_flat(f: &Flat, bytes: &[u8]) -> CmdResult<Stamp> {
     let written = layout::write_flat(&f.map_dir, f.name, bytes).map_err(|e| format!("map/{} wasn't saved into map/terrain/: {e}", f.name))?;
     let mut also = Vec::new();
+    // Written, so a stamp that can't be read back is unknown, not an error (`stamp_or_unknown`).
     for rel in &written {
         let at = join_rel(&f.map_dir, rel);
-        let s = crate::stamp_of(&at)?;
-        also.push(Also { path: at.to_string_lossy().into_owned(), size: s.size, modified: s.modified });
+        also.push(Also::of(&at, &crate::stamp_or_unknown(|| crate::stamp_of(&at))));
     }
-    for v in layout::flat_views(&f.map_dir).map_err(err)?.unwrap_or_default() {
+    // The write is done: a layout that can't be read back now leaves the other flat files out (they show as changed at
+    // the next check) rather than failing a save that happened.
+    for v in layout::flat_views(&f.map_dir).ok().flatten().unwrap_or_default() {
         if v.name != f.name && v.sources.iter().any(|s| written.contains(s)) {
             let other = Flat { map_dir: f.map_dir.clone(), name: v.name, sources: v.sources };
-            let s = other.stamp();
-            also.push(Also { path: f.map_dir.join(v.name).to_string_lossy().into_owned(), size: s.size, modified: s.modified });
+            also.push(Also::of(&f.map_dir.join(v.name), &other.stamp()));
         }
     }
     let mut stamp = f.stamp();

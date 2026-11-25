@@ -490,7 +490,8 @@ enum Cmd {
     /// war3campaign.wts aren't pruned). Unless a map has "Modify ally priorities" on, its user
     /// players get the ally priorities in war3map.w3i the World Editor's save works out from their
     /// start locations. A map script W3Proj Studio wrote last is made again first (see
-    /// --keep-script), so it follows them.
+    /// --keep-script), so it follows them; a map with no script at all gets one written into
+    /// map/ first, as the app's packing does (the game can't run a map without one).
     Pack {
         project: PathBuf,
         /// Output map; defaults to [pack].output or build/<folder>.w3x.
@@ -499,6 +500,11 @@ enum Cmd {
         /// Pack war3map.wts as it is, unused strings included.
         #[arg(long)]
         keep_unused_strings: bool,
+        /// Write an (attributes) into the map (and its chapter maps), as the World Editor's save does: a CRC32 of
+        /// each file and no time stamps, so the map has the same entries as a World Editor save and packing twice
+        /// still gives the same bytes. Without it the map has one entry fewer (the game loads it either way).
+        #[arg(long)]
+        attributes: bool,
         /// Pack pathing, shadows and the minimap as they are, even when the terrain or doodads
         /// changed since they were made (the app makes them again a moment after an edit).
         #[arg(long)]
@@ -520,7 +526,7 @@ enum Cmd {
         /// packs it as it is even when it doesn't (a missing script still stops the pack). Not for a release.
         #[arg(long)]
         allow_stale_script: bool,
-        /// Pack the map script as the project has it. Without it, a script that is the one W3Proj
+        /// Pack the map script as the project has it (a map without one is packed without one). Without it, a script that is the one W3Proj
         /// Studio wrote last is made again from the project's files first, as `w3proj rebuild
         /// --only script` makes it (so it follows changed players, start locations and ally
         /// priorities); a script edited by hand or from the World Editor stays as it is anyway.
@@ -889,7 +895,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept the project's {s}: only its export header changed");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, game, trigger_data } => {
+        Cmd::Pack { project, output, keep_unused_strings, attributes, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, game, trigger_data } => {
             check_trigger_data(&trigger_data)?;
             check_derived(&project, force_stale, allow_terrain_only_derived)?;
             seams::check_for_pack(&packed_projects(&project), allow_seam_issues, &extra)?;
@@ -898,19 +904,21 @@ fn run(cli: Cli) -> Result<ExitCode> {
             // allies.rs's check of it warns when its priorities aren't those.
             if !keep_script && game != "none" {
                 for (at, dir) in packed_projects(&project) {
-                    if let rebuild::PackScript::NotMade(why) = rebuild::script_for_pack(&dir, &at, &game, &extra) {
-                        eprintln!(
+                    match rebuild::script_for_pack(&dir, &at, &game, &extra) {
+                        rebuild::PackScript::NotMade(why) => eprintln!(
                             "warning: {at}map script not made again ({why}): packed as the project has it, so it may not follow \
                              the players, start locations and ally priorities of war3map.w3i (--keep-script packs it as it is without trying)"
-                        );
+                        ),
+                        rebuild::PackScript::NoneMade(why) => eprintln!("warning: {at}the map has no script and none could be made ({why})"),
+                        _ => {}
                     }
                 }
             }
             check_script(&project, allow_stale_script)?;
             // The game's TriggerData (read only for a project with map/triggers/) checks the GUI functions.
             let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &lazy_game(&game), &trigger_data);
-            let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };
-            let r = pack(&project, output.as_deref(), &codecs)
+            let options = w3proj::PackOptions { prune: !keep_unused_strings, attributes };
+            let r = w3proj::pack_with(&project, output.as_deref(), &codecs, options)
                 .with_context(|| format!("packing {}", project.display()))?;
             if let Some(s) = &r.strings {
                 let list = |v: &[w3proj::wts::StringNum]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");

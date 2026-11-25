@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtg, type TriggerFile } from "../triggers/wtg";
 import { TRIGGERS_ROOT } from "../triggers/project";
-import { MINE_CLEARANCE, meleeAfterSave, meleeSetBlockers, newStartPlaces, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsUnderWater, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import { MINE_CLEARANCE, meleeAfterSave, meleeSetBlockers, newStartPlaces, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsSurelyInvalid, startSurroundings, startsUnderWater, startVerdicts, surroundingsFrom, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
 import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
@@ -268,6 +268,48 @@ test("the flag stays off for a reason, and where Studio can't tell", () => {
   assert.equal(left({ customData: undefined }), true, "object data not looked at");
   assert.equal(meleeAfterSave({ flags: OFF }, [], clean()).flags, OFF, "no start location");
   assert.equal(meleeAfterSave({ flags: OFF }, [startMid, { id: "ngol", player: 27 }], clean()).flags, OFF, "a unit without a position");
+});
+
+test("each start location has its own verdict (the start previews follow it), on the surroundings the game's tables give", async () => {
+  // A 32 x 32 tile map: A with a tree 192 east, B alone, C and D 488 apart (we-drive 2026-11-25, make-start-preview.mjs
+  // overlap: both previews hidden; 496 kept both), E with a gold mine 900 east and a footman on it, F near a doodad of
+  // unknown pathing.
+  const t = flat(33);
+  const at = (x: number, y: number, player: number) => ({ ...start(x, y), player });
+  const A = at(1024, 1024, 0), B = at(3072, 1024, 1), C = at(1024, 3072, 2), D = at(1024 + 488, 3072, 3), E = at(3072, 2560, 4), F = at(2048, 2048, 5);
+  const placed = [A, B, C, D, E, F, { id: "ngol", player: 27, position: [3072 + 900, 2560, 0] }, { id: "hfoo", player: 24, position: [3072, 2560, 0] }];
+  const doodads = JSON.stringify({ doodads: [{ id: "LTlt", position: [1024 + 192, 1024, 0] }, { id: "ZZzz", position: [2048 + 64, 2048, 0] }], specials: [] });
+  const ws = { gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; }, gameBytes };
+  const around = await startSurroundings(ws, t, doodads);
+  assert.ok(around, "the surroundings are known");
+  const verdicts = startVerdicts(t, placed, around!);
+  assert.deepEqual([A, B, C, D, E, F].map((s) => verdicts.get(s)), ["invalid", "valid", "invalid", "invalid", "valid", "unknown"]);
+  // 496 apart: neither (rounded to the cells, the squares don't overlap).
+  const D2 = at(1024 + 496, 3072, 3);
+  const apart = startVerdicts(t, [C, D2], around!);
+  assert.deepEqual([apart.get(C), apart.get(D2)], ["valid", "valid"]);
+  // The whole map's verdict is the worst start's (startsSurelyInvalid / startsPlainlyValid).
+  assert.equal(startsSurelyInvalid(t, placed, around!), true);
+  assert.equal(startsPlainlyValid(t, [B, E, placed[6]], around!), true);
+  assert.equal(startsSurelyInvalid(t, [B, F], around!) || startsPlainlyValid(t, [B, F], around!), false, "unknown: neither");
+
+  // Only the starts' squares worked out (`near`): the same verdicts.
+  const near = [A, B, C, D, E, F].map((s) => s.position);
+  const cut = await startSurroundings(ws, t, doodads, near);
+  assert.deepEqual([...startVerdicts(t, placed, cut!).values()], [...verdicts.values()]);
+  assert.ok(cut!.pathing.subarray(16).some((c) => c === 0) && around!.pathing.subarray(16).every((c) => c !== 0), "control: cells past the squares left out");
+  // From what a caller holds (the terrain view's pathing data), nothing read from the game: the same verdicts.
+  const textures: string[] = [];
+  const source = {
+    tileRules: RULES, ownTiles: () => ["Ldrt", "Lrok"], waterOffset: () => undefined,
+    pathTex: (id: string) => ({ LTlt: "PathTextures\\4x4Default.tga" } as Record<string, string>)[id],
+    texture: async (p: string) => { textures.push(p); return { width: 4, height: 4, rgba: new Uint8Array(64).fill(255) }; },
+  };
+  const held = await surroundingsFrom(source, t, doodads, near);
+  assert.deepEqual([...startVerdicts(t, placed, held!).values()], [...verdicts.values()]);
+  assert.deepEqual(textures, ["PathTextures\\4x4Default.tga"], "the tree's texture from the source");
+  const blind = await surroundingsFrom({ ...source, pathTex: () => undefined }, t, doodads, near);
+  assert.equal(startVerdicts(t, placed, blind!).get(A), "unknown", "control: a tree the source can't tell");
 });
 
 test("the facts for putting the flag back come from the project; unreadable ones leave it", async () => {

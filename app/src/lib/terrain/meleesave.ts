@@ -116,7 +116,7 @@ export const START_SQUARE = 8;
 /** A gold mine whose centre is nearer to a start location than this makes it invalid (we-drive 2026-11-16: 749 and
  *  (528, 528) were, 750 and (530.5, 530.5) not). Haunted and entangled mines count alike (not measured). */
 export const MINE_CLEARANCE = 750;
-const MINES = new Set(["ngol", "ugol", "egol"]);
+export const MINES: ReadonlySet<string> = new Set(["ngol", "ugol", "egol"]);
 
 /** Whether a start location stands under water: one of the World Editor's "start locations in invalid positions"
  *  (World Editor 7003's new maps on shallow or deep water, we-drive 2026-11-11). The others (startsSurelyInvalid) need
@@ -167,10 +167,10 @@ const NOT_FOR_A_HALL = NO_BUILD | NO_WALK;
  * The pathing the World Editor's save tests the start locations' squares against: the ground's (pathing.ts
  * generatePathing, with the tiles past the playable map blocked by the terrain's map-edge marks) with `stamps` ored in.
  * Unlike war3map.wpm the stamps include destructables (trees count) and doodads whatever their flags. In the layout of
- * war3map.wpm (16 bytes of header, then a byte per 32 × 32 cell from the bottom left).
+ * war3map.wpm (16 bytes of header, then a byte per 32 × 32 cell from the bottom left). `opts.only`: generatePathing's.
  */
-export function startPathing(t: Terrain, tileRules: Map<string, TileRule>, stamps: PathingStamp[] = [], opts: { ownTiles?: readonly string[]; waterOffset?: number } = {}): Uint8Array {
-  const wpm = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules, stamps, ownTiles: opts.ownTiles, waterOffset: opts.waterOffset });
+export function startPathing(t: Terrain, tileRules: Map<string, TileRule>, stamps: PathingStamp[] = [], opts: { ownTiles?: readonly string[]; waterOffset?: number; only?: Uint8Array } = {}): Uint8Array {
+  const wpm = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules, stamps, ownTiles: opts.ownTiles, waterOffset: opts.waterOffset, only: opts.only });
   const edge = mapEdgeTiles(t), tilesX = t.width - 1, w = tilesX * 4, h = (t.height - 1) * 4, cells = wpm.subarray(16);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (edge[(y >> 2) * tilesX + (x >> 2)]) cells[y * w + x] |= NO_BUILD | NO_WALK;
   return wpm;
@@ -204,29 +204,44 @@ const placedPos = (p: PlacedLike) => (Array.isArray(p.position) && p.position.le
 /** startsPlainlyValid and startsSurelyInvalid: "invalid" when a start surely is, "valid" when every start surely
  *  isn't, else "unknown". */
 function startsJudged(t: Terrain, placed: readonly PlacedLike[], around: StartSurroundings): "valid" | "invalid" | "unknown" {
+  const each = startVerdicts(t, placed, around);
+  if ([...each.values()].includes("invalid")) return "invalid";
+  return placed.some((p) => !placedPos(p)) || !each.size || [...each.values()].includes("unknown") ? "unknown" : "valid";
+}
+
+/**
+ * Each placed start location's own verdict by startsJudged's rules: "invalid" when it surely is (another start's square
+ * overlapping its own, a gold mine nearer than MINE_CLEARANCE, its square past the map, a cell of it not buildable in
+ * `around.pathing`), "unknown" when that can't be told (a doodad of unknown pathing near it, a cell only unwalkable, a
+ * pathing map of another size), else "valid". Starts without a position aren't in it. The World Editor leaves the town
+ * hall preview out of exactly the invalid ones (terrain-viewer/startpreview.ts; we-drive 2026-11-25: both of two starts
+ * 488 apart, neither 496 apart; a footman on a start isn't a reason).
+ */
+export function startVerdicts(t: Terrain, placed: readonly PlacedLike[], around: StartSurroundings): Map<PlacedLike, "valid" | "invalid" | "unknown"> {
+  const out = new Map<PlacedLike, "valid" | "invalid" | "unknown">();
   const starts = placed.filter((p) => p.id === "sloc" && placedPos(p));
-  const unplaced = placed.some((p) => !placedPos(p));
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const cells = around.pathing.subarray(16);
   const sized = cells.length === w * h;
   const cellOf = (p: PlacedLike) => [Math.round((placedPos(p)![0] - t.offsetX) / 32), Math.round((placedPos(p)![1] - t.offsetY) / 32)];
   const mines = placed.filter((p) => MINES.has(p.id) && placedPos(p));
   const S = START_SQUARE;
-  let unknown = unplaced || !starts.length || !sized;
-  for (const s of starts) {
+  const judge = (s: PlacedLike): "valid" | "invalid" | "unknown" => {
     const [cx, cy] = cellOf(s), [sx, sy] = placedPos(s)!;
     if (starts.some((o) => o !== s && Math.max(Math.abs(cellOf(o)[0] - cx), Math.abs(cellOf(o)[1] - cy)) < 2 * S)) return "invalid";
     if (mines.some((m) => Math.hypot(placedPos(m)![0] - sx, placedPos(m)![1] - sy) < MINE_CLEARANCE)) return "invalid";
     if (cx - S < 0 || cy - S < 0 || cx + S > w || cy + S > h) return "invalid";
-    if (around.unknown?.some((d) => Math.max(Math.abs(d.x - sx), Math.abs(d.y - sy)) < UNKNOWN_REACH)) unknown = true;
-    if (!sized) continue;
+    if (!sized) return "unknown";
+    let unknown = !!around.unknown?.some((d) => Math.max(Math.abs(d.x - sx), Math.abs(d.y - sy)) < UNKNOWN_REACH);
     for (let y = cy - S; y < cy + S; y++) for (let x = cx - S; x < cx + S; x++) {
       const c = cells[y * w + x];
       if (c & NO_BUILD) return "invalid";
       if (c & NOT_FOR_A_HALL) unknown = true;
     }
-  }
-  return unknown ? "unknown" : "valid";
+    return unknown ? "unknown" : "valid";
+  };
+  for (const s of starts) out.set(s, judge(s));
+  return out;
 }
 
 /**
@@ -376,19 +391,19 @@ const noTexture = (tex: string | undefined) => tex === undefined || tex === "" |
 
 /**
  * The pathing stamps of war3map.doo.json's doodads, destructables and special doodads (caves, collapsed cliffs), as
- * buildPathingMap places them, and where doodads stand whose pathing can't be told (a type the game's tables, `pathTex`:
- * id → its pathing texture, "" for none, don't have; a texture that can't be read). Null for what leaves the whole file
- * unknown: not a doodad file (raw, unreadable, malformed), a doodad without a position, a special doodad of unknown
- * pathing.
+ * buildPathingMap places them, and where doodads stand whose pathing can't be told (a type `pathTex`, id → its pathing
+ * texture, "" for none, doesn't know; a texture that can't be read). Null for what leaves the whole file unknown: not a
+ * doodad file (raw, unreadable, malformed), a doodad without a position, a special doodad of unknown pathing.
  */
-async function doodadStamps(text: string | null, t: Terrain, pathTex: ReadonlyMap<string, string>, texture: (path: string) => Promise<Mip | null>): Promise<{ stamps: PathingStamp[]; unknown: { x: number; y: number }[] } | null> {
+async function doodadStamps(text: string | null, t: Terrain, pathTex: (id: string) => string | undefined,
+  texture: PathingSource["texture"]): Promise<{ stamps: PathingStamp[]; unknown: { x: number; y: number }[] } | null> {
   if (text === null) return null;
   let doc: { doodads?: unknown; specials?: unknown };
   try { doc = JSON.parse(text) as typeof doc; } catch { return null; }
   if (!doc || !Array.isArray(doc.doodads) || (doc.specials !== undefined && !Array.isArray(doc.specials))) return null;
   const out: PathingStamp[] = [], unknown: { x: number; y: number }[] = [];
   for (const d of doc.doodads as { id?: unknown; position?: unknown; angle?: unknown }[]) {
-    const p = d?.position, tex = typeof d?.id === "string" ? pathTex.get(d.id) : undefined;
+    const p = d?.position, tex = typeof d?.id === "string" ? pathTex(d.id) : undefined;
     if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
     if (tex === "") continue;
     const image = tex === undefined ? null : await texture(tex);
@@ -396,7 +411,7 @@ async function doodadStamps(text: string | null, t: Terrain, pathTex: ReadonlyMa
     out.push({ x: p[0], y: p[1], angle: Number.isFinite(d.angle) ? (d.angle as number) : 0, width: image.width, height: image.height, rgba: image.rgba });
   }
   for (const s of (doc.specials ?? []) as { id?: unknown; x?: unknown; y?: unknown }[]) {
-    const tex = typeof s?.id === "string" ? pathTex.get(s.id) : undefined;
+    const tex = typeof s?.id === "string" ? pathTex(s.id) : undefined;
     if (!Number.isFinite(s?.x) || !Number.isFinite(s?.y) || tex === undefined) return null;
     if (tex === "") continue;
     const image = await texture(tex);
@@ -521,8 +536,9 @@ async function readSurroundings(ws: MeleeFiles, dooText: string | null | undefin
 
 /** The start locations' surroundings (readSurroundings) of `ground` with the doodads of `dooText` (war3map.doo.json's
  *  text: null when there is none or it can't be read): for ground and doodads not saved yet, as Map Size's. Null when
- *  they can't be told (no game tables, a doodad file that can't be read). */
-export async function startSurroundings(ws: Pick<MeleeFiles, "gameText" | "gameBytes">, ground: Terrain, dooText: string | null): Promise<StartSurroundings | null> {
+ *  they can't be told (no game tables, a doodad file that can't be read). `near`: see surroundingsFrom. */
+export async function startSurroundings(ws: Pick<MeleeFiles, "gameText" | "gameBytes">, ground: Terrain, dooText: string | null,
+  near?: readonly (readonly number[])[]): Promise<StartSurroundings | null> {
   /** A game table's rows that have `key`; empty when it can't be read. */
   const table = async (path: string, key: string) => {
     const text = ws.gameText ? await ws.gameText(path).catch(() => null) : null;
@@ -546,12 +562,53 @@ export async function startSurroundings(ws: Pick<MeleeFiles, "gameText" | "gameB
     }
     return m;
   };
-  const doodads = tiles.length ? await doodadStamps(dooText, ground, pathTex, texture) : null;
+  if (!tiles.length) return null;
+  let water: Map<string, number> | null = null;
+  return surroundingsFrom({
+    tileRules: new Map(tiles.map((r) => [r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" }])),
+    ownTiles: (tileset) => ownGroundTiles(tiles, tileset),
+    // Read only once the doodads could be told, as before.
+    waterOffset: async (tileset) => (water ??= parseWaterOffsets(await table("TerrainArt\\Water.slk", "waterID"))).get(tileset),
+    pathTex: (id) => pathTex.get(id),
+    texture,
+  }, ground, dooText, near);
+}
+
+/** What startSurroundings' pathing is made from: the game's tables (startSurroundings reads them) or what a caller holds
+ *  already (the terrain view's pathing data, read once for the editor). */
+export interface PathingSource {
+  tileRules: Map<string, TileRule>;
+  ownTiles(tileset: string): readonly string[];
+  /** generatePathing's `waterOffset` for a tileset. */
+  waterOffset(tileset: string): number | undefined | Promise<number | undefined>;
+  /** A doodad's or destructable's pathing texture: "" for none, undefined for a type that can't be told. */
+  pathTex(id: string): string | undefined;
+  /** A pathing texture's pixels; null when it can't be read. */
+  texture(path: string): Promise<{ width: number; height: number; rgba: ArrayLike<number> } | null>;
+}
+
+/** startSurroundings from `source`. `near`: only the cells of these start locations' squares are worked out (the rest of
+ *  the pathing is left 0), which is all startVerdicts reads, and much less work on a large map (GoldRush: 36 ms, not
+ *  313); such surroundings are for startVerdicts alone. */
+export async function surroundingsFrom(source: PathingSource, ground: Terrain, dooText: string | null, near?: readonly (readonly number[])[]): Promise<StartSurroundings | null> {
+  const doodads = await doodadStamps(dooText, ground, (id) => source.pathTex(id), (p) => source.texture(p));
   if (!doodads) return null;
-  const rules = new Map(tiles.map((r) => [r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" }]));
-  const water = parseWaterOffsets(await table("TerrainArt\\Water.slk", "waterID"));
+  let only: Uint8Array | undefined;
+  if (near) {
+    // The squares' cells (startVerdicts' cellOf and START_SQUARE), clipped to the map.
+    const w = (ground.width - 1) * 4, h = (ground.height - 1) * 4;
+    only = new Uint8Array(w * h);
+    for (const p of near) {
+      if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+      const cx = Math.round((p[0] - ground.offsetX) / 32), cy = Math.round((p[1] - ground.offsetY) / 32);
+      for (let y = Math.max(0, cy - START_SQUARE); y < Math.min(h, cy + START_SQUARE); y++) {
+        for (let x = Math.max(0, cx - START_SQUARE); x < Math.min(w, cx + START_SQUARE); x++) only[y * w + x] = 1;
+      }
+    }
+  }
+  const waterOffset = await source.waterOffset(ground.tileset);
   return {
-    pathing: startPathing(ground, rules, doodads.stamps, { ownTiles: ownGroundTiles(tiles, ground.tileset), waterOffset: water.get(ground.tileset) }),
+    pathing: startPathing(ground, source.tileRules, doodads.stamps, { ownTiles: source.ownTiles(ground.tileset), waterOffset, only }),
     unknown: doodads.unknown,
   };
 }

@@ -63,8 +63,13 @@ export class Locks {
  * for a lock they can't hold together: so a step that waits for a write lock gets it once the readers
  * that were there before it are done, instead of later readers handing the lock on without a gap.
  * Steps that don't share a lock pass each other, to fill the cores.
+ *
+ * Memory: a step's `mem` (MB, its peak; `defaultMem` when it has none) counts while it runs, and a
+ * step starts only while the running steps' sum stays within `memBudget`. A step bigger than the
+ * budget still runs, alone: nothing else running always fits, so the gate never waits for ever.
+ * `onMemWait(step, { used, budget })` is told once per step that could start but for memory.
  */
-export function schedule({ steps, locks, serial = false, jobs, launch, skip: onSkip, done = new Map(), now = Date.now }) {
+export function schedule({ steps, locks, serial = false, jobs, memBudget = Infinity, defaultMem = 1000, onMemWait = () => {}, launch, skip: onSkip, done = new Map(), now = Date.now }) {
   const waiting = [...steps];
   const ticket = new Map();
   let nextTicket = 0;
@@ -72,6 +77,11 @@ export function schedule({ steps, locks, serial = false, jobs, launch, skip: onS
   const holding = new Set();
   let busy = 0;
   let running = 0;
+  /** The memory estimates of the steps that run, summed (MB). */
+  let memUsed = 0;
+  const memOf = (step) => step.mem ?? defaultMem;
+  /** The steps already said to wait for memory. */
+  const toldMem = new Set();
   return new Promise((finish) => {
     locks.onRelease = () => pump();
     function pump() {
@@ -99,7 +109,13 @@ export function schedule({ steps, locks, serial = false, jobs, launch, skip: onS
         const wants = step.locks ?? [];
         const behind = wants.some(([name, mode]) => ahead.some(([n, m]) => n === name && (mode === "w" || m === "w")));
         const fits = running === 0 || (!serial && busy + step.weight <= jobs);
-        if (behind || !fits || !wants.every(([name, mode]) => locks.can(name, mode))) {
+        const memFits = running === 0 || memUsed + memOf(step) <= memBudget;
+        const free = wants.every(([name, mode]) => locks.can(name, mode));
+        if (behind || !fits || !memFits || !free) {
+          if (!behind && fits && free && !toldMem.has(step)) {
+            toldMem.add(step);
+            onMemWait(step, { used: memUsed, budget: memBudget });
+          }
           ahead.push(...wants);
           continue;
         }
@@ -114,6 +130,7 @@ export function schedule({ steps, locks, serial = false, jobs, launch, skip: onS
       for (const [name, mode] of held) locks.take(name, mode);
       holding.add(held);
       busy += step.weight;
+      memUsed += memOf(step);
       running++;
       const t0 = now();
       let freed = false;
@@ -134,6 +151,7 @@ export function schedule({ steps, locks, serial = false, jobs, launch, skip: onS
           mark(step, ok === true);
           done.set(step.id, { ok: ok === true, seconds: Math.round((now() - t0) / 1000) });
           busy -= step.weight;
+          memUsed -= memOf(step);
           running--;
           if (freed) pump();
           else free();

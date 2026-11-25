@@ -10,7 +10,9 @@
 //! The flat `map/war3map.w3e.txt` stays the default; a project has one layout or the other. Reading
 //! assembles the subterrains into one whole terrain (`flatten`, used by `project::read_project`, so
 //! packing sees `war3map.w3e.txt` either way); writing slices a whole terrain back into the
-//! project's rectangles (`slice`), and only files whose bytes changed are written (`write_changed`).
+//! project's rectangles (`slice`), and only files whose bytes changed are written (`write_changed`). The file layer
+//! (reading `map/terrain/`, writing what changed, removing what a slice no longer has) is the one the trigger folders
+//! use too (`crate::folder_codec`).
 //! Every slice is assembled again in memory and compared before anything is written: a terrain that
 //! can't come back byte for byte is refused, never stored.
 //!
@@ -30,6 +32,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
+use crate::folder_codec::{read_if_there, Files, Folder};
 use crate::terrain_objects::{self as objects, Flats, Heads, Kind, KINDS};
 use crate::w3e::{self, Corner, Terrain};
 use crate::{Error, Result};
@@ -37,6 +40,8 @@ use crate::{Error, Result};
 pub const FORMAT: &str = "w3proj.terrain/1";
 /// The layout's folder under `map/`.
 pub const DIR: &str = "terrain";
+/// The layout's folder (`crate::folder_codec`).
+pub const FOLDER: Folder = Folder::new(DIR);
 /// The layout file, relative to `map/`.
 pub const LAYOUT_FILE: &str = "terrain/terrain.json";
 /// A subterrain's ground, in its folder.
@@ -670,7 +675,7 @@ fn key<'a>(files: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a Strin
 }
 
 fn under_dir(path: &str) -> bool {
-    path.len() > DIR.len() && path.as_bytes()[DIR.len()] == b'/' && path[..DIR.len()].eq_ignore_ascii_case(DIR)
+    FOLDER.holds(path)
 }
 
 /// Which layout a project has, from its `terrain.json` (if there) and whether a flat terrain file
@@ -789,7 +794,7 @@ pub fn split(files: &mut BTreeMap<String, Vec<u8>>, rects: &[Rect]) -> Result<()
     if is_split(files)? {
         return Err(Error::Project("the terrain is split already".into()));
     }
-    if let Some(k) = files.keys().find(|k| under_dir(k)) {
+    if let Some(k) = FOLDER.first_in(files) {
         return Err(Error::Project(format!("map/{k} is there already (a file of the map's own?): the terrain layout needs map/{DIR}/ to itself")));
     }
     let Some(flat) = key(files, FLAT_FILE).cloned() else {
@@ -825,7 +830,7 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
     }
     let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE))?)?;
     let pathing: Vec<String> = layout.subterrains.iter().map(crate::terrain_pathing::path).collect();
-    if let Some(k) = files.keys().find(|k| under_dir(k)) {
+    if let Some(k) = FOLDER.first_in(files) {
         return Err(Error::Project(format!("the map has a file map/{k}, but the project keeps its terrain in map/{DIR}/: merge the terrain first (`w3proj terrain merge`)")));
     }
     let Some(flat) = key(files, FLAT_FILE).cloned() else {
@@ -849,28 +854,12 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
     Ok(crate::derived::take(files))
 }
 
-/// Writes `files` (relative to `map_dir`) whose bytes differ from those on disk, each in one step
-/// (`crate::atomic`); returns the paths written.
-pub fn write_changed(map_dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<String>> {
-    let mut written = Vec::new();
-    for (rel, bytes) in files {
-        if crate::project::write_if_changed(&crate::paths::join_rel(map_dir, rel), bytes)? {
-            written.push(rel.clone());
-        }
-    }
-    Ok(written)
-}
+pub use crate::folder_codec::write_changed;
 
 /// The split layout's files on disk (relative to `map/`), read; a project without `map/terrain/`
 /// gives none.
-pub(crate) fn read_layout_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
-    let mut files = BTreeMap::new();
-    for rel in crate::project::walk(&map_dir.join(DIR))? {
-        let path = format!("{DIR}/{rel}");
-        let bytes = fs::read(crate::paths::join_rel(map_dir, &path)).map_err(|e| Error::Project(format!("map/{path} can't be read: {e}")))?;
-        files.insert(path, bytes);
-    }
-    Ok(files)
+pub(crate) fn read_layout_files(map_dir: &Path) -> Result<Files> {
+    FOLDER.read_disk(map_dir)
 }
 
 /// What `split_project` and `merge_project` did, relative to the project.
@@ -885,20 +874,6 @@ pub struct Converted {
 /// file names.
 fn derived_fresh(project: &Path) -> Result<bool> {
     Ok(crate::derived::check(project)? == crate::derived::Freshness::Fresh)
-}
-
-/// Reads `names` under `map_dir` into `files` where they are there.
-fn read_if_there(map_dir: &Path, names: &[&str], files: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
-    for name in names {
-        match fs::read(crate::paths::join_rel(map_dir, name)) {
-            Ok(b) => {
-                files.insert(name.to_string(), b);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(Error::Project(format!("map/{name} can't be read: {e}"))),
-        }
-    }
-    Ok(())
 }
 
 /// `.gitignore` gets the derived files' store and record (`crate::derived::IGNORED`); the path written, if it changed.
@@ -1020,10 +995,8 @@ pub fn merge_project(project: &Path) -> Result<Converted> {
         crate::project::write_atomic(&crate::terrain_pathing::json_path(project), json)?;
         done.written.push(crate::terrain_pathing::JSON_NAME.to_string());
     }
-    for p in &layout_paths {
-        fs::remove_file(crate::paths::join_rel(&map_dir, p))?;
-    }
-    remove_empty(&map_dir.join(DIR));
+    FOLDER.remove_stale(&map_dir, &layout_paths, &Files::new())?;
+    FOLDER.remove_empty(&map_dir, None);
     let store = crate::derived::STORE_DIR.join("/");
     for name in crate::derived::out_of_store(project)? {
         done.removed.push(format!("{store}/{name}"));
@@ -1174,13 +1147,10 @@ fn relayout_on_disk(project: &Path, plan: &[Planned]) -> Result<Converted> {
     });
     let layout_files: BTreeMap<String, Vec<u8>> = files.into_iter().filter(|(k, _)| under_dir(k)).collect();
     let written = write_changed(&map_dir, &layout_files)?;
-    let removed: Vec<&String> = before.iter().filter(|p| !layout_files.contains_key(*p)).collect();
-    for p in &removed {
-        fs::remove_file(crate::paths::join_rel(&map_dir, p))?;
-    }
+    let removed = FOLDER.remove_stale(&map_dir, &before, &layout_files)?;
     for s in &old.subterrains {
         if !new.subterrains.iter().any(|n| n.folder == s.folder) {
-            remove_empty(&crate::paths::join_rel(&map_dir, &format!("{DIR}/{}", s.folder)));
+            FOLDER.remove_empty(&map_dir, Some(&s.folder));
         }
     }
     if let Some(names) = open_now {
@@ -1404,14 +1374,11 @@ pub fn restore_layout(project: &Path, from: &LayoutState, to: &LayoutState) -> R
     }
     let fresh = derived_fresh(project)?;
     let written = write_changed(&map_dir, &to.files)?;
-    let removed: Vec<&String> = now.files.keys().filter(|k| !to.files.contains_key(*k)).collect();
-    for p in &removed {
-        fs::remove_file(crate::paths::join_rel(&map_dir, p))?;
-    }
+    let removed = FOLDER.remove_stale(&map_dir, now.files.keys(), &to.files)?;
     let prefix = format!("{DIR}/");
     let folders: HashSet<&str> = removed.iter().filter_map(|p| p.strip_prefix(&prefix)).filter_map(|p| p.split_once('/')).map(|(f, _)| f).collect();
     for f in folders {
-        remove_empty(&crate::paths::join_rel(&map_dir, &format!("{DIR}/{f}")));
+        FOLDER.remove_empty(&map_dir, Some(f));
     }
     let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
     let mut done = Converted { written: written.iter().map(at).collect(), removed: removed.into_iter().map(at).collect() };
@@ -1457,7 +1424,7 @@ pub fn flat_views(map_dir: &Path) -> Result<Option<Vec<FlatView>>> {
     if !is_split_on_disk(map_dir)? {
         return Ok(None);
     }
-    let all: Vec<String> = crate::project::walk(&map_dir.join(DIR))?.into_iter().map(|r| format!("{DIR}/{r}")).collect();
+    let all: Vec<String> = FOLDER.paths(map_dir)?;
     let layout = match fs::read(map_dir.join(LAYOUT_FILE)).map_err(Error::from).and_then(|b| Layout::parse(&b)) {
         Ok(l) => l,
         Err(_) => return Ok(Some(vec![FlatView { name: FLAT_FILE, sources: all }])),
@@ -1566,13 +1533,11 @@ pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String
     let sliced = resized_files(&old_files, &layout, &t, &flats)?;
     let written = write_changed(map_dir, &sliced)?;
     // The old layout's files the new one doesn't have (a subterrain cut away, overrides cut off) go.
-    for rel in old_files.keys().filter(|k| under_dir(k) && !sliced.contains_key(*k)) {
-        fs::remove_file(crate::paths::join_rel(map_dir, rel))?;
-    }
+    FOLDER.remove_stale(map_dir, old_files.keys(), &sliced)?;
     let new_layout = Layout::parse(&sliced[LAYOUT_FILE])?;
     for s in &layout.subterrains {
         if !new_layout.subterrains.iter().any(|n| n.folder == s.folder) {
-            remove_empty(&crate::paths::join_rel(map_dir, &format!("{DIR}/{}", s.folder)));
+            FOLDER.remove_empty(map_dir, Some(&s.folder));
         }
     }
     Ok(written)
@@ -1614,6 +1579,11 @@ pub fn map_size_round_trip(files: &BTreeMap<String, Vec<u8>>, by: i64) -> Result
 fn resized_files(files: &BTreeMap<String, Vec<u8>>, layout: &Layout, t: &Terrain, flats: &Flats) -> Result<BTreeMap<String, Vec<u8>>> {
     let shift = canvas_shift(layout, t)?;
     let subs = resized_canvas(&layout.subterrains, layout.corners(), [t.width, t.height], shift)?;
+    if let Some(side) = uncovered_growth(&subs, layout.corners(), t, shift, &layout.default_corner) {
+        return Err(Error::Project(format!(
+            "Map Size can't grow the map to the {side}: part of that edge lies in no subterrain (map/{LAYOUT_FILE}), so the ground added beside it would be lost. Make a subterrain reach that edge (Edit Terrain Layout…) first"
+        )));
+    }
     let pathing = crate::terrain_pathing::assemble(layout, &|p| files.get(p).cloned())?;
     let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats)?;
     if let Some(json) = pathing {
@@ -1630,6 +1600,34 @@ fn resized_files(files: &BTreeMap<String, Vec<u8>>, layout: &Layout, t: &Terrain
         sliced.extend(crate::terrain_pathing::slice(&crate::terrain_pathing::json_text([t.width, t.height], &moved), &new_layout)?);
     }
     Ok(sliced)
+}
+
+/// The side ("west", "east", "south" or "north") on which Map Size added a corner of `t` that lies in none of the
+/// resized subterrains `subs` and isn't the default corner: beside an edge no subterrain reaches, the strip added stays
+/// outside every subterrain, and the ground it copies (with new variations) can't be stored there. None when every
+/// added corner is kept (or equals the default corner). `old`: the canvas before, `shift`: corners added west and south.
+fn uncovered_growth(subs: &[Subterrain], old: [usize; 2], t: &Terrain, shift: [i64; 2], default_corner: &Corner) -> Option<&'static str> {
+    let mut covered = vec![false; t.width * t.height];
+    for s in subs {
+        for row in s.y..(s.y + s.h).min(t.height) {
+            let at = row * t.width;
+            covered[at + s.x.min(t.width)..at + (s.x + s.w).min(t.width)].iter_mut().for_each(|c| *c = true);
+        }
+    }
+    (0..covered.len()).filter(|&i| !covered[i] && t.corners[i] != *default_corner).find_map(|i| {
+        let (ox, oy) = ((i % t.width) as i64 - shift[0], (i / t.width) as i64 - shift[1]);
+        if ox < 0 {
+            Some("west")
+        } else if ox >= old[0] as i64 {
+            Some("east")
+        } else if oy < 0 {
+            Some("south")
+        } else if oy >= old[1] as i64 {
+            Some("north")
+        } else {
+            None
+        }
+    })
 }
 
 /// The corners a terrain of another size adds on the canvas's west and south side (negative: cuts), as Map Size
@@ -1813,18 +1811,6 @@ pub fn delete_pathing(project: &Path) -> Result<Vec<String>> {
     Ok(removed)
 }
 
-/// Removes `dir` and the folders below it that are empty (a folder holding anything stays).
-fn remove_empty(dir: &Path) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for e in entries.flatten() {
-            if e.file_type().is_ok_and(|t| t.is_dir()) {
-                remove_empty(&e.path());
-            }
-        }
-    }
-    let _ = fs::remove_dir(dir);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1932,6 +1918,43 @@ mod tests {
         let e = split(&mut files, &[rect("left:0,0,3,5"), rect("mid:3,0,3,5")]).unwrap_err().to_string();
         assert!(e.contains("would be lost"), "{e}");
         assert!(files.contains_key(FLAT_FILE), "a refused split leaves the files as they were");
+    }
+
+    /// Map Size beside an edge no subterrain reaches (the corners there are the default corner): the strip added stays
+    /// in no subterrain. Ground equal to the default corner there is kept (as `w3proj verify`'s round trip grows it);
+    /// ground with the new variations the app rolls is refused, naming the side and what to do, with nothing written.
+    #[test]
+    fn map_size_beside_an_uncovered_edge_names_the_side() {
+        let mut t = terrain(12, true);
+        let fill = t.corners[t.width * t.height - 1];
+        for y in 0..t.height {
+            for x in 0..t.width {
+                if x >= 6 || y >= 5 {
+                    t.corners[y * t.width + x] = fill;
+                }
+            }
+        }
+        let mut files = flat_files(&t);
+        split(&mut files, &[rect("left:0,0,3,5"), rect("mid:3,0,3,5")]).unwrap();
+        let layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
+        let flats: Flats = Flats::new();
+        // Copied exactly (map_sized): the new corners are the default corner, kept outside every subterrain.
+        for change in [[0, 2, 0, 0], [0, 0, 0, 2], [0, 2, 0, 2]] {
+            resized_files(&files, &layout, &map_sized(&t, change), &flats).unwrap_or_else(|e| panic!("{change:?}: {e}"));
+        }
+        // With new variations, as the app's resize rolls them: refused, naming the side.
+        for (change, side) in [([0, 2, 0, 0], "east"), ([0, 0, 0, 2], "north")] {
+            let mut grown = map_sized(&t, change);
+            let (w, h) = (grown.width, grown.height);
+            let last = if side == "east" { w - 1 } else { (h - 1) * w };
+            grown.corners[last].variation ^= 1;
+            let e = resized_files(&files, &layout, &grown, &flats).unwrap_err().to_string();
+            assert!(e.contains(&format!("can't grow the map to the {side}")) && e.contains("Edit Terrain Layout"), "{change:?}: {e}");
+        }
+        // Growth on the covered sides (west, south) is as before.
+        let mut grown = map_sized(&t, [2, 0, 2, 0]);
+        grown.corners[0].variation ^= 1;
+        resized_files(&files, &layout, &grown, &flats).unwrap();
     }
 
     fn layout_json(subterrains: &str) -> String {

@@ -22,7 +22,7 @@ import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { stringRefsInMap } from "../../lib/formats/mapdoc";
 import { readPrunedStrings, recordPrunedStrings, restorePrunedStrings } from "../../lib/formats/prunedstrings";
-import { pruneStrings } from "../../lib/formats/wts";
+import { pruneStrings, readWts, writeWts } from "../../lib/formats/wts";
 
 const WTS = "map/war3map.wts";
 
@@ -69,7 +69,7 @@ export async function dropUnusedStrings(w3: W3Api): Promise<PruneOutcome> {
     return { dropped: done ? dropped : [], restored: done ? restored : [], kept: null };
   }
   // Without the edit log (the MCP extension off): the same, written only when the table is still as it was read.
-  const read = (path: string) => w3.workspace.readText(path).catch((e) => {
+  const read = (path: string) => readWts(w3.workspace, path).catch((e) => {
     if (listed().some((p) => p.toLowerCase() === path.toLowerCase())) throw e;
     return null;
   });
@@ -77,6 +77,6 @@ export async function dropUnusedStrings(w3: W3Api): Promise<PruneOutcome> {
   const out = await change(async (p) => (p === WTS ? before : read(p)));
   if (!out.length) return { dropped: [], restored: [], kept: null };
   if ((await read(WTS)) !== before || w3.editors.unsavedPaths().length) throw new Error("war3map.wts changed meanwhile");
-  await w3.workspace.writeText(WTS, out[0].text);
+  await writeWts(w3.workspace, WTS, out[0].text);
   return { dropped, restored, kept: null };
 }

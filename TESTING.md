@@ -21,14 +21,16 @@ How this project is tested, why, and what to do before committing or releasing.
 | the real World Editor (Linux, local, not in the gate) | `node app/scripts/we-compare.mjs <spec.json…>`, see "The real World Editor" below |
 
 Gate options: `--serial`, `--jobs=<n>`, `--update-floor`. Logs are in `target/gate-logs/<tier>-<pid>/`, the last line is
-`GATE_EXIT=<code>`, and a check missing what it needs **fails**: green always means it ran.
+`GATE_EXIT=<code>`, and a check missing what it needs **fails**: green always means it ran. Steps start only while
+their memory estimates fit a budget (80% of free memory or of a cgroup limit such as `systemd-run -p MemoryMax=`,
+printed at the start); `W3_GATE_MEM_MB=<MB>` sets it ([details](docs/testing/gate-and-smoke.md)).
 
 **Where the maps and the game go.** The corpus is `smoketest_maps/` at the root of the *main* checkout (git-ignored,
 third-party maps aren't in the repository; worktrees find it through the main checkout), or any folder named by
 `W3PROJ_CORPUS=<folder>`: put `.w3x`, `.w3m` and `.w3n` files there, sub-folders are fine. The game's install folder is
 read from `.game-path` in the main checkout (git-ignored; `scripts/setup-linux.sh` or `scripts/setup-windows.ps1` write
 it) or `W3PROJ_GAME=<folder>`. Without them the commit gate still passes and the corpus tier fails: it never skips
-silently. Minimum on a fresh clone: Node 26+, `npm ci` in `app/`, the Rust toolchain.
+silently. Minimum on a fresh clone: Node 26+, `npm ci` in `app/` (also in every new worktree: the gate refuses to start without it), the Rust toolchain.
 
 ## What can go wrong, worst first
 
@@ -50,14 +52,17 @@ oracle only proves the code does what the code does.
 |---|---|---|---|
 | Static | compilers, clippy, module boundaries; every tooling script loads (`node --check`) and app-smoke's `--only` map names the same checks as its full run | `npm run check` (`scripts/check-scripts.mjs`), clippy | every commit, CI |
 | Unit | known answers, round trips | `#[test]`, `src/**/*.test.ts` | every commit, CI |
-| System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` | every commit, CI |
-| Hostile input | never panics; what parses still round-trips | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
+| System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` (a file for every format definition and object data kind, except the campaign info) and `tests/fixtures/mini-campaign` (`war3campaign.w3f`, `.imp`, `.w3u`: in a map, campaign info would make it a campaign) | every commit, CI |
+| Hostile input | never panics; what parses still round-trips; the two fixtures hold a file for every format definition (`the_fixtures_hold_a_file_for_every_codec`) | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
 | Hostile input, app | damaged files neither hang the app nor use up its memory, under a watchdog that kills a stuck parser | `app/src/lib/hostile.test.ts`, `app/scripts/hostile-seeds.mjs` | every commit (made-up files), corpus tier (the game's files) |
+| Fast game transfer | the 127.0.0.1 server (`game.fastTransfer`, `crates/backend/src/fastgame.rs`) serves game_read's bytes and refuses everything else: no or a wrong token, another Host or Origin, not GET, a body, filesystem paths, other routes; huge heads, slow and idle clients, too many connections or requests; the port closes on stop; damaged request bytes never panic, hang or stop it (seeded rounds, `W3PROJ_ROBUSTNESS_ROUNDS`). `GameService` uses it when on and falls back to game_read (stand-in fetch); app-smoke `--only=fastGameTransfer` does both in the real app with the game and prints both routes' MB/s | `crates/backend/tests/fastgame.rs`, `app/src/workbench/gamefast.test.ts`, app-smoke `fastGameTransfer` | every commit (Rust, TS), app smoke (needs the game) |
+| JSON Schemas | each schema in `docs/schemas` names its format definition's fields and types, or the keys its codec reads (object data, split terrain, pathing, trigger folders); the fixtures, with a file for every definition schema (commit tier), and every corpus map's unpacked and split files (corpus tier) pass, broken samples fail | `app/src/lib/formats/schemas.test.ts` (Ajv) | every commit, corpus tier |
 | Random maps | the JASS and Lua checkers on every generated script | `app/src/lib/script/random-maps.test.ts` | every commit, CI |
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
 | Real app | the map it packs is the CLI's, byte for byte; nothing changes without an edit | `app/scripts/app-smoke.mjs` | locally, before merging |
 | Corpus | real maps, and the baseline of which codec reads what; a map's whole ground through a fragment gives the same file | `w3proj verify`, `twin-check.mjs` | locally, before merging |
-| Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
+| String tables on real maps | `wts.ts` against a frozen older reading of every corpus and game `.wts` (6,393 files): untouched tables give their bytes back, edits move no other string | `app/scripts/wts-corpus.mjs` (verdict: `wts-verdict.mjs`, unit-tested in `wts-verdict.test.mjs`): a text cut at a `}` inside a line (the rule of `wts.test.ts`; 33 `_Locales/jaJP` copies) or a recovered block is expected, anything else fails; the first run extracts every `.wts` into `target/wts-corpus` (about 2.5 min and 4 GB, later runs use the cache; the gate's memory budget counts it) | corpus tier (step `wts`) |
+| Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps; the Lua check (syntax and unknown names) silent on the game's 49 Lua maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
 | The real thing | the game and World Editor | the release checklist below | by hand, before a release |
 
 The top of the table is fast and runs everywhere; the bottom is slow and only runs here, because
@@ -67,7 +72,7 @@ real maps and game files can't go into the repository.
 
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
-node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov)
+node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov; scripts/setup-linux.sh --with-coverage-tools)
 node tests/gate.mjs corpus     # real maps and the game: about 8 minutes (the app smoke test's two halves set the pace)
 node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
@@ -110,8 +115,9 @@ falls short, rather than copying their insides into a scratch file.
 | apply testers' verdicts to the open points | `node scripts/openpoints-close.mjs <verdicts-file> [--dry-run]` (repo root): lines `<id>: PASS \| FAIL \| DIFFERS \| NOT DONE — <text>`. PASS removes the item block; FAIL/DIFFERS add a one-line item to `bugs.md` "From verification" pointing at the old one; NOT DONE adds `(not done: reason, date)`, the second moves the item to `user.md` (game/Windows/user) or `onhold.md`. Unknown ids refuse the whole run; changed files are copied to `openpoints/.backup/<timestamp>/` first. Tested in `app/scripts/openpoints.test.mjs` |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
 | check the save's Melee-flag rule against the game's maps | `node scripts/melee-corpus.mjs [--filter TEXT] [--why] [--save F] [--baseline F]` (in `app/`): clears each game map's Melee flag and runs `savedMelee` (meleesave.ts); a map stored melee should get it back, others not. `--why` names the reasons for each miss, `--baseline` lists maps whose result changed (exit 1 if an agreement was lost) |
+| count how maps store their object texts | `node scripts/object-text-census.mjs <maps or folders> [--json F]` (in `app/`): per map, the values of the fields the editor's save moves into war3map.wts (movetexts.ts `MOVED_FIELDS`) in the main and Skin object files, as references, literals and empty texts, and whether its war3map.wts carries the editor's object comments (docs/testing/object-text-strings.md) |
 | look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--clipboard FILE` (the editor's clipboard text, which Wine hands to X with LF line ends whatever the editor put in), `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl`, `--drag-button 2|3` or `--drag-hold MS` before it; a drag holds still 250 ms at both ends by default, as the editor reads the pointer once a frame), `--move X,Y`, `--wheel N[@X,Y][+ctrl]` (+ctrl, +alt or +shift held while turning: Ctrl is Adjust Clipping), `--windows`, `--close-modules`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog; printable ASCII only), `--campaign FILE` (a copy of the .w3n where the Campaign Editor's Open dialog lists it: F7, Ctrl+O, `--type` its bare file name, Return; the dialog refuses `/` and `:`), `--numlock on\|off\|status` (Num Lock as the X server holds it: pressed only when it differs), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default), `--timeout S`, `--work DIR`, `--save-accept T1,T2`, `--keep-prefs`, `--null-audio` (Wine's ALSA driver on with ALSA's config a lone null device: the editor has an audio device that plays nowhere, so File > Preferences opens; nothing else is let near the sound hardware), `--pref Section/Key=value` (see "Preferences"), `--expect-layout` (`--wait-ready` fails when the main window or tool palette isn't where spec clicks were measured), `--looks-every-map` (every `--map`/`--open` gets the run's `--look` cameras, not only the first: look n is row n in each), `--slot N` (another World Editor slot: editors on two slots run at once), `--frame-cap N` (default 10, 0 none) and `--renderer software|gpu` (see "Editor CPU"), `--alone` (every slot's lock: no other editor meanwhile, for `--fps`; see "Several editors"). An unknown or malformed argument is refused before anything starts. Needs the install's English text (enUS in `.build.info`), else it says so and starts nothing. `--look` waits until two pictures a frame apart are the same (at most 10 s). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
-| run a built binary that may be older than its sources | `tests/binfresh.mjs` refuses a `w3proj` or app binary older than a tracked source it is built from (CLI: `crates/`, Cargo files; app: also `app/src-tauri`, `app/src`, `index.html`, the vite/TS configs, the npm packages), as we-compare and the `make-*.mjs` generators use them: rebuild, or pass `--allow-stale` (where the tool parses its own flags) / `W3_ALLOW_STALE=1`. mtimes are compared, so a fresh checkout refuses a binary built before it |
+| run a built binary that may be older than its sources | `tests/binfresh.mjs` refuses a `w3proj` or app binary older than a tracked source it is built from (CLI: `crates/`, Cargo files; app: also `app/src-tauri`, `app/src`, `index.html`, the vite/TS configs, the npm packages), as we-compare and the `make-*.mjs` generators use them: rebuild, or pass `--allow-stale` (anywhere on the command line; `binfresh.mjs` takes it out of `process.argv` on import, so positional arguments don't shift) / `W3_ALLOW_STALE=1`. mtimes are compared, so a fresh checkout refuses a binary built before it |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh` and
 `scripts/setup-windows.bat`; one folder per line after `#` comments, the first that exists counts, so a checkout
@@ -229,11 +235,21 @@ mutation testing (changing the code and seeing whether a test notices) found `mp
 passed every test, so reading encrypted files had no real test at all. Over the four files tried,
 84% of mutants were detected before that fix.
 
-Mutation testing is too slow for each commit, so run it now and then on small critical files:
+Mutation testing is too slow for each commit, so run it now and then on small critical files. Never uncapped: a
+mutant that turns `i += 1` into `i *= 1` loops while allocating, and one filled the machine's 62 GB. The runner caps
+each test binary, the scope the whole run (Linux; cargo-mutants can live in `target/tools`):
 
 ```sh
-cargo mutants -f crates/mpq/src/crypto.rs -p mpq
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$PWD/tests/mutants-runner.sh \
+  systemd-run --user --scope -p MemoryMax=18G -p MemorySwapMax=0 -- \
+  cargo mutants -j 3 --timeout 60 -f crates/mpq/src/crypto.rs -p mpq
 ```
+
+Last run (2026-11-24) on `lossless.rs`, `paths.rs`, `format/expr.rs` and `wtg.rs`: the survivors left are equivalent
+mutants, each explained where it is (`lossless.rs` FIRST, `paths.rs` percent_decode).
+
+`cargo-mutants`, `cargo-llvm-cov` and the `llvm-tools` rustup component are optional installs:
+`scripts/setup-linux.sh --with-coverage-tools` (or `scripts\setup-windows.bat --with-coverage-tools`).
 
 ## Rules for writing tests
 

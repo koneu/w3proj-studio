@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Campaign info (war3campaign.w3f.json)",
+  "description": "The project form of war3campaign.w3f, written by the format definition crates/w3proj/formats/campaign.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed campaign).",
+  "type": "object",
+  "required": ["format", "version", "campaignVersion", "editorVersion", "name", "difficulty", "author", "description", "flags", "background", "backgroundPath", "minimapPath", "ambientSound", "ambientSoundPath", "fogStyle", "fogStartZ", "fogEndZ", "fogDensity", "fogColor", "race", "chapters", "mapOrder"],
+  "properties": {
+    "format": { "const": "w3proj.campaign/1" },
+    "version": { "enum": [1, 2, 3] },
+    "campaignVersion": { "$ref": "#/$defs/u32", "description": "how often the campaign was saved" },
+    "editorVersion": { "$ref": "#/$defs/u32" },
+    "name": { "$ref": "#/$defs/cstring" },
+    "difficulty": { "$ref": "#/$defs/cstring", "description": "text shown for the difficulty" },
+    "author": { "$ref": "#/$defs/cstring" },
+    "description": { "$ref": "#/$defs/cstring" },
+    "flags": { "$ref": "#/$defs/u32", "description": "1 variable difficulty; 2 and 4 seen, meaning unknown" },
+    "background": { "$ref": "#/$defs/i32", "description": "campaign screen preset; -1 custom (backgroundPath)" },
+    "backgroundPath": { "$ref": "#/$defs/cstring" },
+    "minimapPath": { "$ref": "#/$defs/cstring", "description": "picture shown for the campaign" },
+    "ambientSound": { "$ref": "#/$defs/i32", "description": "preset; -1 custom (ambientSoundPath), 0 none" },
+    "ambientSoundPath": { "$ref": "#/$defs/cstring" },
+    "fogStyle": { "$ref": "#/$defs/i32", "description": "-1 or 0 none" },
+    "fogStartZ": { "$ref": "#/$defs/f32" },
+    "fogEndZ": { "$ref": "#/$defs/f32" },
+    "fogDensity": { "$ref": "#/$defs/f32" },
+    "fogColor": { "$ref": "#/$defs/rgba" },
+    "race": { "$ref": "#/$defs/i32", "description": "interface: 0 human, 1 orc, 2 undead, 3 night elf" },
+    "unknown": { "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 1, "maxItems": 1, "description": "version 2" },
+    "unknown3": { "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 7, "maxItems": 7, "description": "version 3" },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["flags", "chapter", "title", "map"],
+        "properties": {
+          "flags": { "$ref": "#/$defs/u32", "description": "1 button shown from the start; version 1 files may hold leftover values" },
+          "chapter": { "$ref": "#/$defs/cstring", "description": "button title (\"Chapter One\")" },
+          "title": { "$ref": "#/$defs/cstring", "description": "map title" },
+          "map": { "$ref": "#/$defs/cstring", "description": "map file in the campaign" }
+        }
+      }
+    },
+    "mapOrder": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["unknown", "map"],
+        "properties": {
+          "unknown": { "$ref": "#/$defs/cstring" },
+          "map": { "$ref": "#/$defs/cstring" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "required": ["version"], "properties": { "version": { "const": 2 } } }, "then": { "required": ["unknown"] } },
+    { "if": { "required": ["version"], "properties": { "version": { "minimum": 3 } } }, "then": { "required": ["unknown3"] } }
+  ],
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

@@ -1,11 +1,13 @@
 // war3map.wts on real maps: what the string table reads from every .wts in the map corpus and the
 // game's own maps (including their _Locales copies), compared with the reference rule (the first
 // line that starts `}` ends a block). Lists every file whose result differs and checks that each
-// difference is a recovered block: a string the reference swallowed into its neighbour, with the
-// text of every other string unchanged and no string lost. It also checks that a table which was
+// difference is either a recovered block (a string the reference swallowed into its neighbour, with the
+// text of every other string unchanged and no string lost) or a text cut at a `}` inside a line, the
+// rule pinned in wts.test.ts (verdict: wts-verdict.mjs). It also checks that a table which was
 // not edited serializes to the file's own bytes, and that editing one string keeps every other. In a file
 // with stray carriage returns (`\r\r\n`, `\r\r`), an edit of a string holding them or of its neighbour
-// must change that string's bytes and no other byte.
+// must change that string's bytes and no other byte. Tables are read as the app reads them (lossless text, wts.ts
+// readWts); in one that isn't UTF-8 (an old map's code page) the same holds for an edit of each of its strings.
 //
 //   W3PROJ_GAME=<install> node scripts/wts-corpus.mjs [corpus-folder]
 //
@@ -18,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chosenGamePath } from "../../tests/gamepath.mjs";
+import { classifyText, fileFine } from "./wts-verdict.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const root = join(app, "..");
@@ -88,27 +91,51 @@ const reference = (text) => {
 
 const out = join(cache, "wts.bundle.mjs");
 await build({ entryPoints: [join(app, "src/lib/formats/wts.ts")], bundle: true, format: "esm", outfile: out, logLevel: "silent" });
-const { StringTable } = await import(pathToFileURL(out).href + "?" + Date.now());
+const { StringTable, wtsText, wtsBytes } = await import(pathToFileURL(out).href + "?" + Date.now());
+const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const isUtf8 = (bytes) => { try { strict.decode(bytes); return true; } catch { return false; } };
+const sameBytes = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]);
 
 const files = readdirSync(cache).filter((f) => f.endsWith(".wts")).sort();
 let same = 0, changed = 0, bad = 0, recovered = 0, lost = 0, strings = 0, notIdentical = 0, editLost = 0, crFiles = 0, crEdits = 0, crEditBad = 0;
+let codePage = 0, codePageBad = 0;
 const lines = [];
 for (const f of files) {
   const id = readFileSync(join(cache, f.replace(/wts$/, "id")), "utf8");
-  const text = readFileSync(join(cache, f)).toString("utf8");
+  // As the app reads a table (lib/formats/wts readWts): one that isn't UTF-8 keeps its bytes as lossless text.
+  const bytes = new Uint8Array(readFileSync(join(cache, f)));
+  const text = wtsText(bytes);
   const a = reference(text);
   const table = new StringTable(text);
   const b = new Map(table.entries());
   strings += a.size;
-  if (table.serialize() !== text) notIdentical++;
+  if (!sameBytes(wtsBytes(table.serialize()), bytes)) notIdentical++;
+  // A table in a code page (BonusCredits.w3m's, in the game): an edit of each string in turn, written as the app writes
+  // it, changes that string's bytes and no other byte, and reads back.
+  if (!isUtf8(bytes)) {
+    codePage++;
+    let ok = true;
+    for (const [n, v] of b) {
+      const t = new StringTable(text);
+      t.set(n, v + "!");
+      const written = wtsBytes(t.serialize());
+      let p = 0;
+      while (p < bytes.length && written[p] === bytes[p]) p++;
+      const back = new Map(new StringTable(wtsText(written)).entries());
+      const expected = new Uint8Array([...bytes.subarray(0, p), 0x21, ...bytes.subarray(p)]);
+      if (!sameBytes(written, expected) || back.get(n) !== v + "!" || [...b].some(([k, w]) => k !== n && back.get(k) !== w)) ok = false;
+    }
+    if (!ok) codePageBad++;
+    lines.push(`${ok ? "ok " : "BAD"} ${id}: not UTF-8, ${b.size} strings read; each edit changes its own string's bytes only`);
+  }
   const diff = [];
   for (const [n, v] of a) {
     if (!b.has(n)) { lost++; diff.push(`LOST ${n}`); }
     else if (b.get(n) !== v) {
-      // allowed: the reference text swallowed the next block, the new one is only its start
-      const rest = v.slice(b.get(n).length);
-      const ok = v.startsWith(b.get(n)) && rest.startsWith("}");
-      diff.push(ok ? `cut ${n}` : `CHANGED ${n}`);
+      // allowed: the text ends at a `}` inside a line (the rule of wts.test.ts), or the reference text swallowed
+      // the next block and the new one is only its start
+      const kind = classifyText(v, b.get(n));
+      diff.push(kind === "cut" || kind === "inline" ? `${kind} ${n}` : `CHANGED ${n}`);
     }
   }
   for (const [n] of b) {
@@ -147,14 +174,14 @@ for (const f of files) {
   }
   if (!diff.length) { same++; continue; }
   changed++;
-  const cuts = diff.filter((d) => d.startsWith("cut")).length, news = diff.filter((d) => d.startsWith("new")).length;
-  const fine = diff.every((d) => d.startsWith("cut") || d.startsWith("new")) && cuts > 0 && news >= cuts;
+  const fine = fileFine(diff);
   if (!fine) bad++;
   lines.push(`${fine ? "ok " : "BAD"} ${id}: ${diff.join(", ")}`);
 }
 console.log(lines.join(LF));
 console.log(`${LF}${files.length} wts files, ${strings} strings in the reference reading`);
-console.log(`unchanged ${same}, changed ${changed} (${bad} not a plain recovered block), recovered strings ${recovered}, lost strings ${lost}`);
+console.log(`unchanged ${same}, changed ${changed} (${bad} neither a recovered block nor an inline cut), recovered strings ${recovered}, lost strings ${lost}`);
 console.log(`untouched table not byte-identical: ${notIdentical}; strings lost after editing every string: ${editLost}`);
 console.log(`files with stray carriage returns: ${crFiles}; edits next to them ${crEdits}, changing more than their string: ${crEditBad}`);
-process.exit(bad || lost || notIdentical || editLost || crEditBad ? 1 : 0);
+console.log(`files that aren't UTF-8: ${codePage}; where an edit changed more than its string: ${codePageBad}`);
+process.exit(bad || lost || notIdentical || editLost || crEditBad || codePageBad ? 1 : 0);

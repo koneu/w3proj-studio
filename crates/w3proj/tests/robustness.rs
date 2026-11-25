@@ -14,7 +14,7 @@ use std::ops::Range;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, Once};
+use std::sync::{Arc, Mutex, Once, Weak};
 
 use mpq::Archive;
 use w3proj::Registry;
@@ -153,21 +153,54 @@ fn map_bytes(_name: &str) -> Vec<u8> {
         .clone()
 }
 
-/// Files of the map that a codec reads.
-fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
-    let archive = Archive::from_bytes(map_bytes(&format!("{test}.w3x"))).unwrap();
-    let codecs = registry();
-    archive
-        .read("(listfile)")
-        .map(|l| String::from_utf8_lossy(&l).lines().map(str::to_string).collect::<Vec<_>>())
-        .unwrap()
-        .into_iter()
-        .filter(|name| codecs.for_archive_name(name).any(|c| c.unpacks()))
-        .map(|name| {
-            let bytes = archive.read(&name).unwrap();
-            (name, bytes)
+/// The made-up campaign (`tests/fixtures/mini-campaign`: war3campaign.w3f, .imp, .w3u) as a campaign archive. A map
+/// can't hold campaign info (war3campaign.w3f makes it a campaign), so it is a fixture of its own.
+fn campaign_bytes() -> Vec<u8> {
+    static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let _guard = TmpGuard::new();
+            let out = tmp("shared-campaign.w3n");
+            w3proj::pack(&fixture().join("../mini-campaign"), Some(&out), &registry()).unwrap();
+            fs::read(out).unwrap()
         })
-        .collect()
+        .clone()
+}
+
+/// Files of the mini map and the mini campaign that a codec reads.
+fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
+    let codecs = registry();
+    let mut out = Vec::new();
+    for bytes in [map_bytes(&format!("{test}.w3x")), campaign_bytes()] {
+        let archive = Archive::from_bytes(bytes).unwrap();
+        let names = archive
+            .read("(listfile)")
+            .map(|l| String::from_utf8_lossy(&l).lines().map(str::to_string).collect::<Vec<_>>())
+            .unwrap();
+        for name in names.into_iter().filter(|name| codecs.for_archive_name(name).any(|c| c.unpacks())) {
+            let bytes = archive.read(&name).unwrap();
+            out.push((name, bytes));
+        }
+    }
+    out
+}
+
+/// The hostile rounds reach every format: each format definition and each kind of object data has a file in the
+/// fixtures (a new definition without one would get no damaged input in the commit tier).
+#[test]
+fn the_fixtures_hold_a_file_for_every_codec() {
+    let codecs = registry();
+    let files = codec_files("coverage");
+    let used: std::collections::BTreeSet<String> =
+        files.iter().flat_map(|(name, _)| codecs.for_archive_name(name).map(|c| c.id().to_string()).collect::<Vec<_>>()).collect();
+    let missing: Vec<&str> = codecs.formats().iter().map(|f| w3proj::Codec::id(*f)).filter(|id| !used.contains(*id)).collect();
+    assert!(missing.is_empty(), "format definitions without a file in tests/fixtures/mini-map or mini-campaign: {missing:?}");
+    let kinds: std::collections::BTreeSet<String> =
+        files.iter().filter_map(|(name, _)| name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase())).collect();
+    // (war3map.wtg and .wct have hostile rounds of their own: damaged_trigger_files_split_or_are_refused.)
+    for kind in ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q", "w3e"] {
+        assert!(kinds.contains(kind), "no .{kind} file in the fixtures");
+    }
 }
 
 thread_local! {
@@ -193,12 +226,81 @@ fn collect_panics() {
     });
 }
 
+/// The whole process's resident memory may grow to this many MB (`W3PROJ_ROBUSTNESS_MEM_MB` overrides it); past it
+/// the watchdog names the cases running then and ends the process. A case that allocates what a damaged header asks
+/// for would otherwise use up the machine's memory instead of failing (the TS hostile children have the same cap).
+const MEM_MB: u64 = 1536;
+
+/// The process's resident memory in MB, read from /proc (Linux only: elsewhere there is no cap).
+fn resident_mb() -> Option<u64> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmRSS:"))?;
+    let kb: u64 = line["VmRSS:".len()..].trim().trim_end_matches("kB").trim().parse().ok()?;
+    Some(kb / 1024)
+}
+
+/// The case each thread is running (empty between cases), for the watchdog's report. Weak: a finished thread's slot
+/// goes away with it.
+static CASES: Mutex<Vec<Weak<Mutex<String>>>> = Mutex::new(Vec::new());
+
+thread_local! {
+    /// This thread's slot in `CASES`.
+    static CASE: Arc<Mutex<String>> = {
+        let slot = Arc::new(Mutex::new(String::new()));
+        let mut cases = CASES.lock().unwrap_or_else(|e| e.into_inner());
+        cases.retain(|c| c.strong_count() > 0);
+        cases.push(Arc::downgrade(&slot));
+        slot
+    };
+    /// The loop of seeds this thread works for (`par_seeds`'s `what`), so the report names the test too.
+    static LOOP: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Starts the memory watchdog once: a thread that looks at the resident memory every 20 ms and, past the cap, prints
+/// the cases running and ends the process (a case can't be stopped from outside, and its memory is the problem).
+fn watch_memory() {
+    static WATCH: Once = Once::new();
+    WATCH.call_once(|| {
+        if resident_mb().is_none() {
+            return;
+        }
+        let limit = env_u64("W3PROJ_ROBUSTNESS_MEM_MB").unwrap_or(MEM_MB);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let Some(mb) = resident_mb() else { continue };
+            if mb <= limit {
+                continue;
+            }
+            let running: Vec<String> = CASES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .filter_map(Weak::upgrade)
+                .map(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                .filter(|case| !case.is_empty())
+                .collect();
+            // Straight to stderr: eprintln! in a thread a test started goes to the test's captured output, which the
+            // exit below throws away.
+            let report = format!("robustness: {mb} MB resident, over the cap of {limit} MB; the cases running then:\n  {}\n", running.join("\n  "));
+            std::io::Write::write_all(&mut std::io::stderr(), report.as_bytes()).ok();
+            fs::remove_dir_all(tmp_dir()).ok();
+            std::process::exit(1);
+        });
+    });
+}
+
 /// Runs `body` and records a panic under `what`.
 fn guarded(failures: &mut BTreeMap<String, String>, what: impl Fn() -> String, body: impl FnOnce()) {
     collect_panics();
+    watch_memory();
+    CASE.with(|slot| *slot.lock().unwrap_or_else(|e| e.into_inner()) = LOOP.with_borrow(|l| format!("{l}: {}", what())));
     GUARDED.set(true);
     let result = catch_unwind(AssertUnwindSafe(body));
     GUARDED.set(false);
+    CASE.with(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).clear());
     if result.is_err() {
         let message = SEEN.with_borrow_mut(|seen| seen.pop()).unwrap_or_default();
         // The same bug is met by many seeds: keep the first of each.
@@ -258,12 +360,15 @@ fn par_seeds<A: Send>(what: &str, seeds: Range<u64>, work: impl Fn(&Chunk) -> A 
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(starts.len());
     std::thread::scope(|scope| {
         for _ in 0..threads {
-            scope.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some(&start) = starts.get(i) else { return };
-                let chunk = Chunk { range: start..(start + CHUNK).min(seeds.end), count: Cell::new(0), hash: Cell::new(0) };
-                let made = work(&chunk);
-                done.lock().unwrap()[i] = Some((made, chunk.count.get(), chunk.hash.get()));
+            scope.spawn(|| {
+                LOOP.with_borrow_mut(|l| what.clone_into(l));
+                loop {
+                    let i = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(&start) = starts.get(i) else { return };
+                    let chunk = Chunk { range: start..(start + CHUNK).min(seeds.end), count: Cell::new(0), hash: Cell::new(0) };
+                    let made = work(&chunk);
+                    done.lock().unwrap()[i] = Some((made, chunk.count.get(), chunk.hash.get()));
+                }
             });
         }
     });
@@ -655,6 +760,46 @@ fn archive_reader_survives_damaged_maps() {
     report(Found::all(runs).failures);
 }
 
+/// (attributes), from a map packed with one (`PackOptions::attributes`): damaged as part of the archive, and on its own
+/// against block counts at their limits. Reading it never panics.
+#[test]
+fn attributes_survive_damaged_archives() {
+    let map = {
+        let _guard = TmpGuard::new();
+        let out = tmp("attributes-fixture.w3x");
+        w3proj::pack_with(&fixture(), Some(&out), &registry(), w3proj::PackOptions { attributes: true, ..Default::default() }).unwrap();
+        fs::read(out).unwrap()
+    };
+    let archive = Archive::from_bytes(map.clone()).unwrap();
+    let own = archive.read(mpq::attributes::NAME).unwrap();
+    let blocks = archive.header().block_table_entries as usize;
+    assert!(mpq::attributes::Attributes::parse(&own, blocks).is_ok(), "the undamaged one must read");
+    let runs = par_seeds("attributes", seeds(rounds() * 10), |chunk| {
+        let mut found = Found::default();
+        for seed in chunk.seeds() {
+            let mut rng = Rng::new(seed + 1);
+            let (bad_map, bad_own) = (damage(&map, &mut rng), damage(&own, &mut rng));
+            let count = match rng.below(5) {
+                0 => usize::MAX,
+                1 => u32::MAX as usize,
+                2 => 0,
+                3 => rng.next() as usize,
+                _ => blocks + rng.below(3),
+            };
+            guarded(&mut found.failures, || format!("seed {seed}"), || {
+                if let Ok(a) = Archive::from_bytes(bad_map) {
+                    if let Ok(raw) = a.read(mpq::attributes::NAME) {
+                        let _ = mpq::attributes::Attributes::parse(&raw, a.header().block_table_entries as usize);
+                    }
+                }
+                let _ = mpq::attributes::Attributes::parse(&bad_own, count);
+            });
+        }
+        found
+    });
+    report(Found::all(runs).failures);
+}
+
 /// Damage aimed at what the archive tables point to, through the file contents: compression
 /// methods and sector tables are read before anything is checked.
 #[test]
@@ -790,7 +935,9 @@ fn wts_pruning_survives_damaged_files() {
                 }
                 found.accepted += 1;
                 let refs = wts::map_string_refs(&f, &codecs).unwrap();
-                let (was, now) = (wts::strings(&String::from_utf8_lossy(&before)), wts::strings(&String::from_utf8_lossy(&f["war3map.wts"])));
+                // As the table is read (a damaged one isn't UTF-8 any more): `lossless`, so a string is compared byte for byte.
+                let lossless = w3proj::lossless::decode;
+                let (was, now) = (wts::strings(&lossless(&before)), wts::strings(&lossless(&f["war3map.wts"])));
                 for (n, v) in &was {
                     if refs.contains(n) {
                         assert_eq!(now.get(n), Some(v), "{target}, seed {seed}: string {n} referenced but not kept as it was");
@@ -806,4 +953,37 @@ fn wts_pruning_survives_damaged_files() {
     if !single_seed() {
         assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} pruned, {rejected} kept");
     }
+}
+
+/// The memory watchdog's own test: this test program run again with `W3PROJ_ROBUSTNESS_HOG` set, where one case
+/// allocates twice a low cap (as a header's size taken at its word does) and then waits. The watchdog must end that
+/// run and name the case; without it the run passes.
+#[cfg(target_os = "linux")]
+#[test]
+fn memory_watchdog_names_the_case() {
+    const CAP_MB: u64 = 128;
+    if std::env::var_os("W3PROJ_ROBUSTNESS_HOG").is_some() {
+        par_seeds("hog", 0..1, |chunk| {
+            let mut found = Found::default();
+            for seed in chunk.seeds() {
+                guarded(&mut found.failures, || format!("allocating, seed {seed}"), || {
+                    let held: Vec<Vec<u8>> = (0..2 * CAP_MB).map(|_| vec![1u8; 1 << 20]).collect();
+                    std::hint::black_box(&held);
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                });
+            }
+            found
+        });
+        return;
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["memory_watchdog_names_the_case", "--exact", "--test-threads=1"])
+        .env("W3PROJ_ROBUSTNESS_HOG", "1")
+        .env("W3PROJ_ROBUSTNESS_MEM_MB", CAP_MB.to_string())
+        .env_remove("W3PROJ_ROBUSTNESS_SEED")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "the allocating case ran to its end: no watchdog\n{stderr}");
+    assert!(stderr.contains(&format!("over the cap of {CAP_MB} MB")) && stderr.contains("hog: allocating, seed 0"), "the report names the cap and the case:\n{stderr}");
 }

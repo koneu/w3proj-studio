@@ -69,6 +69,9 @@
 //               text, text-exact (lines split at LF only: a CR is part of its line, so line endings count; the map's own
 //               bytes), text-set (the lines as a set, their order ignored), bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
 //               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may;
+//               on text and text-exact "expectPaths" are lines: ["12", "30-40"] (1-based, ranges include both ends); on wpm they are
+//               cells: ["3,4", "0,0-9,9"] (x,y, or a box from its low to its high corner); the same rule: every listed one must hold a
+//               difference and every difference must be in one (a version or size difference of a wpm is outside them all);
 //               "expectLines": { "we": [regex, ...], "studio": [regex, ...] } (text-set) the same for lines: each pattern
 //               has to match a line only that side's save has, and every line only one side has a pattern of its side;
 //               "expectCorners": [{ "box": [x0, y0, x1, y1], "fields": ["texture"], "we": 1, "studio": 0, "delta": 512,
@@ -87,7 +90,7 @@
 //               A file missing from a save, or one that can't be read, is MISSING / ERROR: never the expected difference.
 //               A "parsed" file of the World Editor's save that doesn't come back the same from the codecs (w3proj
 //               verify) is ERROR: the codecs' JSON of both sides would hide what they lose.
-//               "tolerance", "ignore" and "expectPaths" are refused on text, bytes and wpm (they'd do nothing there).
+//               "tolerance" and "ignore" are refused on text, bytes and wpm, "expectPaths" on bytes and text-set (they'd do nothing there).
 //               "lines": "regex" (text and text-set only) compares only the lines of each save that match it; none
 //               matching in a save is ERROR (two empty texts would match). A text kind on a binary file (a NUL in
 //               it: a w3e or wpm the unpack left raw) is ERROR too: compare it as bytes, wpm or a JSON kind.

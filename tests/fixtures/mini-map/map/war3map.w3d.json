@@ -1,0 +1,20 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [
+    {
+      "base": "LOhp",
+      "end": "LOhp",
+      "mods": [
+        {
+          "field": "dmis",
+          "type": "real",
+          "level": 0,
+          "data": 0,
+          "value": 0.75
+        }
+      ]
+    }
+  ],
+  "custom": []
+}

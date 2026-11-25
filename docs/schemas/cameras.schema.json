@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cameras (map/war3map.w3c.json)",
+  "description": "The project form of war3map.w3c, written by the format definition crates/w3proj/formats/cameras.json. Keys the definition doesn't know are allowed: the codec ignores them (they don't reach the packed map).",
+  "type": "object",
+  "required": ["format", "version", "cameras"],
+  "properties": {
+    "format": { "const": "w3proj.cameras/1" },
+    "version": { "description": "0 classic, 3 Reforged", "enum": [0, 3] },
+    "localAngles": { "$ref": "#/$defs/variant", "description": "version 0 only: whether the file holds localPitch, localYaw and localRoll (the Reign of Chaos campaign's files don't). Missing means true." },
+    "cameras": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["targetX", "targetY", "zOffset", "rotation", "angleOfAttack", "distance", "roll", "fieldOfView", "farZ", "nearZ", "name"],
+        "properties": {
+          "targetX": { "$ref": "#/$defs/f32" },
+          "targetY": { "$ref": "#/$defs/f32" },
+          "zOffset": { "$ref": "#/$defs/f32" },
+          "rotation": { "$ref": "#/$defs/f32", "description": "degrees, around the vertical axis" },
+          "angleOfAttack": { "$ref": "#/$defs/f32", "description": "degrees; 304 looks down like the game camera" },
+          "distance": { "$ref": "#/$defs/f32" },
+          "roll": { "$ref": "#/$defs/f32" },
+          "fieldOfView": { "$ref": "#/$defs/f32", "description": "degrees" },
+          "farZ": { "$ref": "#/$defs/f32" },
+          "nearZ": { "$ref": "#/$defs/f32" },
+          "localPitch": { "$ref": "#/$defs/f32" },
+          "localYaw": { "$ref": "#/$defs/f32" },
+          "localRoll": { "$ref": "#/$defs/f32" },
+          "dofDistance": { "$ref": "#/$defs/f32", "description": "version 3: the World Editor's DoF Distance" },
+          "dofScale": { "$ref": "#/$defs/f32", "description": "version 3: the World Editor's DoF Scale" },
+          "posAbsoluteZ": { "$ref": "#/$defs/f32", "description": "version 3: the World Editor's Pos Absolute Z" },
+          "unknown": { "type": "array", "items": { "$ref": "#/$defs/f32" }, "minItems": 3, "maxItems": 3, "description": "older JSON: dofDistance, dofScale and posAbsoluteZ before they had names" },
+          "name": { "$ref": "#/$defs/cstring" },
+          "trailer": { "$ref": "#/$defs/u32", "description": "version 3: camera type, 1 a free camera, 0 not" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["version"], "properties": { "version": { "const": 3 } } },
+      "then": {
+        "properties": {
+          "cameras": {
+            "items": {
+              "required": ["localPitch", "localYaw", "localRoll", "trailer"],
+              "anyOf": [{ "required": ["dofDistance", "dofScale", "posAbsoluteZ"] }, { "required": ["unknown"] }]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "required": ["version"], "properties": { "version": { "const": 0 }, "localAngles": { "const": true } } },
+      "then": { "properties": { "cameras": { "items": { "required": ["localPitch", "localYaw", "localRoll"] } } } }
+    }
+  ],
+  "$defs": {
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "i32": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "f32": {
+      "description": "a 32-bit float: a number, or \"f32:0x\" and its 8 hex digits (NaN and infinities keep their bits that way)",
+      "anyOf": [
+        { "type": "number", "exclusiveMinimum": -3.4028235677973366e38, "exclusiveMaximum": 3.4028235677973366e38 },
+        { "type": "string", "pattern": "^f32:0x[0-9a-fA-F]{8}$" }
+      ]
+    },
+    "cstring": { "description": "a zero-terminated string; it can't hold the zero character", "type": "string", "pattern": "^[^\\u0000]*$" },
+    "char": { "description": "one printable ASCII character, or empty for a zero byte", "type": "string", "pattern": "^[!-~]?$" },
+    "id": { "description": "four bytes: four printable ASCII characters (\"hfoo\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "rgba": { "type": "array", "items": { "$ref": "#/$defs/u8" }, "minItems": 4, "maxItems": 4 },
+    "variant": { "description": "a layout choice the codec made reading the file; it stores no bytes", "type": "boolean" }
+  }
+}

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, parseBranches, parseCounts, parseLog, parseNameStatus, takeSide, type Change, type Side } from "./git";
+import { addPage, branchProblem, chunks, commitPaths, deleteBranchArgs, diffTarget, discardPlan, lfsSize, logArgs, LOG_FORMAT, noFilter, notFullyMerged, PAGE, parseBranches, parseCounts, parseFilter, parseLog, parseNameStatus, renameBranchArgs, takeSide, type Change, type Commit, type Side } from "./git";
 
 test("LFS pointers give the file's real size", () => {
   const pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 271253\n";
@@ -112,3 +112,86 @@ for (const side of ["ours", "theirs"] as const) {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+const commit = (n: number): Commit => ({ hash: `h${n}`, short: `h${n}`, author: "a", date: "2026-01-01", subject: `c${n}` });
+const list = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => commit(from + i));
+
+test("history paging: one more than a page tells there is a next one", () => {
+  // 450 commits, pages of 200: the fetch asks for 201 each time.
+  let page = addPage([], list(0, 201), PAGE);
+  assert.equal(page.commits.length, 200);
+  assert.equal(page.more, true);
+  page = addPage(page.commits, list(200, 401), PAGE);
+  assert.equal(page.commits.length, 400);
+  assert.equal(page.more, true);
+  page = addPage(page.commits, list(400, 450), PAGE);
+  assert.equal(page.commits.length, 450);
+  assert.equal(page.more, false, "the last page has no more");
+  assert.equal(addPage([], list(0, 200), PAGE).more, false, "exactly a page: nothing more");
+  // The history moved on between two pages: what's listed already isn't listed twice.
+  const again = addPage(list(0, 200), list(199, 399), PAGE);
+  assert.deepEqual(again.commits.map((c) => c.hash).slice(198, 202), ["h198", "h199", "h200", "h201"]);
+  assert.equal(new Set(again.commits.map((c) => c.hash)).size, again.commits.length);
+});
+
+test("history search: what the box means, and the log arguments", () => {
+  assert.deepEqual(parseFilter("  fix water "), { message: "fix water", author: "", path: "" });
+  assert.deepEqual(parseFilter("author: Ann"), { message: "", author: "Ann", path: "" });
+  assert.deepEqual(parseFilter("PATH:map/war3map.w3e"), { message: "", author: "", path: "map/war3map.w3e" });
+  assert.equal(noFilter(parseFilter("  ")), true);
+  assert.deepEqual(logArgs(parseFilter(""), 0, 200), ["log", "--skip=0", "--max-count=201", `--format=${LOG_FORMAT}`, "--date=short", "--", "."]);
+  const a = logArgs(parseFilter("--output=x"), 200, 200);
+  assert.ok(a.includes("--grep=--output=x"), "text starting with - is an option's value");
+  assert.ok(a.includes("--skip=200") && a.includes("--fixed-strings"));
+  assert.deepEqual(logArgs(parseFilter("path:-rf"), 0, 5).slice(-2), ["--", "-rf"], "a path comes after --");
+  assert.ok(logArgs(parseFilter("author:x"), 0, 5).includes("--author=x"));
+});
+
+test("branch commands: names are checked and go after --", () => {
+  assert.deepEqual(deleteBranchArgs("feature/a", false), ["branch", "-d", "--", "feature/a"]);
+  assert.deepEqual(deleteBranchArgs("feature/a", true), ["branch", "-D", "--", "feature/a"]);
+  assert.deepEqual(renameBranchArgs("old", "new"), ["branch", "-m", "--", "old", "new"]);
+  for (const bad of ["--delete", "-D", "a; rm -rf", "a b", "", "a..b", "x.lock", "/a", "a~1", "a:b"]) {
+    assert.throws(() => deleteBranchArgs(bad, true), `delete ${JSON.stringify(bad)}`);
+    assert.throws(() => renameBranchArgs("old", bad), `rename to ${JSON.stringify(bad)}`);
+    assert.throws(() => renameBranchArgs(bad, "new"), `rename from ${JSON.stringify(bad)}`);
+  }
+  // Shell characters that git allows are data: there's no shell.
+  assert.deepEqual(renameBranchArgs("a", "x;rm"), ["branch", "-m", "--", "a", "x;rm"]);
+  assert.equal(notFullyMerged(new Error("error: the branch 'x' is not fully merged.")), true);
+  assert.equal(notFullyMerged(new Error("error: branch 'x' not found")), false);
+});
+
+test("the branch rules agree with git check-ref-format", { skip: !hasGit }, () => {
+  const names = ["ok", "a/b", "a b", "-x", "a..b", "a.lock", "a/.b", "a@{b", "a\\b", "a^", "a?", "a*", "a[", "x/", "/x", "a//b", "a.", "ü", "a;b", "$(x)"];
+  // "@" alone passes check-ref-format --branch (it means HEAD there) but git branch refuses it.
+  assert.notEqual(branchProblem("@"), null);
+  for (const n of names) {
+    const git = spawnSync("git", ["check-ref-format", "--branch", n], { encoding: "utf8" }).status === 0;
+    // A name starting with - is read by git as an option here, so it can't say; the rule refuses it.
+    if (n.startsWith("-")) { assert.notEqual(branchProblem(n), null, n); continue; }
+    assert.equal(branchProblem(n) === null, git, `${JSON.stringify(n)}: git ${git}`);
+  }
+});
+
+test("rename and delete run as git does, even for odd names", { skip: !hasGit }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "w3-branches-"));
+  const sh = (args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8" });
+  try {
+    sh(["init", "-q", "-b", "main"]);
+    sh(["commit", "-q", "--allow-empty", "-m", "one"]);
+    sh(["branch", "x"]);
+    assert.equal(sh(renameBranchArgs("x", "x;rm")).status, 0);
+    assert.match(sh(["branch", "--list"]).stdout, /x;rm/);
+    assert.equal(sh(deleteBranchArgs("x;rm", false)).status, 0);
+    // Unmerged: -d refuses (the message that asks for a question), -D deletes.
+    sh(["switch", "-q", "-c", "work"]);
+    sh(["commit", "-q", "--allow-empty", "-m", "two"]);
+    sh(["switch", "-q", "main"]);
+    const refused = sh(deleteBranchArgs("work", false));
+    assert.notEqual(refused.status, 0);
+    assert.equal(notFullyMerged(new Error(refused.stderr)), true);
+    assert.equal(sh(deleteBranchArgs("work", true)).status, 0);
+    assert.equal(sh(["branch", "--list"]).stdout.trim(), "* main");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

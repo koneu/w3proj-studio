@@ -11,6 +11,7 @@ import { parseIni, parseSlk, westring } from "../lib/formats/text";
 import { StringTable } from "../lib/formats/wts";
 import { encodeBlp1Jpeg } from "../lib/image/encode";
 import { decodeImage } from "../lib/image/index.ts";
+import { keyOf } from "../lib/keys";
 import { checkJass } from "../lib/jass/check";
 import { gameJassEnv } from "../lib/jass/env";
 import { checkLua } from "../lib/lua/check";
@@ -34,7 +35,9 @@ export const triggers = {
   parseTriggerData, parseWtg, writeWtg, readTriggerFiles, writeTriggerFiles, wtgPath,
   parseWct, writeWct, triggerRefs, missingRefs,
 };
-export const objects = { loadKind };
+// The key of a keyboard event for shortcuts: read it through keyOf, not `e.key` (WebKitGTK's "Unidentified" chords).
+export const keys = { keyOf };
+export const objects ={ loadKind };
 export const image = { decodeImage, encodeBlp1Jpeg };
 export const model = { parseMdx };
 export const script = { generateScript, lostFunctions, checkJass, gameJassEnv, checkLua };

@@ -26,6 +26,7 @@
 //! | `prefer`  | `variant` only: expression choosing the expected alternative |
 //! | `default` | value written when the field is missing from the JSON |
 //! | `was`     | where older JSON had the value, read when the field is missing: a sibling's name, or `name[index]` for an item of a sibling list (a field that got its name later) |
+//! | `wasType` | with `was`: the type older JSON gave those bytes, when it differs (`u32 i32 f32`; the field's own type is one of them): the old value is written as that type and read back as the field's, so the bytes stay |
 //! | `doc`     | free text for humans |
 
 mod engine;
@@ -110,6 +111,8 @@ struct RawNode {
     default: Option<Value>,
     #[serde(default)]
     was: Option<String>,
+    #[serde(default, rename = "wasType")]
+    was_type: Option<String>,
     #[serde(default)]
     #[allow(dead_code)]
     doc: Option<String>,
@@ -154,6 +157,8 @@ pub struct Node {
     pub default: Option<Value>,
     /// Older JSON's place of the value (`was`): a sibling field, and an index into it when it's a list.
     pub was: Option<(String, Option<usize>)>,
+    /// The type older JSON gave the bytes at `was` (`wasType`), when it differs from the field's.
+    pub was_type: Option<Prim>,
 }
 
 #[derive(Debug)]
@@ -215,6 +220,22 @@ fn compile_node(raw: RawNode, path: &str) -> Result<Node> {
             None => return Err(err(format!("was: {s:?} isn't a name or name[index]"))),
         }),
     };
+    // Only the 4-byte numbers swap types: their bytes are the same either way.
+    let word = |s: &str| match s {
+        "u32" => Some(Prim::U32),
+        "i32" => Some(Prim::I32),
+        "f32" => Some(Prim::F32),
+        _ => None,
+    };
+    let was_type = match raw.was_type.as_deref() {
+        None => None,
+        Some(_) if was.is_none() => return Err(err("wasType needs was".into())),
+        Some(_) if raw.count.is_some() => return Err(err("wasType is for a single number".into())),
+        Some(s) => match (word(s), word(&raw.ty)) {
+            (Some(old), Some(_)) => Some(old),
+            _ => return Err(err(format!("wasType: {s:?} for a {:?} field: both must be u32, i32 or f32", raw.ty))),
+        },
+    };
     let count = match &raw.count {
         None => None,
         Some(Value::Number(n)) => Some(Count::Fixed(n.as_u64().ok_or_else(|| err("count must be a whole number".into()))? as usize)),
@@ -256,6 +277,7 @@ fn compile_node(raw: RawNode, path: &str) -> Result<Node> {
                 check: None,
                 default: raw.default,
                 was,
+                was_type,
             });
         }
         "variant" => Kind::Variant { prefer: parse(&raw.prefer)? },
@@ -265,13 +287,14 @@ fn compile_node(raw: RawNode, path: &str) -> Result<Node> {
     Ok(match count {
         Some(count) => Node {
             name: raw.name,
-            kind: Kind::List(count, Box::new(Node { name: None, kind: base, cond: None, check, default: None, was: None })),
+            kind: Kind::List(count, Box::new(Node { name: None, kind: base, cond: None, check, default: None, was: None, was_type: None })),
             cond,
             check: None,
             default: raw.default,
             was,
+            was_type,
         },
-        None => Node { name: raw.name, kind: base, cond, check, default: raw.default, was },
+        None => Node { name: raw.name, kind: base, cond, check, default: raw.default, was, was_type },
     })
 }
 
@@ -486,7 +509,7 @@ mod w3i_tests {
         o.insert("prologue".into(), json!({ "path": "", "text": "", "title": "", "subtitle": "" }));
         o.insert("fog".into(), json!({ "style": 0, "start": 3000.0, "end": 5000.0, "density": 0.5, "color": [255, 255, 255, 255] }));
         if v39 {
-            o.insert("terrainFog".into(), json!({ "style": 0, "overSky": 1, "linearStart": 1000.0, "linearEnd": 8000.0, "maxOpacity": 1.0, "height": 0.0 }));
+            o.insert("terrainFog".into(), json!({ "heightStart": 250.0, "heightEnd": -125.0, "linearStart": 1000.0, "linearEnd": 8000.0, "maxOpacity": 1.0, "drawOverSky": 1 }));
         }
         o.insert("weather".into(), json!("RAhr"));
         o.insert("soundEnvironment".into(), json!("Default"));
@@ -630,10 +653,8 @@ mod w3i_tests {
         for k in ["start", "end", "density"] {
             fields.push((vec!["fog", k], &f32_bad, &f32_good));
         }
-        for k in ["style", "overSky"] {
-            fields.push((vec!["terrainFog", k], &i32_bad, &i32_good));
-        }
-        for k in ["linearStart", "linearEnd", "maxOpacity", "height"] {
+        fields.push((vec!["terrainFog", "drawOverSky"], &i32_bad, &i32_good));
+        for k in ["heightStart", "heightEnd", "linearStart", "linearEnd", "maxOpacity"] {
             fields.push((vec!["terrainFog", k], &f32_bad, &f32_good));
         }
         for k in ["minOpacity", "maxOpacity", "reflectivity", "emissivity", "edgeSoftness", "wavesVertexDisplacement",
@@ -651,6 +672,57 @@ mod w3i_tests {
                 assert_eq!(encode(&def, &decode(&def, &bin).unwrap().value).unwrap(), bin, "{path:?} = {v} reads back");
             }
         }
+    }
+
+    /// The v39 terrain fog words are the World Editor's Height Start, Height End, Linear Start, Linear End, Max
+    /// Opacity and Draw Fog Over Sky (measured 2026-11-25, docs/testing/numeric-limits-measured.md). JSON from before
+    /// named them style (i32), overSky (i32), ..., height (f32): it still writes the same bytes, bit for bit.
+    #[test]
+    fn terrain_fog_words_are_named_and_older_json_keeps_its_bytes() {
+        let def = w3i();
+        let json = sample(39, true);
+        let bin = encode(&def, &json).unwrap();
+        let words = [250f32.to_le_bytes(), (-125f32).to_le_bytes(), 1000f32.to_le_bytes(), 8000f32.to_le_bytes(), 1f32.to_le_bytes(), 1i32.to_le_bytes()].concat();
+        assert!(bin.windows(words.len()).any(|w| w == words), "the six words in the file's order");
+        let tf = |words: &str| {
+            let mut t: serde_json::Map<String, Value> = serde_json::from_str(words).unwrap();
+            for (k, v) in [("linearStart", 1000.0), ("linearEnd", 8000.0), ("maxOpacity", 1.0)] {
+                t.insert(k.into(), json!(v));
+            }
+            Value::Object(t)
+        };
+        let with = |t: Value| { let mut j = json.clone(); j["terrainFog"] = t; j };
+        // Older JSON: Height Start and End as the i32 of their bits, Draw Fog Over Sky 1 as the f32 of bits 1.
+        let old = with(tf(&format!(r#"{{ "style": {}, "overSky": {}, "height": {} }}"#, 250f32.to_bits() as i32, (-125f32).to_bits() as i32, f32::from_bits(1) as f64)));
+        assert_eq!(encode(&def, &old).unwrap(), bin);
+        // ...and reads back with the names.
+        assert_eq!(decode(&def, &encode(&def, &old).unwrap()).unwrap().value, json);
+        // Bits that are no number as an f32 (a NaN) keep them: "f32:0x…".
+        let nan = with(tf(r#"{ "style": 2143289345, "overSky": 0, "height": "f32:0x7fc00000" }"#));
+        let nan_bin = encode(&def, &nan).unwrap();
+        let back = decode(&def, &nan_bin).unwrap().value;
+        assert_eq!(back["terrainFog"]["heightStart"], json!("f32:0x7fc00001"));
+        assert_eq!(back["terrainFog"]["drawOverSky"], json!(0x7fc00000u32 as i32));
+        assert_eq!(encode(&def, &back).unwrap(), nan_bin);
+        // A name wins over the older field; an older value its old type can't hold is refused.
+        let both = with(tf(r#"{ "heightStart": 7.0, "style": 5, "heightEnd": -125.0, "drawOverSky": 1 }"#));
+        assert_ne!(encode(&def, &both).unwrap(), bin);
+        assert_eq!(decode(&def, &encode(&def, &both).unwrap()).unwrap().value["terrainFog"]["heightStart"], json!(7.0));
+        assert!(encode(&def, &with(tf(r#"{ "style": 0.5, "heightEnd": 0.0, "drawOverSky": 0 }"#))).is_err());
+        assert!(encode(&def, &with(tf(r#"{ "heightEnd": 0.0, "drawOverSky": 0 }"#))).is_err(), "neither name");
+    }
+
+    #[test]
+    fn was_type_is_checked() {
+        let bad = |field: &str| {
+            let text = format!(r#"{{ "name": "t", "description": "", "files": ["t"], "jsonFormat": "t/1", "fields": [ {{ "name": "a", "type": "u32" }}, {field} ] }}"#);
+            Definition::parse(&text, Source::Builtin).is_err()
+        };
+        assert!(bad(r#"{ "name": "b", "type": "f32", "wasType": "i32" }"#), "without was");
+        assert!(bad(r#"{ "name": "b", "type": "cstring", "was": "a", "wasType": "i32" }"#), "not a number field");
+        assert!(bad(r#"{ "name": "b", "type": "f32", "was": "a", "wasType": "u8" }"#), "not a 4-byte number");
+        assert!(bad(r#"{ "name": "b", "type": "f32", "count": 2, "was": "a", "wasType": "i32" }"#), "a list");
+        assert!(!bad(r#"{ "name": "b", "type": "f32", "was": "a", "wasType": "i32" }"#), "control");
     }
 
     #[test]

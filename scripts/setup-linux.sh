@@ -5,6 +5,8 @@
 #   scripts/setup-linux.sh --check       only report what's there and what's missing; changes nothing
 #   scripts/setup-linux.sh --game PATH   use this Warcraft III folder (else the newest install found)
 #   scripts/setup-linux.sh --apt-packages  print the apt packages below, one line (CI installs them)
+#   scripts/setup-linux.sh --with-coverage-tools  also install cargo-llvm-cov, cargo-mutants and the llvm-tools component
+#                                      (long cargo builds; also on with W3PROJ_COVERAGE_TOOLS=1)
 #
 # Safe to run again: anything already installed is left alone, and a chosen game folder is kept.
 # What it sets up, and why, is in README.md ("Build & run", Linux).
@@ -14,12 +16,14 @@ set -euo pipefail
 CHECK_ONLY=0
 GAME_ARG=""
 PRINT_APT=0
+WITH_COVERAGE="${W3PROJ_COVERAGE_TOOLS:-0}"
 while (( $# )); do
   case "$1" in
     --check) CHECK_ONLY=1 ;;
     --game) GAME_ARG="${2:?--game needs a folder}"; shift ;;
     --apt-packages) PRINT_APT=1 ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    --with-coverage-tools) WITH_COVERAGE=1 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -165,6 +169,33 @@ if [[ -x "$ACTIONLINT" ]]; then ok "actionlint"; else
     rm -rf "$tmp"
   fi
 fi
+
+# --- coverage and mutation tools --------------------------------------------------------------
+# Optional and off by default (each is a long cargo build): `node tests/gate.mjs coverage` needs cargo-llvm-cov and
+# rustup's llvm-tools component; mutation testing (TESTING.md "Coverage", tests/mutants-runner.sh) needs cargo-mutants.
+# Turned on by --with-coverage-tools or W3PROJ_COVERAGE_TOOLS=1. Without it, --check only reports what's there.
+step "coverage and mutation tools (optional: --with-coverage-tools)"
+cov_on=0; [[ "$WITH_COVERAGE" == 1 ]] && cov_on=1
+cov_note() {   # a missing optional tool counts as missing only when asked for
+  if (( cov_on )); then miss "$1"; else printf '  \033[33mnot installed\033[0m  %s (optional)\n' "$1"; fi
+}
+if command -v rustup >/dev/null && (cd "$REPO" && rustup component list --installed 2>/dev/null | grep -q '^llvm-tools'); then
+  ok "llvm-tools (rustup component)"
+else
+  cov_note "llvm-tools (rustup component)"
+  if (( cov_on && ! CHECK_ONLY )) && command -v rustup >/dev/null; then
+    (cd "$REPO" && rustup component add llvm-tools-preview)
+  fi
+fi
+for tool in cargo-llvm-cov cargo-mutants; do
+  if command -v "$tool" >/dev/null || [[ -x "$HOME/.cargo/bin/$tool" ]]; then ok "$tool"; else
+    cov_note "$tool"
+    if (( cov_on && ! CHECK_ONLY )) && command -v cargo >/dev/null; then
+      # From outside the checkout, like sccache: its .cargo/config.toml may name a wrapper that isn't there yet.
+      (cd "${TMPDIR:-/tmp}" && cargo install --locked "$tool")
+    fi
+  fi
+done
 
 # --- npm packages ------------------------------------------------------------------------------
 step "npm packages in app/"

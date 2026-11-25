@@ -20,8 +20,10 @@ import { mapChecks } from "./mapchecks";
  *  for too before the load fails; twice, as a failed load is tried again. The real game has them all.
  *  127 → 130: Trigger validation reads TriggerData with the editor's strings, for the functions' names,
  *  and the custom script texts, which can run triggers; the triggers themselves are read once for both
- *  trigger checks; 130 → 131: the run looks whether .w3proj/problems-ignore.json is there; 131 → 133: and whether w3proj.toml is there, and reads its [checks].) */
-const BUDGET = 133;
+ *  trigger checks; 130 → 131: the run looks whether .w3proj/problems-ignore.json is there; 131 → 133: and whether w3proj.toml is there, and reads its [checks];
+ *  133 → 134: the mini map got object data of every kind and a sound: 12 fewer looks for absent files, 13 more reads of
+ *  the game's tables for those kinds and one more batch of path lookups.) */
+const BUDGET = 134;
 
 /** The mini map, found from where the tests run (app/ or the repository). */
 function fixture(): string {
@@ -50,6 +52,7 @@ const BASE_GAME: Record<string, string> = {
   "Units\\UnitAbilities.slk": slk([["unitAbilID"]]),
 };
 const BASE_STORED = ["units\\stored\\model.mdx"];
+const layer = (p: string) => p.toLowerCase().replace(/\.w3mod[\\/]/, ".w3mod:");
 
 /** Made-up files on top of the mini map, so that every kind of lookup happens: object data with
  *  paths, sounds, import entries and Game Interface art. */
@@ -111,8 +114,9 @@ function fakeApp(more: { overlay?: Record<string, string>; game?: Record<string,
       list: async () => { count("game.list"); return []; },
       read: async (p: string) => { count(`game.read ${p}`); if (!(p in GAME)) throw new Error(`no ${p}`); return new TextEncoder().encode(GAME[p]); },
       readText: async (p: string) => { count(`game.read ${p}`); if (!(p in GAME)) throw new Error(`no ${p}`); return GAME[p]; },
-      resolve: async (p: string) => { count(`game.resolve ${p}`); return STORED.has(p.toLowerCase()) ? `War3.w3mod:${p}` : null; },
-      resolveMany: async (paths: string[]) => { count("game.resolveMany"); return paths.map((p) => (STORED.has(p.toLowerCase()) ? `War3.w3mod:${p}` : null)); },
+      // Like crates/casc/src/game.rs resolve: a layer folder written `X.w3mod\` is looked up as `X.w3mod:`.
+      resolve: async (p: string) => { count(`game.resolve ${p}`); return STORED.has(layer(p)) ? `War3.w3mod:${p}` : null; },
+      resolveMany: async (paths: string[]) => { count("game.resolveMany"); return paths.map((p) => (STORED.has(layer(p)) ? `War3.w3mod:${p}` : null)); },
     },
     settings: { get: () => undefined },
     statusBar: { add: () => ({ text: "", tooltip: "", dispose() {} }) },

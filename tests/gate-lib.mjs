@@ -2,14 +2,48 @@
 // a command with a timeout, ending its tree, the signal handlers, the coverage floors, the step table.
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
+import { join } from "node:path";
+
+/** The pids below `root` (POSIX, from `ps`); empty when `ps` is unavailable. */
+function descendants(root) {
+  const r = spawnSync("ps", ["-e", "-o", "pid=,ppid="], { encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string") return [];
+  const kids = new Map();
+  for (const line of r.stdout.split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (!pid || Number.isNaN(ppid)) continue;
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    kids.get(ppid).push(pid);
+  }
+  const found = [];
+  const stack = [root];
+  while (stack.length) for (const k of kids.get(stack.pop()) ?? []) if (!found.includes(k)) (found.push(k), stack.push(k));
+  return found;
+}
 
 /** Ends a step's process and all it started. */
 export function killTree(child) {
   if (child.pid === undefined) return;
   try {
     if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
-    else process.kill(-child.pid, "SIGKILL");
+    else {
+      // A descendant that made its own process group (setsid, detached: tauri-driver's WebKitWebDriver, Xvfb)
+      // is not in the step's group: collect the tree while it is still linked, then end all of it.
+      const rest = descendants(child.pid);
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // group already gone
+      }
+      for (const pid of rest) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+      }
+    }
   } catch {
     // already gone
   }
@@ -80,7 +114,75 @@ export function checkFloors(areas, floors, say, updating = false) {
   return { ok, floors: next };
 }
 
+/** The process's own cgroup (v2) from the text of /proc/self/cgroup: "/user.slice/...", or null (v1 only, none). */
+export function cgroupPath(procSelfCgroup) {
+  for (const line of String(procSelfCgroup ?? "").split("\n")) {
+    const m = /^0::(\/.*)$/.exec(line.trim());
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/**
+ * The memory left (MB) under the tightest memory.max of `path` and the cgroups above it: each one's
+ * memory.max minus its memory.current. null when none has a limit ("max") or nothing can be read.
+ * `read(file)`: the file's text, or null when it can't be read.
+ */
+export function cgroupHeadroomMb(path, read, root = "/sys/fs/cgroup") {
+  let best = null;
+  for (let p = path; p; p = p === "/" ? null : p.slice(0, p.lastIndexOf("/")) || "/") {
+    const dir = p === "/" ? root : `${root}${p}`;
+    const max = read(`${dir}/memory.max`)?.trim();
+    if (!max || max === "max" || !/^\d+$/.test(max)) continue;
+    const current = Number(read(`${dir}/memory.current`)?.trim());
+    const left = Math.max(0, Number(max) - (Number.isFinite(current) ? current : 0)) / 1048576;
+    best = best === null ? left : Math.min(best, left);
+  }
+  return best === null ? null : Math.floor(best);
+}
+
+/** MemAvailable (MB) from the text of /proc/meminfo, or null. */
+export function memAvailableMb(meminfo) {
+  const m = /^MemAvailable:\s+(\d+)\s*kB/m.exec(String(meminfo ?? ""));
+  return m ? Math.floor(Number(m[1]) / 1024) : null;
+}
+
+/**
+ * How much memory (MB) the gate's running steps may need together, and where that came from:
+ * W3_GATE_MEM_MB if set, else 80% of the smaller of MemAvailable (os.freemem() off Linux) and what
+ * the gate's cgroup leaves (cgroup v2: memory.max minus memory.current, the tightest from its own
+ * cgroup up, e.g. a `systemd-run -p MemoryMax=` scope).
+ */
+export function memoryBudget({ env = process.env, platform = process.platform, read, freemem }) {
+  const forced = Number(env.W3_GATE_MEM_MB);
+  if (env.W3_GATE_MEM_MB && Number.isFinite(forced) && forced > 0) return { mb: Math.floor(forced), from: "W3_GATE_MEM_MB" };
+  const parts = [];
+  let avail = platform === "linux" ? memAvailableMb(read("/proc/meminfo")) : null;
+  if (avail !== null) parts.push(`MemAvailable ${avail} MB`);
+  else {
+    avail = Math.floor(freemem() / 1048576);
+    parts.push(`free memory ${avail} MB`);
+  }
+  if (platform === "linux") {
+    const path = cgroupPath(read("/proc/self/cgroup"));
+    const left = path ? cgroupHeadroomMb(path, read) : null;
+    if (left !== null) {
+      parts.push(`cgroup limit leaves ${left} MB`);
+      avail = Math.min(avail, left);
+    }
+  }
+  return { mb: Math.floor(avail * 0.8), from: `80% of ${parts.join(", ")}` };
+}
+
 /** A step missing from the table would be run but left out of the result. */
 export function assertInTable(steps, table) {
   for (const s of steps) if (!table.includes(s.id)) throw new Error(`gate: step "${s.id}" is not in the table`);
+}
+
+/** What a missing or half-installed app/node_modules looks like: one line to say, or null when it's complete enough. */
+export function missingDeps(appDir, exists = existsSync) {
+  const bin = join(appDir, "node_modules", ".bin");
+  const need = process.platform === "win32" ? ["vite.cmd", "tsc.cmd"] : ["vite", "tsc"];
+  const lacking = need.filter((n) => !exists(join(bin, n)));
+  return lacking.length === 0 ? null : `app/node_modules is missing or incomplete (no ${lacking.join(", ")}): run \`npm ci\` in app/ (also in every new git worktree), then run the gate again`;
 }

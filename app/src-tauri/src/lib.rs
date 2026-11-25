@@ -176,7 +176,7 @@ fn project_create(dir: String, name: String, flags: u32, max_players: u32, campa
     // Campaigns have no map header; maps saved by World Editor 3.0.1 don't either (`header: false`).
     let with_header = !campaign.unwrap_or(false) && header.unwrap_or(true);
     let header = with_header.then_some(w3proj::header::MapHeader { name, flags, max_players, unknown: 0 });
-    w3proj::create(Path::new(&dir), header).map_err(err)
+    w3proj::project::create_as(Path::new(&dir), header, campaign.unwrap_or(false)).map_err(err)
 }
 
 #[tauri::command]
@@ -881,9 +881,61 @@ fn extensions_scan(app: AppHandle, project_root: Option<String>) -> CmdResult<Ve
 
 // ---------------------------------------------------------------- game data (CASC)
 
-/// The opened game storage, keyed by install folder (backend::GameCache).
+/// The opened game storage, keyed by install folder (backend::GameCache). Shared with the fast transfer's server.
 #[derive(Default)]
-struct Game(backend::GameCache);
+struct Game(Arc<backend::GameCache>);
+
+/// The fast game file transfer's server (backend::fastgame), while `game.fastTransfer` is on.
+#[derive(Default)]
+struct FastGame(Mutex<Option<backend::fastgame::Server>>);
+
+/// Where the page fetches game files from. The token is for the page only: never print it.
+#[derive(Serialize)]
+struct FastGameEndpoint {
+    port: u16,
+    token: String,
+}
+
+/// The origin a page's requests carry (`tauri://localhost`, `http://tauri.localhost`, the dev server's): scheme, host
+/// and port as written (the url crate calls a custom scheme's origin opaque).
+fn page_origin(url: &tauri::Url) -> CmdResult<String> {
+    let host = url.host_str().ok_or_else(|| format!("the page's address has no host: {}", url.scheme()))?;
+    Ok(match url.port() {
+        Some(p) => format!("{}://{host}:{p}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
+    })
+}
+
+/// `on`: starts the fast transfer's server (once; again after a stop) and says where it is, for pages of this
+/// webview's origin only. Off: stops it, closing its port. Off by default; the page asks when `game.fastTransfer` is on.
+#[tauri::command]
+fn game_fast_transfer(webview: tauri::Webview, game: State<'_, Game>, fast: State<'_, FastGame>, on: bool) -> CmdResult<Option<FastGameEndpoint>> {
+    let mut slot = fast.0.lock().unwrap_or_else(|e| e.into_inner());
+    if !on {
+        if let Some(mut server) = slot.take() {
+            server.stop();
+        }
+        return Ok(None);
+    }
+    let origin = page_origin(&webview.url().map_err(err)?)?;
+    if slot.as_ref().is_some_and(|s| s.origin() != origin) {
+        if let Some(mut old) = slot.take() {
+            old.stop();
+        }
+    }
+    if slot.is_none() {
+        let source: Arc<dyn backend::fastgame::GameSource> = game.0.clone();
+        *slot = Some(backend::fastgame::Server::start(source, &origin, Default::default()).map_err(|e| format!("fast game transfer: {e}"))?);
+    }
+    let server = slot.as_ref().expect("started above");
+    Ok(Some(FastGameEndpoint { port: server.port(), token: server.token().to_string() }))
+}
+
+/// Files the fast transfer served since it started (0 while it's off): the app smoke's proof the page used it.
+#[tauri::command]
+fn game_fast_transfer_served(fast: State<'_, FastGame>) -> u64 {
+    fast.0.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(0, |s| s.served())
+}
 
 fn game_data(state: &Game, install: &str) -> CmdResult<Arc<casc::GameData>> {
     state.0.get(install)
@@ -1293,6 +1345,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Watches::default())
         .manage(Game::default())
+        .manage(FastGame::default())
         .manage(mcp::Mcp::default())
         .invoke_handler(tauri::generate_handler![
             project_open,
@@ -1372,14 +1425,24 @@ pub fn run() {
             game_resolve,
             game_resolve_many,
             game_read,
+            game_fast_transfer,
+            game_fast_transfer_served,
             mcp::mcp_serve,
             mcp::mcp_respond,
             mcp::mcp_bridge_path,
             mcpclients::mcp_clients,
             mcpclients::mcp_client_setup,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running W3Proj Studio");
+        .build(tauri::generate_context!())
+        .expect("error while running W3Proj Studio")
+        .run(|app, event| {
+            // The fast transfer's port closes with the app (the process ending would close it too).
+            if let tauri::RunEvent::Exit = event {
+                if let Some(mut server) = app.state::<FastGame>().0.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    server.stop();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

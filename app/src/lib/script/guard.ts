@@ -3,6 +3,7 @@
 // the script from the triggers would drop it without a trace.
 
 import { isCampaignObjectFile } from "../objects/campaign";
+import { decodeLossless, encodeLossless } from "../formats/lossless";
 
 /** Project file holding the hash of the script this app wrote last: a script that still has it holds nothing but
  *  what the map's data made, so it's replaced without asking. */
@@ -14,6 +15,19 @@ export const KEPT_SCRIPT_WORDS = "so it isn't regenerated";
 
 /** The map script's files (JASS, Lua): what the generator writes. */
 export const SCRIPT_FILES = ["map/war3map.j", "map/war3map.lua"];
+
+/** A map script's text from its file, whatever its encoding (lib/formats/lossless): an old map's script in its code
+ *  page reads, and the strings the generator takes from a table in one (readWts) are the same characters. Rejects as
+ *  `io.readBytes` does (a missing file: not found). */
+export async function readScriptFile(io: { readBytes(path: string): Promise<Uint8Array> }, path: string): Promise<string> {
+  return decodeLossless(await io.readBytes(path));
+}
+
+/** Writes a map script's text as `readScriptFile` reads it: the original bytes where its strings came from a file that
+ *  isn't UTF-8, plain UTF-8 otherwise. */
+export function writeScriptFile<T>(io: { writeBytes(path: string, bytes: Uint8Array): Promise<T> }, path: string, text: string): Promise<T> {
+  return io.writeBytes(path, encodeLossless(text));
+}
 
 /** Files the map script is made from (also as their .json documents, and every file of the trigger folders,
  *  map/triggers/): saving one regenerates it. */

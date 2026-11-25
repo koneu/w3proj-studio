@@ -12,8 +12,9 @@
 //!   again and missing come back first, at the end, with their old numbers and texts;
 //! - the languages' tables (`_Locales\x.w3mod\war3map.wts`) stay as they are, as the World
 //!   Editor's save leaves them, and refer to nothing;
-//! - nothing is dropped when anything can't be read (a sounds file, the record, a table that isn't
-//!   UTF-8): the strings just stay.
+//! - nothing is dropped when anything can't be read (a sounds file, the record): the strings just stay;
+//! - a table that isn't UTF-8 (an old map's code page) is read as `lossless` text, as the app reads it
+//!   (`app/src/lib/formats/wts.ts` `readWts`): what stays keeps its bytes.
 //!
 //! Numbers are compared as JavaScript's `Number()` reads the digits (an `f64`), so both sides agree
 //! on any input. The parser reads strangers' files: it never panics, and a run of `//` lines is
@@ -412,9 +413,11 @@ pub fn prune_files(files: &mut BTreeMap<String, Vec<u8>>, record: std::result::R
     let Some(name) = files.keys().find(|k| k.eq_ignore_ascii_case("war3map.wts")).cloned() else {
         return PruneOutcome::default();
     };
-    let Ok(wts) = std::str::from_utf8(&files[&name]) else {
-        return kept("war3map.wts isn't UTF-8 text".into());
-    };
+    // A table in an old code page (not UTF-8) is read as `lossless` text: every structural character of the format is
+    // ASCII, which `lossless` keeps as it is, so blocks are found where they are in the bytes and the rest comes back
+    // byte for byte.
+    let wts = crate::lossless::decode(&files[&name]);
+    let wts = wts.as_str();
     let record = match record {
         Ok(None) => BTreeMap::new(),
         Ok(Some(text)) => match parse_pruned_record(&text) {
@@ -435,8 +438,9 @@ pub fn prune_files(files: &mut BTreeMap<String, Vec<u8>>, record: std::result::R
         Ok(r) => r,
         Err(e) => return kept(e),
     };
-    if text.as_bytes() != &files[&name][..] {
-        files.insert(name, text.into_bytes());
+    let bytes = crate::lossless::encode(&text);
+    if bytes != files[&name] {
+        files.insert(name, bytes);
     }
     PruneOutcome { dropped, restored, kept: None }
 }
@@ -554,9 +558,46 @@ mod tests {
             assert!(r.kept.is_some() && r.dropped.is_empty(), "{what}");
             assert_eq!(f["war3map.wts"], wts.as_bytes(), "{what}");
         }
-        let mut f = files.clone();
-        f.insert("war3map.wts".into(), vec![0xff, 0xfe, b'S']);
-        assert!(prune_files(&mut f, Ok(None), &codecs).kept.is_some());
+    }
+
+    #[test]
+    fn a_table_in_a_code_page_is_pruned_byte_for_byte() {
+        // GBK "中文" (D6 D0 CE C4), CP949 "한국" (C7 D1 B1 B9), Big5 "中文" (A4 A4 A4 E5), a GBK character whose second
+        // byte is `}` (81 7D: the game ends the text there, as for any `}`), and the junk BonusCredits.w3m's table
+        // holds (EE .. B1 12 DD).
+        let codecs = Registry::default();
+        let block_b = |n: u32, t: &[u8]| [format!("STRING {n}\r\n{{\r\n").as_bytes(), t, b"\r\n}\r\n\r\n"].concat();
+        let wts = [
+            &b"\xEF\xBB\xBF"[..],
+            &block_b(1, b"\xD6\xD0\xCE\xC4"),
+            &block_b(2, b"orphan \xC7\xD1\xB1\xB9"),
+            &block_b(3, b"\xA4\xA4\xA4\xE5"),
+            &block_b(4, b"cut \x81}"),
+            &block_b(5, b"\xEE\xEE\xB1\x12\xDD"),
+        ]
+        .concat();
+        assert!(std::str::from_utf8(&wts).is_err());
+        let table = strings(&crate::lossless::decode(&wts));
+        assert_eq!(crate::lossless::encode(&table[&StringNum::from_u64(1)]), b"\xD6\xD0\xCE\xC4");
+        assert_eq!(crate::lossless::encode(&table[&StringNum::from_u64(4)]), b"cut \x81");
+        let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        files.insert("war3map.wts".into(), wts.clone());
+        files.insert("war3map.w3i.json".into(), br#"{"a":"TRIGSTR_001","b":"TRIGSTR_003","c":"TRIGSTR_004","d":"TRIGSTR_005"}"#.to_vec());
+        let r = prune_files(&mut files, Ok(None), &codecs);
+        assert_eq!((list(&r.dropped), r.kept), (vec![2.0], None));
+        let expected = [&b"\xEF\xBB\xBF"[..], &block_b(1, b"\xD6\xD0\xCE\xC4"), &block_b(3, b"\xA4\xA4\xA4\xE5"), &block_b(4, b"cut \x81}"),
+            &block_b(5, b"\xEE\xEE\xB1\x12\xDD")].concat();
+        assert_eq!(files["war3map.wts"], expected);
+        // Nothing to drop: the file's own bytes.
+        let r = prune_files(&mut files, Ok(None), &codecs);
+        assert!(r.dropped.is_empty() && r.kept.is_none());
+        assert_eq!(files["war3map.wts"], expected);
+        // A string restored from the record, written in the same code page, comes back as its bytes.
+        files.insert("war3map.w3i.json".into(), br#"{"a":"TRIGSTR_001","b":"TRIGSTR_003","c":"TRIGSTR_004","d":"TRIGSTR_005","e":"TRIGSTR_002"}"#.to_vec());
+        let record = serde_json::json!({ "format": PRUNED_FORMAT, "strings": { "2": crate::lossless::decode(b"orphan \xC7\xD1\xB1\xB9") } }).to_string();
+        let r = prune_files(&mut files, Ok(Some(record)), &codecs);
+        assert_eq!((list(&r.restored), r.kept), (vec![2.0], None));
+        assert_eq!(files["war3map.wts"], [&expected[..], &block_b(2, b"orphan \xC7\xD1\xB1\xB9")].concat());
     }
 
     #[test]
