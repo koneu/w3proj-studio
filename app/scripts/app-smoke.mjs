@@ -281,6 +281,10 @@ async function newMaps(page, found) {
       if (mode !== "generated") fail(`map/triggers/triggers.json says "script": ${lit(mode)}, not "generated"`);
       if (names.has(scriptFile) || !existsSync(join(root, ".w3proj", "derived", scriptFile))) fail(`its ${scriptFile} isn't in .w3proj/derived/ alone (in map/: ${names.has(scriptFile)})`);
       if (!/^\/\.w3proj\/derived\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/derived/");
+      // The agent file (w3proj::agent_file): in the root, for a flat map project, never in map/.
+      const agents = existsSync(join(root, "AGENTS.md")) ? readFileSync(join(root, "AGENTS.md"), "utf8") : "";
+      if (!agents.includes("war3map.w3e.txt") || !agents.includes("w3proj rebuild")) fail(`no AGENTS.md in the project root (${agents.length} bytes)`);
+      if (names.has("AGENTS.md")) fail("AGENTS.md is in map/");
       await page.evaluate(`w3.commands.execute("w3.script.settle")`);
       const state = await page.evaluate(`w3.backend.invoke("script_state", { root: ${lit(root)} })`);
       if (state?.freshness !== "fresh") fail(`the generated script doesn't follow its sources after New Map: ${lit(state)}`);
