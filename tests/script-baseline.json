@@ -97,7 +97,11 @@
     "problems": 46,
     "guarded": 0,
     "asked": 2,
-    "checked": 375
+    "checked": 375,
+    "lua": {
+      "checked": 49,
+      "judged": 47
+    }
   },
   "valid": {
     "common": 0,

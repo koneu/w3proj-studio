@@ -12726,6 +12726,44 @@ async function triggerTree(page, found) {
   }
 }
 
+/** The Lua check's names in the Problems view, on a new Lua map with a script file in its trigger folders: a call of a
+ *  name nothing defines is a warning at the file's line; the game's natives (also common.ai's UnitAlive), Blizzard
+ *  functions, Lua's own, the generated war3map.lua's functions and a function defined further down aren't reported. */
+async function luaNames(page, found) {
+  const fail = (what) => found.push(`Lua names: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "lua-names");
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  const confirm = await page.evaluate(`(() => { window.__luaNamesConfirm = w3.window.confirm; w3.window.confirm = async () => true; return true; })()`);
+  try {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await tool("new_map", { name: "Lua Names", script: "lua", width: 32, height: 32, folder });
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+    const text = [
+      `-- @w3proj {"type":32,"name":"Lua Names"}`,
+      "function Lua_Names_Run()",
+      "  NoSuchLuaFunction()",
+      "  print(UnitAlive(nil), I2S(1), BJDebugMsg('x'), tostring(GetTriggerUnit()))",
+      "  InitGlobals()",
+      "  Lua_Names_Later()",
+      "end",
+      "function Lua_Names_Later() end",
+      "",
+    ].join("\n");
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/triggers/Lua_Names.lua", ${lit(text)}); await w3.workspace.refresh(); })()`);
+    await settled(page);
+    const run = await page.evaluate(`(async () => (await w3.services.get("w3.problems")).runChecked())()`);
+    const names = (run?.problems ?? []).filter((p) => /^Unknown function /.test(p.message)).map((p) => `${p.severity} ${p.location}: ${p.message}`);
+    if (!names.includes("warning map/triggers/Lua_Names.lua:3: Unknown function NoSuchLuaFunction")) fail(`the unknown call isn't a warning at the file's line 3: ${lit(names)}`);
+    if (names.length !== 1) fail(`other names are reported too: ${lit(names)}`);
+  } finally {
+    if (confirm) await page.evaluate(`(() => { w3.window.confirm = window.__luaNamesConfirm; delete window.__luaNamesConfirm; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 async function tabsBeforeListing(page, found) {
   const fail = (what) => found.push(`tabs before the file list: ${what}`);
   const dir = join(work, "tabs-before-listing");
@@ -17886,6 +17924,7 @@ async function run() {
         keybindings,
         keyChords,
         lightNumbersRefused,
+        luaNames,
         mapInfoColorTools,
         mapInfoUndoKept,
         mapPropertiesPriorities,
@@ -18276,6 +18315,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "triggerFolders", found);
   await triggerTree(page, found).catch((e) => found.push(`check trigger tree: ${e.message}`));
   await leftOpen(page, "triggerTree", found);
+  await luaNames(page, found).catch((e) => found.push(`Lua names: ${e.message}`));
+  await leftOpen(page, "luaNames", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));

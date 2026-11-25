@@ -14,7 +14,8 @@ const J = await mod("/script/jass.ts");
 const G = await mod("/script/guard.ts");
 const O = await mod("/script/objects.ts");
 const R = await mod("/triggers/refs.ts");
-const { checkLua } = await mod("/lua/check.ts");
+const { checkLua, luaKnownNames, luaApiFrom } = await mod("/lua/check.ts");
+const { envFrom } = await mod("/jass/check.ts");
 const { StringTable } = await mod("/formats/wts.ts");
 const T = await mod("/terrain/w3e.ts");
 const { w3eFromText } = await mod("/terrain/w3etext.ts");
@@ -57,11 +58,18 @@ const broken: string[] = [];
 const [shardI, shardN] = (process.env.SCRIPT_CHECK_SHARD ?? "0/1").split("/").map(Number);
 const allMaps = readdirSync("ws");
 const maps = allMaps.slice(Math.floor((shardI * allMaps.length) / shardN), Math.floor(((shardI + 1) * allMaps.length) / shardN));
+// Names too, as the Problems view checks them: against the game's Lua API (common.j, Blizzard.j, common.ai's natives).
+const luaApi = luaApiFrom(envFrom([read("Blizzard.j")], envFrom([read("common.j")])), read("common.ai"));
+let luaChecked = 0, luaNamesJudged = 0;
 for (const m of maps) {
   const f = `ws/${m}/map/war3map.lua`;
   if (!existsSync(f)) continue;
-  const p = checkLua(read(f));
-  if (p.length) luaBroken.push(`${m} lua: ${p[0].message}`);
+  const src = read(f);
+  const known = luaKnownNames(luaApi);
+  luaChecked++;
+  if (luaKnownNames(luaApi, [src])) luaNamesJudged++;
+  const p = checkLua(src, known);
+  for (const x of p) luaBroken.push(`${m} lua: ${x.message} (line ${src.slice(0, x.from).split("\n").length})`);
 }
 let shown = 0;
 const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
@@ -158,7 +166,7 @@ for (const m of maps) {
     }
   }
 }
-const detail = { stats, broken: [...luaBroken, ...broken], guarded, asked, checked, luaBroken, otherBroken: broken };
+const detail = { stats, broken: [...luaBroken, ...broken], guarded, asked, checked, luaBroken, otherBroken: broken, lua: { checked: luaChecked, judged: luaNamesJudged } };
 // Under run.mjs (SCRIPT_CHECK_SHARD set) nothing is printed here: it puts the shards' details together and prints that.
 if (!process.env.SCRIPT_CHECK_SHARD) printSections(detail);
 if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify(detail));

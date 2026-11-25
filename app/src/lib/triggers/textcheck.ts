@@ -3,8 +3,8 @@
 // an outside editor shows (the `// @w3proj {…}` frontmatter is line 1, a comment to the checkers). JASS files are
 // checked as one trigger's text is in the Trigger Editor (trigger-script): against the game's scripts and the map
 // script's declarations, without the file's own, its trigger's gg_trg_ global added, functions not ordered across
-// files. vJASS files aren't (JassHelper compiles the whole script: "Check with JassHelper"), and Lua files get the
-// syntax check only (lib/lua/check.ts: blocks, brackets, strings; names aren't looked at).
+// files. vJASS files aren't (JassHelper compiles the whole script: "Check with JassHelper"). Lua files get
+// lib/lua/check.ts: the syntax, and calls of names that neither the game's API, the map script nor the files define.
 //
 // The map script's own check (war3map.j / war3map.lua) then leaves to these what lies in a text it copied as it is:
 // such a finding is told at the file's line once (dropped where the file's lint found the same line, moved to the file
@@ -55,14 +55,16 @@ export function hasFrontmatter(text: string, lua: boolean): boolean {
 
 /** The diagnostics of each file. `env`: the game's scripts and the map script's and other files' declarations (JASS);
  *  `judgeGlobals`: whether an unknown udg_ or gg_ name is told (the Problems view leaves those to the whole script's
- *  check, whose findings in a file's text are moved to it: a kept script may not follow the triggers). */
-export function lintTexts(texts: TriggerText[], language: "jass" | "lua", env: JassEnv | null, judgeGlobals: boolean): TextDiagnostic[] {
+ *  check, whose findings in a file's text are moved to it: a kept script may not follow the triggers). `luaNames`:
+ *  what Lua files may call (luaKnownNames: the game's API, the map script's and the other files' globals); null: Lua
+ *  names aren't judged. */
+export function lintTexts(texts: TriggerText[], language: "jass" | "lua", env: JassEnv | null, judgeGlobals: boolean, luaNames: ReadonlySet<string> | null = null): TextDiagnostic[] {
   const out: TextDiagnostic[] = [];
   for (const t of texts) {
     const text = sane(t.text);
     const found: { from: number; message: string; severity: "error" | "warning" }[] = [];
     if (language === "lua" || /\.lua$/i.test(t.path)) {
-      for (const d of checkLua(text)) found.push({ from: d.from, message: d.message, severity: "error" });
+      for (const d of checkLua(text, luaNames)) found.push({ from: d.from, message: d.message, severity: d.severity });
     } else if (env && !/\.vjass$/i.test(t.path) && !isVjass(text)) {
       const own = envWithout(env, text);
       if (t.global) own.globals.set(t.global, { type: "trigger", array: false, constant: false });

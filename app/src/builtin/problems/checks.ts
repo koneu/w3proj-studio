@@ -12,7 +12,8 @@ import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
 import { checkJass, envFrom } from "../../lib/jass/check";
-import { checkLua } from "../../lib/lua/check";
+import { checkLua, luaKnownNames } from "../../lib/lua/check";
+import { gameLuaApi } from "../../lib/lua/env";
 import { ident } from "../../lib/script/names";
 import { readScriptFile } from "../../lib/script/guard";
 import { TRIGGERS_ROOT, type ProjectTriggers } from "../../lib/triggers/project";
@@ -137,8 +138,11 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         };
         if (language === "lua") {
           if (luaSrc === null && !texts.length) return [];
-          const perFile = lintTexts(texts, "lua", null, true);
-          const diags = luaSrc === null ? [] : checkLua(luaSrc).map((d) => ({ ...d, severity: "error" as const }));
+          // Names against the game's API and the script's globals; the files' also against each other's. Without the
+          // script the files' names aren't judged: the triggers' functions would be missing.
+          const api = await gameLuaApi((p) => w3.game.readText(p));
+          const perFile = lintTexts(texts, "lua", null, true, luaSrc === null ? null : luaKnownNames(api, [luaSrc, ...texts.map((t) => t.text)]));
+          const diags = luaSrc === null ? [] : checkLua(luaSrc, luaKnownNames(api));
           return capped(told(luaSrc ?? "", LUA_SCRIPT, diags, perFile), "script problems");
         }
         if (src === null && !texts.length) return [];
