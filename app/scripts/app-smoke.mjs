@@ -741,6 +741,14 @@ async function atmosphereTools(page, found) {
   await tool("save_project");
   const back = read("war3map.w3i.json");
   if (JSON.stringify(back) !== JSON.stringify(w3i0)) fail(`one undo didn't restore war3map.w3i: ${lit(Object.keys(back).filter((k) => JSON.stringify(back[k]) !== JSON.stringify(w3i0[k])).map((k) => [k, back[k], w3i0[k]]))}`);
+  // The World Editor's other fog styles (Height 3, New Exponential 1 and 2: 4 and 5), by name or number.
+  for (const [fogStyle, want] of [["Height", 3], ["New Exponential 2", 5], ["4", 4]]) {
+    await tool("set_sky", { fogStyle }).catch((e) => fail(`set_sky fogStyle ${fogStyle}: ${e.message}`));
+    await tool("save_project");
+    if (read("war3map.w3i.json").fog.style !== want) fail(`set_sky fogStyle ${fogStyle} saved fog.style ${read("war3map.w3i.json").fog.style}, not ${want}`);
+  }
+  const badStyle = await tool("set_sky", { fogStyle: "6" }).then(() => "not refused", (e) => e.message);
+  if (!/Choices: .*5 = New Exponential 2/.test(badStyle)) fail(`set_sky fogStyle 6 wasn't refused with the six styles: ${badStyle}`);
 
   // Weather: global, then a region's.
   await tool("set_weather", { effect: "RAlr" });
@@ -8873,6 +8881,13 @@ async function typedFieldSave(page, found) {
     // ---- Map Properties: the fog's Start Z, a number field ----
     const w3i = "map/war3map.w3i.json";
     await page.evaluate(`w3.editors.closeAll()`);
+    // A camera zoom of 0 (a new map's) is saved as 1250 in each field, as the World Editor's save with Force camera
+    // zoom unticked (map-info/save.ts); set so here if the map's isn't.
+    const w3iNow = JSON.parse(readFileSync(join(root, w3i), "utf8"));
+    const zoomZero = w3iNow.cameraZoom ? Object.fromEntries(Object.keys(w3iNow.cameraZoom).map((key) => [key, 0])) : null;
+    if (zoomZero && JSON.stringify(w3iNow.cameraZoom) !== JSON.stringify(zoomZero)) {
+      await page.evaluate(`w3.workspace.writeText(${lit(w3i)}, ${lit(JSON.stringify({ ...w3iNow, cameraZoom: zoomZero }, null, 2))})`);
+    }
     await page.evaluate(`w3.editors.open(${lit(w3i)})`);
     await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
     await page.evaluate(`[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Environment")?.click()`);
@@ -8882,10 +8897,15 @@ async function typedFieldSave(page, found) {
     await until("the typed Start Z saved", () => fog() === 1234, 5000).catch(() => fail(`Ctrl+S right after typing 1234 as Start Z saved ${lit(fog())}`));
     await settled(page);
     if (await dirty(w3i)) fail("Ctrl+S right after typing in Map Properties left it unsaved");
+    if (!zoomZero) fail("the smoke map's war3map.w3i has no camera zoom (a new map's is version 39)");
+    else {
+      const zoomSaved = JSON.parse(readFileSync(join(root, w3i), "utf8")).cameraZoom;
+      const want = Object.fromEntries(Object.keys(zoomZero).map((key) => [key, 1250]));
+      if (JSON.stringify(zoomSaved) !== JSON.stringify(want)) fail(`Map Properties saved a camera zoom of 0 as ${lit(zoomSaved)}, the World Editor writes ${lit(want)}`);
+    }
     // A value war3map.w3i can't hold is refused with why, the box shows the value kept, and it is no edit
-    // (map-info/numbers.ts): Start Z past a 32-bit float, the water tint's alpha past a byte (it was cut to 255).
+    // (map-info/numbers.ts): the water tint's alpha past a byte (it was cut to 255). The fog boxes refuse nothing (below).
     for (const [what, expr, typed, said] of [
-      ["Start Z", startZ, "1e39", "Fog start Z must be a number from -3.4e38 to 3.4e38"],
       ["the water tint's alpha", `document.querySelector(".map-info input[data-field=waterTintAlpha]")`, "256", "Water tint alpha must be a whole number from 0 to 255"],
     ]) {
       await k.clearToasts();
@@ -8898,15 +8918,25 @@ async function typedFieldSave(page, found) {
     if (fog() !== 1234) fail(`the refused Start Z changed the saved file: ${lit(fog())}`);
     // Some fields pull a typed value into range as the World Editor does (map-info/numbers.ts INFO_CLAMPS); the box shows
     // the value kept. Which of these fields the open map's file has depends on its layout; at least one must be there.
+    // Typed as the box takes it (its input filter: digits only in zoom and water, letters dropped in the fog boxes,
+    // docs/testing/numeric-limits-measured.md), then left. The fog boxes say nothing: "1e3" is 13, "+7.5" is 0.
     let clamped = 0;
-    for (const [key, typed, want] of [["zoomMax", "99999", "3000"], ["terrainFogMaxOpacity", "12.5", "1"], ["terrainFogLinearStart", "-5", "0"], ["terrainFogHeightStart", "-200000", "-100000"], ["waterMinOpacity", "-5", "5"], ["waterMinOpacity", "99999", "100"]]) {
-      const shown = await page.evaluate(`(() => { const i = document.querySelector(".map-info input[data-field=${key}]"); if (!i) return null; i.value = ${lit(typed)}; i.dispatchEvent(new Event("change", { bubbles: true })); return i.value; })()`);
+    await k.clearToasts();
+    for (const [key, typed, want] of [["zoomMax", "99999", "3000"], ["terrainFogMaxOpacity", "12.5", "1"], ["terrainFogLinearStart", "-5", "0"], ["terrainFogHeightStart", "-200000", "-100000"], ["waterMinOpacity", "-5", "5"], ["waterMinOpacity", "99999", "100"],
+      ["fogDensity", "1e3", "13"], ["terrainFogLinearEnd", "+7.5", "0"], ["terrainFogMaxOpacity", "0.123", "0.12"]]) {
+      const shown = await page.evaluate(`(() => { const i = document.querySelector(".map-info input[data-field=${key}]"); if (!i) return null; i.value = ${lit(typed)}; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); return i.value; })()`);
       if (shown === null) continue;
       clamped++;
       if (shown !== want) fail(`${key} typed as ${typed} in Map Properties shows ${lit(shown)}, the World Editor keeps ${want}`);
     }
     await settled(page);
     if (!clamped) fail("no clamped Map Properties field (zoom, terrain fog, water) in the smoke map's war3map.w3i");
+    const fogToasts = await k.toasts();
+    if (fogToasts) fail(`typing into Map Properties' fog, zoom and water boxes said "${fogToasts}" (the World Editor's boxes take any text)`);
+    // The fog style list holds the World Editor's six (fog.style 0 to 5); Height is picked here and saved below.
+    const styles = await page.evaluate(`(() => { const s = [...document.querySelectorAll(".map-info label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Style")?.querySelector("select"); if (!s) return null; const o = [...s.options].map((x) => x.value + "=" + x.textContent); s.value = "3"; s.dispatchEvent(new Event("change", { bubbles: true })); return o; })()`);
+    const wantStyles = ["0=Linear", "1=Exponential 1", "2=Exponential 2", "3=Height", "4=New Exponential 1", "5=New Exponential 2"];
+    if (JSON.stringify(styles) !== JSON.stringify(wantStyles)) fail(`Map Properties' fog styles: ${lit(styles)}, the World Editor's: ${lit(wantStyles)}`);
     // Draw Fog Over Sky, the terrain fog's sixth word (w3i.json drawOverSky), is a checkbox: ticked and saved, the file
     // holds 1 there and Height Start (the first word) stays as typed above.
     const overSky = await page.evaluate(`(() => { const b = document.querySelector(".map-info input[data-field=terrainFogDrawOverSky]"); if (!b) return null; b.dataset.smoke = "sky"; return b.checked; })()`);
@@ -8919,6 +8949,8 @@ async function typedFieldSave(page, found) {
       await until("Draw Fog Over Sky saved", () => tf()?.drawOverSky === (overSky ? 0 : 1), 5000)
         .catch(() => fail(`Draw fog over sky ticked (was ${overSky}) and saved: terrain fog ${lit(tf())}`));
       if (tf()?.heightStart !== -100000) fail(`Height Start after the checkbox: ${lit(tf())}`);
+      const fogSaved = JSON.parse(readFileSync(join(root, w3i), "utf8")).fog;
+      if (fogSaved?.style !== 3 || fogSaved?.density !== 13) fail(`fog style Height and Density typed 1e3, saved: ${lit(fogSaved)} (want style 3, density 13)`);
       await settled(page);
     }
     // Closing the tab right after typing asks to save what was typed (it closed without asking, dropping it).
