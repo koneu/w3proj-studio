@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { clampInfoNumber, filterInfoTyping, INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
+import { clampInfoNumber, filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingFiltered, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
 import { repoPath } from "../../lib/testhelpers/testutil";
 
 const repoFile = (...parts: string[]): string => readFileSync(repoPath(...parts), "utf8");
@@ -66,6 +66,7 @@ test("every Map Properties number field refuses values past its stored type and 
     assert.notEqual(orig, undefined, `${key} is in the fixture`);
     const before = JSON.stringify(info);
     for (const typed of PAST[f.kind]) {
+      if (typed === "" && infoTypingFiltered(key)) continue; // an empty digits-only box is 0 (tested below)
       const r = setInfoNumber(info, key, typed, player);
       assert.ok("refused" in r, `${f.label}: ${JSON.stringify(typed)} refused`);
       assert.match(r.refused, new RegExp(`^${f.label} must be`));
@@ -167,6 +168,41 @@ test("zoom: box holds 4 characters, 1250..3000, min <= default <= max with every
   typeInto(info, "zoomMax", "3000"); typeInto(info, "zoomMin", "1250"); typeInto(info, "zoomDefault", "1250");
   typeInto(info, "zoomMin", "2999");
   assert.deepEqual(read(info, ...all), [2999, 2999, 3000], "min above the others pushes default and max up");
+});
+
+// we-drive 2026-11-25 (docs/testing/numeric-limits-measured.md): typed into the World Editor's Map Properties, then
+// saved and war3map.w3i read back.
+test("measured: a zoom default typed below Min is Min (Min stays), water Min typed above Max pushes Max up", () => {
+  const info = fixture();
+  info.cameraZoom = { min: 1250, default: 1250, max: 1250 };
+  typeInto(info, "zoomMin", "2000"); typeInto(info, "zoomMax", "2500"); typeInto(info, "zoomDefault", "1500");
+  assert.deepEqual(read(info, "zoomMin", "zoomDefault", "zoomMax"), [2000, 2000, 2500]);
+  typeInto(info, "zoomMin", "1500"); typeInto(info, "zoomMax", "2000"); typeInto(info, "zoomDefault", "2800");
+  assert.deepEqual(read(info, "zoomMin", "zoomDefault", "zoomMax"), [1500, 2000, 2000]);
+  typeInto(info, "zoomDefault", "1800"); typeInto(info, "zoomMin", "1900");
+  assert.deepEqual(read(info, "zoomMin", "zoomDefault", "zoomMax"), [1900, 1900, 2000]);
+  const w = fixture();
+  typeInto(w, "waterMaxOpacity", "50"); typeInto(w, "waterMinOpacity", "80");
+  assert.deepEqual(read(w, "waterMinOpacity", "waterMaxOpacity"), [80, 80]);
+  typeInto(w, "waterMinOpacity", "60"); typeInto(w, "waterMaxOpacity", "30");
+  assert.deepEqual(read(w, "waterMinOpacity", "waterMaxOpacity"), [30, 30]);
+});
+
+test("measured: water and zoom boxes take digits only, and an empty box is 0 pulled into range", () => {
+  const w = fixture();
+  for (const [key, t, want] of [["waterReflectivity", "abc", 0], ["waterEdgeSoftness", "", 0], ["waterEnvironmentMapReflectivity", "1e2", 12],
+    ["waterEmissivity", "-30", 30], ["waterWavesNormalMapStrength", "12.7", 100]] as const) {
+    typeInto(w, key, t);
+    assert.equal(infoNumber(w, key), want, `${key} ${t}`);
+  }
+  const z = fixture();
+  z.cameraZoom = { min: 1500, default: 1800, max: 2000 };
+  typeInto(z, "zoomMax", "abc");
+  assert.deepEqual(read(z, "zoomMin", "zoomDefault", "zoomMax"), [1250, 1250, 1250], "Max typed abc is 1250 and pulls the others down");
+  z.cameraZoom = { min: 1500, default: 1800, max: 2000 };
+  typeInto(z, "zoomMin", "1e3");
+  assert.deepEqual(read(z, "zoomMin", "zoomDefault", "zoomMax"), [1250, 1800, 2000], "1e3 is 13, pulled up to 1250");
+  assert.equal(filterInfoTyping("zoomMin", "+1e3x"), "13");
 });
 
 test("typed clamps leave stored values alone: a map's own value past the limits loads and saves as it is", () => {

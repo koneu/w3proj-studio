@@ -458,7 +458,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const num = (key: InfoNumberKey, opts: { player?: number; then?: () => void } = {}) => {
           const kind = INFO_NUMBERS[key].kind;
           const shown = () => String(infoNumber(info, key, opts.player) ?? "");
-          // A box that drops characters as they are typed ("-", ".") or holds only a few is a text one (a number box
+          // A box that drops characters as they are typed (digits only) or holds only a few is a text one (a number box
           // keeps what is typed until it changes); the others are number boxes.
           const filtered = infoTypingFiltered(key);
           const input = h("input.form-input.form-num", filtered
