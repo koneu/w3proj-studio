@@ -72,7 +72,8 @@ A `"$schema"` key inside one file works too (the codec ignores it), but the app'
   copied so each file stands alone for editors);
 - each schema has its definition's fields (nothing more but older names), the same primitive types, fixed list
   lengths and always-written keys; a control proves this comparison catches a changed schema;
-- the mini-map's files (`tests/fixtures/mini-map`) and samples of what unpack wrote for the other formats pass;
+- the files of the mini-map (`tests/fixtures/mini-map`) and the mini-campaign (`tests/fixtures/mini-campaign`, the
+  campaign info) pass, with a file for every schema, and so do samples of what unpack wrote on real maps;
   broken documents (a missing key, a byte past 255, a version the definition refuses, a float past the 32-bit
   range, a version-dependent key left out, …) fail;
 - in the corpus tier (`W3PROJ_REQUIRE_CORPUS=1`; skipped in the commit tier), every map and campaign of the corpus

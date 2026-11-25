@@ -50,14 +50,15 @@ oracle only proves the code does what the code does.
 |---|---|---|---|
 | Static | compilers, clippy, module boundaries; every tooling script loads (`node --check`) and app-smoke's `--only` map names the same checks as its full run | `npm run check` (`scripts/check-scripts.mjs`), clippy | every commit, CI |
 | Unit | known answers, round trips | `#[test]`, `src/**/*.test.ts` | every commit, CI |
-| System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` | every commit, CI |
-| Hostile input | never panics; what parses still round-trips | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
+| System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` (a file for every format definition and object data kind, except the campaign info) and `tests/fixtures/mini-campaign` (`war3campaign.w3f`, `.imp`, `.w3u`: in a map, campaign info would make it a campaign) | every commit, CI |
+| Hostile input | never panics; what parses still round-trips; the two fixtures hold a file for every format definition (`the_fixtures_hold_a_file_for_every_codec`) | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
 | Hostile input, app | damaged files neither hang the app nor use up its memory, under a watchdog that kills a stuck parser | `app/src/lib/hostile.test.ts`, `app/scripts/hostile-seeds.mjs` | every commit (made-up files), corpus tier (the game's files) |
-| JSON Schemas | each schema in `docs/schemas` names its format definition's fields and types; the mini-map (commit tier) and every corpus map's unpacked files (corpus tier) pass, broken samples fail | `app/src/lib/formats/schemas.test.ts` (Ajv) | every commit, corpus tier |
+| JSON Schemas | each schema in `docs/schemas` names its format definition's fields and types; the mini-map and mini-campaign, a file for every schema (commit tier) and every corpus map's unpacked files (corpus tier) pass, broken samples fail | `app/src/lib/formats/schemas.test.ts` (Ajv) | every commit, corpus tier |
 | Random maps | the JASS and Lua checkers on every generated script | `app/src/lib/script/random-maps.test.ts` | every commit, CI |
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
 | Real app | the map it packs is the CLI's, byte for byte; nothing changes without an edit | `app/scripts/app-smoke.mjs` | locally, before merging |
 | Corpus | real maps, and the baseline of which codec reads what; a map's whole ground through a fragment gives the same file | `w3proj verify`, `twin-check.mjs` | locally, before merging |
+| String tables on real maps | `wts.ts` against a frozen older reading of every corpus and game `.wts` (6,393 files): untouched tables give their bytes back, edits move no other string | `app/scripts/wts-corpus.mjs`, by hand, **not in the gate**: its verdict predates the rule that a `}` inside a text ends it (`wts.test.ts`), so 33 files (`_Locales/jaJP` copies) are reported BAD by design; it takes 2.5 min and 4 GB on a fresh extract. it can join the corpus tier once its verdict allows a cut at an inline `}` | by hand |
 | Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
 | The real thing | the game and World Editor | the release checklist below | by hand, before a release |
 
