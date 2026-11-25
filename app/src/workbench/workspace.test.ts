@@ -21,6 +21,11 @@ const landLater = new Map<string, Promise<void>>();
 const statFails = new Set<string>();
 /** Entries whose listing lags: the directory shows these values, the file itself has the true ones. */
 const listingLag = new Map<string, { size: number; modified: number }>();
+/** Writes (by text) that change other files besides (a split terrain's flat file written into its subterrain files,
+ *  backend flatview.rs): those land with it, each with the size given, and come back in the answer's `also`. */
+const alsoWrites = new Map<string, { path: string; size: number }[]>();
+/** While set, a trigger save (`triggers_write`) waits for it before its files land. */
+let triggersGate: Promise<void> | null = null;
 /** A write lands: the file has this size, and a time that follows from it. */
 const land = (path: string, size: number) => {
   const p = path.replace(/\\/g, "/");
@@ -38,6 +43,8 @@ const reset = () => {
   landLater.clear();
   statFails.clear();
   listingLag.clear();
+  alsoWrites.clear();
+  triggersGate = null;
   backend.set(A, [{ path: "war3map.j", size: 1, modified: 1 }]);
   backend.set(B, [{ path: "other.txt", size: 1, modified: 1 }]);
   calls.projectFiles = 0;
@@ -78,11 +85,22 @@ g.__TAURI_INTERNALS__ = {
         const later = landLater.get(String(args.text));
         if (later) await later;
         const landed = land(String(args.path), String(args.text).length);
+        const also = (alsoWrites.get(String(args.text)) ?? []).map((a) => ({ path: a.path, ...land(a.path, a.size) }));
         // backend::stamp_or_unknown: the file is written, its size and time couldn't be read back.
-        const stamp = statFails.has(String(args.text)) ? { size: 0, modified: 0, unknown: true } : landed;
+        const stamp = statFails.has(String(args.text)) ? { size: 0, modified: 0, unknown: true } : { ...landed, also };
         const hold = holds.get(String(args.text));
         if (hold) await hold; // the write has landed, its answer comes late
         return stamp;
+      }
+      case "triggers_write": {
+        // The stand-in's save names its files and texts (project paths): each lands, all in `also` (backend triggers.rs).
+        const files = (args.save as { write: [string, string][] }).write;
+        if (triggersGate) await triggersGate;
+        const also = files.map(([p, text]) => {
+          const path = `${String(args.root)}\\${p.replace(/\//g, "\\")}`;
+          return { path, ...land(path, text.length) };
+        });
+        return { also, written: files.map(([p]) => p), deleted: [], files: [], headerFile: null };
       }
       case "codec_write": return land(`${String(args.root)}/${String(args.path)}`, String(args.text).length);
       case "fs_write_bytes": return land(decodeURIComponent(options!.headers!.path), (args as unknown as Uint8Array).length);
@@ -500,6 +518,78 @@ test("overlapping writes to one file reach the disk in the order they started: t
   assert.equal((await ws.externalChanges()).size, 0, "no spurious change");
   outside("war3map.j", 7, 777);
   assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"], "a change after both is still seen (control)");
+});
+
+test("write groups: a map folder's trigger layout, split terrain and derived files each queue together, per map folder; other files alone", async () => {
+  const { writeGroup } = await import("./workspace");
+  const g = (k: string) => writeGroup(k);
+  assert.equal(g("map/triggers/a.j"), g("map/Triggers/Map/triggers/b.txt"), "a trigger folder named map is in the root's layout");
+  assert.equal(g("map/terrain/ne/terrain.txt"), g("map/war3mapUnits.doo.json"));
+  assert.equal(g("map/war3map.w3e.txt"), g(".w3proj/pathing.json"));
+  assert.equal(g("map/war3map.wpm"), g(".w3proj/derived/war3map.wpm"));
+  assert.equal(g("maps/c1/map/war3map.j"), g("maps/c1/.w3proj/derived/war3map.j"));
+  assert.notEqual(g("maps/c1/map/terrain/a/terrain.txt"), g("map/terrain/a/terrain.txt"), "another chapter's own group");
+  assert.notEqual(g("map/triggers/a.j"), g("map/terrain/a/terrain.txt"));
+  for (const k of ["war3map.j", "map/war3map.w3i", "map/war3map.w3e", "map/terrainx/a", "map/war3map.w3e.txt.bak"]) assert.equal(g(k), null, k);
+});
+
+const TRIGGER_FILE = "map/triggers/Melee/init.j";
+const sizeOf = (path: string) => backend.get(A)!.find((x) => x.path === path)?.size;
+
+test("a write of a trigger file that starts while a trigger save runs lands after it: its bytes stay, nothing is reported", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  let release!: () => void;
+  triggersGate = new Promise<void>((r) => { release = r; });
+  const saving = ws.writeTriggers({ write: [[TRIGGER_FILE, "from the trigger save"]] } as never); // held before its files land
+  await settle();
+  const writing = ws.writeText(TRIGGER_FILE, "BB"); // started later: must not land first
+  await settle();
+  release();
+  await Promise.all([saving, writing]);
+  assert.equal(sizeOf(TRIGGER_FILE), 2, "the disk has the write that started last");
+  assert.equal((await ws.externalChanges()).size, 0, "no spurious change");
+  outside(TRIGGER_FILE, 7, 777);
+  assert.deepEqual([...(await ws.externalChanges())], [ws.key(TRIGGER_FILE)], "a change after both is still seen (control)");
+});
+
+test("a trigger save that starts while a write of one of its files runs lands after it", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  let release!: () => void;
+  landLater.set("A", new Promise<void>((r) => { release = r; }));
+  const writing = ws.writeText(TRIGGER_FILE, "A"); // held before it reaches the disk
+  await settle();
+  const saving = ws.writeTriggers({ write: [[TRIGGER_FILE, "from the trigger save"]] } as never);
+  await settle();
+  release();
+  await Promise.all([saving, writing]);
+  assert.equal(sizeOf(TRIGGER_FILE), "from the trigger save".length, "the disk has the save that started last");
+  assert.equal((await ws.externalChanges()).size, 0, "no spurious change");
+});
+
+test("split terrain: a write of a subterrain file that starts while a flat file's write into it runs lands after it", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  const SUB = "map/terrain/ne/terrain.txt";
+  backend.get(A)!.push({ path: SUB, size: 1, modified: 1 }, { path: "map/war3map.w3e.txt", size: 1, modified: 1 });
+  await ws.refresh();
+  let release!: () => void;
+  landLater.set("flat", new Promise<void>((r) => { release = r; }));
+  alsoWrites.set("flat", [{ path: `${A}\\map\\terrain\\ne\\terrain.txt`, size: 9 }]);
+  const flat = ws.writeText("map/war3map.w3e.txt", "flat"); // goes into the subterrain's file (backend write_flat)
+  await settle();
+  const sub = ws.writeText(SUB, "sub"); // started later: must not land first
+  await settle();
+  release();
+  await Promise.all([flat, sub]);
+  assert.equal(sizeOf(SUB), 3, "the disk has the write that started last");
+  assert.equal((await ws.externalChanges()).size, 0, "no spurious change");
+  outside(SUB, 7, 777);
+  assert.deepEqual([...(await ws.externalChanges())], [ws.key(SUB)], "a change after both is still seen (control)");
 });
 
 test("a write that landed but whose stamp couldn't be read back succeeds, keeps the file listed, and the next check re-reads it quietly", async () => {
