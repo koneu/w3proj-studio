@@ -154,6 +154,16 @@ test("NOT DONE: the first adds a note, the second moves the item", () => {
   assert.match(b.files.get("user.md"), /prove beta/);
 });
 
+test("a milestone entry counts as work, and NOT DONE never moves it out", () => {
+  const files = new Map([["milestone.md", "# m\n\n## A\n- [ ] M1. build it (not done: no time, 2026-11-10)\n- [ ] [game] M2. play it\n"]]);
+  const points = parsePoints(files.get("milestone.md"), "milestone.md");
+  assert.deepEqual(points.map(lineOf), ["build", "user"]);
+  assert.equal(countsOf(points).byFile["milestone.md"], 2);
+  const r = applyVerdicts(files, [{ id: points[0].id, verdict: "NOT DONE", text: "still no" }], "2026-11-14");
+  assert.deepEqual([...r.files.keys()], ["milestone.md"]);
+  assert.match(r.files.get("milestone.md"), /M1\. build it .*\(not done: still no, 2026-11-14\)/);
+});
+
 test("unknown, duplicate and incomplete verdicts change nothing", () => {
   const known = id("bugs.md", "bug two");
   const r = applyVerdicts(maps(FIXTURE), [
