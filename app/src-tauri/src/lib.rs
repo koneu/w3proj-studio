@@ -176,7 +176,7 @@ fn project_create(dir: String, name: String, flags: u32, max_players: u32, campa
     // Campaigns have no map header; maps saved by World Editor 3.0.1 don't either (`header: false`).
     let with_header = !campaign.unwrap_or(false) && header.unwrap_or(true);
     let header = with_header.then_some(w3proj::header::MapHeader { name, flags, max_players, unknown: 0 });
-    w3proj::create(Path::new(&dir), header).map_err(err)
+    w3proj::project::create_as(Path::new(&dir), header, campaign.unwrap_or(false)).map_err(err)
 }
 
 #[tauri::command]

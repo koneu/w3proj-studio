@@ -178,7 +178,7 @@ pub fn resolve_empty_v8_skin_ids(
 
 /// Whether something is at `path`. A path that can't be checked (a folder above it may not be looked
 /// into) is an error, never "not there": what is taken for absent gets created or written over.
-fn there(path: &Path) -> Result<bool> {
+pub(crate) fn there(path: &Path) -> Result<bool> {
     path.try_exists()
         .map_err(|e| Error::Project(format!("{} can't be checked: {e}", path.display())))
 }
@@ -1091,6 +1091,10 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
             crate::derived::ensure_ignored(project)?;
         }
     }
+    // The agent file sits next to .gitignore: written when absent, never rewritten (`agent_file`).
+    if top {
+        crate::agent_file::ensure(project, crate::agent_file::Kind::of(project)?)?;
+    }
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
     crate::derived::record_now(project)?;
     // A generated script lives in the store, not in git, and follows the map's files as Studio wrote it; a kept one is
@@ -1242,10 +1246,18 @@ fn absolute(p: &Path) -> PathBuf {
 /// (`.w3n` archives have no map header). The files are written by the caller.
 /// Fails if the directory exists and isn't empty.
 pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
+    let campaign = header.is_none();
+    create_as(project, header, campaign)
+}
+
+/// `create`, with `campaign` said outright: a map saved by World Editor 3.0.1 has no header either, but is no
+/// campaign (the agent file describes the layout of the kind).
+pub fn create_as(project: &Path, header: Option<MapHeader>, campaign: bool) -> Result<()> {
     if there(project)? && fs::read_dir(project)?.next().is_some() {
         return Err(Error::Project(format!("{} is not empty", project.display())));
     }
     fs::create_dir_all(project.join(MAP_DIR))?;
+    let kind = if campaign { crate::agent_file::Kind::Campaign } else { crate::agent_file::Kind::Flat };
     let manifest = Manifest {
         format: FORMAT_VERSION,
         map: header,
@@ -1256,6 +1268,7 @@ pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
     for (name, text) in [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)] {
         write_atomic(&project.join(name), text.as_bytes())?;
     }
+    crate::agent_file::ensure(project, kind)?;
     Ok(())
 }
 
