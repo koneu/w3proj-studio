@@ -3177,10 +3177,13 @@ async function triggerParamColorTools(page, found) {
     await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
     const shown = await page.evaluate(`(() => { const p = ${root}.querySelector(".color-tools-preview"); return { hidden: p.hidden, text: p.textContent }; })()`);
     if (shown.hidden || shown.text !== "Hello world") fail(`preview ${lit(shown)}`);
+    // Line break puts |n (the form a script string holds), not a real line break.
+    await page.evaluate(`(() => { const e = ${root}.querySelector("input.picker-search"); e.focus(); e.setSelectionRange(0, 0); e.dispatchEvent(new Event("select")); })()`);
+    await page.evaluate(`[...${root}.querySelectorAll(".color-tools-button")].find((x) => x.textContent === "Line break").click()`);
     await page.evaluate(`document.querySelector(".trig-dialog-body .primary").click()`);
     await until("the dialog closed", () => page.evaluate(`window.__colorResult !== undefined`), 20000);
     const got = await page.evaluate(`window.__colorResult?.value ?? null`);
-    if (got !== "Hello |cffFF0303world|r") fail(`the dialog returned ${lit(got)}`);
+    if (got !== "|nHello |cffFF0303world|r") fail(`the dialog returned ${lit(got)}`);
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
 }
 
@@ -8688,6 +8691,55 @@ async function soundEditorKeys(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
   } finally { await restoreWindow(page); }
   } catch (e) { found.push(`sound editor keys: ${e.message}`); }
+}
+
+/** The Sound Editor's speaker name and dialogue text have the colour tools: a colour on the selection is stored as typed
+ *  (|c..|r) in the string table, "Line break" inserts |n, each use is one undo step, and the toolbar's edit commits at once. */
+async function soundEditorColorTools(page, found) {
+  const fail = (what) => found.push(`sound editor colour tools: ${what}`);
+  try {
+    const k = await heightKit(page, "SoundColors");
+    const w3s = "map/war3map.w3s.json", wtsFile = join(k.root, "map", "war3map.wts");
+    const sound = {
+      name: "gg_snd_Colored", file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_Colored", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "Hello world", speakerNameKey: -1, speakerName: "Hello world", unknown1: 0,
+      speakerUnitType: "hfoo", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(async () => { await w3.workspace.writeText(${lit(w3s)}, ${lit(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [sound] }))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.editors.open(${lit(w3s)})`);
+    await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 1`), 20000);
+    await page.evaluate(`document.querySelector("tr.snd-row").click()`);
+    await until("the dialogue fields", () => page.evaluate(`!!document.querySelector("textarea.snd-dialogue-text")`), 10000);
+    const strings = () => new Map([...readFileSync(wtsFile, "utf8").matchAll(/STRING (\d+)\r?\n\{\r?\n([^}]*?)\r?\n\}/g)].map((m) => [Number(m[1]), m[2]]));
+    for (const [sel, label] of [["input.snd-speaker-name", "speaker name"], ["textarea.snd-dialogue-text", "text"]]) {
+      const root = `document.querySelector(${lit(sel)}).closest(".color-tools")`;
+      const value = () => page.evaluate(`document.querySelector(${lit(sel)})?.value ?? null`);
+      if (!(await page.evaluate(`!!${root}`))) { fail(`the ${label} field has no colour tools`); continue; }
+      if ((await value()) !== "Hello world") { fail(`the ${label} shows ${lit(await value())} (control)`); continue; }
+      await page.evaluate(`(() => { const e = document.querySelector(${lit(sel)}); e.focus(); e.setSelectionRange(6, 11); e.dispatchEvent(new Event("select")); })()`);
+      await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
+      await settled(page);
+      if ((await value()) !== "Hello |cffFF0303world|r") { fail(`the ${label} after the colour: ${lit(await value())}`); continue; }
+      // The box is made anew when the keys are; the line break goes in at the start of the new one.
+      await page.evaluate(`(() => { const e = document.querySelector(${lit(sel)}); e.focus(); e.setSelectionRange(0, 0); e.dispatchEvent(new Event("select")); })()`);
+      const brk = await page.evaluate(`(() => { const b = [...${root}.querySelectorAll(".color-tools-button")].find((x) => x.textContent === "Line break"); return b.disabled ? null : (b.click(), true); })()`);
+      await settled(page);
+      if (brk !== true || (await value()) !== "|nHello |cffFF0303world|r") { fail(`the ${label} after Line break: ${lit(await value())} (${lit(brk)})`); continue; }
+    }
+    await page.evaluate(`w3.editors.saveAll()`);
+    await until("saved", async () => (await page.evaluate(`w3.editors.unsavedPaths().length`)) === 0, 15000).catch(() => fail("still unsaved after the save"));
+    await settled(page);
+    const saved = [...strings().values()];
+    if (saved.filter((s) => s === "|nHello |cffFF0303world|r").length !== 2) fail(`war3map.wts holds ${lit(saved)}, not the typed |c..|r form twice`);
+    // One undo step per use: the line break first, then the colour.
+    const text = () => page.evaluate(`document.querySelector("textarea.snd-dialogue-text")?.value ?? null`);
+    await page.evaluate(`document.querySelector("textarea.snd-dialogue-text").dispatchEvent(new Event("blur"))`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await settled(page);
+    if ((await text()) !== "Hello |cffFF0303world|r") fail(`one undo left the text ${lit(await text())}, not without the line break`);
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
 /** Ctrl+S with the cursor still in a field of an editor that takes a field's text when the field is left (its `change`
@@ -17759,6 +17811,7 @@ async function run() {
         shadowLeftOut,
         shadowTextureOrder,
         shouldHaves,
+        soundEditorColorTools,
         soundEditorKeys,
         soundNumbersRefused,
         specialDoodads,
@@ -18121,6 +18174,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "byHand", found);
   await soundEditorKeys(page, found).catch((e) => found.push(`sound editor keys: ${e.message}`));
   await leftOpen(page, "soundEditorKeys", found);
+  await soundEditorColorTools(page, found).catch((e) => found.push(`sound editor colour tools: ${e.message}`));
+  await leftOpen(page, "soundEditorColorTools", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
   await aiNumbersRefused(page, found);
