@@ -4,8 +4,8 @@ import { soundDurationMs } from "../../lib/audio/duration";
 import { soundVariants } from "../../lib/audio/variants";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { readWts, StringTable } from "../../lib/formats/wts";
-import { isScriptInput, KEPT_SCRIPT_WORDS, lostFunctions, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash, staleScriptReason,
-  type ScriptState } from "../../lib/script/guard";
+import { isScriptInput, KEPT_SCRIPT_WORDS, lostFunctions, readScriptFile, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash, staleScriptReason,
+  type ScriptState, writeScriptFile } from "../../lib/script/guard";
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -216,7 +216,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // regenerated (the uncompiled text would break the map).
     const textList = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")];
     const texts = textList.join("\n");
-    const current = await w3.workspace.readText(path).catch(() => "");
+    const current = await readScriptFile(w3.workspace, path).catch(() => "");
     // `held`: the script before any language compiles it (ScriptLanguagesService.source).
     const language = info.scriptType === 1 || held ? undefined : languages.find((l) => l.detect({ texts: textList, script: current }));
     // Lua maps have no vJASS: their texts are Lua (FOE's has lines that read as vJASS, e.g. "module" tables).
@@ -301,8 +301,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  unreadable file each keep their own). `campaign`: a chapter map's campaign project. */
   const soundDurations = async (soundFiles: string[], path: string, campaign?: string): Promise<(file: string, name: string) => number | undefined> => {
     const measured = new Map<string, number>();
-    const script = await w3.workspace.readText(path).catch(() => null);
-    const old = scriptSoundDurations(script ?? "");
+    const script = await readScriptFile(w3.workspace, path).catch(() => null);
+    const old =scriptSoundDurations(script ?? "");
     /** The first of `variants` that `read` finds. */
     const first = async (variants: string[], read: (v: string) => Promise<Uint8Array | null>): Promise<Uint8Array | null> => {
       for (const v of variants) {
@@ -373,9 +373,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let running: Promise<boolean> = Promise.resolve(true);
   /** Projects already told that their vJASS script isn't regenerated. */
   const warned = new Set<string>();
-  /** The script's text; null when there is none, undefined when it's there but can't be read (not taken for none). */
+  /** The script's text (readScriptFile: any encoding); null when there is none, undefined when it's there but can't be
+   *  read (not taken for none). */
   const readScript = (path: string): Promise<string | null | undefined> =>
-    w3.workspace.readText(path).then((t) => t, (e) => (isNotFoundError(e) ? null : undefined));
+    readScriptFile(w3.workspace, path).then((t) => t, (e) => (isNotFoundError(e) ? null : undefined));
   /** No tracked map script at all: neither war3map.j nor war3map.lua is in map/ (one that is there but can't be read
    *  counts as there). */
   const noTrackedScript = async () => (await Promise.all(SCRIPT_FILES.map(readScript))).every((t) => t === null);
@@ -490,7 +491,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         // Forced over a script that would have been kept: said, naming the file and what of it is gone.
         const before = force && !generated && current !== null ? scriptDecision(current, text, stamp) : null;
-        await w3.workspace.writeText(path, text);
+        // Strings from a file in an old code page go back as their own bytes (writeScriptFile).
+        await writeScriptFile(w3.workspace, path, text);
         await w3.workspace.writeText(STAMP, `${scriptHash(text)}
 `);
         await dropOther();
@@ -553,7 +555,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!root || !w3.settings.get<boolean>("script.generateOnSave")) return true;
         const stamp = (await w3.workspace.readText(STAMP).catch(() => null))?.trim();
         for (const p of SCRIPT_FILES) {
-          const t = await w3.workspace.readText(p).catch(() => null);
+          const t = await readScriptFile(w3.workspace, p).catch(() => null);
           if (t !== null && stamp === scriptHash(t)) return true;
         }
         const { path, text, vjass, deferred } = await generate(true, undefined, { compile: false });
@@ -607,7 +609,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const stamp = (await w3.workspace.readText(STAMP).catch(() => null))?.trim();
       let ours = false;
       for (const p of SCRIPT_FILES) {
-        const t = await w3.workspace.readText(p).catch(() => null);
+        const t = await readScriptFile(w3.workspace, p).catch(() => null);
         if (t !== null && stamp === scriptHash(t)) ours = true;
       }
       if (ours && w3.workspace.project()?.root === root) await write("opened (a chapter of a campaign)", false, root, { compile: false });
@@ -672,9 +674,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       requireProject(w3);
       clearTimeout(timer);
       const built = await write("build_script");
-      const lua = await w3.workspace.readText("map/war3map.lua").catch(() => null);
+      const lua = await readScriptFile(w3.workspace, "map/war3map.lua").catch(() => null);
       const path = lua !== null ? "map/war3map.lua" : "map/war3map.j";
-      const text = lua ?? await w3.workspace.readText(path);
+      const text = lua ?? await readScriptFile(w3.workspace, path);
       const found = lua !== null ? checkLua(text).map((d) => ({ ...d, severity: "error" })) : checkJass(text, await gameJassEnv((p) => w3.game.readText(p)));
       return {
         // Not rebuilt: what's checked is the old script, so it can't say anything about the latest change.

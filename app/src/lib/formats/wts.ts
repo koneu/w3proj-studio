@@ -29,15 +29,20 @@ export function writeWts<T>(io: { writeBytes(path: string, bytes: Uint8Array): P
   return io.writeBytes(path, wtsBytes(text));
 }
 
-/** Any text file of a project, a string table read with `readWts` (for what edits any file: the MCP edit log). */
+/** Files read as lossless text: string tables, and the map script, which holds their strings (lib/script/guard
+ *  readScriptFile). */
+const isLosslessPath = (path: string): boolean => isWtsPath(path) || /(^|[\\/])war3map\.(j|lua)$/i.test(path);
+
+/** Any text file of a project, a string table or the map script read as `readWts` reads (for what edits any file: the
+ *  MCP edit log). */
 export function readTextFile(io: { readText(path: string): Promise<string>; readBytes(path: string): Promise<Uint8Array> }, path: string): Promise<string> {
-  return isWtsPath(path) ? readWts(io, path) : io.readText(path);
+  return isLosslessPath(path) ? readWts(io, path) : io.readText(path);
 }
 
 /** Writes what `readTextFile` read. */
 export async function writeTextFile(io: { writeText(path: string, text: string): Promise<unknown>; writeBytes(path: string, bytes: Uint8Array): Promise<unknown> },
   path: string, text: string): Promise<void> {
-  await (isWtsPath(path) ? writeWts(io, path, text) : io.writeText(path, text));
+  await (isLosslessPath(path) ? writeWts(io, path, text) : io.writeText(path, text));
 }
 
 /** A header `STRING <digits> [// …\n]* {` + `\r*\n`: where it starts, where its digits are, its number, where its

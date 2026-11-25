@@ -479,3 +479,20 @@ test("readTextFile reads a string table as lossless text and any other file as U
   await writeTextFile(io, "map/war3map.w3i.json", "{}");
   assert.deepEqual(written, [["map/war3map.wts", [0x61, 0xc7, 0xd1]], ["map/war3map.w3i.json", "{}"]]);
 });
+
+test("readTextFile reads the map script as lossless text too, and writeTextFile gives its bytes back", async () => {
+  const io = {
+    readText: async (p: string): Promise<string> => { throw Object.assign(new Error(`${p} is not valid UTF-8`), { name: "NotUtf8Error" }); },
+    readBytes: async () => new Uint8Array([0x61, 0xc7, 0xd1]),
+    writeText: async (p: string, t: string) => { written.push([p, t]); },
+    writeBytes: async (p: string, b: Uint8Array) => { written.push([p, [...b]]); },
+  };
+  const written: [string, unknown][] = [];
+  const text = wtsText(new Uint8Array([0x61, 0xc7, 0xd1]));
+  assert.equal(await readTextFile(io, "map/war3map.j"), text);
+  assert.equal(await readTextFile(io, "map/War3Map.LUA"), text);
+  await writeTextFile(io, "map/war3map.j", text);
+  assert.deepEqual(written, [["map/war3map.j", [0x61, 0xc7, 0xd1]]]);
+  // Control: another file named like it is plain text.
+  await assert.rejects(readTextFile(io, "map/notwar3map.j"), /not valid UTF-8/);
+});

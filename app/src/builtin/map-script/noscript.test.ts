@@ -45,6 +45,7 @@ function project(mode: "kept" | null, extra: Record<string, string | Error> = {}
       readText: read,
       readBytes: async (p: string) => new TextEncoder().encode(await read(p)),
       writeText: async (p: string, t: string) => { written.set(p, t); },
+      writeBytes: async (p: string, b: Uint8Array) => { written.set(p, new TextDecoder().decode(b)); },
       onDidChange: () => none,
       onDidSave: () => none,
       readTriggers: async () => null,

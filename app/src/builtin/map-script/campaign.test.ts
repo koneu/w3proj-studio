@@ -65,6 +65,7 @@ function chapter(campaign: Record<string, string | null>, own: Record<string, st
       readText: read,
       readBytes: async (p: string) => bytes[p] ?? new TextEncoder().encode(await read(p)),
       writeText: async (p: string, t: string) => { written.set(p, t); },
+      writeBytes: async (p: string, b: Uint8Array) => { written.set(p, new TextDecoder().decode(b)); },
       onDidChange: () => none,
       onDidSave: (f: (path: string) => void) => { saved.push(f); return none; },
       // No trigger folders in this chapter.

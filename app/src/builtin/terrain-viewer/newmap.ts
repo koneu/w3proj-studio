@@ -15,7 +15,7 @@ import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel,
 import { meleeFlagsAfter } from "../../lib/terrain/owner";
 import { tilesetFlagAfter } from "../../lib/terrain/tilesetflag";
 import { w3eToText } from "../../lib/terrain/w3etext";
-import { SCRIPT_STAMP, scriptHash } from "../../lib/script/guard";
+import { SCRIPT_STAMP, scriptHash, writeScriptFile } from "../../lib/script/guard";
 import { parseWct, textTriggers } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
@@ -491,7 +491,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await w3.workspace.writeText("map/conversation.json", '{\n    "stringTablePath": "war3map.wts",\n    "conversation": {}\n}');
   await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));
   const script = mapScript(o, t, lights);
-  await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", script);
+  await writeScriptFile(w3.workspace, o.lua ? "map/war3map.lua" : "map/war3map.j", script);
   // Written here, so it's this app's: the generator below replaces it without asking (lib/script/guard).
   await w3.workspace.writeText(SCRIPT_STAMP, `${scriptHash(script)}\n`);
   // What pathing, shadows and the minimap below are made from (w3proj::derived: `w3proj pack` checks it).

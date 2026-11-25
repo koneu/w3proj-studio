@@ -14,6 +14,7 @@ import { toClassicMdx } from "../../lib/model/classic";
 import { checkJass, envFrom } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
 import { ident } from "../../lib/script/names";
+import { readScriptFile } from "../../lib/script/guard";
 import { TRIGGERS_ROOT, type ProjectTriggers } from "../../lib/triggers/project";
 import { lintTexts, placeScriptDiagnostics, type TextDiagnostic, type TriggerText } from "../../lib/triggers/textcheck";
 import { mapScriptJassEnv } from "../../lib/jass/env";
@@ -117,8 +118,9 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
           // A tree that can't be read is Trigger validation's error.
           ? (await shared.triggersAndTexts().catch(() => null))?.layout ?? null : null;
         const texts = layout ? await triggerTexts(w3, layout) : [];
-        const src = await w3.workspace.readText(JASS_SCRIPT).catch(() => null);
-        const luaSrc = src === null ? await w3.workspace.readText(LUA_SCRIPT).catch(() => null) : null;
+        // Any encoding (readScriptFile): an old map's script in its code page is checked, not taken for none.
+        const src = await readScriptFile(w3.workspace, JASS_SCRIPT).catch(() => null);
+        const luaSrc = src === null ? await readScriptFile(w3.workspace, LUA_SCRIPT).catch(() => null) : null;
         const language = layout?.language ?? (src === null && luaSrc !== null ? "lua" : "jass");
         const fileProblem = (d: TextDiagnostic): Problem => ({
           severity: d.severity, message: d.message, location: `${d.path}:${d.line}`, reveal: { command: "w3.text.revealAt", args: [d.path, d.offset] },
