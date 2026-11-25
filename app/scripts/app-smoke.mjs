@@ -7299,6 +7299,43 @@ async function textEditorTabs(page, found) {
   }
 }
 
+/** The text editor's JASS check is against the map's own Scripts\common.j where it ships one: a native only that file
+ *  declares is unknown without it (control) and known with it. Unit tests: lib/jass/env.test.ts. */
+async function textEditorOwnCommon(page, found) {
+  const fail = (what) => found.push(`text editor own common.j: ${what}`);
+  const dir = join(work, "text-own-common");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  const rows = () => page.evaluate(`[...document.querySelectorAll(".cm-diag-row")].map((r) => r.textContent)`);
+  const openAndRead = async () => {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.editors.open("own.j", "w3.textEditor")`);
+    await until("the text editor", () => page.evaluate(`document.querySelector(".cm-content")?.textContent.includes("SmokeOwnNative") ?? false`), 20000);
+    // The check runs after a pause: the rows are final once the list has settled for a moment.
+    await new Promise((r) => setTimeout(r, 2500));
+    return rows();
+  };
+  try {
+    writeFileSync(join(dir, "own.j"), "function SmokeOwn takes nothing returns nothing\n    call SmokeOwnNative()\nendfunction\n");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.workspace.open(${lit(dir)}).then(() => null, (e) => String(e?.message ?? e))`);
+    await page.evaluate(`w3.workspace.filesReady().then(() => null, (e) => String(e))`);
+    const without = await openAndRead();
+    if (!without.some((r) => r.includes("Unknown function SmokeOwnNative"))) return fail(`without the map's own common.j the call isn't unknown (control): ${lit(without)}`);
+    const common = await page.evaluate(`w3.game.readText("Scripts\\\\common.j")`);
+    mkdirSync(join(dir, "map", "Scripts"), { recursive: true });
+    writeFileSync(join(dir, "map", "Scripts", "common.j"), `${common}\r\nnative SmokeOwnNative takes nothing returns nothing\r\n`);
+    await page.evaluate(`w3.workspace.refresh()`);
+    await page.evaluate(`w3.workspace.filesReady().then(() => null, (e) => String(e))`);
+    const withOwn = await openAndRead();
+    if (withOwn.some((r) => r.includes("SmokeOwnNative"))) fail(`with the map's own common.j the call is still reported: ${lit(withOwn)}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await page.evaluate(`w3.workspace.close()`).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** A save that has to sync the players into war3map.w3i (an object was placed) while that file is there but can't be
  *  read is refused as a whole: the message says so, no file of the map changes, the edit stays unsaved. With the file
  *  readable again the same save goes through (control). editdoc.test.ts covers mapDocProblem; this is the save. */
@@ -18256,6 +18293,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
+        textEditorOwnCommon,
         textEditorTabs,
         tileCleanup,
         tilesetUnreadable,
@@ -18713,6 +18751,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "editorUndoStacks", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
   await leftOpen(page, "contextLoss", found);
+  await textEditorOwnCommon(page, found).catch((e) => found.push(`text editor own common.j: ${e.message}`));
+  await leftOpen(page, "textEditorOwnCommon", found);
   await textEditorTabs(page, found).catch((e) => found.push(`text editor Tab keys: ${e.message}`));
   await leftOpen(page, "textEditorTabs", found);
   await playerSyncRefused(page, found).catch((e) => found.push(`player sync refused: ${e.message}`));

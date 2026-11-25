@@ -14,7 +14,7 @@ import { checkLua } from "../../lib/lua/check";
 import { mapLuaNames } from "../../lib/lua/env";
 import { wtsStrayLines } from "../../lib/formats/wts";
 import { luaSymbols } from "../../lib/lua/symbols";
-import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
+import { gameJassEnv, jassSymbols, projectJassEnv } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
 import { linter, lineDiagnostics } from "./lint";
 import { errorView, h } from "../../workbench/dom";
@@ -236,7 +236,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const jass = base ? base === "jass" : /\.j$/i.test(doc.path);
         const problems = h("div.cm-diag-list", { hidden: true });
         const lua = base ? base === "lua" : /\.lua$/i.test(doc.path);
-        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t))
+        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await projectJassEnv(w3), t))
           // Lua names only in a whole map script (war3map.lua): a piece of one may call what the rest defines.
           : lua ? async (t: string) => checkLua(t, /(?:^|\/)war3map\.lua$/i.test(doc.path) ? await mapLuaNames((p) => w3.game.readText(p), []) : null) : undefined;
         const lint = check ? linter(check, problems) : null;
@@ -250,7 +250,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...basics(language(base ? `x.${base === "jass" ? "j" : base}` : doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
               ...(jass ? [symbolTools(async (t) => {
-                const env = await gameJassEnv((p) => w3.game.readText(p));
+                const env = await projectJassEnv(w3);
                 // A claiming language's own declarations, then the game's (no JASS parse of its text).
                 return claim?.symbols ? [...claim.symbols(t), ...jassSymbols(env, "")] : jassSymbols(env, t);
               }, elsewhere(), extraCompletion)] : []),
