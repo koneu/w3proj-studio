@@ -1,5 +1,6 @@
 // The number fields Map Properties types into war3map.w3i, with the type each has there (crates/w3proj/formats/w3i.json).
-// A typed value that type can't hold is refused and the map info stays as it was (user decision 2026-11-15).
+// A typed value that type can't hold is refused and the map info stays as it was (user decision 2026-11-15), except
+// in the boxes whose typing follows the World Editor's (TYPING): they take what the editor's box takes.
 
 import { typedNumber, type StoredNumber } from "../../lib/formats/numbers";
 
@@ -70,7 +71,8 @@ export const INFO_CLAMPS: { readonly [K in InfoNumberKey]?: Clamp } = {
   waterEnvironmentMapReflectivity: WATER_CLAMP,
   waterWavesVertexDisplacement: WATER_CLAMP,
   waterWavesNormalMapStrength: WATER_CLAMP,
-  terrainFogMaxOpacity: { min: 0, max: 1 },
+  // 0.123 is 0.12 (measured 2026-11-25).
+  terrainFogMaxOpacity: { round2: true, min: 0, max: 1 },
   terrainFogLinearStart: FOG_CLAMP,
   terrainFogLinearEnd: FOG_CLAMP,
   terrainFogHeightStart: HEIGHT_CLAMP,
@@ -94,29 +96,51 @@ export function clampInfoNumber(key: InfoNumberKey, v: number): number {
   return v;
 }
 
-/** The text a field's box lets through as it is typed: the water and zoom boxes take digits only (measured: "-5" is 5,
- *  "1e2" is 12, "abc" leaves the box empty; docs/testing/numeric-limits-measured.md) and the zoom boxes hold 4. */
-const TYPING: { readonly [K in InfoNumberKey]?: { readonly digitsOnly: true; readonly maxLength?: number } } = {
-  ...Object.fromEntries(WATER_NUMBERS.filter((k) => INFO_CLAMPS[k]).map((k) => [k, { digitsOnly: true }])),
-  zoomMin: { digitsOnly: true, maxLength: 4 },
-  zoomMax: { digitsOnly: true, maxLength: 4 },
-  zoomDefault: { digitsOnly: true, maxLength: 4 },
+/** The text a field's box lets through as it is typed (docs/testing/numeric-limits-measured.md, 2026-11-25):
+ *  - `digits`: the water and zoom boxes take digits only ("-5" is 5, "1e2" is 12, "abc" leaves the box empty), and the
+ *    zoom boxes hold 4;
+ *  - `decimal`: the fog boxes drop letters but keep the rest ("1e3" is 13, "1.5e2" 1.52, "-5" stays -5; "+5" and
+ *    "+7.5" stay, and are 0: see fogBoxValue). */
+type Typing = { readonly mode: "digits" | "decimal"; readonly maxLength?: number };
+const DECIMAL: Typing = { mode: "decimal" };
+const TYPING: { readonly [K in InfoNumberKey]?: Typing } = {
+  ...Object.fromEntries(WATER_NUMBERS.filter((k) => INFO_CLAMPS[k]).map((k) => [k, { mode: "digits" }])),
+  zoomMin: { mode: "digits", maxLength: 4 },
+  zoomMax: { mode: "digits", maxLength: 4 },
+  zoomDefault: { mode: "digits", maxLength: 4 },
+  // Map Options' terrain fog boxes: Z Start, Z End, Density, Max Opacity, Height Start/End, Linear Start/End.
+  fogStart: DECIMAL,
+  fogEnd: DECIMAL,
+  fogDensity: DECIMAL,
+  terrainFogMaxOpacity: DECIMAL,
+  terrainFogHeightStart: DECIMAL,
+  terrainFogHeightEnd: DECIMAL,
+  terrainFogLinearStart: DECIMAL,
+  terrainFogLinearEnd: DECIMAL,
 };
 
 /** What field `key`'s box holds after `text` was typed into it ("-5" is "5" in a water field, 12345 is 1234 in a zoom
- *  field). Fields with no rule give `text` back. */
+ *  field, "1e3" is "13" in a fog field). Fields with no rule give `text` back. */
 export function filterInfoTyping(key: InfoNumberKey, text: string): string {
   const t = TYPING[key];
   if (!t) return text;
-  let out = text.replace(/[^0-9]/g, "");
+  let out = t.mode === "digits" ? text.replace(/[^0-9]/g, "") : text.replace(/\p{L}/gu, "");
   if (t.maxLength !== undefined) out = out.slice(0, t.maxLength);
   return out;
+}
+
+/** The number a fog box's text is: a plain decimal ("-5", "12.5", ".5", "5.") is itself, anything else (empty, "+5",
+ *  "-", "1.2.3", a space) is 0, as the editor's box showed 0.00 for text, an empty box and "+5" / "+7.5" (measured). */
+function fogBoxValue(text: string): number {
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(text) ? Number(text) + 0 : 0;
 }
 
 /** The text field `key`'s box takes at most (for its maxlength), if limited. */
 export const infoTypingLimit = (key: InfoNumberKey): number | undefined => TYPING[key]?.maxLength;
 /** Whether field `key`'s box is a plain text one (its filter drops characters a number box would keep). */
 export const infoTypingFiltered = (key: InfoNumberKey): boolean => TYPING[key] !== undefined;
+/** Whether field `key`'s box keeps a sign and a decimal point (a fog box): for the keyboard it asks for. */
+export const infoTypingDecimal = (key: InfoNumberKey): boolean => TYPING[key]?.mode === "decimal";
 
 /** Fields the editor keeps in order after an edit: each group lists its fields lowest first; the edited field keeps
  *  its value (within the limits of its neighbours when it is a middle one) and the others are pushed. */
@@ -161,12 +185,15 @@ export function infoNumber(info: object, key: InfoNumberKey, player?: number): n
   return typeof o === "number" ? o : undefined;
 }
 
-/** Sets a typed value into `info`; a value the field's stored type can't hold is refused and `info` stays as it was. */
+/** Sets a typed value into `info`; a value the field's stored type can't hold is refused and `info` stays as it was.
+ *  A fog box refuses nothing: what it holds is a number or 0, pulled into its range (as the editor's). */
 export function setInfoNumber(info: object, key: InfoNumberKey, typed: string, player?: number): { value: number } | { refused: string } {
   const field = INFO_NUMBERS[key];
   // An empty digits-only box is 0 to the editor (then pulled into range: water 0, zoom 1250).
-  if (TYPING[key] && typed === "") typed = "0";
-  const t0 = typedNumber(field.kind, typed, field.label);
+  if (TYPING[key]?.mode === "digits" && typed === "") typed = "0";
+  const t0 = TYPING[key]?.mode === "decimal"
+    ? { value: fogBoxValue(filterInfoTyping(key, typed)) }
+    : typedNumber(field.kind, typed, field.label);
   if ("refused" in t0) return t0;
   const t = { value: clampInfoNumber(key, t0.value) };
   const path = field.path.map((k) => step(k, player));

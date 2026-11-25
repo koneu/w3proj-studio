@@ -977,6 +977,8 @@ test("the 3.0 terrain fog: Height Start and End after the density, Max Opacity, 
   // Sky's as f32) gives the same script.
   const old = { style: 1132068864, overSky: -1023803392, linearStart: 1500, linearEnd: 6000, maxOpacity: 0.75, height: 1e-45 };
   block(mainSection(setup({ fog, terrainFog: old, flags: 0x2000 })));
+  // The other styles pass their number on as it is (New Exponential 1 and 2: 4 and 5).
+  for (const style of [0, 1, 2, 4, 5]) has(mainSection(setup({ fog: { ...fog, style }, terrainFog, flags: 0x2000 })), `    call SetTerrainFogExV( ${style}, 3000.0, 5000.0, 0.500, 250.0, -125.0, 1500.0, 6000.0, 0.753, 0.502, 0.251 )`);
 });
 
 test("placement: custom forces use the map's settings, except from old editors", () => {
