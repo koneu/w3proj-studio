@@ -59,7 +59,7 @@ import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { RebuildJobs } from "./rebuildjob";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { savedUnitsLayout } from "../../lib/terrain/tftflag";
-import { afterPlacedEdit } from "./placedsave";
+import { afterPlacedEdit, storedFlags } from "./placedsave";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
 import { editorDooVersion, lightBlocks, UPGRADED_DOO_VERSIONS, type DoodadLights } from "../../lib/terrain/dooversion";
 import { meleeAfterSave, meleeFiles, MINES, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, surroundingsFrom, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
@@ -619,6 +619,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dropped = dropFallenSpecials(parsed, terrain, (id) => sizes.get(id), partialNow ? (i) => partialNow.corners[i] === OPEN_CORNER : undefined).length;
           specialsRemoved += dropped;
         }
+        // Units that followed the ground are written in the layout of flag 0x4000, as the terrain view's save writes them.
+        if (key === "units" && count) savedUnitsLayout(parsed, await storedFlags(read));
         if (count || dropped) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
       }
       return files;

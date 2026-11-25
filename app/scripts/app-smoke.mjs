@@ -543,7 +543,8 @@ async function terrainWiring(page, found) {
 
 /** place_objects on a new map: a dry run refuses the overlaps among its own objects that the real run refuses,
  *  and the placing itself takes the Melee flag off (not the map script's regeneration a moment after a save,
- *  which is off here, as it is with script.generateOnSave unset or a project closed right after). */
+ *  which is off here, as it is with script.generateOnSave unset or a project closed right after). A placed tavern sets
+ *  flag 0x4000, and the units file gets subversion 11 in the same edit, as the terrain view's save writes it. */
 async function placeObjects(page, found) {
   try {
   const fail = (what) => found.push(`place objects: ${what}`);
@@ -570,6 +571,20 @@ async function placeObjects(page, found) {
     // One undo step takes the unit and the flag back.
     await tool("undo_last_edit");
     if (!(flags() & 4)) fail("undoing the placing didn't make it a melee map again");
+    // A tavern (version 1) sets flag 0x4000 in the placing's edit, and the units file takes the layout the terrain
+    // view's save gives it under that flag (tftflag.ts savedUnitsLayout): subversion 11, also after a save. Without
+    // the flag (the barracks above) it stayed 9.
+    const units = () => JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
+    if (units().subversion !== 9 || flags() & 0x4000) fail(`a new map's units aren't subversion 9 without flag 0x4000 (control): ${units().subversion}, flags ${flags()}`);
+    await tool("place_objects", { objects: [{ id: "ntav", x: -1024, y: -1024, player: 28 }], ignoreRoom: true });
+    if (!(flags() & 0x4000)) fail(`placing a tavern didn't set flag 0x4000 (control): flags ${flags()}`);
+    if (units().subversion !== 11) fail(`place_objects under flag 0x4000 wrote the units as subversion ${units().subversion}, not 11 as the terrain view's save`);
+    if (units().units.some((u) => u.itemTable !== -1 || u.strength !== 0)) fail(`the units under subversion 11 lack the item table -1 and hero attributes 0: ${lit(units().units[0])}`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (units().subversion !== 11) fail(`saving the map after the placing wrote the units as subversion ${units().subversion}`);
+    await tool("undo_last_edit");
+    if (units().subversion !== 9 || flags() & 0x4000) fail(`one undo didn't take the tavern, the flag and the layout back: subversion ${units().subversion}, flags ${flags()}`);
   } finally {
     await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
   }
