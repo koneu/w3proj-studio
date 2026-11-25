@@ -143,6 +143,10 @@ export interface TerrainToolGroupInstance {
   changed?(what: { terrain: boolean; objects: boolean }): void;
   /** Adjusts the generated pathing map (flags per 32×32 cell, rows from the south) before it is shown or saved. */
   filterPathing?(cells: Uint8Array, width: number, height: number): void;
+  /** filterPathing as it is now, unchanged by later edits: taken by a save right before it calls `save`, for the derived
+   *  files it makes afterwards (which can wait behind a rebuild). Without it, the save's derived files use filterPathing
+   *  as it is when they're made. */
+  pathingFilterNow?(): (cells: Uint8Array, width: number, height: number) => void;
   /** A file the group keeps was saved elsewhere: takes it in place. Without this, the editor reopens. */
   reloadFile?(path: string): Promise<boolean>;
   /** The camera objects as the group holds them, unsaved edits included: the Camera Objects layer draws these, not the saved war3map.w3c. */

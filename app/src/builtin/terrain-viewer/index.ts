@@ -4628,11 +4628,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         // ---- tool groups of other extensions ("w3.terrain") --------------------------
         /** wpm bytes (header + cells): applies every group's pathing filter. */
-        const filterPathing = (wpm: Uint8Array) => {
+        const filterWith = (wpm: Uint8Array, filters: Iterable<(cells: Uint8Array, width: number, height: number) => void>) => {
           const v = new DataView(wpm.buffer, wpm.byteOffset);
           const w = v.getUint32(8, true), hgt = v.getUint32(12, true);
-          for (const g of groupInsts.values()) g.filterPathing?.(wpm.subarray(16), w, hgt);
+          for (const f of filters) f(wpm.subarray(16), w, hgt);
         };
+        const filterPathing = (wpm: Uint8Array) =>
+          filterWith(wpm, [...groupInsts.values()].flatMap((g) => g.filterPathing ? [(c: Uint8Array, w: number, h: number) => g.filterPathing!(c, w, h)] : []));
         /** Latest ghost request (older model loads are dropped). */
         let ghostReq = 0;
         /** File each created entry goes to (set by objects.create). */
@@ -6409,18 +6411,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         raf = requestAnimationFrame(tick);
 
+        /** The live state the derived files read besides terrain and doodads, as a save took it. `units` null: no units file. */
+        type DerivedTaken = {
+          units: Placed[] | null;
+          specials: ReturnType<typeof specialsOf>;
+          staleSet: boolean;
+          ctx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null;
+          filterPathing: (wpm: Uint8Array) => void;
+        };
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
-         *  `baseDoodads` are the state the shadows were last updated for. */
-        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take(), unsaved = false) => {
-          const icons = units ?? unitsFile?.list;
+         *  `baseDoodads` are the state the shadows were last updated for. What `taken` leaves out is read live (a
+         *  rebuild); a save passes what it took when it started, so an edit or reload made while it waits behind a
+         *  running rebuild doesn't reach the files it derives (it reaches the next save's). */
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, staleAt: number = minimapStale.take(), unsaved = false, taken: Partial<DerivedTaken> = {}) => {
+          const units = taken.units !== undefined ? taken.units : unitsFile ? unitsFile.list : null;
+          const ctx = taken.ctx !== undefined ? taken.ctx : objCtx;
           await writeDerived(w3, {
             unsaved, partial,
-            now, doodads, specials: specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
-            units: unitsFile && icons ? icons : null,
-            skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
+            now, doodads, specials: taken.specials ?? specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
+            units,
+            skins: ctx?.skins ?? new Map(), baseOf: (id) => ctx?.bases.get(id),
             read: (p) => readFile(w3, doc, p),
-            filterPathing,
-            minimapStale: minimapStale.isSet(),
+            filterPathing: taken.filterPathing ?? filterPathing,
+            minimapStale: taken.staleSet ?? minimapStale.isSet(),
             // Clean only for what the snapshot had: an edit made since keeps it set, and the next save redraws.
             minimapWritten: () => minimapStale.clear(staleAt),
           });
@@ -6527,7 +6540,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             minimapStale.set();
             // With unsaved edits in the editor, what's made has them: not what the files hold.
             const unsaved = mark.isDirty(at);
-            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, undefined, minimapStale.take(), unsaved);
+            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, minimapStale.take(), unsaved);
           },
           minimapSource: exportSource,
           followFlags: async (follow) => {
@@ -6770,6 +6783,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 doodads: dooFile ? structuredClone(dooFile.list) : null,
                 units: unitsFile ? structuredClone(unitsFile.list) : undefined,
                 stale: minimapStale.take(),
+                // What else the derived files are made from, as it is now (updateDerived).
+                staleSet: minimapStale.isSet(),
+                specials: structuredClone(specialsOf(dooFile?.doc)),
+                ctx: objCtx,
               }),
               write: async (t) => {
                 // Placed or removed starts sync the players into war3map.w3i: an unreadable one refuses the whole save
@@ -6818,7 +6835,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (startsAdded.length) void rebuildObjects();
             // The tool groups' files first (the Pathing tool's overrides): in a split project they are map/terrain/*/pathing.txt,
             // sources of the derived files, so the record the derived files' update makes below has to see them written.
+            // Each group's pathing filter is taken as its save takes its files (pathingFilterNow): an override painted
+            // while this save waits behind a rebuild is the next save's, as in its files.
+            const savedFilters: ((cells: Uint8Array, width: number, height: number) => void)[] = [];
             for (const g of groupInsts.values()) {
+              const now = g.pathingFilterNow?.();
+              if (now) savedFilters.push(now);
+              else if (g.filterPathing) savedFilters.push((c, w, h) => g.filterPathing!(c, w, h));
               await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
             // The derived files follow what was written, not what an edit made meanwhile changed.
@@ -6828,7 +6851,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // One that doesn't end in time doesn't hold the save: the files are left as they are, and the state they
             // follow is kept, so the next save updates them from there (the minimap stays due).
             const derived = await rebuilding.runWithin(
-              () => updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units, snap.stale),
+              () => updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.stale, false, {
+                units: snap.units ?? null, specials: snap.specials, staleSet: snap.staleSet, ctx: snap.ctx,
+                filterPathing: (wpm) => filterWith(wpm, savedFilters),
+              }),
               SETTLE_LIMIT,
             );
             if (derived.ran) {

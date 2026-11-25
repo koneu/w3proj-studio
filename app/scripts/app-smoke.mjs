@@ -9998,6 +9998,70 @@ async function derivedSaveQueue(page, found) {
   }
 }
 
+/** A save that waits behind a running rebuild makes its derived files from what it took when it started: a Pathing
+ *  stroke painted during the wait isn't in the save's war3map.wpm (it equals a clean rebuild of the saved files), and
+ *  the next save has it. The rebuild is held at its pathing write until the stroke is in. Controls: the save wrote the
+ *  pathing after the hold, and the stroke changes the pathing. */
+async function derivedSaveTaken(page, found) {
+  const fail = (what) => found.push(`derived save taken: ${what}`);
+  const k = await heightKit(page, "DerivedSaveTaken");
+  const wpm = () => readFileSync(join(k.root, "map", "war3map.wpm"));
+  const same = (a, b) => Buffer.compare(a, b) === 0;
+  try {
+    await k.tool("place_objects", { kind: "doodads", objects: [-512, 0, 512].map((x) => ({ id: "LTbr", x, y: 0 })), ignoreRoom: true });
+    await k.save();
+    // An unsaved edit, so that the save below has the terrain editor to save.
+    const e = await k.run("w3.terrain.replaceDoodads", { from: "LTbr", to: "LOch" });
+    if (e) return fail(`Replace Doodads: ${e}`);
+    await k.tab("Pathing");
+    const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
+    await until("the pathing overlay", async () => /cells overridden/.test(await overridden()), 20000);
+    // Away from the doodads: the stroke blocks open ground.
+    await k.look(0, -600);
+    await page.evaluate(`(() => {
+      const ws = w3Workbench.workspace, S = window.__derivedTaken = { writes: 0, held: false };
+      const o = (S.orig = ws.writeBytes);
+      ws.writeBytes = function (p, ...rest) {
+        if (String(p).toLowerCase() !== "map/war3map.wpm") return o.call(this, p, ...rest);
+        S.writes++;
+        if (S.writes > 1) return o.call(this, p, ...rest);
+        S.held = true;
+        // Held until the check lets it go (a minute at most, so a failed check doesn't hang the app).
+        return new Promise((r) => { S.release = r; setTimeout(r, 60000); }).then(() => o.call(this, p, ...rest));
+      };
+    })()`);
+    try {
+      await page.evaluate(`(() => { const S = window.__derivedTaken; S.rebuild = w3.commands.execute("w3.terrain.rebuildFromFiles").then(() => null, (e) => String(e)); })()`);
+      await until("the rebuild held at its pathing write", () => page.evaluate(`window.__derivedTaken.held`), 30000);
+      await page.evaluate(`(() => { const S = window.__derivedTaken; S.save = w3.editors.saveAll().then(() => null, (e) => String(e)); })()`);
+      // The save's files written: it waits for the rebuild now, with its derived files still to make.
+      await until("the save's files written", async () => !(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)), 30000);
+      await sleep(300);
+      await k.clickMiddle();
+      await until("the stroke's cells", async () => /^[1-9]\d* cells/.test(await overridden()), 10000)
+        .catch(async () => fail(`the stroke made no overrides (${await overridden()})`));
+      if ((await page.evaluate(`window.__derivedTaken.writes`)) > 1) fail("the save wrote the pathing before the held rebuild ended (control)");
+      await page.evaluate(`window.__derivedTaken.release()`);
+      const err = await page.evaluate(`(async () => { const S = window.__derivedTaken; return [await S.rebuild, await S.save].filter(Boolean).join("; ") || null; })()`, { timeout: 120000 });
+      if (err) fail(`the rebuild or the save failed: ${err}`);
+      await settled(page);
+      if ((await page.evaluate(`window.__derivedTaken.writes`)) < 2) fail("the save didn't write the pathing after the rebuild (control)");
+    } finally {
+      await page.evaluate(`(() => { const S = window.__derivedTaken; S?.release?.(); if (S?.orig) w3Workbench.workspace.writeBytes = S.orig; delete window.__derivedTaken; })()`);
+    }
+    const saved = wpm();
+    await page.evaluate(`w3.commands.execute("w3.terrain.rebuildFromFiles")`);
+    await settled(page);
+    if (!same(wpm(), saved)) fail("the save's pathing has the stroke painted while it waited behind the rebuild (a clean rebuild of the saved files differs)");
+    // The next save has the stroke.
+    await k.save();
+    if (same(wpm(), saved)) fail("the next save's pathing doesn't have the stroke");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** `w3proj rebuild` (crates/cli/src/rebuild.rs running src/headless in Node) writes what the app writes. Two copies of
  *  one new map get the same edit made outside the app (a rock and a footman moved in the placement files); then the
  *  app makes the derived files from the saved files (w3.terrain.rebuildFromFiles, Calculate Shadows, Generate Map
@@ -17486,6 +17550,7 @@ async function run() {
         dataSafety,
         derivedAfterDeletes,
         derivedSaveQueue,
+        derivedSaveTaken,
         destructableFlags,
         doodadRulesEdit,
         doodadSnapOnLoad,
@@ -17950,6 +18015,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "derivedAfterDeletes", found);
   await derivedSaveQueue(page, found).catch((e) => found.push(`derived save queue: ${e.message}`));
   await leftOpen(page, "derivedSaveQueue", found);
+  await derivedSaveTaken(page, found).catch((e) => found.push(`derived save taken: ${e.message}`));
+  await leftOpen(page, "derivedSaveTaken", found);
   await rebuildCli(page, found).catch((e) => found.push(`rebuild cli: ${e.message}`));
   await leftOpen(page, "rebuildCli", found);
   await cliCheck(page, found).catch((e) => found.push(`cli check: ${e.message}`));
