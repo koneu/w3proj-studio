@@ -15560,6 +15560,16 @@ async function vjassCheck(page, found) {
     await k.hands.type("//! runtextmacro SmokeNoSuchMacro()");
     const typed = await pressCheck();
     if (!/^JassHelper: Line 6: Unable to find textmacro/.test(typed)) fail(`with a line typed and not saved, the check says: ${typed}`);
+    // The error is also marked on that line in the editor and listed under it, a click on the row going to the line.
+    const marked = await page.evaluate(`({ marks: [...document.querySelectorAll(".trig-code .cm-diag-error")].map((e) => e.closest(".cm-line")?.textContent ?? ""),
+      rows: [...document.querySelectorAll(".trig-code ~ .cm-diag-list .cm-diag-row, .cm-diag-list .cm-diag-row")].map((e) => e.textContent) })`);
+    if (!marked.marks.some((m) => m.includes("SmokeNoSuchMacro"))) fail(`the error line isn't underlined in the editor: ${lit(marked)}`);
+    if (!marked.rows.some((r) => /Ln 6.*Unable to find textmacro/.test(r))) fail(`the error isn't listed under the editor: ${lit(marked)}`);
+    await k.hands.click(".trig-code .cm-line");
+    if ((await page.evaluate(`document.querySelector(".trig-code .cm-activeLine")?.textContent ?? ""`)).includes("SmokeNoSuchMacro")) fail("the cursor didn't leave the error line (control)");
+    await k.hands.click(".cm-diag-list .cm-diag-row");
+    const onLine = await page.evaluate(`document.querySelector(".trig-code .cm-activeLine")?.textContent ?? ""`);
+    if (!onLine.includes("SmokeNoSuchMacro")) fail(`clicking the listed error didn't go to its line: ${lit(onLine)}`);
     if (triggersOnDisk(k.root)?.text.includes("SmokeNoSuchMacro")) fail("the check saved the typed line");
     if (!(await page.evaluate(`w3.editors.isDirty("map/triggers")`))) fail("the typed line isn't an unsaved change (control)");
   } finally {

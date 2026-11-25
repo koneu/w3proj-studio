@@ -26,8 +26,20 @@ const field = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-/** Runs `check` on the text after changes (debounced) and shows its results; `list` gets the summary. */
-export function linter(check: (text: string) => Promise<Diagnostic[]> | Diagnostic[], list: HTMLElement): { extension: Extension; start(view: EditorView): void; stop(): void } {
+/** Whole-line diagnostics from line numbers (from 1); lines outside the text are dropped, empty lines get a mark at their break. */
+export function lineDiagnostics(doc: { lines: number; line(n: number): { from: number; to: number } }, problems: { line: number; message: string; severity?: "error" | "warning" }[]): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  for (const p of problems) {
+    if (!Number.isInteger(p.line) || p.line < 1 || p.line > doc.lines) continue;
+    const l = doc.line(p.line);
+    out.push({ from: l.from, to: Math.max(l.to, l.from + 1), message: p.message, severity: p.severity ?? "error" });
+  }
+  return out;
+}
+
+/** Runs `check` on the text after changes (debounced) and shows its results; `list` gets the summary.
+ *  `show` puts findings of someone else's check (e.g. JassHelper's) in the same markers and list; the next edit clears them. */
+export function linter(check: (text: string) => Promise<Diagnostic[]> | Diagnostic[], list: HTMLElement): { extension: Extension; start(view: EditorView): void; stop(): void; show(view: EditorView, diags: Diagnostic[]): void } {
   let timer: ReturnType<typeof setTimeout> | undefined, run = 0;
   const go = (view: EditorView) => {
     const n = ++run;
@@ -59,5 +71,6 @@ export function linter(check: (text: string) => Promise<Diagnostic[]> | Diagnost
     /** The first check, once the editor exists. */
     start: (view: EditorView) => go(view),
     stop: () => { clearTimeout(timer); run++; },
+    show: (view: EditorView, diags: Diagnostic[]) => { run++; view.dispatch({ effects: setDiagnostics.of(diags) }); render(view, diags); },
   };
 }
