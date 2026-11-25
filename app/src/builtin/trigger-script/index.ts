@@ -9,6 +9,7 @@ import { CODE_EDITOR_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type Tri
 import type { TriggerItem } from "../../lib/triggers/wtg";
 import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv, mapJass, projectJassEnv } from "../../lib/jass/env";
+import { readScriptFile } from "../../lib/script/guard";
 import { checkLua } from "../../lib/lua/check";
 import { mapLuaNames } from "../../lib/lua/env";
 import { luaSymbols } from "../../lib/lua/symbols";
@@ -31,12 +32,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Typing is committed after a pause (one undo step each) without redrawing the editor.
         // JASS is checked against the game's scripts and the map script's declarations
         // (war3map.j as last generated; this trigger's own global may be newer).
-        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null), () => projectJassEnv(w3));
+        const map = mapJass((p) => w3.game.readText(p), readScriptFile(w3.workspace, "map/war3map.j").catch(() => null), () => projectJassEnv(w3));
         const own = `gg_trg_${ident(t.name)}`;
         // Lua names are checked against the game's API, war3map.lua as last generated (without it, e.g. a map
         // never built, names aren't judged: the triggers' functions would be missing) and the custom texts as the
         // editor holds them now (a function another trigger's text has just defined).
-        const luaScript = lua ? w3.workspace.readText("map/war3map.lua").catch(() => null) : null;
+        const luaScript = lua ? readScriptFile(w3.workspace, "map/war3map.lua").catch(() => null) : null;
         const check = !lua ? async (text: string) => {
           const env = await map.without(text);
           if (trigger) env.globals.set(own, { type: "trigger", array: false, constant: false });

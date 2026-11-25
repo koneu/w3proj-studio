@@ -34,6 +34,7 @@ import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass, projectJassEnv } from "../../lib/jass/env";
+import { readScriptFile } from "../../lib/script/guard";
 import { applyExpanded, childrenOf, collapsedOf, dropMode, moveItem, onlyFoldsUnsaved, pasteBlock, subtree, treeStructure, type DropMode } from "./tree";
 import { deleteVariable, nameField, nameFields, newVariable, renameVariable, variableParams, variablesTable, type NameField, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
@@ -1666,7 +1667,7 @@ class TriggerView {
         const box = h("div.trig-code");
         this.detail.replaceChildren(...heading, box);
         // JASS headers are checked like the map script they open (its own functions in order).
-        const map = mapJass((p) => this.w3.game.readText(p), this.w3.workspace.readText("map/war3map.j").catch(() => null), () => projectJassEnv(this.w3));
+        const map = mapJass((p) => this.w3.game.readText(p), readScriptFile(this.w3.workspace, "map/war3map.j").catch(() => null), () => projectJassEnv(this.w3));
         const jass = this.handle.language === "jass";
         const check = jass ? async (text: string) => checkJass(text, await map.without(text)) : undefined;
         const ed = this.code.create(box, {

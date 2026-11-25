@@ -10,6 +10,7 @@ import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type C
   type TriggersService } from "../../extensions/services";
 import type { TriggerItem } from "../../lib/triggers/wtg";
 import { mapJass, projectJassEnv } from "../../lib/jass/env";
+import { readScriptFile } from "../../lib/script/guard";
 import { commonJFor } from "../../lib/jass/owncommon";
 import { readImported } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
@@ -184,7 +185,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const box = h("div.trig-code");
         el.append(box, h("div.trig-gui-toolbar", {}, checkBtn, status), hint);
         // Completion from the map script as last generated (JassHelper's output: libraries' functions too).
-        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null), () => projectJassEnv(w3));
+        const map = mapJass((p) => w3.game.readText(p), readScriptFile(w3.workspace, "map/war3map.j").catch(() => null), () => projectJassEnv(w3));
         const editor = code.create(box, {
           value: ed.customText(t) ?? "", language: "jass", readOnly: !ed.editable,
           // The text's own declarations from the vJASS scanner; other texts' as they are now (saved or not,

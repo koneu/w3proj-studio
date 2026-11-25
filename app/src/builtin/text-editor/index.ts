@@ -12,7 +12,8 @@ import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, ty
 import { checkJass, envWithout } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
 import { mapLuaNames } from "../../lib/lua/env";
-import { wtsStrayLines } from "../../lib/formats/wts";
+import { hasRawBytes } from "../../lib/formats/lossless";
+import { readTextFile, writeTextFile, wtsStrayLines } from "../../lib/formats/wts";
 import { luaSymbols } from "../../lib/lua/symbols";
 import { gameJassEnv, jassSymbols, projectJassEnv } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
@@ -211,9 +212,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.editors.registerProvider("w3.textEditor", {
       async resolve(el, doc) {
+        // A string table or map script in an old code page as lossless text (lib/formats/wts readTextFile): its bytes
+        // that aren't UTF-8 come back as they were on save. Anything else that isn't UTF-8 is binary.
+        const io = { readText: () => doc.readText(), readBytes: () => doc.readBytes(), writeText: (_: string, t: string) => doc.writeText(t), writeBytes: (_: string, b: Uint8Array) => doc.writeBytes(b) };
         let text: string;
         try {
-          text = await doc.readText();
+          text = await readTextFile(io, doc.path);
         } catch (e) {
           if ((e as Error).name === "NotUtf8Error") {
             el.append(errorView("This file is not UTF-8 text.", h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
@@ -222,11 +226,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           throw e;
         }
         const eol = lineEnding(text);
+        const encoding = hasRawBytes(text) ? "UTF-8 + code page bytes" : "UTF-8";
         let saved = text;
         const updateStatus = (view: EditorView) => {
           const pos = view.state.selection.main.head;
           const line = view.state.doc.lineAt(pos);
-          status.text = `Ln ${line.number}, Col ${pos - line.from + 1}  ${eol === "\r\n" ? "CRLF" : eol === "\r" ? "CR" : "LF"}  UTF-8${claim ? `  ${claim.title}` : ""}${doc.readOnly ? "  read-only" : ""}`;
+          status.text = `Ln ${line.number}, Col ${pos - line.from + 1}  ${eol === "\r\n" ? "CRLF" : eol === "\r" ? "CR" : "LF"}  ${encoding}${claim ? `  ${claim.title}` : ""}${doc.readOnly ? "  read-only" : ""}`;
         };
         // A language extension may claim the file (vJASS in a .j file, .vj files): its base language
         // and its checker. Else JASS files are checked against the game's common.j and Blizzard.j
@@ -292,7 +297,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (!(await w3.window.confirm(`${msg} Save anyway?`, "Save Anyway", 120_000))) throw new Error(`Not saved: ${msg}`);
               }
             }
-            await doc.writeText(t);
+            await writeTextFile(io, doc.path, t);
             saved = t;
             // Typed while the question was open or the file was being written: still unsaved.
             doc.setDirty(view.state.sliceDoc() !== saved);

@@ -31,7 +31,7 @@ export function writeWts<T>(io: { writeBytes(path: string, bytes: Uint8Array): P
 
 /** Files read as lossless text: string tables, and the map script, which holds their strings (lib/script/guard
  *  readScriptFile). */
-const isLosslessPath = (path: string): boolean => isWtsPath(path) || /(^|[\\/])war3map\.(j|lua)$/i.test(path);
+export const isLosslessPath = (path: string): boolean => isWtsPath(path) || /(^|[\\/])war3map\.(j|lua)$/i.test(path);
 
 /** Any text file of a project, a string table or the map script read as `readWts` reads (for what edits any file: the
  *  MCP edit log). */

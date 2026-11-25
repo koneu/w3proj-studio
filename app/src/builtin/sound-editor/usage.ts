@@ -7,6 +7,7 @@ import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { textTriggers } from "../../lib/triggers/wtg";
 import { readTriggerFiles, wtgPath } from "../../lib/triggers/project";
+import { readScriptFile } from "../../lib/script/guard";
 import { describeUse, soundUsages, unusedSounds, type SoundUsageInput } from "./sounds";
 
 const SOUNDS_FILE = /^map\/war3map\.w3s(\.json)?$/i;
@@ -35,7 +36,8 @@ export async function readSoundUsageInput(w3: W3Api): Promise<SoundUsageInput> {
     custom.texts.forEach((text, i) => scripts.push({ where: names[i] ? `Custom text of ${names[i]}` : `Custom text ${i + 1}`, text }));
   }
   for (const f of ["map/war3map.j", "map/war3map.lua"]) {
-    if (files.has(f)) scripts.push({ where: f, text: await w3.workspace.readText(f), generated: true });
+    // Any encoding: an old map's script in its code page names its sounds all the same.
+    if (files.has(f)) scripts.push({ where: f, text: await readScriptFile(w3.workspace, f), generated: true });
   }
   const regions = await readMapDocStrict<{ regions?: { name: string; sound?: string }[] }>(w3, "map/war3map.w3r.json");
   return { triggers, scripts, regions: regions?.regions ?? [] };

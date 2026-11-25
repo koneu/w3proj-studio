@@ -3359,6 +3359,92 @@ async function codePageStrings(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** A war3map.j and a war3map.wts in an old map's code page (GBK bytes, not UTF-8) open in the text editor as lossless
+ *  text (lib/formats/wts readTextFile), also at a Problems entry's offset (w3.text.revealAt); a save without a change
+ *  writes the same bytes, an edit keeps every byte it didn't touch, and the source-control diff shows the string table
+ *  as text. A binary file is still refused. */
+async function codePageTextEditor(page, found) {
+  const fail = (what) => found.push(`code page text editor: ${what}`);
+  const dir = join(work, "code-page-text");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  const hands = new Hands(page);
+  const gbk = Buffer.from([0xd6, 0xd0, 0xce, 0xc4]);
+  const lossless = (b) => [...b].map((x) => String.fromCodePoint(0x10ff00 + x)).join("");
+  const scriptFile = join(dir, "map", "war3map.j"), wtsFile = join(dir, "map", "war3map.wts");
+  const orig = readFileSync(scriptFile);
+  const eol = orig.includes("\r\n") ? "\r\n" : "\n";
+  const script = Buffer.concat([orig, Buffer.from("// "), gbk, Buffer.from(`${eol}// smoke marker${eol}`)]);
+  const wts = Buffer.concat([Buffer.from("STRING 1\r\n{\r\n"), gbk, Buffer.from("\r\n}\r\n")]);
+  const same = (file, want, what) => {
+    const got = readFileSync(file);
+    if (!got.equals(want)) fail(`${what}: ${basename(file)} holds ${lit(got.subarray(-40).toString("latin1"))} at its end, not ${lit(want.subarray(-40).toString("latin1"))}`);
+  };
+  const lines = () => page.evaluate(`[...document.querySelectorAll(".cm-content .cm-line")].map((l) => l.textContent)`);
+  const cursor = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEditor.cursor"]')?.textContent ?? ""`);
+  const typeAtEnd = async (text) => {
+    await hands.click(".cm-content");
+    await hands.key("End", "End", 35, 2); // Ctrl+End
+    await hands.type(text);
+  };
+  try {
+    writeFileSync(scriptFile, script);
+    writeFileSync(wtsFile, wts);
+    writeFileSync(join(dir, "blob.txt"), Buffer.from([0x80, 0x00, 0xd6, 0xd0, 0xff]));
+    const env = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(dir) };
+    const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "-c", "core.autocrlf=false", ...args], { cwd: dir, encoding: "utf8", env });
+    if (git("init", "-q").status !== 0 || git("add", "-A").status !== 0 || git("commit", "-q", "-m", "start").status !== 0) return fail("the scratch repository wasn't made");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.workspace.open(${lit(dir)}).then(() => null, (e) => String(e?.message ?? e))`);
+    await page.evaluate(`w3.workspace.filesReady().then(() => null, (e) => String(e))`);
+
+    // The script, at a Problems entry's offset (lines counted with "\n" breaks, as checks.ts gives them).
+    const before = orig.toString("utf8").replace(/\r\n/g, "\n");
+    const markerLine = before.split("\n").length + 1;
+    const at = before.length + `// ${lossless(gbk)}\n`.length + 3;
+    await page.evaluate(`void w3.commands.execute("w3.text.revealAt", "map/war3map.j", ${at})`);
+    if (!(await soon(async () => (await lines()).length > 0 && /^Ln /.test(await cursor()), 20000))) return fail(`war3map.j didn't open in the text editor (the editor shows ${lit((await page.evaluate(`document.querySelector(".editor-area")?.textContent ?? ""`)).slice(0, 200))})`);
+    if (!(await soon(async () => (await cursor()).startsWith(`Ln ${markerLine},`), 5000))) fail(`the Problems offset opened war3map.j at ${lit(await cursor())}, not line ${markerLine}`);
+    if (!(await cursor()).includes("code page")) fail(`the status bar says ${lit(await cursor())}, not that the file holds code page bytes`);
+    if (!(await lines()).includes(`// ${lossless(gbk)}`)) fail("the script's code page line isn't shown as its lossless text");
+    await page.evaluate(`w3.commands.execute("workbench.save")`);
+    await settled(page);
+    same(scriptFile, script, "a save of war3map.j without a change");
+    await typeAtEnd("// typed");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    same(scriptFile, Buffer.concat([script, Buffer.from("// typed")]), "an edit of war3map.j");
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // The string table.
+    await page.evaluate(`void w3.editors.open("map/war3map.wts", "w3.textEditor")`);
+    if (!(await soon(async () => (await lines()).includes(lossless(gbk)), 20000))) return fail(`war3map.wts shows ${lit(await lines())}, not its string as lossless text`);
+    await page.evaluate(`w3.commands.execute("workbench.save")`);
+    await settled(page);
+    same(wtsFile, wts, "a save of war3map.wts without a change");
+    await typeAtEnd("// typed");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    same(wtsFile, Buffer.concat([wts, Buffer.from("// typed")]), "an edit of war3map.wts");
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // The diff against the last commit: text on both sides, one change.
+    await page.evaluate(`void w3.editors.open("w3:diff:map/war3map.wts")`);
+    const head = () => page.evaluate(`document.querySelector(".diff-pane")?.textContent ?? ""`);
+    if (!(await soon(async () => /change|Binary file/.test(await head()), 20000))) fail(`the diff of war3map.wts shows ${lit((await head()).slice(0, 200))}`);
+    else if (!/\b1 change\b/.test(await head())) fail(`the diff of war3map.wts shows ${lit((await head()).slice(0, 200))}, not one change in text`);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // A binary file (not a string table or map script): refused (control).
+    await page.evaluate(`void w3.editors.open("blob.txt", "w3.textEditor")`);
+    if (!(await soon(() => page.evaluate(`document.querySelector(".editor-area")?.textContent.includes("This file is not UTF-8 text.") ?? false`), 20000))) fail("a binary .txt file isn't refused as not UTF-8");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await page.evaluate(`w3.workspace.close()`).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
  *  preview, a plain string's doesn't; the toolbar's colour lands in the value the dialog returns. */
 async function triggerParamColorTools(page, found) {
@@ -18202,6 +18288,7 @@ async function run() {
         cliCheck,
         cliffTypeList,
         codePageStrings,
+        codePageTextEditor,
         configSafety,
         contextLoss,
         dataSafety,
@@ -18555,6 +18642,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectEditorColorTools", found);
   await codePageStrings(page, found).catch((e) => found.push(`code page string table: ${e.message}`));
   await leftOpen(page, "codePageStrings", found);
+  await codePageTextEditor(page, found).catch((e) => found.push(`code page text editor: ${e.message}`));
+  await leftOpen(page, "codePageTextEditor", found);
   await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
   await leftOpen(page, "objectListSuffix", found);
   await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));

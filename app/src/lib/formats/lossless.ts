@@ -23,6 +23,9 @@ function sequence(b: Uint8Array, i: number): [number, number] | null {
   return overlong || (cp >= 0xd800 && cp < 0xe000) || cp > 0x10ffff ? null : [cp, n];
 }
 
+/** Whether a text from `decodeLossless` holds bytes that aren't UTF-8 (an old code page's). */
+export const hasRawBytes = (s: string): boolean => ESCAPES.test(s);
+
 /** Text for any bytes; `encodeLossless` gives exactly these bytes back. */
 export function decodeLossless(bytes: Uint8Array): string {
   try {
