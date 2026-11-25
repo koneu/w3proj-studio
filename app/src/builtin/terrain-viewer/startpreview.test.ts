@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { playerRaces, startBuilding, startPreviewHidden, startPreviewKey, startPreviews } from "./startpreview";
+import { judgedHidden, playerRaces, startBuilding, StartJudge, startPreviewHidden, startPreviewKey, startPreviews, startSpot } from "./startpreview";
 import type { Terrain } from "../../lib/terrain/w3e";
+import type { StartSurroundings } from "../../lib/terrain/meleesave";
+import { NO_BUILD, NO_WALK } from "../../lib/terrain/pathing";
 import type { Placed } from "./objects";
 
 const sloc = (player: number | undefined, x: number, y: number): Placed => ({ id: "sloc", variation: 0, position: [x, y, 16], angle: 1, scale: [1, 1, 1], player });
@@ -116,4 +118,124 @@ test("the key follows the hidden state, so Undo (the start back on dry ground) r
   assert.notEqual(wet, dry);
   assert.equal(keyIn(pond(0)), dry, "back after Undo");
   assert.equal(wet, startPreviewKey([], races), "hidden = no previews");
+});
+
+/** shore()'s 64 x 64 cells as the melee save tests them: all fit for a hall, but `blocked` (cell x, y) not buildable. */
+function cellsWith(blocked: [number, number][]): StartSurroundings {
+  const pathing = new Uint8Array(16 + 64 * 64);
+  for (const [x, y] of blocked) pathing[16 + y * 64 + x] = NO_BUILD;
+  return { pathing };
+}
+
+test("the judged rule hides a start's preview where the melee save calls it invalid (we-drive 2026-11-25)", () => {
+  const races = new Map([[0, 1], [1, 1], [2, 1]]);
+  const t = shore(99, 0);
+  // World 0 is cell 32: the square of a start there is cells 24..39 each way.
+  const shown = (units: Placed[], around: StartSurroundings) => {
+    const judged = judgedHidden(t, units, around);
+    return startPreviews(units, races, (x, y) => startPreviewHidden(t, [], x, y) || judged.has(startSpot(x, y))).map((p) => p.player);
+  };
+  assert.deepEqual(shown([sloc(0, 0, 0)], cellsWith([])), [0], "control: nothing in the square");
+  assert.deepEqual(shown([sloc(0, 0, 0)], cellsWith([[36, 32]])), [], "a tree's (or blocker's, Lrok's, cliff's) cell in the square");
+  assert.deepEqual(shown([sloc(0, 0, 0)], cellsWith([[39, 39]])), [], "its last cell");
+  assert.deepEqual(shown([sloc(0, 0, 0)], cellsWith([[40, 32], [32, 23]])), [0], "cells just past it");
+  // Another start: 488 away hides both, 496 neither (make-start-preview.mjs overlap).
+  assert.deepEqual(shown([sloc(0, -256, 0), sloc(1, 232, 0)], cellsWith([])), [], "488 apart");
+  assert.deepEqual(shown([sloc(0, -256, 0), sloc(1, 240, 0)], cellsWith([])), [0, 1], "496 apart");  // A footman on the start isn't a reason; unknown surroundings (a cell only unwalkable) keep the preview.
+  const footman: Placed = { id: "hfoo", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1], player: 24 };
+  assert.deepEqual(shown([sloc(0, 0, 0), footman], cellsWith([])), [0], "a footman on the start");
+  const unwalkable = cellsWith([]);
+  unwalkable.pathing[16 + 32 * 64 + 34] = NO_WALK;
+  assert.deepEqual(shown([sloc(0, 0, 0)], unwalkable), [0], "unknown: kept");
+  assert.deepEqual(shown([sloc(0, 0, 0)], { pathing: new Uint8Array(16) }), [0], "a pathing map of another size: kept");
+});
+
+/** Timers run by hand: `fire` runs the waiting ones. */
+function handTimers() {
+  let next = 1;
+  const waiting = new Map<number, () => void>();
+  return {
+    timers: { set: (f: () => void) => { waiting.set(next, f); return next++; }, clear: (h: unknown) => { waiting.delete(h as number); } },
+    fire: () => { const fs = [...waiting.values()]; waiting.clear(); for (const f of fs) f(); },
+    get waiting() { return waiting.size; },
+  };
+}
+
+/** A judge whose answers are given by hand, in the order asked. */
+function handJudge() {
+  const asked: ((r: ReadonlySet<string> | null) => void)[] = [];
+  return { judge: () => new Promise<ReadonlySet<string> | null>((res) => asked.push(res)), asked };
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+test("a judged result shows only when nothing changed since it was asked for; the last one stays until then", async () => {
+  const clock = handTimers(), j = handJudge();
+  let results = 0;
+  const judge = new StartJudge(j.judge, () => results++, 300, clock.timers);
+  judge.changed("a");
+  judge.changed("a");
+  assert.equal(clock.waiting, 1, "the same key twice: one judgement");
+  clock.fire();
+  assert.equal(j.asked.length, 1);
+  j.asked[0](new Set([startSpot(0, 0)]));
+  await flush();
+  assert.equal(judge.hiddenAt(0, 0), true, "the result shows");
+  assert.equal(results, 1, "and asks for a frame");
+  // An edit (the tree removed): judged again; meanwhile the last result stays (no flicker).
+  judge.changed("b");
+  assert.equal(judge.hiddenAt(0, 0), true, "kept until the new result");
+  clock.fire();
+  // Another edit while that judgement runs (the tree put back): its result is stale and never shows.
+  judge.changed("c");
+  j.asked[1](new Set());
+  await flush();
+  assert.equal(judge.hiddenAt(0, 0), true, "the stale result (nothing hidden) didn't show");
+  assert.equal(results, 1);
+  clock.fire();
+  assert.equal(j.asked.length, 3);
+  j.asked[2](new Set([startSpot(0, 0), startSpot(512, 0)]));
+  await flush();
+  assert.equal(judge.hiddenAt(512, 0), true, "the newest result shows");
+  assert.equal(results, 2);
+  // Can't tell (no game): nothing hidden by it.
+  judge.changed("d");
+  clock.fire();
+  j.asked[3](null);
+  await flush();
+  assert.equal(judge.hiddenAt(0, 0), false);
+  assert.equal(results, 3);
+});
+
+test("a change whose timer fires while a judgement runs is judged right after it; nothing lands after dispose", async () => {
+  const clock = handTimers(), j = handJudge();
+  const judge = new StartJudge(j.judge, () => {}, 300, clock.timers);
+  judge.changed("a");
+  clock.fire();
+  judge.changed("b");
+  clock.fire();
+  assert.equal(j.asked.length, 1, "one at a time");
+  j.asked[0](new Set([startSpot(1, 1)]));
+  await flush();
+  assert.equal(judge.hiddenAt(1, 1), false, "stale");
+  assert.equal(j.asked.length, 2, "judged again at once");
+  j.asked[1](new Set([startSpot(2, 2)]));
+  await flush();
+  assert.equal(judge.hiddenAt(2, 2), true);
+  // A judgement that throws counts as can't tell.
+  const failing = new StartJudge(async () => { throw new Error("EIO"); }, () => {}, 300, clock.timers);
+  failing.changed("a");
+  clock.fire();
+  await flush();
+  assert.equal(failing.hiddenAt(2, 2), false);
+  // Disposed while it runs: the result is dropped, no timer is left.
+  judge.changed("c");
+  clock.fire();
+  judge.changed("d");
+  judge.dispose();
+  assert.equal(clock.waiting, 0, "the timer is gone");
+  j.asked[2](new Set([startSpot(3, 3)]));
+  await flush();
+  assert.equal(judge.hiddenAt(3, 3), false);
+  assert.equal(j.asked.length, 3);
 });

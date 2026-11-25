@@ -3984,6 +3984,24 @@ async function startPreviewFollow(page, found) {
     if (await near(was[0], was[1])) fail("a preview stayed at the old place");
     await k.tool("undo_last_edit");
     await until("the preview back after undo", () => near(was[0], was[1]), 10000).catch(async () => fail(`undo didn't move the preview back to ${was.slice(0, 2)}: ${lit(await drawn())}, start now ${lit(await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.filter((u) => u.id === "sloc").map((u) => u.position))()`))}`));
+    // A tree, then a pathing blocker in the town hall's square: the preview goes, as where the World Editor's melee save
+    // calls the start invalid (judged on the game's pathing textures, after the edit); undo brings it back
+    // (make-start-preview.mjs ground: a tree 192 away and YTpb 192 away hid it, a tree 384 away didn't).
+    for (const [id, dx] of [["LTlt", 192], ["YTpb", 192], ["LTlt", 384]]) {
+      await k.tool("place_objects", { objects: [{ id, x: was[0] + dx, y: was[1] }], ignoreRoom: true });
+      if (dx < 300) {
+        // The first judgement reads the game's tables and pathing textures, behind the models still loading: cold, slow.
+        await until(`no preview with ${id} ${dx} from the start`, async () => !(await near(was[0], was[1])), 30000)
+          .catch(async () => fail(`${id} ${dx} east of the start left the preview: ${lit(await drawn())}`));
+      } else {
+        await settled(page);
+        await sleep(1500);
+        if (!(await near(was[0], was[1]))) fail(`${id} ${dx} east of the start (outside its square) hid the preview`);
+      }
+      await k.tool("undo_last_edit");
+      await until(`the preview back after undoing ${id}`, () => near(was[0], was[1]), 10000)
+        .catch(async () => fail(`undoing ${id} ${dx} from the start didn't bring the preview back: ${lit(await drawn())}`));
+    }
     // The Melee flag doesn't matter, as in the World Editor (we-drive 2026-11-13: fresh opens of maps with it off drew the
     // town hall; a pasted player's footman left it drawn; the user's decision the same day). Taken off as Scenario
     // Properties does: still drawn for the next 4 s. (The open editor's reading of the file isn't proven here; the reopen
