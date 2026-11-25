@@ -728,6 +728,8 @@ async function atmosphereTools(page, found) {
   const w3i = read("war3map.w3i.json");
   if (w3i.lightEnvironment !== "A" || w3i.fog.style !== 1 || w3i.fog.end !== 7000 || JSON.stringify(w3i.fog.color.slice(0, 3)) !== "[0,0,255]" || JSON.stringify(w3i.waterTint.slice(0, 3)) !== "[0,255,0]") fail(`war3map.w3i after set_sky: ${lit({ l: w3i.lightEnvironment, f: w3i.fog, t: w3i.waterTint })}`);
   if ((w3i.flags & 0x12000) !== 0x12000) fail(`fog and tint flags not on: ${w3i.flags}`);
+  // overSky is Draw Fog Over Sky, the terrain fog's sixth word (w3i.json drawOverSky; Height Start is the first).
+  if (w3i.terrainFog?.drawOverSky !== 1 || w3i.terrainFog?.heightStart !== 0) fail(`set_sky overSky 1: terrain fog ${lit(w3i.terrainFog)}`);
   const refused = await tool("set_sky", { lightEnvironment: "Nowhere Land" }).then(() => "not refused", (e) => e.message);
   if (!/Choices: .*Ashenvale/.test(refused)) fail(`an unknown light environment wasn't refused with the choices: ${refused.slice(0, 300)}`);
   // A fog value war3map.w3i's float can't hold is refused with why, and is no edit (atmosphere.ts).
@@ -8897,7 +8899,7 @@ async function typedFieldSave(page, found) {
     // Some fields pull a typed value into range as the World Editor does (map-info/numbers.ts INFO_CLAMPS); the box shows
     // the value kept. Which of these fields the open map's file has depends on its layout; at least one must be there.
     let clamped = 0;
-    for (const [key, typed, want] of [["zoomMax", "99999", "3000"], ["terrainFogMaxOpacity", "12.5", "1"], ["terrainFogLinearStart", "-5", "0"], ["waterMinOpacity", "-5", "5"], ["waterMinOpacity", "99999", "100"]]) {
+    for (const [key, typed, want] of [["zoomMax", "99999", "3000"], ["terrainFogMaxOpacity", "12.5", "1"], ["terrainFogLinearStart", "-5", "0"], ["terrainFogHeightStart", "-200000", "-100000"], ["waterMinOpacity", "-5", "5"], ["waterMinOpacity", "99999", "100"]]) {
       const shown = await page.evaluate(`(() => { const i = document.querySelector(".map-info input[data-field=${key}]"); if (!i) return null; i.value = ${lit(typed)}; i.dispatchEvent(new Event("change", { bubbles: true })); return i.value; })()`);
       if (shown === null) continue;
       clamped++;
@@ -8905,6 +8907,20 @@ async function typedFieldSave(page, found) {
     }
     await settled(page);
     if (!clamped) fail("no clamped Map Properties field (zoom, terrain fog, water) in the smoke map's war3map.w3i");
+    // Draw Fog Over Sky, the terrain fog's sixth word (w3i.json drawOverSky), is a checkbox: ticked and saved, the file
+    // holds 1 there and Height Start (the first word) stays as typed above.
+    const overSky = await page.evaluate(`(() => { const b = document.querySelector(".map-info input[data-field=terrainFogDrawOverSky]"); if (!b) return null; b.dataset.smoke = "sky"; return b.checked; })()`);
+    if (overSky === null) fail("no Draw fog over sky checkbox in Map Properties (a new map's war3map.w3i is version 39)");
+    else {
+      await k.clearToasts();
+      await hands.click("[data-smoke=sky]");
+      await hands.chord("Ctrl+S");
+      const tf = () => JSON.parse(readFileSync(join(root, w3i), "utf8")).terrainFog;
+      await until("Draw Fog Over Sky saved", () => tf()?.drawOverSky === (overSky ? 0 : 1), 5000)
+        .catch(() => fail(`Draw fog over sky ticked (was ${overSky}) and saved: terrain fog ${lit(tf())}`));
+      if (tf()?.heightStart !== -100000) fail(`Height Start after the checkbox: ${lit(tf())}`);
+      await settled(page);
+    }
     // Closing the tab right after typing asks to save what was typed (it closed without asking, dropping it).
     await until("the fog's Start Z again", () => mark(startZ), 5000);
     await hands.click("[data-smoke=typed]");

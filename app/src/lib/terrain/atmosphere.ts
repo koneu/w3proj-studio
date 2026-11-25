@@ -3,6 +3,7 @@
 
 import { storable, storableText, type StoredNumber } from "../formats/numbers";
 import { setW3iColorHex, w3iColorHex } from "../formats/w3icolor";
+import { namedTerrainFog } from "../formats/terrainfog";
 
 /** An id from `choices` ([id, label]) for what was typed: the id or the label, ignoring case. Else an error that lists the choices. */
 export function resolveChoice(what: string, value: unknown, choices: readonly (readonly [string, string])[]): string {
@@ -73,7 +74,9 @@ export function applySky(doc: Doc, args: SkyArgs, lists: SkyLists): string[] {
   }
   if (args.overSky !== undefined) {
     if (!work.terrainFog) throw new Error("This map's format has no \"draw over sky\" setting (it needs the 3.0 terrain fog).");
-    const was = work.terrainFog.overSky; work.terrainFog.overSky = num("overSky", args.overSky, "i32"); set("fog drawn over the sky", was, work.terrainFog.overSky);
+    // Draw Fog Over Sky (older JSON's names read too).
+    const tf = work.terrainFog = namedTerrainFog(work.terrainFog);
+    const was = tf.drawOverSky; tf.drawOverSky = num("overSky", args.overSky, "i32"); set("fog drawn over the sky", was, tf.drawOverSky);
   }
   if (args.useFog !== undefined) flag(FOG_FLAG, args.useFog === true, "terrain fog");
   else if (fogGiven) flag(FOG_FLAG, true, "terrain fog");

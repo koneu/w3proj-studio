@@ -59,16 +59,24 @@
       }
     },
     "terrainFog": {
-      "description": "version 39",
+      "description": "version 39: the World Editor's Height fog values (Map Options)",
       "type": "object",
-      "required": ["style", "overSky", "linearStart", "linearEnd", "maxOpacity", "height"],
+      "required": ["linearStart", "linearEnd", "maxOpacity"],
+      "allOf": [
+        { "anyOf": [{ "required": ["heightStart"] }, { "required": ["style"] }] },
+        { "anyOf": [{ "required": ["heightEnd"] }, { "required": ["overSky"] }] },
+        { "anyOf": [{ "required": ["drawOverSky"] }, { "required": ["height"] }] }
+      ],
       "properties": {
-        "style": { "$ref": "#/$defs/i32" },
-        "overSky": { "$ref": "#/$defs/i32" },
+        "heightStart": { "$ref": "#/$defs/f32", "description": "Height Start" },
+        "heightEnd": { "$ref": "#/$defs/f32", "description": "Height End" },
         "linearStart": { "$ref": "#/$defs/f32" },
         "linearEnd": { "$ref": "#/$defs/f32" },
         "maxOpacity": { "$ref": "#/$defs/f32" },
-        "height": { "$ref": "#/$defs/f32" }
+        "drawOverSky": { "$ref": "#/$defs/i32", "description": "Draw Fog Over Sky: 1 when ticked" },
+        "style": { "$ref": "#/$defs/i32", "description": "older JSON: heightStart's bytes as an i32" },
+        "overSky": { "$ref": "#/$defs/i32", "description": "older JSON: heightEnd's bytes as an i32" },
+        "height": { "$ref": "#/$defs/f32", "description": "older JSON: drawOverSky's bytes as an f32" }
       }
     },
     "weather": { "$ref": "#/$defs/id", "description": "version 25 and later" },

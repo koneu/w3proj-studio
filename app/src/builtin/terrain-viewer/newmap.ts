@@ -356,7 +356,7 @@ export function mapInfo(o: NewMapOptions, t: Terrain): unknown {
     gameDataSet: 0xffffffff,
     prologue: { path: "", text: "", title: "", subtitle: "" },
     fog: { style: 0, start: 3000, end: 5000, density: 0.5, color: [0, 0, 0, 255] },
-    terrainFog: { style: 0, overSky: 0, linearStart: 10000, linearEnd: 10000, maxOpacity: 1, height: 0 },
+    terrainFog: { heightStart: 0, heightEnd: 0, linearStart: 10000, linearEnd: 10000, maxOpacity: 1, drawOverSky: 0 },
     weather: "0x00000000", soundEnvironment: "", lightEnvironment: "", waterTint: [255, 255, 255, 255],
     scriptType: o.lua ? 1 : 0, supportedModes: 3, gameDataVersion: 2,
     cameraZoom: { default: 0, max: 0, min: 0 },

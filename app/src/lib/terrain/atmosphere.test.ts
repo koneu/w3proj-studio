@@ -8,7 +8,7 @@ const weather: [string, string][] = [["RAlr", "Lordaeron Rain (Heavy)"], ["WOsw"
 const doc = () => ({
   version: 31, flags: 0, lightEnvironment: "", weather: NO_WEATHER,
   fog: { style: 0, start: 3000, end: 5000, density: 0.5, color: [255, 255, 255, 255] },
-  terrainFog: { style: 0, overSky: 0, linearStart: 0, linearEnd: 0, maxOpacity: 0, height: 0 },
+  terrainFog: { heightStart: 0, heightEnd: 0, linearStart: 0, linearEnd: 0, maxOpacity: 0, drawOverSky: 0 },
   waterTint: [128, 255, 255, 255],
 });
 
@@ -37,7 +37,7 @@ test("set_sky's changes land in the w3i and are listed; fog values turn fog on",
   assert.equal(d.fog.style, 2);
   assert.equal(d.fog.end, 9000);
   assert.deepEqual(d.fog.color, [0, 0, 255, 255], "blue, green, red, alpha");
-  assert.equal(d.terrainFog.overSky, 1);
+  assert.equal(d.terrainFog.drawOverSky, 1, "Draw Fog Over Sky, the sixth word");
   assert.deepEqual(d.waterTint, [0, 255, 0, 255]);
   assert.equal(d.flags, 0x2000 | 0x10000);
   assert.ok(out.some((l) => l.startsWith("light environment: default → A")), out.join("|"));
@@ -67,7 +67,15 @@ test("set_sky refuses a fog value war3map.w3i can't hold (past a 32-bit float, o
   for (const v of [2147483648, -2147483649, 0.5]) assert.throws(() => applySky(d, { fogEnd: 1, overSky: v }, { tilesets }), /overSky must be a whole number from -2147483648 to 2147483647/);
   assert.deepEqual(d, doc());
   applySky(d, { fogStart: -3.4028234663852886e38, fogEnd: 3.4028234663852886e38, overSky: -2147483648 }, { tilesets });
-  assert.deepEqual([d.fog.start, d.fog.end, d.terrainFog.overSky], [-3.4028234663852886e38, 3.4028234663852886e38, -2147483648]);
+  assert.deepEqual([d.fog.start, d.fog.end, d.terrainFog.drawOverSky], [-3.4028234663852886e38, 3.4028234663852886e38, -2147483648]);
+});
+
+test("set_sky's overSky on JSON written before the terrain fog names: Draw Fog Over Sky, the others keep their bytes", () => {
+  // Older JSON: style and overSky held Height Start's and End's bits as i32, height Draw Fog Over Sky's as f32.
+  const d: Record<string, any> = { ...doc(), terrainFog: { style: 1132068864, overSky: -1023803392, linearStart: 0, linearEnd: 0, maxOpacity: 0, height: 0 } };
+  const out = applySky(d, { overSky: 1 }, { tilesets });
+  assert.deepEqual(d.terrainFog, { heightStart: 250, heightEnd: -125, linearStart: 0, linearEnd: 0, maxOpacity: 0, drawOverSky: 1 });
+  assert.ok(out.includes("fog drawn over the sky: 0 → 1"), out.join("|"));
 });
 
 test("set_sky says the terrain view shows no fog while its Fog checkbox is off", async () => {

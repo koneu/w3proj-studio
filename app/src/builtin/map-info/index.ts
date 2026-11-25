@@ -13,6 +13,7 @@ import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { mapTextEdit } from "./textedit";
 import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { namedTerrainFog, type TerrainFog } from "../../lib/formats/terrainfog";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { LOADING_TEXTS_UNUSED, loadingTextsUnused, mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
@@ -43,7 +44,7 @@ interface MapInfo {
   gameDataSet: number;
   prologue: { path: string; text: string; title: string; subtitle: string };
   fog: { style: number; start: number; end: number; density: number; color: number[] };
-  terrainFog?: { style: number; overSky: number; linearStart: number; linearEnd: number; maxOpacity: number; height: number };
+  terrainFog?: TerrainFog;
   weather: string; soundEnvironment: string; lightEnvironment: string; waterTint: number[];
   scriptType?: number; supportedModes?: number; gameDataVersion?: number;
   cameraZoom?: { default: number; max: number; min?: number };
@@ -364,6 +365,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const info: MapInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
+        // JSON written before the terrain fog words had names: the names, the same bytes (saved with them).
+        if (info.terrainFog) info.terrainFog = namedTerrainFog(info.terrainFog);
         // war3map.wts as read or last saved here: saving merges this editor's string edits onto
         // the file as it is then (other editors may have saved strings meanwhile).
         let wtsBase = await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
@@ -501,6 +504,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           box.addEventListener("change", () => { set(box.checked ? get() | mask : get() & ~mask); update(); });
           return h("label.form-check", {}, box, " ", label);
         };
+        /** Draw Fog Over Sky, the terrain fog's sixth word: 1 when ticked, as the World Editor saves it (any number but 0
+         *  shows ticked and stays until the box is changed). */
+        const overSky = (tf: TerrainFog) => {
+          const box = h("input", { type: "checkbox", checked: tf.drawOverSky !== 0 });
+          box.dataset.field = "terrainFogDrawOverSky";
+          box.addEventListener("change", () => { if (info.terrainFog) info.terrainFog.drawOverSky = box.checked ? 1 : 0; update(); });
+          return h("label.form-check", {}, box, " ", "Draw fog over sky");
+        };
         /** A w3i colour (stored blue, green, red, alpha): colour picker + alpha. */
         const color = (bgra: number[], alpha: InfoNumberKey) => {
           const pick = h("input", { type: "color", value: w3iColorHex(bgra) });
@@ -637,13 +648,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Density", num("fogDensity")),
               row("Color", color(info.fog.color, "fogAlpha"), "Used when “Use terrain fog” is set (Options)."),
             ),
+            // The World Editor's Height fog values (Map Options), in the file's order.
             info.terrainFog ? section_("Terrain fog (3.0)",
-              row("Style", num("terrainFogStyle")),
-              row("Draw over sky", num("terrainFogOverSky")),
+              row("Height start", num("terrainFogHeightStart"), "Kept at or above Height end."),
+              row("Height end", num("terrainFogHeightEnd")),
               row("Linear start", num("terrainFogLinearStart")),
               row("Linear end", num("terrainFogLinearEnd")),
               row("Max opacity", num("terrainFogMaxOpacity")),
-              row("Height", num("terrainFogHeight")),
+              h("div.form-checks", {}, overSky(info.terrainFog)),
             ) : null,
             info.water ? section_("Water rendering (3.0)",
               ...WATER_NUMBERS.filter((k) => infoNumber(info, k) !== undefined).map((k) => row(INFO_NUMBERS[k].label, num(k)))) : null,

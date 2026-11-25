@@ -155,7 +155,7 @@ function randomMap(seed: number, lua: boolean): ScriptInput {
       players, forces: [{ flags: r.int(64), players: mask(), name: "Team 1" }, { flags: r.int(64), players: mask(), name: "Team 2" }],
       water: r.bool() ? { overrideColor: 1, wavesVertexDisplacement: 1, minOpacity: 1, maxOpacity: 1, reflectivity: 1, emissivity: 1, edgeSoftness: 1, wavesNormalMapStrength: 1, environmentMapReflectivity: 1 } : undefined,
       fog: { style: 0, start: 100, end: 2000, density: 0.5, color: [255, 128, 0, 255] }, waterTint: [1, 2, 3, 4],
-      terrainFog: r.bool() ? { style: 1, overSky: 1, linearStart: 0, linearEnd: 1, maxOpacity: 1, height: 100 } : undefined,
+      terrainFog: r.bool() ? { heightStart: 100, heightEnd: -50, linearStart: 0, linearEnd: 1, maxOpacity: 1, drawOverSky: 1 } : undefined,
       upgrades: r.bool() ? [{ players: mask(), id: "Rhme", level: 0, availability: r.int(3) }] : [], techs: r.bool() ? [{ players: mask(), id: r.pick(["hfoo", "AHhb"]) }] : [],
       itemTables: hasTable ? [{ number: 0, sets: [[{ id: "ratc", chance: 50 }, { id: "YYI/", chance: 25 }]] }] : [],
       unitTables: groups ? [{ number: 2, name: "Creeps", positions: [0, 1], lines: [{ chance: 60, ids: ["hfoo", "0x00000000"] }, { chance: 40, ids: ["YYU2", "hpea"] }] }] : [],
