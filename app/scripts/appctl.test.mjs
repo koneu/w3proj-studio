@@ -33,6 +33,14 @@ test("startApp never removes a W3PROJ_CONFIG_DIR of the caller's; a start that f
   }
 });
 
+test("the app reads the game's TriggerData when there is a game folder, the made-up one only when asked or without one", () => {
+  const fixture = repoPath("tests", "fixtures", "TriggerData.txt");
+  assert.deepEqual(appctl.triggerDataEnv("/games/Warcraft III"), {});
+  assert.equal(appctl.triggerDataEnv("/games/Warcraft III", true).W3PROJ_TRIGGERDATA.endsWith(join("tests", "fixtures", "TriggerData.txt")), true);
+  assert.equal(appctl.triggerDataEnv(null).W3PROJ_TRIGGERDATA.endsWith(join("tests", "fixtures", "TriggerData.txt")), true);
+  assert.equal(existsSync(fixture), true);
+});
+
 test("buildApp's command is an argument list: a config path with spaces and quotes stays one argument", () => {
   const patch = join("/w o\"rk", "tauri smoke.json");
   const [cmd, args] = appctl.buildCommand("/app dir", patch);
