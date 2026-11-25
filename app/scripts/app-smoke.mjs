@@ -6994,6 +6994,91 @@ async function dataSafety(page, found) {
   }
 }
 
+/** Tab and Shift+Tab in a CodeMirror editor (the plain-text one) indent and unindent the line, sent as real key events
+ *  into the webview. CodeMirror names an event with w3c-keyname, which goes by keyCode for key "Unidentified" (WebKitGTK's
+ *  Shift+Tab; libkeys.test.ts covers that headlessly): this is the real webview. The check compares the line's leading
+ *  white space, not a particular indent unit. */
+async function textEditorTabs(page, found) {
+  const fail = (what) => found.push(`text editor Tab keys: ${what}`);
+  const dir = join(work, "text-tabs");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  const hands = new Hands(page);
+  try {
+    writeFileSync(join(dir, "notes.txt"), "alpha\nbeta\n");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.workspace.open(${lit(dir)}).then(() => null, (e) => String(e?.message ?? e))`);
+    await page.evaluate(`w3.workspace.filesReady().then(() => null, (e) => String(e))`);
+    await page.evaluate(`w3.editors.open("notes.txt", "w3.textEditor")`);
+    await until("the text editor", () => page.evaluate(`document.querySelector(".cm-content")?.textContent.includes("alpha") ?? false`), 20000);
+    const lines = () => page.evaluate(`[...document.querySelectorAll(".cm-content .cm-line")].map((l) => l.textContent)`);
+    await hands.click(".cm-content");
+    await hands.key("Home", "Home", 36, 2); // Ctrl+Home: the start of the text
+    const before = await lines();
+    if (before[0] !== "alpha") return fail(`the text isn't as written (control): ${lit(before)}`);
+    await hands.key("Tab", "Tab", 9);
+    const indented = await lines();
+    if (!/^\s+alpha$/.test(indented[0] ?? "") || indented[1] !== "beta") fail(`Tab left the lines as ${lit(indented)}, not the first one indented`);
+    await hands.key("Tab", "Tab", 9, 8); // Shift+Tab
+    const back = await lines();
+    if (back[0] !== "alpha" || back[1] !== "beta") fail(`Shift+Tab left the lines as ${lit(back)}, not as before the Tab`);
+    // Dirty edits stay out of the scratch file: the text is as it was, and it is closed unsaved.
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await page.evaluate(`w3.workspace.close()`).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** A save that has to sync the players into war3map.w3i (an object was placed) while that file is there but can't be
+ *  read is refused as a whole: the message says so, no file of the map changes, the edit stays unsaved. With the file
+ *  readable again the same save goes through (control). editdoc.test.ts covers mapDocProblem; this is the save. */
+async function playerSyncRefused(page, found) {
+  const fail = (what) => found.push(`player sync refused: ${what}`);
+  const k = await heightKit(page, "PlayerSyncRefused");
+  try {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+    await k.save();
+    const map = join(k.root, "map");
+    const w3iPath = join(map, "war3map.w3i.json"), rawPath = join(map, "war3map.w3i");
+    if (!existsSync(w3iPath)) return fail("the new map has no war3map.w3i.json (control)");
+    const good = readFileSync(w3iPath);
+    const sloc = k.units().find((u) => u.id === "sloc");
+    if (!sloc) return fail("the new map has no start location (control)");
+    const unitsBefore = readFileSync(join(map, "war3mapUnits.doo.json"), "utf8");
+    // A start location nudged by hand (a tool's placement is written at once, without this save): 64 east, unsaved.
+    await k.look(sloc.position[0], sloc.position[1], { id: "sloc", x: sloc.position[0], y: sloc.position[1] });
+    await k.focusMap();
+    await k.hands.key("6", "Numpad6", 102);
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) return fail("the nudged start location left the terrain editor saved (control)");
+    rmSync(w3iPath);
+    writeFileSync(rawPath, Buffer.from("not a map info"));
+    const bad = snapshot(map);
+    await settled(page);
+    const err = await page.evaluate(`w3.editors.saveAll().then(() => null, (e) => String(e?.message ?? e))`);
+    await settled(page);
+    const toasts = await k.toasts();
+    if (!/the players can't be synced/.test(`${err} ${toasts}`)) fail(`the save wasn't refused with the players message: ${lit(err)} / ${lit(toasts.slice(0, 200))}`);
+    const after = snapshot(map);
+    const moved = [...new Set([...bad.keys(), ...after.keys()])].filter((f) => bad.get(f) !== after.get(f));
+    if (moved.length) fail(`the refused save changed ${moved.join(", ")}`);
+    if (!readFileSync(rawPath).equals(Buffer.from("not a map info"))) fail("the unreadable war3map.w3i was changed");
+    if (readFileSync(join(map, "war3mapUnits.doo.json"), "utf8") !== unitsBefore) fail("the refused save wrote the moved start location");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the terrain editor isn't unsaved after a refused save");
+    // Control: readable again, the same save goes through and moves the start.
+    rmSync(rawPath);
+    writeFileSync(w3iPath, good);
+    await page.evaluate(`w3.workspace.refresh()`);
+    await k.save();
+    const moved2 = k.units().find((u) => u.id === "sloc")?.position[0];
+    if (moved2 !== sloc.position[0] + 64) fail(`with war3map.w3i readable again the save left the start at x ${moved2}, not ${sloc.position[0] + 64}`);
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** A campaign whose chapter can't be read (not on Windows, where the permissions differ; not as root):
  *  1. Opening the campaign works: the other chapter is listed, the open rejects nothing.
  *  2. The workspace names the unreadable chapter folders (a whole chapter, and the map folder of another), and a warning
@@ -17467,6 +17552,7 @@ async function run() {
         placeObjects,
         placerAndCampaign,
         playerStarts: (p, f) => playerStarts(p, f, project),
+        playerSyncRefused,
         problemsIgnore,
         realMapSave,
         rebuildCli,
@@ -17508,6 +17594,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
+        textEditorTabs,
         tileCleanup,
         tilesetUnreadable,
         tilesInPlace,
@@ -17943,6 +18030,10 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "editorUndoStacks", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
   await leftOpen(page, "contextLoss", found);
+  await textEditorTabs(page, found).catch((e) => found.push(`text editor Tab keys: ${e.message}`));
+  await leftOpen(page, "textEditorTabs", found);
+  await playerSyncRefused(page, found).catch((e) => found.push(`player sync refused: ${e.message}`));
+  await leftOpen(page, "playerSyncRefused", found);
 }
 
 /** The Object Editor's save when war3map.wts really can't be written (read-only file; not on Windows, not as root): the
