@@ -377,16 +377,20 @@ async function gateWrites(page, path) {
   await page.evaluate(`(() => {
     const path = ${key}, gates = (window.__gates ??= {});
     const g = gates[path] = { hold: null, release: null, inflight: 0, max: 0, writes: 0 };
-    const space = w3Workbench.workspace, write = (space.__write ??= space.writeText);
-    space.writeText = async function (p, text) {
-      const g = gates[String(p).split(String.fromCharCode(92)).join("/")];
-      if (!g) return write.call(this, p, text);
-      g.writes++; g.max = Math.max(g.max, ++g.inflight);
-      try {
-        if (g.hold) await g.hold;
-        return await write.call(this, p, text);
-      } finally { g.inflight--; }
-    };
+    // Text and bytes: string tables are written as bytes (lib/formats/wts writeWts).
+    const space = w3Workbench.workspace;
+    for (const [name, saved] of [["writeText", "__write"], ["writeBytes", "__writeBytes"]]) {
+      const write = (space[saved] ??= space[name]);
+      space[name] = async function (p, data) {
+        const g = gates[String(p).split(String.fromCharCode(92)).join("/")];
+        if (!g) return write.call(this, p, data);
+        g.writes++; g.max = Math.max(g.max, ++g.inflight);
+        try {
+          if (g.hold) await g.hold;
+          return await write.call(this, p, data);
+        } finally { g.inflight--; }
+      };
+    }
   })()`);
   return {
     state: () => page.evaluate(`({ ...window.__gates[${key}], dirty: w3.editors.isDirty(${key}) })`),
@@ -5501,8 +5505,8 @@ async function gameName(page, id) {
  *  dialogs, and call this in a `finally`). */
 async function restoreWindow(page) {
   await page.evaluate(`(() => { for (const [name, fn] of Object.entries(window.__w3WindowOrig ?? {})) w3.window[name] = fn; })()`).catch(() => {});
-  // gateWrites' replacement of workspace.writeText goes too, so a later check writes through the real one.
-  await page.evaluate(`(() => { const space = w3Workbench.workspace; if (space.__write) { space.writeText = space.__write; delete space.__write; } window.__gates = {}; window.__pickRestore?.(); delete window.__pickRestore; })()`).catch(() => {});
+  // gateWrites' replacements of workspace.writeText and writeBytes go too, so a later check writes through the real ones.
+  await page.evaluate(`(() => { const space = w3Workbench.workspace; if (space.__write) { space.writeText = space.__write; delete space.__write; } if (space.__writeBytes) { space.writeBytes = space.__writeBytes; delete space.__writeBytes; } window.__gates = {}; window.__pickRestore?.(); delete window.__pickRestore; })()`).catch(() => {});
 }
 
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
@@ -6618,11 +6622,12 @@ async function subterrains(page, found) {
       // The new ground's variations are rolled (Math.random): seeded the same for this resize and the one with
       // subterrains closed below, from the moment the resize reads the string table (just before it makes the terrain).
       const seeded = () => page.evaluate(`(() => {
-        const ws = w3.workspace, read = ws.readText.bind(ws), random = Math.random;
+        const ws = w3.workspace, read = ws.readBytes.bind(ws), random = Math.random;
         let seed = 1;
         Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
-        ws.readText = (p, ...rest) => { if (p === "map/war3map.wts") seed = 1; return read(p, ...rest); };
-        window.__subSeed = { restore: () => { ws.readText = read; Math.random = random; } };
+        // The table is read as bytes (lib/formats/wts readWts: lossless text).
+        ws.readBytes = (p, ...rest) => { if (p === "map/war3map.wts") seed = 1; return read(p, ...rest); };
+        window.__subSeed = { restore: () => { ws.readBytes = read; Math.random = random; } };
       })()`);
       const unseeded = () => page.evaluate(`window.__subSeed?.restore()`);
       await seeded();
