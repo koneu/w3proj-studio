@@ -93,6 +93,8 @@ const DERIVED: &str = "## Derived files: do not edit by hand
   the doodads. After you change `war3map.w3e*`, `terrain/`, or the doodads, make them again with `w3proj rebuild`.
 - A generated `war3map.j` / `war3map.lua` is made from the triggers (`w3proj rebuild --only script`); change the
   triggers, never the generated script. A script kept in `map/` (`\"script\": \"kept\"`) is yours to edit.
+  To replace a script that isn't Studio's with the generated one, use `w3proj rebuild --replace-script` (the old
+  script is first copied to `.w3proj/replaced-scripts/`).
 - Everything in `.w3proj/derived/` and `.w3proj/derived-from.json`.
 ";
 

@@ -390,6 +390,120 @@ fn rebuild_force_replaces_a_script_studio_did_not_write_and_says_so() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The files in `.w3proj/replaced-scripts/`: name → bytes (none when the folder isn't there).
+fn backups(project: &Path) -> Vec<(String, Vec<u8>)> {
+    let Ok(dir) = fs::read_dir(project.join(".w3proj/replaced-scripts")) else { return Vec::new() };
+    let mut out: Vec<(String, Vec<u8>)> = dir.map(|e| e.unwrap()).map(|e| (e.file_name().to_string_lossy().into_owned(), fs::read(e.path()).unwrap())).collect();
+    out.sort();
+    out
+}
+
+/// `--replace-script` (the app's "Replace the script", with a backup instead of a checkpoint): a hand-edited script is
+/// kept by a plain rebuild (the control), replaced with the flag, its old bytes in .w3proj/replaced-scripts/ (git-ignored),
+/// and the next run is up to date and leaves the backup alone. A script that isn't UTF-8 (lossless strings from an old
+/// code page) is kept aside byte for byte.
+#[test]
+fn rebuild_replace_script_backs_up_the_script_it_replaces() {
+    let Some(game) = game() else {
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("replace-script");
+    for (label, tail) in [("utf8", b"\n// my own line\nfunction MyOwnCode takes nothing returns nothing\nendfunction\n".to_vec()), ("cp1252", b"\n// caf\xe9 \xff\xfe not UTF-8\n".to_vec())] {
+        let project = dir.join(label);
+        copy_dir(&fixture(), &project);
+        let script = project.join("map/war3map.j");
+        let mut edited = fs::read(&script).unwrap();
+        edited.extend_from_slice(&tail);
+        fs::write(&script, &edited).unwrap();
+
+        // Control: without the flag the script stays, and the line says so.
+        let o = w3proj(&["rebuild", s(&project), "--only=script"], &game);
+        assert!(o.status.success(), "{}", text(&o));
+        assert!(text(&o).lines().any(|l| l.starts_with("kept") && l.contains("map/war3map.j")), "{}", text(&o));
+        assert_eq!(fs::read(&script).unwrap(), edited, "{label}: a plain rebuild changed the script");
+        assert!(backups(&project).is_empty());
+
+        let o = w3proj(&["rebuild", s(&project), "--only=script", "--replace-script"], &game);
+        let said = text(&o);
+        assert!(o.status.success(), "{label}: {said}");
+        assert!(said.contains("written    map/war3map.j"), "{label}: {said}");
+        let made = fs::read(&script).unwrap();
+        assert_ne!(made, edited, "{label}: not replaced");
+        assert!(String::from_utf8_lossy(&made).contains("function main takes nothing"), "{label}");
+        let kept = backups(&project);
+        assert_eq!(kept.len(), 1, "{label}: {kept:?}");
+        let (name, bytes) = &kept[0];
+        assert!(name.starts_with("war3map.") && name.ends_with(".j"), "{label}: {name}");
+        assert_eq!(bytes, &edited, "{label}: the backup isn't the old script byte for byte");
+        assert!(said.contains(&format!("backup     .w3proj/replaced-scripts/{name}")), "{label}: {said}");
+        let ignore = fs::read_to_string(project.join(".gitignore")).unwrap();
+        assert!(ignore.lines().any(|l| l == "/.w3proj/replaced-scripts/"), "{label}: {ignore}");
+
+        // Studio's now: up to date, nothing backed up again, the backup untouched.
+        let o = w3proj(&["rebuild", s(&project), "--only=script", "--replace-script"], &game);
+        let said = text(&o);
+        assert!(o.status.success(), "{label}: {said}");
+        assert!(said.contains("up to date") && !said.contains("backup ") && !said.contains("replacing"), "{label}: {said}");
+        assert_eq!(fs::read(&script).unwrap(), made);
+        assert_eq!(backups(&project), kept, "{label}: the second run touched the backups");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// `--replace-script` on a map without triggers (no map/triggers/, no war3map.wtg) is refused before anything is made, as
+/// is one whose --only leaves the script out. Needs no game: nothing runs.
+#[test]
+fn rebuild_replace_script_without_triggers_is_refused() {
+    let dir = workdir("replace-no-triggers");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    let script = project.join("map/war3map.j");
+    let edited = format!("{}// mine\n", fs::read_to_string(&script).unwrap());
+    fs::write(&script, &edited).unwrap();
+
+    let o = w3proj(&["rebuild", s(&project), "--only=wpm", "--replace-script"], "none");
+    assert!(!o.status.success() && text(&o).contains("--only must name script"), "{}", text(&o));
+
+    fs::remove_dir_all(project.join("map/triggers")).unwrap();
+    assert!(!project.join("map/war3map.wtg").exists());
+    let o = w3proj(&["rebuild", s(&project), "--replace-script"], "none");
+    let said = text(&o);
+    assert!(!o.status.success(), "{said}");
+    assert!(said.contains("no triggers to make a map script from") && said.contains("nothing was replaced"), "{said}");
+    assert!(!said.contains("written") && !said.contains("kept "), "refused before anything ran: {said}");
+    assert_eq!(fs::read_to_string(&script).unwrap(), edited);
+    assert!(backups(&project).is_empty());
+    assert_eq!(derived(&project), derived(&fixture()));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A map whose triggers are vJASS: the generator keeps the script (no JassHelper in the CLI), so --replace-script fails,
+/// says why, and leaves the script and no backup behind.
+#[test]
+fn rebuild_replace_script_of_a_vjass_map_fails_and_says_jasshelper() {
+    let Some(game) = game() else {
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("replace-vjass");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    let header = project.join("map/triggers/header.j");
+    fs::write(&header, format!("{}library Mine\nendlibrary\r\n", fs::read_to_string(&header).unwrap())).unwrap();
+    let script = project.join("map/war3map.j");
+    let edited = format!("{}// mine\n", fs::read_to_string(&script).unwrap());
+    fs::write(&script, &edited).unwrap();
+
+    let o = w3proj(&["rebuild", s(&project), "--only=script", "--replace-script"], &game);
+    let said = text(&o);
+    assert!(!o.status.success(), "{said}");
+    assert!(said.contains("wasn't replaced") && said.contains("JassHelper"), "{said}");
+    assert_eq!(fs::read_to_string(&script).unwrap(), edited);
+    assert!(backups(&project).is_empty(), "{:?}", backups(&project));
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// A map with no script at all (made without one, its script deleted) gets one written into map/ before the pack, as
 /// the app's packing does (map-script w3.script.forPack), whether its triggers are in map/triggers/ or it has none:
 /// the game can't run a map without one. Controls: --keep-script and a generator that can't run pack it without one,
