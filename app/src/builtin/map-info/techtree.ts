@@ -3,7 +3,7 @@
 // Techtree, Random Groups and Item Tables. The lists are edited as stored, so an untouched
 // entry keeps its bytes.
 
-import { scaleChances } from "../../lib/chances";
+import { addChance, scaleChances } from "../../lib/chances";
 import { ITEM_CLASSES, parseRandomId, randomChoices, randomIdLabel } from "../../lib/objects/randomids";
 import { h } from "../../workbench/dom";
 import { techGrid, upgradeGrid } from "./techgrid";
@@ -280,7 +280,10 @@ function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
         h("button", { onclick: async () => {
           const id = await ctx.pick("Add an item", ["w3t"]);
           if (id === undefined) return;
-          set.push({ chance: set.length ? 0 : 100, id });
+          // The editor's New Item box starts at 100 and the set's other items scale down to the rest.
+          const out = addChance(set.map((x) => x.chance));
+          set.forEach((x, i) => { x.chance = out[i]; });
+          set.push({ chance: out[set.length], id });
           ctx.changed(true);
         } }, "Add item…")); }),
       h("button", { onclick: () => { t.sets.push([]); ctx.changed(true); } }, "Add set"))),
