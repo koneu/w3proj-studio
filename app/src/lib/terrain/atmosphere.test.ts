@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fogOf } from "../model/fog";
-import { applySky, NO_WEATHER, resolveChoice, resolveWeather } from "./atmosphere";
+import { applySky, FOG_STYLES, NO_WEATHER, resolveChoice, resolveWeather } from "./atmosphere";
 
 const tilesets: [string, string][] = [["A", "Ashenvale"], ["L", "Lordaeron Summer"]];
 const weather: [string, string][] = [["RAlr", "Lordaeron Rain (Heavy)"], ["WOsw", "Outland Wind"]];
@@ -46,6 +46,17 @@ test("set_sky's changes land in the w3i and are listed; fog values turn fog on",
   applySky(d, { lightEnvironment: "default", useFog: false }, { tilesets });
   assert.equal(d.lightEnvironment, "");
   assert.equal(d.flags, 0x10000);
+});
+
+test("set_sky takes the World Editor's six fog styles by number or name (Height saved 3: measured 2026-11-25)", () => {
+  const want: [string | number, number][] = [["Linear", 0], ["exponential 1", 1], ["2", 2], ["Height", 3], [3, 3], ["New Exponential 1", 4], ["new exponential 2", 5], ["5", 5]];
+  for (const [fogStyle, n] of want) {
+    const d = doc();
+    applySky(d, { fogStyle }, { tilesets });
+    assert.equal(d.fog.style, n, String(fogStyle));
+  }
+  assert.throws(() => applySky(doc(), { fogStyle: "6" }, { tilesets }), /Unknown fog style "6"\. Choices: 0 = Linear; 1 = Exponential 1; 2 = Exponential 2; 3 = Height; 4 = New Exponential 1; 5 = New Exponential 2\./);
+  assert.deepEqual(FOG_STYLES.map(([n]) => n), ["0", "1", "2", "3", "4", "5"], "Map Properties' Style list, in the editor's order");
 });
 
 test("a refused call leaves the document as it was", () => {

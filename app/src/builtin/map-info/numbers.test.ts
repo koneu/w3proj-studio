@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { clampInfoNumber, filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingFiltered, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
+import { clampInfoNumber, filterInfoTyping, INFO_CLAMPS, INFO_NUMBERS, infoNumber, infoTypingFiltered, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
 import { repoPath } from "../../lib/testhelpers/testutil";
 
 const repoFile = (...parts: string[]): string => readFileSync(repoPath(...parts), "utf8");
@@ -31,6 +31,9 @@ function w3iTypes(): Map<string, string> {
   walk(JSON.parse(text).fields, []);
   return out;
 }
+
+/** Map Options' terrain fog boxes (Z Start, Z End, Density, Max Opacity, Height and Linear Start/End). */
+const FOG_BOXES: readonly InfoNumberKey[] = ["fogStart", "fogEnd", "fogDensity", "terrainFogMaxOpacity", "terrainFogHeightStart", "terrainFogHeightEnd", "terrainFogLinearStart", "terrainFogLinearEnd"];
 
 /** A number as plain decimal text (String() would write 3.4e+38, which a field refuses). */
 const plainText = (n: number): string => (Math.abs(n) >= 1e21 ? BigInt(n).toString() : String(n));
@@ -67,6 +70,7 @@ test("every Map Properties number field refuses values past its stored type and 
     const before = JSON.stringify(info);
     for (const typed of PAST[f.kind]) {
       if (typed === "" && infoTypingFiltered(key)) continue; // an empty digits-only box is 0 (tested below)
+      if (FOG_BOXES.includes(key)) continue; // a fog box refuses nothing (tested below)
       const r = setInfoNumber(info, key, typed, player);
       assert.ok("refused" in r, `${f.label}: ${JSON.stringify(typed)} refused`);
       assert.match(r.refused, new RegExp(`^${f.label} must be`));
@@ -113,7 +117,7 @@ test("water fields: 0..100, '-' and '.' dropped as typed, Max below Min pulls Mi
   typeInto(info, "waterMaxOpacity", "30");
   assert.deepEqual(read(info, "waterMinOpacity", "waterMaxOpacity"), [30, 30], "Max below Min pulls Min down");
   assert.equal(filterInfoTyping("waterEmissivity", "-1.5"), "15");
-  assert.equal(filterInfoTyping("fogStart", "-1.5"), "-1.5", "fog boxes keep what is typed (the value is clamped)");
+  assert.equal(filterInfoTyping("fogStart", "-1.5"), "-1.5", "fog boxes keep a sign and a point (the value is clamped)");
 });
 
 test("fog: Z and Linear 0..100000, Height keeps negatives, Density 0..100, two decimals, End/Start ordered (ya.md)", () => {
@@ -225,6 +229,41 @@ test("measured: water and zoom boxes take digits only, and an empty box is 0 pul
   typeInto(z, "zoomMin", "1e3");
   assert.deepEqual(read(z, "zoomMin", "zoomDefault", "zoomMax"), [1250, 1800, 2000], "1e3 is 13, pulled up to 1250");
   assert.equal(filterInfoTyping("zoomMin", "+1e3x"), "13");
+});
+
+test("measured: the fog boxes drop letters as typed, and text, an empty box or a leading + is 0 (never refused)", () => {
+  const lettersDropped = (k: InfoNumberKey) => filterInfoTyping(k, "-1.5x") === "-1.5";
+  assert.deepEqual((Object.keys(INFO_NUMBERS) as InfoNumberKey[]).filter(lettersDropped).sort(), [...FOG_BOXES].sort(), "Map Options' fog boxes, and only those");
+  for (const k of FOG_BOXES) {
+    assert.ok(infoTypingFiltered(k), `${k}: a text box (a number box would keep "1e3")`);
+    const c = INFO_CLAMPS[k]!;
+    assert.ok(Number.isFinite(c.min) && Number.isFinite(c.max), `${k}: a range, so nothing a box takes is past a float`);
+  }
+  // docs/testing/numeric-limits-measured.md, "Map Properties: Options tab, terrain fog": field, typed, kept.
+  const rows: [InfoNumberKey, string, number][] = [
+    ["fogStart", "abc", 0], ["fogEnd", "", 0], ["fogDensity", "1e3", 13], ["fogDensity", "-2", 0],
+    ["terrainFogMaxOpacity", "0.123", 0.12], ["terrainFogMaxOpacity", "-1", 0], ["terrainFogMaxOpacity", "5", 1],
+    ["terrainFogLinearStart", "-5", 0], ["terrainFogLinearStart", "abc", 0], ["terrainFogLinearEnd", "+7.5", 0], ["terrainFogLinearEnd", "1e3", 13],
+    ["terrainFogHeightStart", "100000.5", 100000], ["terrainFogHeightEnd", "-100000.555", -100000], ["terrainFogHeightStart", "-5", -5],
+    ["terrainFogHeightStart", "123.456", 123.456], ["terrainFogHeightStart", "1.5e2", 1.52],
+    ["terrainFogHeightStart", "abc", 0], ["terrainFogHeightStart", "", 0], ["terrainFogHeightStart", "+5", 0],
+  ];
+  for (const [k, typed, want] of rows) {
+    const info = fixture();
+    // As the box takes it (letters dropped while typing) and as text reaching the field unfiltered.
+    for (const text of [filterInfoTyping(k, typed), typed]) {
+      const one = structuredClone(info);
+      assert.deepEqual(setInfoNumber(one, k, text), { value: want }, `${k} ${JSON.stringify(typed)} (${JSON.stringify(text)})`);
+      assert.equal(infoNumber(one, k), want);
+    }
+  }
+  assert.equal(filterInfoTyping("terrainFogLinearEnd", "+7.5"), "+7.5", "the + stays in the box");
+  assert.equal(filterInfoTyping("fogDensity", "1e3"), "13");
+  assert.equal(filterInfoTyping("terrainFogHeightStart", "1.5e2"), "1.52");
+  // Past a float: pulled into the range, not refused.
+  assert.deepEqual(setInfoNumber(fixture(), "terrainFogHeightEnd", "-" + "9".repeat(400)), { value: -100000 });
+  assert.deepEqual(setInfoNumber(fixture(), "fogEnd", "1" + "0".repeat(40)), { value: 100000 });
+  assert.deepEqual(setInfoNumber(fixture(), "fogEnd", "1e39"), { value: 139 }, "1e39 is 139");
 });
 
 test("typed clamps leave stored values alone: a map's own value past the limits loads and saves as it is", () => {

@@ -12,12 +12,13 @@ import { SCRIPT_FILES } from "../../lib/script/guard";
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { mapTextEdit } from "./textedit";
-import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { infoAsSaved } from "./save";
+import { applySky, FOG_STYLE_LABELS, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
 import { namedTerrainFog, type TerrainFog } from "../../lib/formats/terrainfog";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { LOADING_TEXTS_UNUSED, loadingTextsUnused, mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
-import { filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingFiltered, infoTypingLimit, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
+import { filterInfoTyping, INFO_NUMBERS, infoNumber, infoTypingDecimal, infoTypingFiltered, infoTypingLimit, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
   addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
@@ -114,7 +115,6 @@ const FORCE_FLAGS: [number, string][] = [
   [0x10, "Share unit control"],
   [0x20, "Share advanced unit control"],
 ];
-const FOG_STYLES = [[0, "Linear"], [1, "Exponential 1"], [2, "Exponential 2"]] as const;
 
 /** Labels from the game: tilesets, weather, loading screens. */
 interface GameLists {
@@ -465,7 +465,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // keeps what is typed until it changes); the others are number boxes.
           const filtered = infoTypingFiltered(key);
           const input = h("input.form-input.form-num", filtered
-            ? { type: "text", inputMode: "numeric", value: shown(), maxLength: infoTypingLimit(key) }
+            ? { type: "text", inputMode: infoTypingDecimal(key) ? "decimal" : "numeric", value: shown(), maxLength: infoTypingLimit(key) }
             : { type: "number", value: shown(), step: kind === "f32" ? "any" : "1" });
           input.dataset.field = key;
           if (opts.player === undefined) numInputs.set(key, input);
@@ -642,7 +642,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Water tint", color(info.waterTint, "waterTintAlpha"), "Used when “Enable water tinting” is set (Options)."),
             ),
             section_("Fog",
-              row("Style", select(FOG_STYLES, () => info.fog.style, (n) => { info.fog.style = n; })),
+              row("Style", select(FOG_STYLE_LABELS, () => info.fog.style, (n) => { info.fog.style = n; })),
               row("Start Z", num("fogStart")),
               row("End Z", num("fogEnd")),
               row("Density", num("fogDensity")),
@@ -845,8 +845,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // A text with a `}` would be cut by the game (the field says so): nothing is saved.
             const cuts = strings?.cuts() ?? [];
             if (cuts.length) throw new WtsCutError(cuts);
-            // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
-            // undo isn't mixed up with the save.
+            // The ally priorities (shown so above) and a camera zoom of 0 as the World Editor saves them (save.ts); the
+            // editor's own values stay, so an undo isn't mixed up with the save.
             const taken = history.mark();
             // What is saved is taken now: an edit made while the save waits stays unsaved (and the editor dirty).
             const saved = structuredClone(info);
@@ -861,7 +861,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const next = writeMapExtra(base, JSON.parse(extraNow) as MapExtra);
               if (next !== base && !(now.text === null && next === "")) extraWrite = next;
             }
-            applyAllyPriorities(saved as unknown as PlayerInfo & { flags: number });
+            infoAsSaved(saved);
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(saved) });
             await doc.writeText(text);
             if (extraWrite !== null) await w3.workspace.writeText(MAP_EXTRA_PATH, extraWrite);

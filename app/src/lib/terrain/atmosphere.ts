@@ -14,7 +14,13 @@ export function resolveChoice(what: string, value: unknown, choices: readonly (r
   throw new Error(`Unknown ${what} "${String(value)}". Choices: ${shown}${choices.length > 60 ? `; … (${choices.length} in all)` : ""}.`);
 }
 
-export const FOG_STYLES: readonly (readonly [string, string])[] = [["0", "Linear"], ["1", "Exponential 1"], ["2", "Exponential 2"]];
+/** The World Editor's fog styles (Map Options' Style list, in its order) by the number w3i `fog.style` stores and the
+ *  script's SetTerrainFogEx(V) passes on (measured 2026-11-25, docs/testing/numeric-limits-measured.md: Height saved 3,
+ *  Exponential 1 saved 1). */
+export const FOG_STYLE_LABELS: readonly (readonly [number, string])[] = [
+  [0, "Linear"], [1, "Exponential 1"], [2, "Exponential 2"], [3, "Height"], [4, "New Exponential 1"], [5, "New Exponential 2"],
+];
+export const FOG_STYLES: readonly (readonly [string, string])[] = FOG_STYLE_LABELS.map(([n, label]) => [String(n), label] as const);
 /** w3i flags: "Use terrain fog", "Enable water tinting". */
 const FOG_FLAG = 0x2000, TINT_FLAG = 0x10000;
 /** Nothing, as the w3i stores it. */

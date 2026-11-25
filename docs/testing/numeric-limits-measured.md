@@ -86,8 +86,12 @@ Strength 687,385.
 
 So the water and zoom boxes take digits only and an empty box is 0 (then the range). Studio now does the same
 (`numbers.ts` `filterInfoTyping`, `setInfoNumber`). The fog boxes differ: they keep `-` and `.` and drop letters
-("1e3" is 13), an empty box or text is 0, and "+5" or "+7.5" gave 0.00; Studio's fog boxes are number boxes that refuse
-text, an empty box and an exponent (not changed).
+("1e3" is 13), an empty box or text is 0, and "+5" or "+7.5" gave 0.00. Studio's fog boxes do the same
+(`numbers.ts`, mode `decimal`; branch feat/mapinfo-fog-zoom): they refuse nothing, and text that isn't a plain decimal
+after the letters are gone ("+5", "-", "1.2.3") is 0 (only "+5" and "+7.5" were measured).
+
+With the zoom boxes at 0 (Force ... camera zoom unticked), Studio's Map Properties save writes 1250 into each, as the
+editor's (`map-info/save.ts`); pack and unpack keep the 0.
 
 ## Random groups and item tables (Advanced menu)
 
