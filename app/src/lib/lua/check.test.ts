@@ -167,7 +167,9 @@ test("names: long lists and deep brackets take one pass", () => {
   const t0 = Date.now();
   assert.deepEqual(unknown(`f(${args})\nlocal x = ${nested}\n`), ["f"]);
   assert.equal(luaKnownNames(API, [`${"_G[".repeat(n)}`])?.size ?? null, null, "a bracket that doesn't close: can't tell");
-  assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms`);
+  // Linear takes about a second; a quadratic pass over 200,000 items would take minutes. The bound is loose
+  // on purpose: a gate runs next to other work and the machine can be slow (8.8 s seen under load 14).
+  assert.ok(Date.now() - t0 < 60000, `${Date.now() - t0} ms`);
 });
 
 test("names: a script whose blocks don't close only gets the syntax report", () => {
