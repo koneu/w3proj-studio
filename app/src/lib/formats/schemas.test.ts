@@ -182,7 +182,12 @@ test("the comparison with the definitions catches a schema that differs (control
 
 // ---- the code-defined formats against their codecs' source
 
-const rust = (file: string) => readFileSync(repoPath("crates", "w3proj", "src", file), "utf8");
+/** Reads a source file by its path from the repository root, as it is on disk. */
+type ReadSource = (...path: string[]) => string;
+const readSource: ReadSource = (...path) => readFileSync(repoPath(...path), "utf8");
+/** The text with LF line ends: a Windows checkout (git autocrlf) has CRLF, and the readers below cut at "\n". */
+const lf = (text: string) => text.replace(/\r\n?/g, "\n");
+const rust = (file: string) => lf(readSource("crates", "w3proj", "src", file));
 /** The part of `src` from `from` to the first `to` after it; throws when either isn't there (the codec changed). */
 function part(src: string, from: string, to: string): string {
   const a = src.indexOf(from);
@@ -244,21 +249,22 @@ function check(e: Expect, schema: Json, out: string[]): void {
 }
 
 /** What each code-defined schema must say, read from the codecs' source. */
-function expectations(): Expect[] {
+function expectations(read: ReadSource = readSource): Expect[] {
   const out: Expect[] = [];
+  const src = (file: string) => lf(read("crates", "w3proj", "src", file));
   const serde = (schema: string, node: string[], src: string, struct: string, extra: string[] = []) => {
     const s = serdeStruct(src, struct);
     out.push({ schema, node, keys: [...s.keys, ...extra], required: [...s.required, ...extra], closed: s.closed });
   };
   // Object data: serde structs (objdata.rs); unknown keys ignored.
-  const obj = rust("objdata.rs");
+  const obj = src("objdata.rs");
   serde("objects", [], obj, "ObjectFile");
   serde("objects", ["$defs", "object"], obj, "Object");
   serde("objects", ["$defs", "object", "properties", "sets", "items"], obj, "Set");
   serde("objects", ["$defs", "mod"], obj, "Mod");
   // terrain.json (terrain_layout.rs Layout::parse_unchecked, terrain_objects.rs Heads::parse): every key it lists is
   // needed, the optional ones are named where the object is read; unknown keys are errors.
-  const tl = rust("terrain_layout.rs"), to = rust("terrain_objects.rs"), w3e = rust("w3e.rs");
+  const tl = src("terrain_layout.rs"), to = src("terrain_objects.rs"), w3e = src("w3e.rs");
   const top = strings(tl, /const TOP: &\[&str\] *= *&\[([^\]]*)\]/);
   out.push({ schema: "terrain", node: [], keys: [...top, ...strings(tl, /object\(&doc, "the file", TOP, &\[([^\]]*)\]\)/)], required: top, closed: true });
   const corner = [...part(w3e, "const FIELD_NAMES", "];").matchAll(/\("[^"]+", "([^"]+)"\)/g)].map((m) => m[1]);
@@ -285,13 +291,13 @@ function expectations(): Expect[] {
   out.push({ schema: "terrain-regions", node: [], keys: ["regions"], required: ["regions"], closed: true });
   // .w3proj/pathing.json: the keys the split terrain keeps (terrain_pathing.rs parse_json), the ones the app needs
   // (resize.ts validPathingOverrides); the app keeps keys of its own.
-  const pathingKeys = strings(rust("terrain_pathing.rs"), /!\[([^\]]*)\]\.contains\(&k\.as_str\(\)\)/);
-  const valid = part(readFileSync(repoPath("app", "src", "lib", "terrain", "resize.ts"), "utf8"), "export function validPathingOverrides", "\n}");
+  const pathingKeys = strings(src("terrain_pathing.rs"), /!\[([^\]]*)\]\.contains\(&k\.as_str\(\)\)/);
+  const valid = part(lf(read("app", "src", "lib", "terrain", "resize.ts")), "export function validPathingOverrides", "\n}");
   const pathingNeeds = [...valid.matchAll(/(?:Number\.isInteger|Array\.isArray)\(f\.(\w+)\)/g)].map((m) => m[1]);
   out.push({ schema: "pathing", node: [], keys: pathingKeys, required: pathingNeeds, closed: false });
   // The trigger folders (trigger_layout.rs): Obj::new lists the keys a file may have (others are errors); what is
   // needed is read with need_str or "is missing".
-  const tr = rust("trigger_layout.rs"), wtg = rust("wtg.rs");
+  const tr = src("trigger_layout.rs"), wtg = src("wtg.rs");
   const needed = (code: string) => [...new Set([...code.matchAll(/need_str\("(\w+)"\)|\\"(\w+)\\" is missing|has no \\"(\w+)\\"/g)].map((m) => m[1] ?? m[2] ?? m[3]))];
   const root = part(tr, "pub fn from_files_noted(", "let headers:");
   out.push({ schema: "triggers", node: [], keys: strings(root, /Obj::new\(&v, shown\.clone\(\), &\[([^\]]*)\]\)/), required: needed(part(root, "Obj::new(&v, shown.clone()", "let root =")).concat("format"), closed: true });
@@ -334,6 +340,12 @@ test("the code-defined schemas have the keys their codecs read, the ones they ne
   assert.match(triggers, new RegExp(String(tag("triggers").pattern)));
 });
 
+test("the codecs' source reads the same with CRLF line ends (a Windows checkout) as with LF", () => {
+  const crlf: ReadSource = (...path) => readSource(...path).replace(/\r?\n/g, "\r\n");
+  assert.ok(crlf("crates", "w3proj", "src", "wtg.rs").includes("\r\n\r\n"), "control: the CRLF text has CRLF blank lines");
+  assert.deepEqual(expectations(crlf), expectations());
+});
+
 test("the comparison with the codecs catches a schema that differs (control)", () => {
   const list = expectations();
   const damaged = (name: string, damage: (s: Json) => void): string[] => {
@@ -343,13 +355,15 @@ test("the comparison with the codecs catches a schema that differs (control)", (
     for (const e of list.filter((e) => e.schema === name)) check(e, s, out);
     return out;
   };
-  assert.ok(damaged("terrain", (s) => { delete at(s, "properties", "subterrains", "items", "properties").idRange; }).some((p) => p.includes("subterrains.items: keys")));
-  assert.ok(damaged("terrain", (s) => { delete at(s, "properties", "defaultCorner").additionalProperties; }).some((p) => p.includes("defaultCorner: the codec refuses")));
-  assert.ok(damaged("objects", (s) => { (at(s, "$defs", "mod").required as string[]).push("level"); }).some((p) => p.includes("$defs.mod: required")));
-  assert.ok(damaged("trigger-gui", (s) => { at(s, "properties").isCustom = { type: "boolean" }; }).some((p) => p.includes("trigger-gui:(root): keys")));
-  assert.ok(damaged("trigger-gui", (s) => { at(s, "$defs", "eca").additionalProperties = true; }).some((p) => p.includes("$defs.eca: the codec refuses")));
-  assert.ok(damaged("trigger-variable", (s) => { s.required = ["name"]; }).some((p) => p.includes("required name; the codec needs name, type")));
-  assert.ok(damaged("pathing", (s) => { s.additionalProperties = false; }).some((p) => p.includes("the codec ignores unknown keys")));
+  const caught = (out: string[], needle: string) =>
+    assert.ok(out.some((p) => p.includes(needle)), `expected a line with ${JSON.stringify(needle)}, got ${JSON.stringify(out)}`);
+  caught(damaged("terrain", (s) => { delete at(s, "properties", "subterrains", "items", "properties").idRange; }), "subterrains.items: keys");
+  caught(damaged("terrain", (s) => { delete at(s, "properties", "defaultCorner").additionalProperties; }), "defaultCorner: the codec refuses");
+  caught(damaged("objects", (s) => { (at(s, "$defs", "mod").required as string[]).push("level"); }), "$defs.mod: required");
+  caught(damaged("trigger-gui", (s) => { at(s, "properties").isCustom = { type: "boolean" }; }), "trigger-gui:(root): keys");
+  caught(damaged("trigger-gui", (s) => { at(s, "$defs", "eca").additionalProperties = true; }), "$defs.eca: the codec refuses");
+  caught(damaged("trigger-variable", (s) => { s.required = ["name"]; }), "required name; the codec needs name, type");
+  caught(damaged("pathing", (s) => { s.additionalProperties = false; }), "the codec ignores unknown keys");
 });
 
 // ---- files
