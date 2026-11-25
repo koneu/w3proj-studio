@@ -3,6 +3,8 @@
 //! Unpack splits war3map.wtg and war3map.wct into one file per trigger, pack gives them back byte for byte, an edit of
 //! a file reaches the map, a sync keeps the files' names, and a generated script is refused when it doesn't follow.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,7 +33,7 @@ fn workdir(test: &str) -> PathBuf {
 }
 
 fn w3proj(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_w3proj")).args(args).env_remove("W3PROJ_FORMATS").env_remove("W3PROJ_GAME").output().unwrap()
+    common::w3proj_cmd().args(args).output().unwrap()
 }
 
 fn text(o: &Output) -> String {

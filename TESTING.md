@@ -32,6 +32,10 @@ read from `.game-path` in the main checkout (git-ignored; `scripts/setup-linux.s
 it) or `W3PROJ_GAME=<folder>`. Without them the commit gate still passes and the corpus tier fails: it never skips
 silently. Minimum on a fresh clone: Node 26+, `npm ci` in `app/` (also in every new worktree: the gate refuses to start without it), the Rust toolchain.
 
+The CLI's system tests (`crates/cli/tests/`) give the same result whether or not `W3PROJ_GAME` is set: their fixtures are
+made up, and the game's TriggerData.txt doesn't know their functions. Start the binary through `common::w3proj_cmd()`,
+which runs it with `W3PROJ_GAME=none`; a test that needs the real game sets its folder after that (`rebuild.rs`).
+
 ## What can go wrong, worst first
 
 Tests are worth writing in this order, because this is the order of the damage.

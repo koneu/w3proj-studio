@@ -1,10 +1,12 @@
 //! The agent file (AGENTS.md) a new or unpacked project gets: every command it names exists, it is written only when
 //! absent, a sync never rewrites it, and it never goes into a packed map.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use w3proj::agent_file::{self, Kind};
 
@@ -20,7 +22,7 @@ fn workdir(test: &str) -> PathBuf {
 }
 
 fn w3proj(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_w3proj")).args(args).env_remove("W3PROJ_FORMATS").output().unwrap()
+    common::w3proj_cmd().args(args).output().unwrap()
 }
 
 fn ok(args: &[&str]) -> String {

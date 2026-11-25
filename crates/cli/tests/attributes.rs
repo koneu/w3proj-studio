@@ -11,7 +11,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use mpq::attributes::{self, Attributes};
 use mpq::Archive;
@@ -28,7 +28,7 @@ fn workdir(test: &str) -> PathBuf {
 }
 
 fn w3proj(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_w3proj")).args(args).env_remove("W3PROJ_FORMATS").output().unwrap()
+    common::w3proj_cmd().args(args).output().unwrap()
 }
 
 fn ok(args: &[&str]) -> String {

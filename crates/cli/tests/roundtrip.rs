@@ -22,7 +22,7 @@ fn workdir(test: &str) -> PathBuf {
 }
 
 fn w3proj(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_w3proj")).args(args).env_remove("W3PROJ_FORMATS").output().unwrap()
+    common::w3proj_cmd().args(args).output().unwrap()
 }
 
 fn text(o: &Output) -> String {
@@ -565,9 +565,8 @@ fn a_name_starting_with_a_byte_order_mark_keeps_it_through_pack_and_unpack() {
 /// Runs `w3proj args` with its output pipe already closed on the reader's side, like `| head`.
 fn run_with_closed_pipe(args: &[&str]) -> Output {
     use std::process::Stdio;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_w3proj"))
+    let mut child = common::w3proj_cmd()
         .args(args)
-        .env_remove("W3PROJ_FORMATS")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -712,7 +711,7 @@ fn verify_on_many_threads_prints_what_one_thread_prints() {
         if quiet {
             args.push("-q");
         }
-        let o = Command::new(env!("CARGO_BIN_EXE_w3proj")).args(&args).env("W3PROJ_VERIFY_JOBS", jobs).env_remove("W3PROJ_FORMATS").output().unwrap();
+        let o = common::w3proj_cmd().args(&args).env("W3PROJ_VERIFY_JOBS", jobs).output().unwrap();
         (o.status.code(), text(&o))
     };
     for quiet in [false, true] {
@@ -804,9 +803,8 @@ fn a_wts_write_cut_short_by_the_file_system_leaves_the_old_file_whole() {
     let path = project.join("map/war3map.wts");
     let old = fs::read(&path).unwrap();
     let limited = "trap '' XFSZ; ulimit -f 4; exec \"$0\" unpack \"$1\" \"$2\" --game none --trigger-data \"$3\"";
-    let o = Command::new("sh")
+    let o = common::hermetic(&mut Command::new("sh"))
         .args(["-c", limited,env!("CARGO_BIN_EXE_w3proj"), s(&big), s(&project), s(&trigger_data())])
-        .env_remove("W3PROJ_FORMATS")
         .output()
         .unwrap();
     // The control: the limit really stopped the write.
