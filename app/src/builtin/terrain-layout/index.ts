@@ -111,7 +111,8 @@ export interface MergeHookResult { action: "installed" | "updated" | "removed" |
 
 /** Install Merge Hook / Remove Merge Hook: the opt-in git post-merge hook that runs Check Terrain Seams after a merge
  *  that touched two subterrains (`w3proj terrain merge-hook`, one body in the backend). Says where the hook is and
- *  whether git was found; a post-merge hook that isn't ours is left as it is (the notice has the line to add to it). */
+ *  whether git was found; someone else's sh post-merge hook keeps its text (ours is a block in it), one that isn't an
+ *  sh script is left as it is (the notice has the line to add to it). */
 export async function mergeHook(w3: W3Api, arg?: { remove?: boolean; quiet?: boolean }): Promise<MergeHookResult> {
   const what = arg?.remove ? "Remove Merge Hook" : "Install Merge Hook";
   const project = w3.workspace.project();

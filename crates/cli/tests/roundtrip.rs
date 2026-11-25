@@ -1356,7 +1356,8 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
 /// `w3proj terrain merge-hook`: installed into a real repository whose project lies in a folder with a space, the
 /// post-merge hook stays silent after a merge that touched one subterrain and reports the seam check's error after one
 /// that brought two branches' edits of two subterrains together (the cliff of the seams test); installing again
-/// updates it; a post-merge hook of someone else's is never replaced; --remove removes only this one.
+/// changes nothing; a Git LFS-style post-merge hook that was there first keeps its text and runs too, and --remove
+/// takes out only this hook's block; a hook that isn't an sh script is never touched.
 #[test]
 fn the_merge_hook_checks_the_seams_after_a_merge() {
     let dir = workdir("merge_hook");
@@ -1384,12 +1385,24 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
     git(&["init", "-q"]);
     git(&["add", "-A"]);
     git(&["commit", "-q", "-m", "base"]);
-    let said = ok(&["terrain", "merge-hook", s(&project)]);
-    assert!(said.contains("installed"), "{said}");
+    // A post-merge hook as Git LFS installs one (as soon as a project has LFS rules) is there first.
     let hook = PathBuf::from(String::from_utf8_lossy(&git(&["rev-parse", "--absolute-git-dir"]).stdout).trim()).join("hooks").join("post-merge");
+    let lfs = "#!/bin/sh\ncommand -v git >/dev/null 2>&1 || { printf >&2 \"no git\\n\"; exit 2; }\necho \"lfs-style post-merge ran ($#)\"\n";
+    fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    fs::write(&hook, lfs).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let said = ok(&["terrain", "merge-hook", s(&project)]);
+    assert!(said.contains("added to") && said.contains("kept"), "{said}");
     let text_of_hook = fs::read_to_string(&hook).unwrap();
     assert!(text_of_hook.contains("project='maps/My Map/'"), "{text_of_hook}");
+    assert!(text_of_hook.starts_with("#!/bin/sh\n# >>> w3proj terrain merge-hook: begin >>>\n"), "{text_of_hook}");
+    assert!(text_of_hook.ends_with(&lfs["#!/bin/sh\n".len()..]), "the LFS hook's text is all kept, after the block: {text_of_hook}");
     assert!(ok(&["terrain", "merge-hook", s(&project)]).contains("updated"));
+    assert_eq!(fs::read_to_string(&hook).unwrap(), text_of_hook, "installing again changes nothing");
 
     let terrain = |sub: &str| project.join("map/terrain").join(sub).join("terrain.txt");
     let (sw, se) = (fs::read_to_string(terrain("sw")).unwrap(), fs::read_to_string(terrain("se")).unwrap());
@@ -1401,6 +1414,7 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
     git(&["checkout", "-q", "main"]);
     let quiet = git(&["merge", "--no-edit", "-q", "one"]);
     assert!(!text(&quiet).contains("w3proj:"), "one subterrain: the hook stays silent: {}", text(&quiet));
+    assert!(text(&quiet).contains("lfs-style post-merge ran (1)"), "the LFS hook still runs, with git's argument: {}", text(&quiet));
     // Branch B lowers se's west corner; main raises sw's east one; each alone is fine, merged a cliff of 4 levels.
     git(&["checkout", "-q", "-b", "b", &base]);
     fs::write(terrain("se"), se.replace("[layer] all 2\n", "[layer]\n022\n")).unwrap();
@@ -1411,14 +1425,26 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
     let merged = git(&["merge", "--no-edit", "-q", "b"]);
     let said = text(&merged);
     assert!(said.contains("w3proj: the merged branches changed 3 subterrain(s)") && said.contains("cliff-height") && said.contains("seam issues"), "{said}");
+    assert!(said.contains("lfs-style post-merge ran"), "both hooks run on the merge: {said}");
 
-    // Someone else's post-merge hook: left as it is, the line to add is printed.
-    fs::write(&hook, "#!/bin/sh\necho mine\n").unwrap();
-    let o = w3proj(&["terrain", "merge-hook", s(&project)]);
-    assert!(!o.status.success() && text(&o).contains("isn't this hook") && text(&o).contains("terrain seams"), "{}", text(&o));
-    assert_eq!(fs::read_to_string(&hook).unwrap(), "#!/bin/sh\necho mine\n");
+    // --remove takes out only the block: the LFS hook is as it was, and removing it again is refused.
+    assert!(ok(&["terrain", "merge-hook", s(&project), "--remove"]).contains("the rest of it is left"));
+    assert_eq!(fs::read_to_string(&hook).unwrap(), lfs);
     assert!(!w3proj(&["terrain", "merge-hook", s(&project), "--remove"]).status.success(), "someone else's isn't removed");
-    assert!(hook.exists());
+    assert_eq!(fs::read_to_string(&hook).unwrap(), lfs);
+
+    // A post-merge hook that isn't an sh script: left as it is, the line to add is printed.
+    let python = "#!/usr/bin/env python3\nprint('mine')\n";
+    fs::write(&hook, python).unwrap();
+    let o = w3proj(&["terrain", "merge-hook", s(&project)]);
+    assert!(!o.status.success() && text(&o).contains("isn't an sh script") && text(&o).contains("terrain seams"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&hook).unwrap(), python);
+    assert!(!w3proj(&["terrain", "merge-hook", s(&project), "--remove"]).status.success(), "someone else's isn't removed");
+    assert_eq!(fs::read_to_string(&hook).unwrap(), python);
+    // A hook written before the block existed (MARK alone) is all ours: replaced, then removed with its file.
+    fs::write(&hook, "#!/bin/sh\n# w3proj terrain merge-hook\necho old\n").unwrap();
+    assert!(ok(&["terrain", "merge-hook", s(&project)]).contains("updated"));
+    assert!(!fs::read_to_string(&hook).unwrap().contains("echo old"));
     fs::remove_file(&hook).unwrap();
     ok(&["terrain", "merge-hook", s(&project)]);
     assert!(ok(&["terrain", "merge-hook", s(&project), "--remove"]).contains("removed") && !hook.exists());

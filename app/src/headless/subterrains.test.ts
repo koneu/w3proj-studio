@@ -103,11 +103,19 @@ test("Install Merge Hook writes the shared backend's hook into the project's rep
   const text = readFileSync(hook, "utf8");
   assert.ok(text.includes("# w3proj terrain merge-hook") && text.includes("terrain seams"), "the backend's text");
   assert.equal((await mergeHook(grid, { quiet: true })).action, "updated");
-  // Control: someone else's hook is left alone.
+  // Someone else's sh hook (as Git LFS writes one) keeps its text: ours goes in front, Remove takes only ours out.
   writeFileSync(hook, "#!/bin/sh\necho mine\n");
+  assert.equal((await mergeHook(grid, { quiet: true })).action, "installed");
+  const both = readFileSync(hook, "utf8");
+  assert.ok(both.includes("terrain seams") && both.endsWith("\necho mine\n"), both);
+  assert.equal((await mergeHook(grid, { quiet: true, remove: true })).action, "removed");
+  assert.equal(readFileSync(hook, "utf8"), "#!/bin/sh\necho mine\n");
+  await assert.rejects(mergeHook(grid, { quiet: true, remove: true }), /left as it is/);
+  // Control: a hook that isn't an sh script is left alone.
+  writeFileSync(hook, "#!/usr/bin/env python3\nprint('mine')\n");
   const foreign = await mergeHook(grid, { quiet: true });
   assert.equal(foreign.action, "foreign");
-  assert.equal(readFileSync(hook, "utf8"), "#!/bin/sh\necho mine\n");
+  assert.equal(readFileSync(hook, "utf8"), "#!/usr/bin/env python3\nprint('mine')\n");
   await assert.rejects(mergeHook(grid, { quiet: true, remove: true }), /left as it is/);
   rmSync(hook);
   assert.equal((await mergeHook(grid, { quiet: true })).action, "installed");
