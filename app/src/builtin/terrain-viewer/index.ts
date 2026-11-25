@@ -25,7 +25,7 @@ import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, water
 import { errorView, h } from "../../workbench/dom";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, SUBTERRAIN_RGB, subterrainOutline, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
-import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
+import { cameraMarkers, type CameraObject, ViewClipping } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { textureCandidates } from "../../lib/model/texpath";
 import { levelFor } from "../../lib/model/gltexture";
@@ -4958,8 +4958,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (root && sources && w3.workspace.project()?.root === root) await w3.backend.invoke("derived_record", { root, sources }).catch(() => {});
           return { removed };
         };
+        /** The view's far and near clipping (the World Editor's own when the map opens): the renderer's far plane. */
+        const viewClipping = new ViewClipping();
+        const clipChanged = () => { renderer.farZ = viewClipping.current().farZ; redraw(); };
         const handle: TerrainEditorHandle = {
           terrain, editable, redraw, host: el, resizeMap, resizeRemovals,
+          viewClip: () => viewClipping.current(),
+          lookThroughClip: (c) => { viewClipping.lookThrough(c); clipChanged(); },
           path: doc.path, partial: !!partial, undo, redo,
           terrainChanged: (cliffs) => { renderer.terrainChanged(); if (cliffs) void liveCliffs(); doc.setDirty(true); redraw(); },
           commitTerrain,
@@ -5558,7 +5563,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             p ? { minX: p.left, maxX: p.right, minY: p.bottom, maxY: p.top, minZ: z, maxZ: z } : null,
             renderer.fov, canvas.clientWidth / Math.max(1, canvas.clientHeight));
           Object.assign(renderer, { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: Math.max(200, Math.min(maxDistance(), v.distance)) });
-          redraw();
+          // The editor's far clipping becomes twice the distance (HillsbradCreek: 20480 down, far 40960; we-drive
+          // 2026-11-23), so the whole map shows from above however large it is.
+          viewClipping.lookThrough({ farZ: 2 * renderer.distance });
+          clipChanged();
         };
         /** The selected object View Selection looked at last: the next press goes on from it (cycleIndex). */
         let viewedEntry: Placed | null = null;
@@ -5882,7 +5890,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts(), selection: selectedEntries().map((p) => ({ id: p.id, position: [...p.position] })) }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight), farZ: renderer.farZ }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts(), selection: selectedEntries().map((p) => ({ id: p.id, position: [...p.position] })) }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -6283,6 +6291,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!move) return false;
           if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
           else if ("zoom" in move) zoomView(move.zoom > 1);
+          else if ("clip" in move) { viewClipping.stepFar(move.clip.farther); clipChanged(); }
           else { renderer.yaw += move.turn; redraw(); }
           return true;
         };
@@ -6362,6 +6371,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (move && "zoom" in move) {
             // About the World Editor's camera target, wherever the pointer is (zoomView).
             zoomView(move.zoom > 1);
+            return;
+          }
+          // Ctrl and the wheel: the World Editor's Adjust Clipping, the far clipping a step nearer or farther.
+          if (move && "clip" in move) {
+            viewClipping.stepFar(move.clip.farther);
+            clipChanged();
             return;
           }
           const others = ids.filter((id) => !HELD_COMMANDS.has(id));

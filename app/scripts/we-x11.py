@@ -12,7 +12,7 @@ its own), through python-xlib and its XTest extension. Every command prints one 
                                                        only when it differs ("pressed"), and read it again
   we-x11.py --display :N type TEXT [--window ID]       type TEXT (printable ASCII only: any other character, or one only
                                                        AltGr reaches, refuses the whole text), Shift where a character needs it
-  we-x11.py --display :N click X,Y [--button 1|3] [--double] [--window ID]   click at a screen position
+  we-x11.py --display :N click X,Y [--button 1|3|4|5] [--double] [--mod alt|shift|ctrl] [--window ID]   click at a screen position (4, 5: a wheel notch), MOD held
   we-x11.py --display :N move X,Y [--window ID]        move the pointer
   we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3] [--ms N] [--steps N] [--mod alt|shift|ctrl] [--hold MS] [--window ID] [--dry]
                                                        press at one point, move to the other in steps over MS (default
@@ -370,19 +370,30 @@ def move(d, x, y):
     d.sync()
 
 
-def click(d, x, y, button=1, double=False):
+def click(d, x, y, button=1, double=False, mod=None):
+    """A click (buttons 4 and 5: a wheel notch); `mod` (a MODS name) is held around it and always let go."""
     from Xlib import X
     from Xlib.ext import xtest
     import time
+    modkey = keycode(d, MODS[mod.lower()]) if mod else None
     move(d, x, y)
     time.sleep(0.05)
-    for _ in range(2 if double else 1):
-        xtest.fake_input(d, X.ButtonPress, button)
-        d.sync()
-        time.sleep(0.05)
-        xtest.fake_input(d, X.ButtonRelease, button)
-        d.sync()
-        time.sleep(0.05)
+    try:
+        if modkey is not None:
+            xtest.fake_input(d, X.KeyPress, modkey)
+            d.sync()
+            time.sleep(0.05)
+        for _ in range(2 if double else 1):
+            xtest.fake_input(d, X.ButtonPress, button)
+            d.sync()
+            time.sleep(0.05)
+            xtest.fake_input(d, X.ButtonRelease, button)
+            d.sync()
+            time.sleep(0.05)
+    finally:
+        if modkey is not None:
+            xtest.fake_input(d, X.KeyRelease, modkey)
+            d.sync()
 
 
 def drag_path(a, b, steps):
@@ -740,10 +751,13 @@ def main(argv):
     elif cmd == "click":
         button = num("--button", "1")
         double = flag("--double")
+        mod = opt("--mod")
+        if mod and mod.lower() not in MODS:
+            raise SystemExit("click: unknown --mod %r (known: %s)" % (mod, ", ".join(sorted(MODS))))
         x, y = parse_point(arg(0, "X,Y"), "click")
         if window_gone({"click": [x, y], "button": button}):
             return 0
-        click(d, x, y, button, double)
+        click(d, x, y, button, double, mod)
         out({"click": [x, y], "button": button})
     elif cmd == "move":
         x, y = parse_point(arg(0, "X,Y"), "move")

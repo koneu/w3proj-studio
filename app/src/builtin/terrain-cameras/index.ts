@@ -13,7 +13,7 @@ import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type Terra
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
-import { CAMERA_FIELDS, cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, typedCameraValue, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, ViewClipping, type CameraField } from "../../lib/terrain/cameras";
+import { CAMERA_FIELDS, cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, typedCameraValue, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, type CameraField } from "../../lib/terrain/cameras";
 import { readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
 import { storableFloat32 } from "../../lib/formats/float32";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
@@ -85,8 +85,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Looking through a camera: the markers are hidden until the next click on the map. */
   let previewing = false;
   /** The view's far and near clipping, which Create from view and Set from view give a camera (the World Editor's rule:
-   *  its own view's until View looks through a camera, then that camera's). */
-  const clipping = new ViewClipping();
+   *  its own view's until View looks through a camera, then that camera's; Ctrl and the wheel step the far one): the
+   *  terrain view keeps it, as it draws with it (ed.viewClip, ed.lookThroughClip). */
+  const clipping = { current: () => ed.viewClip(), lookThrough: (c: Camera) => ed.lookThroughClip(c) };
 
   /** The names as saved, for the gg_cam_ references in the triggers of cameras renamed since. */
   const names = new SavedNames<Camera>();

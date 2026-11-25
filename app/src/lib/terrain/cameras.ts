@@ -118,10 +118,40 @@ export interface ViewClip { farZ: number; nearZ: number }
 export const EDITOR_VIEW_CLIP: Readonly<ViewClip> = Object.freeze({ farZ: 50000, nearZ: 16 });
 
 /**
+ * The World Editor's Adjust Clipping (Ctrl and the mouse wheel over the terrain view; we-drive 2026-11-23, branch
+ * feat/camera-cutoff, the far clipping read back from cameras made after each step, spec tests/we-compare/camera-cutoff.json):
+ * a notch toward the user (Wheel Down) multiplies the view's far clipping by 1.1, one away (Wheel Up) divides it by 1.1,
+ * both in single precision (50000 one notch nearer is 45454.543, 101 one farther 111.100006); the result is kept within
+ * 101 and 100000 (sixty notches either way stop there, also with the near clipping at 100). The near clipping, the
+ * camera and the zoom stay; the far plane cuts the picture at that depth from the eye (a straight line across flat
+ * ground: 3415.07 cut the opening view of a flat map 3415 deep). Nothing shows the value, and a map opened again
+ * starts at EDITOR_VIEW_CLIP.
+ */
+export const FAR_CLIP = Object.freeze({ step: 1.1, min: 101, max: 100000 });
+
+/** The view's far clipping after one notch of Adjust Clipping (`farther`: Wheel Down), as the World Editor steps it. */
+export function stepFarClip(far: number, farther: boolean): number {
+  const f = Math.fround;
+  const start = Number.isFinite(far) ? far : EDITOR_VIEW_CLIP.farZ;
+  const next = farther ? f(f(start) * f(FAR_CLIP.step)) : f(f(start) / f(FAR_CLIP.step));
+  return Math.min(FAR_CLIP.max, Math.max(FAR_CLIP.min, next));
+}
+
+/** The terrain view's depth range at camera distance `distance` with the view's far clipping `farZ`: the far plane
+ *  there (the World Editor's: at 100000 with far 40960 its picture is black), the near one by the distance as Studio
+ *  has it (a fiftieth, at least 10), but always well short of the far one so the projection stays whole. */
+export function viewDepthRange(distance: number, farZ: number): { near: number; far: number } {
+  const far = Number.isFinite(farZ) && farZ > 1 ? farZ : EDITOR_VIEW_CLIP.farZ;
+  const byDistance = Number.isFinite(distance) ? Math.max(10, distance / 50) : 10;
+  return { near: Math.min(byDistance, far / 4), far };
+}
+
+/**
  * The view's clipping as the World Editor keeps it for Create Camera and Set Camera To Current View (spec
  * tests/we-compare/camera-farz.json): EDITOR_VIEW_CLIP when the map opens; View Selected Camera gives the view that
  * camera's far and near clipping, which then stay through zooming and scrolling until another camera is looked
  * through. Distance plays no part (cameras of distance 500 to 5000 with far 5000 or 9000 gave new cameras the same).
+ * Adjust Clipping (stepFar) changes the far one. The terrain view draws with it (its far plane).
  */
 export class ViewClipping {
   private clip: ViewClip = { ...EDITOR_VIEW_CLIP };
@@ -132,6 +162,8 @@ export class ViewClipping {
       nearZ: Number.isFinite(c.nearZ) ? c.nearZ! : this.clip.nearZ,
     };
   }
+  /** One notch of Adjust Clipping: the far clipping by stepFarClip. */
+  stepFar(farther: boolean): void { this.clip = { ...this.clip, farZ: stepFarClip(this.clip.farZ, farther) }; }
   /** The clipping a camera made or set from the view takes. */
   current(): ViewClip { return { ...this.clip }; }
 }

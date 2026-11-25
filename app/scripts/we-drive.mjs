@@ -110,8 +110,8 @@
 //                       release (default 250, DEFAULT_DRAG_HOLD; 0: moves at once, the editor's per-frame reading of the
 //                       pointer then decides where a box or stroke starts and ends, as drag-stroke-quick measures)
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
-//   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
-//                       positive zooms in
+//   --wheel N[@X,Y][+MOD]  turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N
+//                       notches, positive zooms in; +ctrl (+alt, +shift) holds that key meanwhile
 //   --close-modules     close the module windows this run opened (Sound Editor after F5, …): the next map of a run
 //                       (--map/--open) starts from the map's own view, and a window left open ended one (sound-order-sort)
 //   --windows           list the editor's windows: title, rect, and which are dialogs
@@ -471,6 +471,16 @@ export function parseDrag(arg) {
 
 export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
 
+/** "N[@X,Y][+MOD]" of --wheel into { n, at, mod }: N notches (not 0; positive zooms in), at a position of the display
+ *  or null (the terrain view's middle), MOD (alt, shift, ctrl) held while turning or null. */
+export function parseWheel(arg) {
+  const m = /^(-?\d{1,4})(?:@(\d+),(\d+))?(?:\+(\w+))?$/.exec(arg ?? "");
+  const n = m ? Number(m[1]) : NaN;
+  if (!Number.isInteger(n) || n === 0) throw new Error("--wheel wants a whole number of notches, not 0, optionally @X,Y and +alt, +shift or +ctrl");
+  if (m[4] !== undefined && !DRAG_MODS.includes(m[4])) throw new Error(`--wheel: the modifier after + must be ${DRAG_MODS.join(", ")}`);
+  return { n, at: m[2] === undefined ? null : `${m[2]},${m[3]}`, mod: m[4] ?? null };
+}
+
 /**
  * How long a --drag keeps the pointer still with the button down, after the press and before the release (ms), when
  * no --drag-hold is given. The editor takes the pointer's place once a frame, not from the press and release
@@ -555,6 +565,8 @@ export function parseArgs(argv) {
     } else if (step === "--export-options") {
       pendingExport = parseExportOptions(v);
       steps.splice(i--, 1);
+    } else if (step === "--wheel") {
+      steps[i] = [step, parseWheel(v)];
     } else if (step === "--export-minimap") {
       steps[i] = [step, { file: v, ...(pendingExport ? { options: pendingExport } : {}) }];
       pendingExport = null;
@@ -2047,18 +2059,17 @@ async function main() {
         } else if (step === "--wheel") {
           // Mouse wheel over the terrain view (its middle, or N@X,Y at a position of the display): positive zooms in
           // (button 4), negative out (button 5).
-          const m = /^(-?\d+)(?:@(\d+),(\d+))?$/.exec(arg);
-          const n = m ? Number(m[1]) : NaN;
-          if (!Number.isInteger(n) || n === 0) throw new Error("--wheel wants a whole number of notches, not 0, and optionally @X,Y");
+          // +MOD holds that key while turning (Ctrl+wheel: the view's far clipping).
+          const { n, at: given, mod } = arg;
           const { main } = s.mainOrThrow();
           const [vx, vy, vw, vh] = s.viewRect(main);
-          const at = m[2] ? `${m[2]},${m[3]}` : `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`;
+          const at = given ?? `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`;
           for (let i = 0; i < Math.abs(n); i++) {
-            s.x("click", at, "--button", n > 0 ? 4 : 5);
+            s.x("click", at, "--button", n > 0 ? 4 : 5, ...(mod ? ["--mod", mod] : []));
             await s.wait(100);
           }
           await s.wait(500);
-          out({ step, notches: n, at });
+          out({ step, notches: n, at, ...(mod ? { mod } : {}) });
         } else if (step === "--close-modules") {
           const mods = s.windows().dialogs.filter((d) => isReopenedModule(d.title));
           for (const d of mods) s.x("close", d.id);

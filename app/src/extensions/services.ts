@@ -220,6 +220,13 @@ export interface TerrainEditorHandle {
   aspect(): number;
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
+  /** The view's far and near clipping (lib/terrain/cameras.ts ViewClipping): the World Editor's own when the map
+   *  opens, a looked-through camera's after lookThroughClip, the far one stepped by Ctrl and the wheel. The view
+   *  draws with the far one; a camera made or set from the view takes both. */
+  viewClip(): import("../lib/terrain/cameras").ViewClip;
+  /** Looking through a camera (the Cameras tab's View): its clipping becomes the view's; a value that is no number
+   *  keeps the view's. */
+  lookThroughClip(c: Partial<import("../lib/terrain/cameras").ViewClip>): void;
   /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
    *  the placed models in it, the particles, and HD water's depth picture of the models in it. For measuring
    *  (app-drive's --frame-cost). */

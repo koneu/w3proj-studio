@@ -79,6 +79,7 @@ import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEff
 import type { Placed } from "./objects";
 import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { BORDER_ALPHA, BORDER_SPREAD, borderReach, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
+import { viewDepthRange } from "../../lib/terrain/cameras";
 import { gridLines, regionOutline, type RegionBox } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -916,6 +917,8 @@ export class TerrainRenderer {
   pitch = 0.95;
   /** Vertical field of view (radians). */
   fov = Math.PI / 4;
+  /** The far plane's depth from the eye: the view's far clipping (lib/terrain/cameras.ts ViewClipping), not the zoom's. */
+  farZ = 50000;
   distance: number;
   target: Vec3;
   readonly center: Vec3;
@@ -1831,7 +1834,7 @@ export class TerrainRenderer {
     if (this.border && this.borderSpread !== BORDER_SPREAD[this.tone === 2 ? "hd" : "sd"]) this.refreshBorder();
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
-    const far = this.distance * 10, near = Math.max(10, this.distance / 50);
+    const { near, far } = viewDepthRange(this.distance, this.farZ);
     const viewProj = mat4.mul(
       mat4.perspective(this.fov, w / Math.max(1, h), near, far),
       mat4.lookAt(this.eye(), this.target, [0, 0, 1]),

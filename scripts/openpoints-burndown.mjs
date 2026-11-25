@@ -8,6 +8,7 @@
 //
 // The Markdown files stay the source: people and agents edit them. An open point is a line starting `- [ ] `; the lines
 // indented under it belong to it; the nearest `## ` / `### ` headings above it are its section. This writes:
+// milestone.md is what batches work from; the page charts its open entries on their own.
 //   openpoints/openpoints.json  every open point: file, section, text, a stable id (the same text keeps its id)
 //   openpoints/burndown.json    the history: one entry per run, the counts per file and in total
 //   openpoints/burndown.html    the chart, with its data inside, so it opens from disk without a server
@@ -26,6 +27,7 @@ import { fileURLToPath } from "node:url";
 
 /** The files and what they hold, in the order the chart stacks them. `active`: counted as work still to do. */
 export const FILES = [
+  { file: "milestone.md", label: "Milestone", active: true },
   { file: "bugs.md", label: "Bugs", active: true },
   { file: "features.md", label: "Features", active: true },
   { file: "lowprio-bugs.md", label: "Bugs (display, low)", active: true },
@@ -104,9 +106,10 @@ export const LINES = [
   { key: "agents", label: "To prove by agents" },
   { key: "user", label: "Waiting for the user" },
 ];
-const BUILD_FILES = new Set(["bugs.md", "features.md", "engineering.md", "lowprio-bugs.md", "lowprio-features.md"]);
+const BUILD_FILES = new Set(["milestone.md", "bugs.md", "features.md", "engineering.md", "lowprio-bugs.md", "lowprio-features.md"]);
 export function lineOf(p) {
   if (p.done) return null;
+  if (p.file === "milestone.md" && p.tags.includes("game")) return "user";
   if (BUILD_FILES.has(p.file)) return "build";
   if (p.file === "user.md") return "user";
   if (p.file === "test.md") return p.tags.some((t) => t === "game" || t === "windows") ? "user" : "agents";
@@ -247,6 +250,7 @@ table { border-collapse: collapse; width: 100%; margin-top: 6px; } td, th { text
 </style></head><body><main>
 <h1>Open points burndown</h1>
 <p class="sub">From <code>openpoints/*.md</code>. Latest snapshot: ${escapeHtml(latest ? latest.time : "none")}. "Active" counts bugs, features (both also as low-priority display items), engineering, tests and the user's items; blocked and on hold are shown but not counted.</p>
+<div class="card"><b>Milestone</b> <span class="sec" id="msnow"></span><svg id="mschart" viewBox="0 0 1000 160" role="img" aria-label="Open milestone entries over time"></svg></div>
 <div class="tiles" id="tiles"></div>
 <div class="card"><svg id="chart" viewBox="0 0 1000 420" role="img" aria-label="Open points over time"></svg><div class="legend" id="legend"></div></div>
 <div class="card"><b>Per day</b> (by id; an edited item is neither opened nor closed)<table id="days"></table></div>
@@ -255,7 +259,7 @@ table { border-collapse: collapse; width: 100%; margin-top: 6px; } td, th { text
 </main>
 <script>
 const DATA = ${data};
-const COLORS = { "bugs.md": "#d1242f", "features.md": "#0969da", "lowprio-bugs.md": "#ff8182", "lowprio-features.md": "#80ccff", "engineering.md": "#8250df", "test.md": "#bf8700", "user.md": "#1a7f37", "fable.md": "#a475f9", "blocked.md": "#6e7781", "onhold.md": "#afb8c1" };
+const COLORS = { "milestone.md": "#d4a72c", "bugs.md": "#d1242f", "features.md": "#0969da", "lowprio-bugs.md": "#ff8182", "lowprio-features.md": "#80ccff", "engineering.md": "#8250df", "test.md": "#bf8700", "user.md": "#1a7f37", "fable.md": "#a475f9", "blocked.md": "#6e7781", "onhold.md": "#afb8c1" };
 const LINE_COLORS = { build: "#0550ae", agents: "#bc4c00", user: "#116329" };
 const entries = DATA.entries, files = DATA.files;
 const svg = document.getElementById("chart"), tip = document.getElementById("tip");
@@ -339,8 +343,31 @@ document.getElementById("legend").innerHTML = files.map((f) => '<span><i style="
   document.getElementById("days").innerHTML = "<tr><th>Day</th><th>Opened</th><th>Closed</th><th>Edited</th></tr>" + [...days].reverse().map(([day, d]) =>
     "<tr><td>" + day + '</td><td><i class="bar" style="background:#cf222e;width:' + (d.o * 120) / m + 'px"></i>' + d.o + '</td><td><i class="bar" style="background:#1a7f37;width:' + (d.c * 120) / m + 'px"></i>' + d.c + "</td><td>" + d.ed + "</td></tr>").join("");
 }
+// The milestone alone, from the first snapshot that has it.
+function drawMilestone() {
+  const ms = document.getElementById("mschart"), now = document.getElementById("msnow");
+  ms.replaceChildren();
+  const pts = entries.filter((e) => e.byFile["milestone.md"] !== undefined);
+  if (!pts.length) { now.textContent = "no snapshot yet"; return; }
+  const vals = pts.map((e) => e.byFile["milestone.md"]), max = Math.max(1, ...vals);
+  now.textContent = vals.at(-1) + " open; " + vals[0] + " in the first snapshot";
+  const ts = pts.map((e) => Date.parse(e.time)), span = ts.at(-1) - ts[0];
+  const x = (i) => !span ? W / 2 : L + ((ts[i] - ts[0]) * (W - L - R)) / span;
+  const y = (v) => 130 - (v * 110) / max;
+  const muted = getComputedStyle(document.documentElement).getPropertyValue("--muted"), grid = getComputedStyle(document.documentElement).getPropertyValue("--grid");
+  for (const v of [0, max]) {
+    ms.append(el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: grid, "stroke-width": 1 }));
+    const t = el("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: muted }); t.textContent = v; ms.append(t);
+  }
+  ms.append(el("path", { d: vals.map((v, i) => (i ? "L" : "M") + x(i) + " " + y(v)).join(" "), fill: "none", stroke: COLORS["milestone.md"], "stroke-width": 2.5 }));
+  vals.forEach((v, i) => {
+    const dot = el("circle", { cx: x(i), cy: y(v), r: 4, fill: COLORS["milestone.md"] });
+    const title = el("title", {}); title.textContent = pts[i].time + ": " + v + " open"; dot.append(title); ms.append(dot);
+  });
+}
 draw();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+drawMilestone();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { draw(); drawMilestone(); });
 </script></body></html>
 `;
 }
