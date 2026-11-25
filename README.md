@@ -364,8 +364,10 @@ subterrain and changes nothing. `w3proj pack` of a split project runs it first a
 can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so. To run it after every git merge that
 brought together changes of two subterrains (or of `terrain.json`), install the opt-in hook once per clone:
 `w3proj terrain merge-hook MyMap/` writes `post-merge` into the repository's hooks folder (worktrees and
-`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` hook that is already
-there and isn't this one is left alone (the line to add to it is printed); `--remove` takes this one out again.
+`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` sh script that is
+already there (Git LFS writes one for a project with LFS rules) keeps all its text: this hook goes in as a marked block
+after its `#!` line and both run. One that isn't an sh script is left alone (the line to add to it is printed).
+`--remove` takes out only this hook's block.
 
 **New Subterrain…**, **Resize Subterrain…**, **Rename Subterrain…** and **Join Subterrains…** (palette, the
 Subterrains view; `w3proj terrain relayout --rect NAME[=OLD+OLD]:x,y,w,h …`) change the rectangles without changing the
