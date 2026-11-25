@@ -19,5 +19,6 @@ an older one only where it says so ("earlier: ...").
 | [lighting-and-shadows.md](lighting-and-shadows.md) | Time of day, light ranges, Calculate Shadows, HD shadows, the game view's light |
 | [doodads-and-units.md](doodads-and-units.md) | Dragging, picking, pasting, rules on load, fences and footprints, camps, unit properties |
 | [saved-data-rules.md](saved-data-rules.md) | What w3i, w3e, wpm, doo, wts and the object files store, map preferences, saving |
+| [object-text-strings.md](object-text-strings.md) | Which object texts the World Editor's save turns into war3map.wts strings, how it numbers and reuses them, the corpus count, and why Studio keeps them literal |
 | [editors-and-ui.md](editors-and-ui.md) | Trigger, Object, Sound and AI editors against the World Editor |
 | [branch-rounds.md](branch-rounds.md) | Rounds that measured several unrelated things (we-compare-N, we-misc-N), kept whole |
