@@ -286,7 +286,10 @@ const steps = [
   { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, run: hostileRounds },
   { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   { id: "script", name: "generated scripts against the World Editor's", tier: "corpus", weight: 8, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/script-check/run.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
-  { id: "twin", name: "Rust and TypeScript codecs agree", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
+  // The scheduler counts cores only (weight), not memory: the first run extracts every .wts of the corpus and the game
+  // (about 4 GB, 2.5 min, then cached in target/wts-corpus), so it weighs as much as an app smoke half.
+  { id: "wts", name: "string tables against the frozen reading on every .wts", tier: "corpus", weight: 4, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/wts-corpus.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3PROJ_CORPUS: corpus } })) },
+  { id: "twin",name: "Rust and TypeScript codecs agree", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   // [Refactored] Start `ui` before `rust` and `clippy` and release `["dist", "w"]` as soon as Vite prints "built in" (~1.5 s),
   // so `ui` no longer queues behind sequential `rust` + `clippy` in `commit` tier and overlaps its Chrome phase with them.
   { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke1#built"], locks: [["dist", "w"]], built: "built in", run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
@@ -306,7 +309,7 @@ const steps = [
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "wts", "twin", "appsmoke1", "appsmoke2", "script"];
 
 const tiers = {
   commit: ["commit"],

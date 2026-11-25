@@ -1,8 +1,9 @@
 // war3map.wts on real maps: what the string table reads from every .wts in the map corpus and the
 // game's own maps (including their _Locales copies), compared with the reference rule (the first
 // line that starts `}` ends a block). Lists every file whose result differs and checks that each
-// difference is a recovered block: a string the reference swallowed into its neighbour, with the
-// text of every other string unchanged and no string lost. It also checks that a table which was
+// difference is either a recovered block (a string the reference swallowed into its neighbour, with the
+// text of every other string unchanged and no string lost) or a text cut at a `}` inside a line, the
+// rule pinned in wts.test.ts (verdict: wts-verdict.mjs). It also checks that a table which was
 // not edited serializes to the file's own bytes, and that editing one string keeps every other. In a file
 // with stray carriage returns (`\r\r\n`, `\r\r`), an edit of a string holding them or of its neighbour
 // must change that string's bytes and no other byte.
@@ -18,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chosenGamePath } from "../../tests/gamepath.mjs";
+import { classifyText, fileFine } from "./wts-verdict.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const root = join(app, "..");
@@ -105,10 +107,10 @@ for (const f of files) {
   for (const [n, v] of a) {
     if (!b.has(n)) { lost++; diff.push(`LOST ${n}`); }
     else if (b.get(n) !== v) {
-      // allowed: the reference text swallowed the next block, the new one is only its start
-      const rest = v.slice(b.get(n).length);
-      const ok = v.startsWith(b.get(n)) && rest.startsWith("}");
-      diff.push(ok ? `cut ${n}` : `CHANGED ${n}`);
+      // allowed: the text ends at a `}` inside a line (the rule of wts.test.ts), or the reference text swallowed
+      // the next block and the new one is only its start
+      const kind = classifyText(v, b.get(n));
+      diff.push(kind === "cut" || kind === "inline" ? `${kind} ${n}` : `CHANGED ${n}`);
     }
   }
   for (const [n] of b) {
@@ -147,14 +149,13 @@ for (const f of files) {
   }
   if (!diff.length) { same++; continue; }
   changed++;
-  const cuts = diff.filter((d) => d.startsWith("cut")).length, news = diff.filter((d) => d.startsWith("new")).length;
-  const fine = diff.every((d) => d.startsWith("cut") || d.startsWith("new")) && cuts > 0 && news >= cuts;
+  const fine = fileFine(diff);
   if (!fine) bad++;
   lines.push(`${fine ? "ok " : "BAD"} ${id}: ${diff.join(", ")}`);
 }
 console.log(lines.join(LF));
 console.log(`${LF}${files.length} wts files, ${strings} strings in the reference reading`);
-console.log(`unchanged ${same}, changed ${changed} (${bad} not a plain recovered block), recovered strings ${recovered}, lost strings ${lost}`);
+console.log(`unchanged ${same}, changed ${changed} (${bad} neither a recovered block nor an inline cut), recovered strings ${recovered}, lost strings ${lost}`);
 console.log(`untouched table not byte-identical: ${notIdentical}; strings lost after editing every string: ${editLost}`);
 console.log(`files with stray carriage returns: ${crFiles}; edits next to them ${crEdits}, changing more than their string: ${crEditBad}`);
 process.exit(bad || lost || notIdentical || editLost || crEditBad ? 1 : 0);
