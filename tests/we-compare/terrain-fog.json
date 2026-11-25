@@ -1,0 +1,24 @@
+[
+  {
+    "name": "terrain-fog-on",
+    "description": "The 3.0 terrain fog words are Height Start, Height End, Linear Start, Linear End, Max Opacity and Draw Fog Over Sky (crates/w3proj/formats/w3i.json, measured 2026-11-25): tf-on.w3x (tests/fixtures/we-specs/make-terrain-fog.mjs: Use Terrain Fog, fog style 3, words 250, -125, 1500, 6000, 0.75, 1), the editor opens and saves it; Studio generates the script (lib/script/setup.ts); the fog lines of war3map.j and the w3i (what the editor's save changes anyway ignored)",
+    "input": { "map": "${REPO}/target/terrain-fog/tf-on.w3x", "make": "make-terrain-fog.mjs" },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.j", "as": "text", "lines": "TerrainFog" },
+      { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet"] }
+    ],
+    "limit": 20
+  },
+  {
+    "name": "terrain-fog-off",
+    "description": "terrain-fog-on with other values (tf-off.w3x: fog style 4, words -40.25, -300, 0, 13, 0.123, 0: not drawn over the sky)",
+    "input": { "map": "${REPO}/target/terrain-fog/tf-off.w3x", "make": "make-terrain-fog.mjs" },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.j", "as": "text", "lines": "TerrainFog" },
+      { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet"] }
+    ],
+    "limit": 20
+  }
+]
