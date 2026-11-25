@@ -116,7 +116,7 @@ export const START_SQUARE = 8;
 /** A gold mine whose centre is nearer to a start location than this makes it invalid (we-drive 2026-11-16: 749 and
  *  (528, 528) were, 750 and (530.5, 530.5) not). Haunted and entangled mines count alike (not measured). */
 export const MINE_CLEARANCE = 750;
-const MINES = new Set(["ngol", "ugol", "egol"]);
+export const MINES: ReadonlySet<string> = new Set(["ngol", "ugol", "egol"]);
 
 /** Whether a start location stands under water: one of the World Editor's "start locations in invalid positions"
  *  (World Editor 7003's new maps on shallow or deep water, we-drive 2026-11-11). The others (startsSurelyInvalid) need

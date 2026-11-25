@@ -6,18 +6,42 @@
 // not saved, not selectable.
 
 import type { Placed } from "./objects";
-import { DEEP_WATER } from "../../lib/terrain/pathing";
-import { heightAt, waterSurfaceAt, type Terrain } from "../../lib/terrain/w3e";
+import { MINE_CLEARANCE, MINES, START_SQUARE } from "../../lib/terrain/meleesave";
+import { waterSurfaceAt, type Terrain } from "../../lib/terrain/w3e";
 import type { TileRect } from "./specials";
 
-/** Whether a start location's preview is left out, as the World Editor does where a start can't be built on:
- *  in shallow water (the water over the ground no deeper than DEEP_WATER; deep water keeps it) or on a tile
- *  a special doodad covers. Studio's own reading of the open point; the editor's exact limits aren't measured. */
+/** Whether a start location's preview is left out, as the World Editor does where a start can't be built on: water
+ *  of any depth under any cell of the town hall's square (START_SQUARE cells each way from the start rounded to the
+ *  32 grid, the square the melee save tests), or a special doodad on the start's tile. The editor's rule is its melee
+ *  save's "start location in an invalid position" (we-drive 2026-11-25, make-start-preview.mjs: every depth from
+ *  0.15 to 100.15 hid it and a surface under the ground didn't; water from 128 or 256 east of the start hid it, from
+ *  384 not; the stored war3map.wpm doesn't count). Not here yet, as they need the game's pathing textures: trees,
+ *  doodads and pathing blockers in the square, Lrok and cliffs; gold mines are in startPreviews. */
 export function startPreviewHidden(t: Terrain, specials: readonly TileRect[], x: number, y: number): boolean {
-  const water = waterSurfaceAt(t, x, y);
-  if (water !== null && water - heightAt(t, x, y) <= DEEP_WATER) return true;
+  const cx = Math.round((x - t.offsetX) / 32), cy = Math.round((y - t.offsetY) / 32);
+  // Checked on every drawn frame: the cells only where a corner of the square's tiles has water.
+  // (past the edge waterSurfaceAt takes the nearest tile, whose corners these bounds keep)
+  const lo = (v: number, n: number) => Math.min(Math.max(v, 0), n - 2), hi = (v: number, n: number) => Math.min(Math.max(v, 1), n - 1);
+  let wet = false;
+  for (let j = lo(Math.floor((cy - START_SQUARE) / 4), t.height); !wet && j <= hi(Math.ceil((cy + START_SQUARE) / 4), t.height); j++) {
+    for (let i = lo(Math.floor((cx - START_SQUARE) / 4), t.width); i <= hi(Math.ceil((cx + START_SQUARE) / 4), t.width); i++) {
+      if (t.corners[j * t.width + i]?.hasWater) { wet = true; break; }
+    }
+  }
+  for (let j = cy - START_SQUARE; wet && j < cy + START_SQUARE; j++) {
+    for (let i = cx - START_SQUARE; i < cx + START_SQUARE; i++) {
+      if (waterSurfaceAt(t, t.offsetX + (i + 0.5) * 32, t.offsetY + (j + 0.5) * 32) !== null) return true;
+    }
+  }
   const tx = Math.floor((x - t.offsetX) / 128), ty = Math.floor((y - t.offsetY) / 128);
   return specials.some((r) => tx >= r.x0 && tx <= r.x1 && ty >= r.y0 && ty <= r.y1);
+}
+
+/** Whether a gold mine (of any kind) stands nearer than MINE_CLEARANCE to (x, y): the World Editor leaves the preview
+ *  out then (we-drive 2026-11-25, make-start-preview.mjs mine: 749 and (528, 528) hid it, 750 and (531, 531) not; a
+ *  farm on the start didn't). */
+function mineTooNear(units: readonly Placed[], x: number, y: number): boolean {
+  return units.some((u) => MINES.has(u.id) && Math.hypot(u.position[0] - x, u.position[1] - y) < MINE_CLEARANCE);
 }
 
 /** Town halls by race as war3map.w3i stores it: 1 Human, 2 Orc, 3 Undead, 4 Night Elf. */
@@ -43,7 +67,7 @@ export function startPreviews(units: readonly Placed[], races: ReadonlyMap<numbe
   const out: Placed[] = [];
   for (const u of units) {
     if (u.id !== "sloc" || u.player === undefined) continue;
-    if (hidden?.(u.position[0], u.position[1])) continue;
+    if (mineTooNear(units, u.position[0], u.position[1]) || hidden?.(u.position[0], u.position[1])) continue;
     out.push({ id: startBuilding(u.player, races.get(u.player)), variation: 0, position: [...u.position], angle: (3 * Math.PI) / 2, scale: [1, 1, 1], player: u.player });
   }
   return out;
