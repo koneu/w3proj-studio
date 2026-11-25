@@ -2116,6 +2116,35 @@ mod tests {
         assert_eq!(encode(&def_units, &dec.value).unwrap(), non_empty);
     }
 
+    /// The w3i of a protected map, cut by its protector, stays raw and packs back unchanged. Every map of the
+    /// campaign "The Chosen Ones" (corpus, all four versions; protected: script moved to `scripts\war3map.j`, no
+    /// trigger files, files without names in some chapters) ends its v25 w3i after the forces with one byte 0xff
+    /// where the upgrade, techtree, random group and item table counts belong. No World Editor writes that, and a
+    /// typed form would hide that the tables are gone (adding one there would change the layout), so raw is
+    /// right; tests/corpus-baseline.tsv records them as `raw`.
+    #[test]
+    fn protector_cut_w3i_stays_raw_and_packs_back_unchanged() {
+        let codecs = Registry::with_formats(&[]).unwrap();
+        let whole = w3i_bytes(25, 6059);
+        // The four table counts (all zero here) are the last 16 bytes; the protector left one 0xff instead.
+        assert!(whole.ends_with(&[0; 16]));
+        let mut cut = whole[..whole.len() - 16].to_vec();
+        cut.push(0xff);
+        for (w3i, want) in [(&whole, Some("format:w3i")), (&cut, None)] {
+            let ar = make_archive(Some(w3i), &empty_v8_doo(false), &empty_v8_doo(true));
+            let ex = extract_with(&ar, &codecs, &[]);
+            let entry = ex.report.files.iter().find(|f| f.archive_name == "war3map.w3i").unwrap();
+            assert_eq!(entry.codec.as_deref(), want, "{entry:?}");
+            if want.is_none() {
+                assert_eq!(ex.files.get("war3map.w3i"), Some(w3i), "kept as the raw bytes");
+                assert!(!ex.files.contains_key("war3map.w3i.json"));
+                assert!(entry.note.as_deref().is_some_and(|n| n.contains("unexpected end of file")), "{entry:?}");
+            }
+            let repacked = Archive::from_bytes(pack_extracted(&ex, &codecs).unwrap()).unwrap();
+            assert_eq!(&repacked.read("war3map.w3i").unwrap(), w3i);
+        }
+    }
+
     /// verify's split-terrain round trip (terrain and placed objects) passes a map whose files come back, and
     /// reports one whose project files don't (a terrain text, or an object file, that isn't the one unpack
     /// writes, so the merged text differs) or that can't be split.
