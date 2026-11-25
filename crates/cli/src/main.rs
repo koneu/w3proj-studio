@@ -500,6 +500,11 @@ enum Cmd {
         /// Pack war3map.wts as it is, unused strings included.
         #[arg(long)]
         keep_unused_strings: bool,
+        /// Write an (attributes) into the map (and its chapter maps), as the World Editor's save does: a CRC32 of
+        /// each file and no time stamps, so the map has the same entries as a World Editor save and packing twice
+        /// still gives the same bytes. Without it the map has one entry fewer (the game loads it either way).
+        #[arg(long)]
+        attributes: bool,
         /// Pack pathing, shadows and the minimap as they are, even when the terrain or doodads
         /// changed since they were made (the app makes them again a moment after an edit).
         #[arg(long)]
@@ -890,7 +895,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept the project's {s}: only its export header changed");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, game, trigger_data } => {
+        Cmd::Pack { project, output, keep_unused_strings, attributes, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, game, trigger_data } => {
             check_trigger_data(&trigger_data)?;
             check_derived(&project, force_stale, allow_terrain_only_derived)?;
             seams::check_for_pack(&packed_projects(&project), allow_seam_issues, &extra)?;
@@ -912,8 +917,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             check_script(&project, allow_stale_script)?;
             // The game's TriggerData (read only for a project with map/triggers/) checks the GUI functions.
             let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &lazy_game(&game), &trigger_data);
-            let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };
-            let r = pack(&project, output.as_deref(), &codecs)
+            let options = w3proj::PackOptions { prune: !keep_unused_strings, attributes };
+            let r = w3proj::pack_with(&project, output.as_deref(), &codecs, options)
                 .with_context(|| format!("packing {}", project.display()))?;
             if let Some(s) = &r.strings {
                 let list = |v: &[w3proj::wts::StringNum]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");

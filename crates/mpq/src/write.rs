@@ -9,7 +9,7 @@ use std::io::Write;
 use flate2::{write::ZlibEncoder, Compression};
 
 use crate::crypto::{self, HASH_FILE_KEY, HASH_NAME_A, HASH_NAME_B, HASH_TABLE_OFFSET};
-use crate::{flags, Error, Result};
+use crate::{attributes, flags, Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct WriteOptions {
@@ -19,6 +19,10 @@ pub struct WriteOptions {
     pub min_hash_table_size: u32,
     pub compress: bool,
     pub listfile: bool,
+    /// Ends the archive with an `(attributes)` as the World Editor's save has it: version 100, flags 0x1 (CRC32
+    /// only, so no time stamps), the CRC32 of each block's file bytes and 0 for its own block. One given with
+    /// `add` is replaced.
+    pub attributes: bool,
 }
 
 impl Default for WriteOptions {
@@ -28,6 +32,7 @@ impl Default for WriteOptions {
             min_hash_table_size: 16,
             compress: true,
             listfile: true,
+            attributes: false,
         }
     }
 }
@@ -76,6 +81,14 @@ impl ArchiveBuilder {
                 .join("\r\n");
             self.files.retain(|(n, _)| !n.eq_ignore_ascii_case("(listfile)"));
             self.files.push(("(listfile)".into(), list.into_bytes()));
+        }
+        if self.options.attributes {
+            self.files.retain(|(n, _)| !n.eq_ignore_ascii_case(attributes::NAME));
+            // Block i holds file i, and (attributes) comes last, as in the World Editor's maps.
+            let mut crc32: Vec<u32> = self.files.iter().map(|(_, d)| attributes::crc32(d)).collect();
+            crc32.push(0);
+            let a = attributes::Attributes { version: attributes::VERSION, flags: attributes::CRC32, crc32, time: vec![], hash16: vec![] };
+            self.files.push((attributes::NAME.into(), a.to_bytes()));
         }
 
         let mut out = prefix.to_vec();
