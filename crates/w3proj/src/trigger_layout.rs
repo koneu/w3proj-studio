@@ -1861,7 +1861,8 @@ pub fn prepare_sync(project: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
     let script = script_in(files);
     let generated = match &script {
         Some((name, bytes)) => {
-            let studios = crate::derived::script_stamp(project).is_some_and(|stamp| std::str::from_utf8(bytes).is_ok_and(|t| crate::derived::script_hash(t) == stamp));
+            // The stamp is the hash of the script's lossless text (the app's readScriptFile): one in an old code page too.
+            let studios = crate::derived::script_stamp(project).is_some_and(|stamp| crate::derived::script_hash(&crate::lossless::decode(bytes)) == stamp);
             let already = old.as_ref().is_some_and(|t| t.script == ScriptMode::Generated)
                 && crate::derived::read_script_store(project)?.iter().any(|(k, b)| k.eq_ignore_ascii_case(name) && b == bytes);
             studios || already

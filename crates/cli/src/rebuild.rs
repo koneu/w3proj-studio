@@ -160,12 +160,11 @@ pub fn script_is_studios(root: &Path) -> Result<bool, String> {
     };
     for file in SCRIPT_FILES {
         let path = root.join(file);
+        // The hash is of the text as the app reads it (guard.ts readScriptFile: lossless, so a script whose strings came
+        // from a table in an old code page holds those bytes and is Studio's all the same).
         match std::fs::read(&path) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) if script_hash(&text) == stamp => return Ok(true),
-                Ok(_) => {}
-                Err(_) => return Err(format!("{file} isn't UTF-8 text")),
-            },
+            Ok(bytes) if script_hash(&w3proj::lossless::decode(&bytes)) == stamp => return Ok(true),
+            Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("{file} is there but can't be read ({e})")),
         }
@@ -745,8 +744,14 @@ mod tests {
         assert_eq!(script_is_studios(&dir), Ok(false), "edited since");
         std::fs::remove_file(dir.join("map/war3map.j")).unwrap();
         assert_eq!(script_is_studios(&dir), Ok(false), "no script");
+        // A script holding a name from a table in CP949 ("한국", not UTF-8), stamped by the app with the hash of its
+        // lossless text (readScriptFile), is Studio's; other bytes are not.
+        let korean = [b"// ".as_slice(), &[0xc7, 0xd1, 0xb1, 0xb9], b"\r\nfunction main takes nothing returns nothing\r\nendfunction\r\n"].concat();
+        std::fs::write(dir.join("map/war3map.j"), &korean).unwrap();
+        std::fs::write(dir.join(SCRIPT_STAMP), format!("{}\n", script_hash(&w3proj::lossless::decode(&korean)))).unwrap();
+        assert_eq!(script_is_studios(&dir), Ok(true), "a script in a code page");
         std::fs::write(dir.join("map/war3map.j"), [0xffu8, 0xfe]).unwrap();
-        assert!(script_is_studios(&dir).unwrap_err().contains("UTF-8"));
+        assert_eq!(script_is_studios(&dir), Ok(false), "other bytes");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

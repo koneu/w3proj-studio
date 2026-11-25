@@ -20,7 +20,11 @@ const T = await mod("/terrain/w3e.ts");
 const { w3eFromText } = await mod("/terrain/w3etext.ts");
 const { parseIni, parseSlk } = await mod("/formats/text.ts");
 
+const { decodeLossless } = await mod("/formats/lossless.ts");
+
 const read = (f: string) => readFileSync(f, "utf8");
+/** A map's script or string table as the app reads it (readScriptFile, readWts): any encoding, lossless. */
+const readMapText = (f: string): string => decodeLossless(new Uint8Array(readFileSync(f)));
 const data = parseTriggerData(read("TriggerData.txt"));
 const wed = parseIni(read("WorldEditData.txt"));
 const light = (sec: string, t: string, kind: string) =>
@@ -82,7 +86,7 @@ for (const m of maps) {
     const wctBytes = new Uint8Array(readFileSync(`${d}/war3map.wct`));
     const rc = (stats["(wct byte-exact)"] ??= [0, 0]); rc[1]++; if (same(W.writeWct(custom), wctBytes)) rc[0]++;
   }
-  const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
+  const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(readMapText(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e.txt`) ? T.parseW3e(w3eFromText(read(`${d}/war3map.w3e.txt`))) : existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg); as the app reads them.
   const unitFiles = [json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")];
@@ -109,10 +113,10 @@ for (const m of maps) {
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
     regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras, sounds: json(d, "war3map.w3s")?.sounds,
     // Sound lengths as the app takes them when it can't read the sound files: from the script there is.
-    soundDuration: J.scriptSoundDurations(read(scriptFile)), soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
+    soundDuration: J.scriptSoundDurations(readMapText(scriptFile)), soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
   };
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
-  const whole = J.generateScript(input), file = read(scriptFile);
+  const whole = J.generateScript(input), file = readMapText(scriptFile);
   // SCRIPT_CHECK_DUMP=<folder>: both scripts per map, to go through the differences (JASS and Lua).
   if (process.env.SCRIPT_CHECK_DUMP) writeFileSync(`${process.env.SCRIPT_CHECK_DUMP}/${m}.json`, JSON.stringify([norm(whole), norm(file)]));
   const inList = (a: any[] | undefined, f: (x: any) => string) => (a ?? []).map(f);
