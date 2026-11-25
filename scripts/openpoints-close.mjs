@@ -9,7 +9,8 @@
 //   DIFFERS   the same
 //   NOT DONE  `(not done: <reason>, <date>)` is added to the end of the item; the second one moves the item to user.md
 //             (when it's tagged [game]/[windows] or the reason names the user, the game or Windows) or else to onhold.md;
-//             an item already in user.md goes on to onhold.md, one already in onhold.md stays
+//             an item already in user.md goes on to onhold.md, one already in onhold.md stays. A milestone.md entry
+//             never moves: only the user takes one out
 // Nothing is changed when an id isn't found (or is ambiguous); they are listed and the exit code is 1. Every file that
 // changes is first copied to openpoints/.backup/<timestamp>/. Other items' text is never touched. --dry-run prints the plan.
 
@@ -98,7 +99,7 @@ export function applyVerdicts(files, verdicts, date) {
     } else {
       const count = (block.join(" ").match(NOTE) ?? []).length + 1;
       block[block.length - 1] += ` (not done: ${cleanReason(v.text)}, ${date})`;
-      if (count < 2 || p.file === "onhold.md") {
+      if (count < 2 || p.file === "onhold.md" || p.file === "milestone.md") {
         lines.splice(p.start, block.length, ...block);
         write(p.file, lines.join(eol));
         plan.push(`${v.id} NOT DONE (${count}): note added in ${p.file}: ${label}`);
