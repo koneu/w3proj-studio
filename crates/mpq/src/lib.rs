@@ -1,6 +1,7 @@
 //! Minimal, dependency-light MPQ v1 reader/writer for Warcraft III maps.
 
 mod adpcm;
+pub mod attributes;
 pub mod crypto;
 mod huffman;
 mod huffman_tables;
@@ -139,6 +140,57 @@ mod tests {
             let a = Archive::from_bytes(encrypted_archive(r"scripts\war3map.j", &data, fix_key)).unwrap();
             assert_eq!(a.read(r"scripts\war3map.j").unwrap(), data, "fix_key {fix_key}");
         }
+    }
+
+    fn with_attributes(attrs: bool) -> Vec<u8> {
+        let mut b = ArchiveBuilder::new(WriteOptions { attributes: attrs, ..WriteOptions::default() });
+        b.add("war3map.j", vec![3; 9000]);
+        b.add("war3map.w3i", (0..300u32).map(|i| i as u8).collect());
+        b.add("empty.txt", Vec::new());
+        b.add("Chapter.w3x", vec![9; 100]);
+        // A stale one from the caller is replaced, never packed.
+        b.add("(attributes)", vec![1, 2, 3]);
+        b.write(b"HM3W").unwrap()
+    }
+
+    /// The World Editor's layout (cli/tests/attributes.rs reads it off real maps): CRC32 only, one per block, block
+    /// order; (listfile) second last, (attributes) last with CRC 0.
+    #[test]
+    fn attributes_hold_a_crc_per_block_and_end_the_archive() {
+        let a = Archive::from_bytes(with_attributes(true)).unwrap();
+        let n = a.header().block_table_entries as usize;
+        assert_eq!(n, 6, "four files, (listfile) and (attributes)");
+        let raw = a.read("(attributes)").unwrap();
+        assert_eq!(raw.len(), 8 + 4 * n);
+        let attrs = attributes::Attributes::parse(&raw, n).unwrap();
+        assert_eq!((attrs.version, attrs.flags), (100, attributes::CRC32));
+        assert!(attrs.time.is_empty() && attrs.hash16.is_empty());
+        let mut seen = 0;
+        for slot in a.slots() {
+            let i = slot.hash.block_index as usize;
+            let data = a.read_block(&slot.block, None).unwrap();
+            if i == n - 1 {
+                assert_eq!(data, raw, "the last block is (attributes)");
+                assert_eq!(attrs.crc32[i], 0);
+            } else {
+                assert_eq!(attrs.crc32[i], attributes::crc32(&data), "block {i}");
+            }
+            seen += 1;
+        }
+        assert_eq!(seen, n);
+        assert_eq!(a.find("(listfile)").unwrap().hash.block_index as usize, n - 2);
+        let list = String::from_utf8(a.read("(listfile)").unwrap()).unwrap();
+        assert!(!list.contains("(attributes)"), "(listfile) names no bookkeeping: {list}");
+        assert_eq!(a.read("war3map.j").unwrap(), vec![3; 9000]);
+    }
+
+    #[test]
+    fn attributes_are_deterministic_and_off_by_default() {
+        assert_eq!(with_attributes(true), with_attributes(true));
+        let plain = Archive::from_bytes(with_attributes(false)).unwrap();
+        // Off: the writer adds nothing, and what the caller gave goes in as it is (today's behaviour).
+        assert_eq!(plain.read("(attributes)").unwrap(), vec![1, 2, 3]);
+        assert_eq!(plain.header().block_table_entries, 6);
     }
 
     #[test]

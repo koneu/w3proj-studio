@@ -760,6 +760,46 @@ fn archive_reader_survives_damaged_maps() {
     report(Found::all(runs).failures);
 }
 
+/// (attributes), from a map packed with one (`PackOptions::attributes`): damaged as part of the archive, and on its own
+/// against block counts at their limits. Reading it never panics.
+#[test]
+fn attributes_survive_damaged_archives() {
+    let map = {
+        let _guard = TmpGuard::new();
+        let out = tmp("attributes-fixture.w3x");
+        w3proj::pack_with(&fixture(), Some(&out), &registry(), w3proj::PackOptions { attributes: true, ..Default::default() }).unwrap();
+        fs::read(out).unwrap()
+    };
+    let archive = Archive::from_bytes(map.clone()).unwrap();
+    let own = archive.read(mpq::attributes::NAME).unwrap();
+    let blocks = archive.header().block_table_entries as usize;
+    assert!(mpq::attributes::Attributes::parse(&own, blocks).is_ok(), "the undamaged one must read");
+    let runs = par_seeds("attributes", seeds(rounds() * 10), |chunk| {
+        let mut found = Found::default();
+        for seed in chunk.seeds() {
+            let mut rng = Rng::new(seed + 1);
+            let (bad_map, bad_own) = (damage(&map, &mut rng), damage(&own, &mut rng));
+            let count = match rng.below(5) {
+                0 => usize::MAX,
+                1 => u32::MAX as usize,
+                2 => 0,
+                3 => rng.next() as usize,
+                _ => blocks + rng.below(3),
+            };
+            guarded(&mut found.failures, || format!("seed {seed}"), || {
+                if let Ok(a) = Archive::from_bytes(bad_map) {
+                    if let Ok(raw) = a.read(mpq::attributes::NAME) {
+                        let _ = mpq::attributes::Attributes::parse(&raw, a.header().block_table_entries as usize);
+                    }
+                }
+                let _ = mpq::attributes::Attributes::parse(&bad_own, count);
+            });
+        }
+        found
+    });
+    report(Found::all(runs).failures);
+}
+
 /// Damage aimed at what the archive tables point to, through the file contents: compression
 /// methods and sector tables are read before anything is checked.
 #[test]

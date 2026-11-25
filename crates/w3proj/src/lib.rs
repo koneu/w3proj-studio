@@ -101,7 +101,8 @@ pub fn private_dir(dir: &std::path::Path) -> std::result::Result<(), String> {
 
 pub use codec::{Codec, Registry};
 pub use project::{
-    create, pack, pack_pruned, unpack, verify, Manifest, PackReport, UnpackOptions, UnpackReport, VerifyReport,
+    create, pack, pack_pruned, pack_with, unpack, verify, Manifest, PackOptions, PackReport, UnpackOptions, UnpackReport,
+    VerifyReport,
 };
 
 #[derive(Debug, thiserror::Error)]

@@ -1333,10 +1333,18 @@ pub fn encode_files_noting(
 /// time and MD5) per block, is left out on purpose. Its values describe the original's blocks, so
 /// carried over it would be wrong for the new ones, and the game loads maps without it (every map of
 /// smoketest_maps that had one: only it went missing, 2026-11-16). (signature) is left out too: a
-/// signature over other bytes is worse than none. `tests/pack_meta_files.rs` pins both.
+/// signature over other bytes is worse than none. `tests/pack_meta_files.rs` pins both. `w3proj pack
+/// --attributes` writes a new one instead (`build_archive_with`).
 pub fn build_archive(manifest: &Manifest, prefix: &[u8], files: BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
+    build_archive_with(manifest, prefix, files, false)
+}
+
+/// `build_archive`; `attributes`: with a fresh (attributes) of the new blocks' CRC32s, as the World Editor's save
+/// has it (`mpq::WriteOptions::attributes`), so the map has the same entries as one it saved.
+pub fn build_archive_with(manifest: &Manifest, prefix: &[u8], files: BTreeMap<String, Vec<u8>>, attributes: bool) -> Result<Vec<u8>> {
     let mut builder = ArchiveBuilder::new(WriteOptions {
         sector_size_shift: manifest.archive.sector_size_shift,
+        attributes,
         ..WriteOptions::default()
     });
     for (name, data) in files {
@@ -1597,11 +1605,13 @@ fn imports_under_other_extension(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<Str
 /// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
 /// Chapter maps are packed as they are. Builds a project's archive (chapter maps under `maps/` are
 /// packed into it first); what the user should know about it goes into `warnings`.
+/// `attributes`: the archive and its chapter maps get an (attributes) (`build_archive_with`).
 fn pack_bytes_with(
     project: &Path,
     codecs: &Registry,
     prune: Option<&mut wts::PruneOutcome>,
     warnings: &mut Vec<String>,
+    attributes: bool,
 ) -> Result<(Vec<u8>, usize)> {
     let (manifest, prefix, mut files) = read_project(project)?;
     if let Some(outcome) = prune {
@@ -1642,12 +1652,12 @@ fn pack_bytes_with(
             )));
         }
         let mut inner = Vec::new();
-        let (bytes, _) = pack_bytes_with(&maps_dir.join(&dir), codecs, None, &mut inner)?;
+        let (bytes, _) = pack_bytes_with(&maps_dir.join(&dir), codecs, None, &mut inner, attributes)?;
         warnings.extend(inner.into_iter().map(|w| format!("{MAPS_DIR}/{dir}/{w}")));
         encoded.insert(name, bytes);
     }
     let count = encoded.len();
-    Ok((build_archive(&manifest, &prefix, encoded)?, count))
+    Ok((build_archive_with(&manifest, &prefix, encoded, attributes)?, count))
 }
 
 /// Builds an extracted archive again in memory (chapter maps included).
@@ -1669,14 +1679,28 @@ fn prefix_of(ex: &Extracted) -> Vec<u8> {
 /// Packs the project's files as they are (the app drops unused strings in the project first), with
 /// the ally priorities in war3map.w3i the World Editor's save works out (`allies`).
 pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
-    pack_to(project, output, codecs, false)
+    pack_with(project, output, codecs, PackOptions::default())
 }
 
 /// Packs with the strings nothing refers to left out of war3map.wts, as the World Editor's save
 /// and the app's packing drop them (`wts`); the project's files stay as they are. Chapter maps
 /// and war3campaign.wts aren't pruned.
 pub fn pack_pruned(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
-    pack_to(project, output, codecs, true)
+    pack_with(project, output, codecs, PackOptions { prune: true, ..PackOptions::default() })
+}
+
+/// How `pack_with` packs. The default is `pack`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackOptions {
+    /// As `pack_pruned`.
+    pub prune: bool,
+    /// The map (and its chapter maps) gets an (attributes) as a World Editor save has it: a CRC32 per block and no
+    /// time stamps, so packing twice still gives the same bytes (`build_archive_with`).
+    pub attributes: bool,
+}
+
+pub fn pack_with(project: &Path, output: Option<&Path>, codecs: &Registry, options: PackOptions) -> Result<PackReport> {
+    pack_to(project, output, codecs, options.prune, options.attributes)
 }
 
 /// Whether `project` is a chapter map of a campaign project (`<campaign>/maps/<chapter>`).
@@ -1688,7 +1712,7 @@ fn is_chapter_project(project: &Path) -> bool {
         .is_some_and(|campaign| campaign.join(MANIFEST).is_file())
 }
 
-fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool) -> Result<PackReport> {
+fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool, attributes: bool) -> Result<PackReport> {
     let manifest = Manifest::load(project)?;
     let mut outcome = wts::PruneOutcome::default();
     // A chapter map packed on its own comes out as the campaign packs it (and the app exports it).
@@ -1697,7 +1721,7 @@ fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool
         outcome.kept = Some("a campaign's chapter maps aren't pruned".into());
     }
     let mut warnings = Vec::new();
-    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome), &mut warnings)?;
+    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome), &mut warnings, attributes)?;
     let output = match output {
         Some(o) => o.to_path_buf(),
         None => default_output(project, &manifest)?,
