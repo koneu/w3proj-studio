@@ -568,6 +568,10 @@ export interface CodeEditorHandle {
   /** Hands a change still waiting for the pause (see `debounce`) to onChange now; nothing when there is none.
    *  Called before anything reads what the editor's owner holds for a save. */
   flush(): void;
+  /** Shows findings of a check run elsewhere (JassHelper's) as underlines on whole lines and in the list below the editor,
+   *  where a click goes to the line. Lines are from 1; ones outside the text are dropped; an empty list clears. The next edit
+   *  clears them too (they were about the text before it). */
+  setProblems(problems: { line: number; message: string; severity?: "error" | "warning" }[]): void;
   dispose(): void;
 }
 
