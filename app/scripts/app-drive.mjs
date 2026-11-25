@@ -17,6 +17,9 @@
 //   --strict            exit 1 if the page reported a problem
 //
 // Steps:
+//   --fixture-triggers  the made-up TriggerData (tests/fixtures/TriggerData.txt) instead of the game's: for projects
+//                       made with it, such as the mini map. By default the game's is read (when there is a game folder),
+//                       so --map splits a real map's triggers as a release build does
 //   --map FILE.w3x      unpack a map into the scratch folder and open it as the project
 //   --project DIR       copy a project folder into the scratch folder and open the copy (the original isn't touched)
 //   --open PATH         open a project file in its editor (e.g. map/war3map.w3i.json)
@@ -59,7 +62,7 @@
 //
 // Examples:
 //   node scripts/app-drive.mjs --map ../openpoints/example-maps/02c_Fog_Linear_Near.w3x --terrain --camera game --shot /tmp/02c.png
-//   node scripts/app-drive.mjs --no-build --project tests/fixtures/mini-map --mcp list_problems --mcp project_info
+//   node scripts/app-drive.mjs --no-build --fixture-triggers --project tests/fixtures/mini-map --mcp list_problems --mcp project_info
 //   node scripts/app-drive.mjs --project P --terrain --camera "pitch=30,distance=3000" --look 0,-1500 --shot a.png
 //   node scripts/app-drive.mjs --map m.w3x --terrain --view-size 1184x844 --camera we --shot studio.png
 //
@@ -79,7 +82,7 @@ const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
 export function parseArgs(argv) {
-  const opts = { build: true, game: null, work: join(repo, "target", "app-drive"), settings: {}, strict: false };
+  const opts = { build: true, game: null, work: join(repo, "target", "app-drive"), settings: {}, strict: false, fixtureTriggers: false };
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -89,6 +92,7 @@ export function parseArgs(argv) {
     };
     if (a === "--no-build") opts.build = false;
     else if (a === "--strict") opts.strict = true;
+    else if (a === "--fixture-triggers") opts.fixtureTriggers = true;
     else if (a === "--allow-stale") continue; // read by tests/binfresh.mjs
     else if (a === "--app") process.env.W3_APP_BIN = resolve(value());
     else if (a === "--game") opts.game = resolve(value());
@@ -173,7 +177,7 @@ async function main() {
   mkdirSync(opts.work, { recursive: true });
   if (opts.build) buildApp(id, opts.work);
 
-  const { page, stop } = await startApp({ id, work: opts.work, game, settings: opts.settings });
+  const { page, stop } = await startApp({ id, work: opts.work, game, fixtureTriggers: opts.fixtureTriggers, settings: opts.settings });
   const out = (o) => console.log(JSON.stringify(o));
   let failed = false;
   try {

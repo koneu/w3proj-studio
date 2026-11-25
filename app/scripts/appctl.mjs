@@ -76,9 +76,11 @@ function freePort() {
  * Starts the built smoke app with fresh settings and connects to its page.
  * `settings` are written over the defaults (no MCP server, no checkpoints, the game's programs pointed at
  * files that don't exist so nothing can start the game or the World Editor, no game-folder question).
+ * With a `game` folder the app reads the game's TriggerData.txt, as a release build does; `fixtureTriggers` (and a
+ * start without a game) gives it the made-up one instead (triggerDataEnv).
  * Returns { page, stop, exited }; `stop` ends the app and removes its settings folder.
  */
-export async function startApp({ id, work, game, settings = {}, env = {} }) {
+export async function startApp({ id, work, game, fixtureTriggers = false, settings = {}, env = {} }) {
   const exe = appExe();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: build it first`);
   // A prebuilt app (W3_APP_BIN) can be of any age; the one built here is rebuilt by buildApp.
@@ -96,7 +98,7 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
     ...settings,
   }));
   const appEnv = {
-    W3PROJ_TRIGGERDATA: join(repo, "tests", "fixtures", "TriggerData.txt"), W3PROJ_CONFIG_DIR: dir,
+    ...triggerDataEnv(game, fixtureTriggers), W3PROJ_CONFIG_DIR: dir,
     ...(LINUX ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}), ...env,
   };
   let page, stop, exited;
@@ -141,6 +143,13 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
     throw e;
   }
   return { page, stop: end, exited };
+}
+
+/** The environment that picks the app's TriggerData.txt (debug builds read W3PROJ_TRIGGERDATA): nothing when there is a
+ *  game folder to read the game's own from, else the made-up one (tests/fixtures/TriggerData.txt), which is also what
+ *  projects made with it need (the mini map: `fixture`). With the made-up one, a real map's war3map.wtg stays raw. */
+export function triggerDataEnv(game, fixture = false) {
+  return game && !fixture ? {} : { W3PROJ_TRIGGERDATA: join(repo, "tests", "fixtures", "TriggerData.txt") };
 }
 
 /** The settings folder startApp makes for a run in `work` (and removes before and after it). */
