@@ -1,8 +1,9 @@
 //! `w3proj check` end to end on the mini map: the app's own Problems checks run in Node through the CLI,
 //! without a game (its reads fail, which those checks report as failed), the project's ignore file honoured
 //! and counted, the exit code from the errors, and nothing in the project written.
+mod common;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -54,7 +55,7 @@ fn mini_map(name: &str) -> TestDir {
 }
 
 fn check(project: &Path, args: &[&str]) -> (Option<i32>, Value) {
-    let out = Command::new(env!("CARGO_BIN_EXE_w3proj"))
+    let out = common::w3proj_cmd()
         .arg("check")
         .arg(project)
         .args(["--json", "--game"])
@@ -109,7 +110,7 @@ fn the_problems_checks_run_honour_the_ignore_file_and_write_nothing() {
 fn melee_is_left_out_of_a_map_without_the_melee_flag_and_path_needs_points() {
     let dir = mini_map("sections");
     // [Refactored] Section skipping on mini-map is already asserted above; here we only test --only=path CLI argument rejection (fast, no Node host needed).
-    let out = Command::new(env!("CARGO_BIN_EXE_w3proj")).arg("check").arg(&*dir).arg("--only=path").output().unwrap();
+    let out = common::w3proj_cmd().arg("check").arg(&*dir).arg("--only=path").output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--path"), "{}", String::from_utf8_lossy(&out.stderr));
 }

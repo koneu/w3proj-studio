@@ -1,9 +1,11 @@
 //! `w3proj mcp` answers every request it read, even when the client closes stdin right after the last one
 //! (`echo … | w3proj mcp`). Studio isn't reachable here (the socket folder is an empty one of the test's own),
 //! so the answers are the offline ones.
+mod common;
+
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -27,7 +29,7 @@ fn answers_everything_read_before_stdin_closed() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let mut child = Command::new(env!("CARGO_BIN_EXE_w3proj"))
+    let mut child = common::w3proj_cmd()
         .arg("mcp")
         .env("XDG_RUNTIME_DIR", &dir)
         .env("USERNAME", "w3proj-mcp-eof-test")

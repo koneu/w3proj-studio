@@ -56,12 +56,12 @@ fn game() -> Option<String> {
 /// map's triggers are written in (tests/fixtures/TriggerData.txt), not the game's, which doesn't know them.
 fn w3proj(args: &[&str], game: &str) -> Output {
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/TriggerData.txt");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_w3proj"));
+    let mut cmd = common::w3proj_cmd();
     cmd.args(args);
     if args.first() == Some(&"pack") {
         cmd.arg("--trigger-data").arg(&data);
     }
-    cmd.env("W3PROJ_GAME", game).env_remove("W3PROJ_FORMATS").output().unwrap()
+    cmd.env("W3PROJ_GAME", game).output().unwrap()
 }
 
 fn text(o: &Output) -> String {
