@@ -2801,8 +2801,10 @@ async function techtreeRandomLevels(page, found) {
   try {
     const info = k.read("war3map.w3i.json");
     if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
-    info.unitTables = [{ number: 0, name: "Smoke Random", positions: [0, 2], lines: [{ chance: 100, ids: ["hfoo", "ratc"] }] }];
-    info.itemTables = [{ number: 0, name: "Smoke Table", sets: [[{ chance: 100, id: "ratf" }]] }];
+    info.unitTables = [{ number: 0, name: "Smoke Random", positions: [0, 2], lines: [{ chance: 100, ids: ["hfoo", "ratc"] }] },
+      { number: 1, name: "Smoke Chances", positions: [0], lines: [30, 14, 14, 14, 14, 14].map((chance) => ({ chance, ids: ["hfoo"] })) }];
+    info.itemTables = [{ number: 0, name: "Smoke Table", sets: [[{ chance: 100, id: "ratf" }],
+      [1, 1, 1, 97].map((chance, i) => ({ chance, id: ["ratc", "rat6", "rat9", "ckng"][i] }))] }];
     info.techs = [{ players: 1, id: "hkni" }];
     info.upgrades = [{ players: 1, id: "Rhme", level: 0, availability: 2 }];
     await page.evaluate(`w3.workspace.writeText(${lit(W3I)}, ${lit(JSON.stringify(info, null, 2))})`);
@@ -2829,6 +2831,33 @@ async function techtreeRandomLevels(page, found) {
       if (m.w < 1 || (m.right > m.paneRight + 0.5 && !(m.cut && m.title === m.text))) fail(`at 900 px the random row's name label ends at ${m.right}, past its pane's ${m.paneRight}, and is not cut with a tooltip: ${lit(m)}`);
     } finally { await page.evaluate(`document.getElementById("app").style.width = ""`); }
     if (!(await dirty())) fail("choosing a random object didn't mark Map Properties changed");
+
+    // Chances (we-drive 2026-11-25, lib/chances.ts): one that takes the total past 100 scales the other lines down as the
+    // World Editor rounds them (30, 14 × 5 with 33 typed: 13, 13, 13, 14, 14), the boxes and the total follow in place, as
+    // one undo step; a lower one leaves the others; an item's 0 is refused (the editor's item box starts at 1).
+    const GROUP1 = "[data-group=\"1\"]";
+    const groupChances = () => page.evaluate(`[...document.querySelectorAll(${lit(`${GROUP1} tbody input.techtree-num`)})].map((e) => e.value).join(",")`);
+    const setBoxes = `([...document.querySelectorAll(${lit("[data-anchor=\"item-table-0\"] .techtree-set")})][1]?.querySelectorAll("input.techtree-num") ?? [])`;
+    const setChances = () => page.evaluate(`[...${setBoxes}].map((e) => e.value).join(",")`);
+    const typeChance = (sel, v) => page.evaluate(`(() => { const e = ${sel}; if (!e) return false; e.value = ${lit(v)}; e.dispatchEvent(new Event("change")); return true; })()`);
+    const groupBox = (row) => `document.querySelectorAll(${lit(`${GROUP1} tbody input.techtree-num`)})[${row}]`;
+    const groupTotal = () => page.evaluate(`(() => { const t = document.querySelector(${lit(`${GROUP1} .techtree-total`)}); return t ? t.textContent + (t.classList.contains("techtree-warn") ? " warn" : "") : null; })()`);
+    if ((await groupChances()) !== "30,14,14,14,14,14") fail(`the chance group shows ${await groupChances()}`);
+    if (!(await typeChance(groupBox(0), "33"))) fail("no chance box in the second group");
+    if ((await groupChances()) !== "33,13,13,13,14,14") fail(`33 typed into 30, 14 × 5 gave ${await groupChances()}, not the editor's 33, 13, 13, 13, 14, 14`);
+    if ((await groupTotal()) !== "total 100%") fail(`the total after the scaling says ${await groupTotal()}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the chances undone", async () => (await groupChances()) === "30,14,14,14,14,14", 5000).catch(async () => fail(`one undo after the scaled chance shows ${await groupChances()}`));
+    if ((await value(`${cell(0)} input.techtree-id`)) !== "YYU3") fail("the undo of the chance took back the random choice before it too");
+    await typeChance(groupBox(0), "33");
+    await typeChance(groupBox(1), "5");
+    if ((await groupChances()) !== "33,5,13,13,14,14") fail(`a lower chance moved the others: ${await groupChances()}`);
+    if ((await groupTotal()) !== "total 92% warn") fail(`the total after a lower chance says ${await groupTotal()}`);
+    if ((await setChances()) !== "1,1,1,97") fail(`the item set shows ${await setChances()}`);
+    await typeChance(`${setBoxes}[3]`, "99");
+    if ((await setChances()) !== "0,0,1,99") fail(`99 typed into an item of 1, 1, 1, 97 gave ${await setChances()}, not the editor's 0, 0, 1, 99`);
+    await typeChance(`${setBoxes}[2]`, "0");
+    if (!(await page.evaluate(`${setBoxes}[2]?.classList.contains("invalid") ?? false`))) fail("an item's chance of 0 wasn't refused");
 
     // The per-player grid: the knight, unavailable to player 1, ticked available again.
     await k.hands.click("[data-switch=\"techs\"] .techtree-view-grid");
@@ -2859,6 +2888,8 @@ async function techtreeRandomLevels(page, found) {
     const saved = k.read("war3map.w3i.json");
     if (JSON.stringify(saved.unitTables?.[0]?.lines?.[0]?.ids) !== JSON.stringify(["YYU3", "YiI2"])) fail(`the saved group's ids: ${lit(saved.unitTables?.[0]?.lines)}`);
     if (saved.itemTables?.[0]?.sets?.[0]?.[0]?.id !== "YkI1") fail(`the saved item table: ${lit(saved.itemTables)}`);
+    if (JSON.stringify(saved.unitTables?.[1]?.lines?.map((l) => l.chance)) !== "[33,5,13,13,14,14]") fail(`the saved chances of the second group: ${lit(saved.unitTables?.[1]?.lines)}`);
+    if (JSON.stringify(saved.itemTables?.[0]?.sets?.[1]?.map((x) => x.chance)) !== "[0,0,1,99]") fail(`the saved chances of the item set: ${lit(saved.itemTables?.[0]?.sets?.[1])}`);
     if (JSON.stringify(saved.techs) !== "[]") fail(`the saved techtree after the knight was made available to player 1: ${lit(saved.techs)}`);
     await page.evaluate(`w3.commands.execute("w3.script.settle")`);
     const script = readFileSync(scriptOnDisk(k.root), "utf8");

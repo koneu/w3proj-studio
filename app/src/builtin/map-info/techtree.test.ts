@@ -49,4 +49,8 @@ test("an upgrade's level past war3map.w3i's u32 (stored from 0) and a chance pas
   for (const typed of ["-1", "101", "50.5", ""]) assert.equal(techNumber(typed, chance), null, `chance ${JSON.stringify(typed)}`);
   assert.equal(techNumber("0", chance), 0);
   assert.equal(techNumber("100", chance), 100);
+  // an item's chance starts at 1, as the World Editor's item box (a group line's at 0)
+  assert.equal(techNumber("0", TECH_LIMITS.itemChance), null);
+  assert.equal(techNumber("1", TECH_LIMITS.itemChance), 1);
+  assert.equal(techNumber("100", TECH_LIMITS.itemChance), 100);
 });
