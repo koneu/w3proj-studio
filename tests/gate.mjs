@@ -32,11 +32,11 @@
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { availableParallelism, freemem } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
-import { assertInTable, checkFloors, installSignalHandlers, killTree, missingDeps, runShell } from "./gate-lib.mjs";
+import { assertInTable, checkFloors, installSignalHandlers, killTree, memoryBudget, missingDeps, runShell } from "./gate-lib.mjs";
 import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
@@ -267,13 +267,15 @@ const hasGame = join(game, ".build.info");
 const update = args.includes("--update-floor") ? " --update-floor" : "";
 
 // Steps, in the order they are started when they can be. `weight`: about how many cores it keeps
-// busy. `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
+// busy. `mem`: about its peak memory in MB (the summed RSS of its process tree, measured on 16 cores
+// in a batch gate on 2026-11-25, cold caches; the scheduler's budget, docs/testing/gate-and-smoke.md).
+// `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
 const steps = [
-  { id: "cli", name: "release CLI", tier: "corpus", weight: 6, locks: [["cargo", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
+  { id: "cli", name: "release CLI", tier: "corpus", weight: 6, mem: 1000, locks: [["cargo", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
   // The real app's smoke test in two halves, two apps of one build side by side (app-smoke.mjs --part): part 1 builds
   // it, part 2 starts once that build is done and runs what part 1 built.
-  { id: "appsmoke1", name: "the real app on a scratch project (part 1/2)", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs --part=1/2", { cwd: app, env: smokeEnv }) },
-  { id: "appsmoke2", name: "the real app on a scratch project (part 2/2)", tier: "corpus", weight: 4, after: ["cli", "appsmoke1#built"], run: async (ctx) => {
+  { id: "appsmoke1", name: "the real app on a scratch project (part 1/2)", tier: "corpus", weight: 4, mem: 5000, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs --part=1/2", { cwd: app, env: smokeEnv }) },
+  { id: "appsmoke2", name: "the real app on a scratch project (part 2/2)", tier: "corpus", weight: 4, mem: 6500, after: ["cli", "appsmoke1#built"], run: async (ctx) => {
     // "#built" only orders (it is done also when part 1 failed before its build): without a build there is
     // nothing of this tree's to run.
     if (!done.get("appsmoke1#built")?.ok) {
@@ -282,31 +284,33 @@ const steps = [
     }
     return ctx.sh("node scripts/app-smoke.mjs --part=2/2 --no-build", { cwd: app, env: smokeEnv });
   } },
-  { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
-  { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, run: hostileRounds },
-  { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
-  { id: "script", name: "generated scripts against the World Editor's", tier: "corpus", weight: 8, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/script-check/run.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
-  // The scheduler counts cores only (weight), not memory: the first run extracts every .wts of the corpus and the game
-  // (about 4 GB, 2.5 min, then cached in target/wts-corpus), so it weighs as much as an app smoke half.
-  { id: "wts", name: "string tables against the frozen reading on every .wts", tier: "corpus", weight: 4, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/wts-corpus.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3PROJ_CORPUS: corpus } })) },
-  { id: "twin",name: "Rust and TypeScript codecs agree", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
+  // `w3proj verify` checks the maps on all cores, so its memory grows with them: alone under a 20 GB limit.
+  { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, mem: 17000, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
+  { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, mem: 1500, run: hostileRounds },
+  { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, mem: 1000, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
+  { id: "script", name: "generated scripts against the World Editor's", tier: "corpus", weight: 8, mem: 3500, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/script-check/run.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
+  // The first run extracts every .wts of the corpus and the game (2.5 min, then cached in target/wts-corpus), so it
+  // weighs as much as an app smoke half.
+  { id: "wts", name: "string tables against the frozen reading on every .wts", tier: "corpus", weight: 4, mem: 4000, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/wts-corpus.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3PROJ_CORPUS: corpus } })) },
+  { id: "twin", name: "Rust and TypeScript codecs agree", tier: "corpus", weight: 2, mem: 1500, after: ["cli"], run: needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   // [Refactored] Start `ui` before `rust` and `clippy` and release `["dist", "w"]` as soon as Vite prints "built in" (~1.5 s),
   // so `ui` no longer queues behind sequential `rust` + `clippy` in `commit` tier and overlaps its Chrome phase with them.
-  { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke1#built"], locks: [["dist", "w"]], built: "built in", run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
-  { id: "rustcov", name: "Rust coverage floors", tier: "coverage", weight: 8, after: ["appsmoke1#built"], locks: [["dist", "r"]], run: rustCoverage },
-  { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
-  { id: "clippy", name: "clippy", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
+  { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, mem: 1500, after: ["appsmoke1#built"], locks: [["dist", "w"]], built: "built in", run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
+  // rustcov and tscov: not measured; as their test steps and a bit more.
+  { id: "rustcov", name: "Rust coverage floors", tier: "coverage", weight: 8, mem: 4500, after: ["appsmoke1#built"], locks: [["dist", "r"]], run: rustCoverage },
+  { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, mem: 3500, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
+  { id: "clippy", name: "clippy", tier: "commit", weight: 4, mem: 1500, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
   // The web demo (docs/web-demo.md): its own build folder (app/dist-demo), so no "dist" lock. A missing browser FAILS, as in ui-smoke.
-  { id: "demo", name: "web demo build and check (headless)", tier: "commit", weight: 2, run: shell("node scripts/demo-check.mjs --build", { cwd: app }) },
-  { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 4, run: shell("npm run --silent check", { cwd: app }) },
+  { id: "demo", name: "web demo build and check (headless)", tier: "commit", weight: 2, mem: 1500, run: shell("node scripts/demo-check.mjs --build", { cwd: app }) },
+  { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 4, mem: 700, run: shell("npm run --silent check", { cwd: app }) },
   // [Refactored] Fast commit-tier unit tests skip slow CASC game-file reads (W3PROJ_GAME=""); `tstestcorpus` runs them with W3PROJ_REQUIRE_CORPUS=1.
-  { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 4, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_GAME: "" } }) },
+  { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 4, mem: 3000, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_GAME: "" } }) },
   // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
   // The CLI's Rust tests that read the game (rebuild.rs, roundtrip.rs) skip without it; here they fail instead. W3PROJ_GAME stays unset: they find the game by `.game-path`, and roundtrip.rs'
   // mini map packs with a made-up TriggerData that the game's would reject.
-  { id: "rustcorpus", name: "Rust CLI tests on the corpus (nothing skipped)", tier: "corpus", weight: 4, after: ["cli"], locks: [["cargo", "w"]], run: needs(hasGame, "the game", shell("cargo test --release --locked -p w3proj-cli --quiet", { env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus } })) },
-  { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
-  { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
+  { id: "rustcorpus", name: "Rust CLI tests on the corpus (nothing skipped)", tier: "corpus", weight: 4, mem: 3500, after: ["cli"], locks: [["cargo", "w"]], run: needs(hasGame, "the game", shell("cargo test --release --locked -p w3proj-cli --quiet", { env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus } })) },
+  { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, mem: 9000, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
+  { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, mem: 4000, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
 const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "wts", "twin", "appsmoke1", "appsmoke2", "script"];
@@ -402,8 +406,20 @@ function skip(step, why) {
 // Ctrl-C or a kill of the gate ends the steps' processes too.
 installSignalHandlers(liveChildren);
 
+// The memory the running steps' estimates (`mem`) may add up to (tests/gate-lib.mjs memoryBudget).
+const readOrNull = (file) => {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+};
+const budget = memoryBudget({ read: readOrNull, freemem });
+console.log(`gate: memory budget ${budget.mb} MB (${budget.from}; set W3_GATE_MEM_MB to change)`);
+const onMemWait = (step, { used }) => console.log(`${clock()}  wait   ${step.name}: needs about ${step.mem} MB, ${used} of ${budget.mb} MB in use`);
+
 const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
-await schedule({ steps: order, locks, serial, jobs, launch, skip, done });
+await schedule({ steps: order, locks, serial, jobs, memBudget: budget.mb, onMemWait, launch, skip, done });
 
 console.log(`\n--- gate: ${tier}`);
 for (const s of chosen) if (!done.has(s.id)) done.set(s.id, { ok: false, seconds: 0 }); // never ran: a failure, not a gap

@@ -21,7 +21,9 @@ How this project is tested, why, and what to do before committing or releasing.
 | the real World Editor (Linux, local, not in the gate) | `node app/scripts/we-compare.mjs <spec.json…>`, see "The real World Editor" below |
 
 Gate options: `--serial`, `--jobs=<n>`, `--update-floor`. Logs are in `target/gate-logs/<tier>-<pid>/`, the last line is
-`GATE_EXIT=<code>`, and a check missing what it needs **fails**: green always means it ran.
+`GATE_EXIT=<code>`, and a check missing what it needs **fails**: green always means it ran. Steps start only while
+their memory estimates fit a budget (80% of free memory or of a cgroup limit such as `systemd-run -p MemoryMax=`,
+printed at the start); `W3_GATE_MEM_MB=<MB>` sets it ([details](docs/testing/gate-and-smoke.md)).
 
 **Where the maps and the game go.** The corpus is `smoketest_maps/` at the root of the *main* checkout (git-ignored,
 third-party maps aren't in the repository; worktrees find it through the main checkout), or any folder named by
@@ -58,7 +60,7 @@ oracle only proves the code does what the code does.
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
 | Real app | the map it packs is the CLI's, byte for byte; nothing changes without an edit | `app/scripts/app-smoke.mjs` | locally, before merging |
 | Corpus | real maps, and the baseline of which codec reads what; a map's whole ground through a fragment gives the same file | `w3proj verify`, `twin-check.mjs` | locally, before merging |
-| String tables on real maps | `wts.ts` against a frozen older reading of every corpus and game `.wts` (6,393 files): untouched tables give their bytes back, edits move no other string | `app/scripts/wts-corpus.mjs` (verdict: `wts-verdict.mjs`, unit-tested in `wts-verdict.test.mjs`): a text cut at a `}` inside a line (the rule of `wts.test.ts`; 33 `_Locales/jaJP` copies) or a recovered block is expected, anything else fails; the first run extracts every `.wts` into `target/wts-corpus` (about 2.5 min and 4 GB, later runs use the cache; the gate counts cores only, not memory, so run the corpus tier under a memory limit) | corpus tier (step `wts`) |
+| String tables on real maps | `wts.ts` against a frozen older reading of every corpus and game `.wts` (6,393 files): untouched tables give their bytes back, edits move no other string | `app/scripts/wts-corpus.mjs` (verdict: `wts-verdict.mjs`, unit-tested in `wts-verdict.test.mjs`): a text cut at a `}` inside a line (the rule of `wts.test.ts`; 33 `_Locales/jaJP` copies) or a recovered block is expected, anything else fails; the first run extracts every `.wts` into `target/wts-corpus` (about 2.5 min and 4 GB, later runs use the cache; the gate's memory budget counts it) | corpus tier (step `wts`) |
 | Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
 | The real thing | the game and World Editor | the release checklist below | by hand, before a release |
 

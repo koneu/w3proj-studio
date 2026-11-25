@@ -13,6 +13,15 @@ no step that comes later starts building against it first (`tests/gate-scheduler
 tests in `app/scripts/gate-scheduler.test.mjs`). A step whose prerequisite
 failed fails without running.
 
+**Memory.** Each step has an estimate of its peak memory (`mem` in MB, measured as the summed RSS of its
+process tree), and a step starts only while the estimates of the running steps add up to no more than the
+budget, printed at the start (`gate: memory budget ...`). A step that waits for memory alone says so
+(`wait <step>: needs about ... MB`). The budget is 80% of the smaller of `MemAvailable` (`os.freemem()` on
+Windows and macOS) and what the gate's cgroup leaves (cgroup v2: `memory.max` minus `memory.current`, the
+tightest from its own cgroup up, so `systemd-run --user --scope -p MemoryMax=20G` is seen);
+`W3_GATE_MEM_MB=<MB>` sets it instead. A step bigger than the budget still runs, alone. A step whose need grew a
+lot gets its new estimate in `tests/gate.mjs`.
+
 **The real-app smoke test runs as two apps at once** in the corpus tier: `app-smoke.mjs --part=1/2` builds the app,
 then runs the project checks and the first half of the full run's checks (`firstHalf`, newMaps to unitProperties);
 `--part=2/2 --no-build` starts once that build is done (part 1's `Built application at`) and runs the second half

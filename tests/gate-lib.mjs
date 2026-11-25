@@ -114,6 +114,66 @@ export function checkFloors(areas, floors, say, updating = false) {
   return { ok, floors: next };
 }
 
+/** The process's own cgroup (v2) from the text of /proc/self/cgroup: "/user.slice/...", or null (v1 only, none). */
+export function cgroupPath(procSelfCgroup) {
+  for (const line of String(procSelfCgroup ?? "").split("\n")) {
+    const m = /^0::(\/.*)$/.exec(line.trim());
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/**
+ * The memory left (MB) under the tightest memory.max of `path` and the cgroups above it: each one's
+ * memory.max minus its memory.current. null when none has a limit ("max") or nothing can be read.
+ * `read(file)`: the file's text, or null when it can't be read.
+ */
+export function cgroupHeadroomMb(path, read, root = "/sys/fs/cgroup") {
+  let best = null;
+  for (let p = path; p; p = p === "/" ? null : p.slice(0, p.lastIndexOf("/")) || "/") {
+    const dir = p === "/" ? root : `${root}${p}`;
+    const max = read(`${dir}/memory.max`)?.trim();
+    if (!max || max === "max" || !/^\d+$/.test(max)) continue;
+    const current = Number(read(`${dir}/memory.current`)?.trim());
+    const left = Math.max(0, Number(max) - (Number.isFinite(current) ? current : 0)) / 1048576;
+    best = best === null ? left : Math.min(best, left);
+  }
+  return best === null ? null : Math.floor(best);
+}
+
+/** MemAvailable (MB) from the text of /proc/meminfo, or null. */
+export function memAvailableMb(meminfo) {
+  const m = /^MemAvailable:\s+(\d+)\s*kB/m.exec(String(meminfo ?? ""));
+  return m ? Math.floor(Number(m[1]) / 1024) : null;
+}
+
+/**
+ * How much memory (MB) the gate's running steps may need together, and where that came from:
+ * W3_GATE_MEM_MB if set, else 80% of the smaller of MemAvailable (os.freemem() off Linux) and what
+ * the gate's cgroup leaves (cgroup v2: memory.max minus memory.current, the tightest from its own
+ * cgroup up, e.g. a `systemd-run -p MemoryMax=` scope).
+ */
+export function memoryBudget({ env = process.env, platform = process.platform, read, freemem }) {
+  const forced = Number(env.W3_GATE_MEM_MB);
+  if (env.W3_GATE_MEM_MB && Number.isFinite(forced) && forced > 0) return { mb: Math.floor(forced), from: "W3_GATE_MEM_MB" };
+  const parts = [];
+  let avail = platform === "linux" ? memAvailableMb(read("/proc/meminfo")) : null;
+  if (avail !== null) parts.push(`MemAvailable ${avail} MB`);
+  else {
+    avail = Math.floor(freemem() / 1048576);
+    parts.push(`free memory ${avail} MB`);
+  }
+  if (platform === "linux") {
+    const path = cgroupPath(read("/proc/self/cgroup"));
+    const left = path ? cgroupHeadroomMb(path, read) : null;
+    if (left !== null) {
+      parts.push(`cgroup limit leaves ${left} MB`);
+      avail = Math.min(avail, left);
+    }
+  }
+  return { mb: Math.floor(avail * 0.8), from: `80% of ${parts.join(", ")}` };
+}
+
 /** A step missing from the table would be run but left out of the result. */
 export function assertInTable(steps, table) {
   for (const s of steps) if (!table.includes(s.id)) throw new Error(`gate: step "${s.id}" is not in the table`);
