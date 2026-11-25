@@ -42,14 +42,17 @@ Linear Start, Linear End, Max Opacity and Draw Fog Over Sky.
 below Height End pulls End down to it (-5 with End 0: both -5; 0 with End 777: both 0), Height End typed above Start
 pushes Start up (777 with Start -5: both 777); End 50 below Start 123.456 stays. Range -100000 to 100000 for both.
 
-**Where they are saved** (contradicts `crates/w3proj/formats/w3i.json`): the six words of the v39 terrain fog struct are
-Height Start (f32), Height End (f32), Linear Start, Linear End, Max Opacity, Draw Fog Over Sky (i32, 1 when ticked).
-w3i.json names them `style` (i32), `overSky` (i32), `linearStart`, `linearEnd`, `maxOpacity`, `height` (f32): Height
-Start 100000 is read as `style` 1203982336, Draw Fog Over Sky ticked as `height` 1e-45. The editor's own war3map.j
-writes `SetTerrainFogExV( 3, 3000.0, 5000.0, 0.500, 123.5, 50.0, 0.0, 13.0, 0.000, 0.000, 0.000 )` for Height Start
-123.456 and End 50 (`fog.style`, Z Start, Z End, Density, Height Start, Height End, Linear Start, Linear End, colour) and
-`BlzSetTerrainFogDrawOverSky( true )` from the sixth word; Studio's `lib/script/setup.ts` writes `tf.height` and
-`tf.style` as the fifth and sixth arguments and `tf.overSky` for the sky. Not changed on this branch (a format change).
+**Where they are saved**: the six words of the v39 terrain fog struct are Height Start (f32), Height End (f32), Linear
+Start, Linear End, Max Opacity, Draw Fog Over Sky (i32, 1 when ticked). w3i.json named them `style` (i32), `overSky`
+(i32), `linearStart`, `linearEnd`, `maxOpacity`, `height` (f32): Height Start 100000 was read as `style` 1203982336,
+Draw Fog Over Sky ticked as `height` 1e-45. The editor's own war3map.j writes `SetTerrainFogExV( 3, 3000.0, 5000.0,
+0.500, 123.5, 50.0, 0.0, 13.0, 0.000, 0.000, 0.000 )` for Height Start 123.456 and End 50 (`fog.style`, Z Start, Z End,
+Density, Height Start, Height End, Linear Start, Linear End, colour), `BlzSetTerrainFogMaxLinearDensity` from the fifth
+word and `BlzSetTerrainFogDrawOverSky( true )` from the sixth. Confirmed by a save of a made-up map with a distinct
+value in each word (250, -125, 1500, 6000, 0.75, 1: `SetTerrainFogExV( 3, 3000.0, 5000.0, 0.500, 250.0, -125.0, 1500.0,
+6000.0, ... )`, `BlzSetTerrainFogMaxLinearDensity( 0.8 )`, `BlzSetTerrainFogDrawOverSky( true )`; we-compare
+`terrain-fog.json`). Fixed: the words are now `heightStart`, `heightEnd`, ..., `drawOverSky` (older JSON's names read
+with their bits: `was`, `wasType`), and Map Properties and the script use them.
 
 ## Map Properties: camera zoom
 

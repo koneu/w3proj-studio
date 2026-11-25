@@ -3,6 +3,7 @@
 // Configuration"), from war3map.w3i as the World Editor writes them.
 
 import { applyAllyPriorities } from "../terrain/startlocations";
+import { namedTerrainFog, type TerrainFog } from "../formats/terrainfog";
 import { fixed } from "./units";
 
 const EOL = "\r\n";
@@ -19,7 +20,8 @@ export interface SetupInput {
     soundEnvironment: string; lightEnvironment: string; players: PlayerJson[]; forces: ForceJson[];
     water?: Record<string, number>; cameraComplements?: number[]; weather?: string; waterTint?: number[];
     fog?: { style: number; start: number; end: number; density: number; color: number[] };
-    terrainFog?: { style: number; overSky: number; linearStart: number; linearEnd: number; maxOpacity: number; height: number };
+    /** Older JSON's names are read too (namedTerrainFog). */
+    terrainFog?: TerrainFog;
     [k: string]: unknown;
   };
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
@@ -156,12 +158,13 @@ export function mainSection(i: SetupInput): string {
     `    call SetCameraBounds( ${L} + ${m("LEFT")}, ${B} + ${m("BOTTOM")}, ${R} - ${m("RIGHT")}, ${T} - ${m("TOP")}, ${L} + ${m("LEFT")}, ${T} - ${m("TOP")}, ${R} - ${m("RIGHT")}, ${B} + ${m("BOTTOM")} )`,
     `    call SetDayNightModels( ${str(i.lights.terrain)}, ${str(i.lights.unit)} )`];
   // Colours are stored blue, green, red, alpha.
-  const fog = i.info.fog, tf = i.info.terrainFog;
+  const fog = i.info.fog, tf = namedTerrainFog(i.info.terrainFog);
   if (fog && i.info.flags & TERRAIN_FOG) {
     const [fb, fg, fr] = fog.color.map((c) => fixed(c / 255, 3));
     if (tf) {
-      lines.push(`    call SetTerrainFogExV( ${fog.style}, ${r1(fog.start)}, ${r1(fog.end)}, ${fixed(fog.density, 3)}, ${r1(tf.height)}, ${r1(tf.style)}, ${r1(tf.linearStart)}, ${r1(tf.linearEnd)}, ${fr}, ${fg}, ${fb} )`,
-        `    call BlzSetTerrainFogMaxLinearDensity( ${r1(tf.maxOpacity)} )`, `    call BlzSetTerrainFogDrawOverSky( ${tf.overSky ? "true" : "false"} )`);
+      // The fog block's style, z and density, then Height Start, Height End, Linear Start and Linear End (measured).
+      lines.push(`    call SetTerrainFogExV( ${fog.style}, ${r1(fog.start)}, ${r1(fog.end)}, ${fixed(fog.density, 3)}, ${r1(tf.heightStart)}, ${r1(tf.heightEnd)}, ${r1(tf.linearStart)}, ${r1(tf.linearEnd)}, ${fr}, ${fg}, ${fb} )`,
+        `    call BlzSetTerrainFogMaxLinearDensity( ${r1(tf.maxOpacity)} )`, `    call BlzSetTerrainFogDrawOverSky( ${tf.drawOverSky ? "true" : "false"} )`);
     } else lines.push(`    call SetTerrainFogEx( ${fog.style}, ${r1(fog.start)}, ${r1(fog.end)}, ${fixed(fog.density, 3)}, ${fr}, ${fg}, ${fb} )`);
   }
   const tint = i.info.waterTint;

@@ -26,12 +26,12 @@ export const INFO_NUMBERS = {
   fogDensity: { label: "Fog density", kind: "f32", path: ["fog", "density"] },
   fogAlpha: { label: "Fog colour alpha", kind: "u8", path: ["fog", "color", 3] },
   waterTintAlpha: { label: "Water tint alpha", kind: "u8", path: ["waterTint", 3] },
-  terrainFogStyle: { label: "Terrain fog style", kind: "i32", path: ["terrainFog", "style"] },
-  terrainFogOverSky: { label: "Terrain fog draw over sky", kind: "i32", path: ["terrainFog", "overSky"] },
+  // The terrain fog struct in the file's order (its sixth word, Draw Fog Over Sky, is a checkbox).
+  terrainFogHeightStart: { label: "Terrain fog height start", kind: "f32", path: ["terrainFog", "heightStart"] },
+  terrainFogHeightEnd: { label: "Terrain fog height end", kind: "f32", path: ["terrainFog", "heightEnd"] },
   terrainFogLinearStart: { label: "Terrain fog linear start", kind: "f32", path: ["terrainFog", "linearStart"] },
   terrainFogLinearEnd: { label: "Terrain fog linear end", kind: "f32", path: ["terrainFog", "linearEnd"] },
   terrainFogMaxOpacity: { label: "Terrain fog max opacity", kind: "f32", path: ["terrainFog", "maxOpacity"] },
-  terrainFogHeight: { label: "Terrain fog height", kind: "f32", path: ["terrainFog", "height"] },
   waterMinOpacity: water("minOpacity", "min opacity"),
   waterMaxOpacity: water("maxOpacity", "max opacity"),
   waterReflectivity: water("reflectivity", "reflectivity"),
@@ -58,6 +58,9 @@ interface Clamp { readonly abs?: boolean; readonly round2?: boolean; readonly mi
 const WATER_CLAMP: Clamp = { min: 0, max: 100 };
 const FOG_CLAMP: Clamp = { round2: true, min: 0, max: 100000 };
 const ZOOM_CLAMP: Clamp = { min: 1250, max: 3000 };
+/** Height Start and End: the box shows two decimals but the file keeps what was typed (123.456 saved as typed;
+ *  measured 2026-11-25, docs/testing/numeric-limits-measured.md). */
+const HEIGHT_CLAMP: Clamp = { min: -100000, max: 100000 };
 export const INFO_CLAMPS: { readonly [K in InfoNumberKey]?: Clamp } = {
   waterMinOpacity: { abs: true, ...WATER_CLAMP },
   waterMaxOpacity: WATER_CLAMP,
@@ -70,7 +73,8 @@ export const INFO_CLAMPS: { readonly [K in InfoNumberKey]?: Clamp } = {
   terrainFogMaxOpacity: { min: 0, max: 1 },
   terrainFogLinearStart: FOG_CLAMP,
   terrainFogLinearEnd: FOG_CLAMP,
-  terrainFogHeight: { round2: true, min: -100000, max: 100000 },
+  terrainFogHeightStart: HEIGHT_CLAMP,
+  terrainFogHeightEnd: HEIGHT_CLAMP,
   fogStart: FOG_CLAMP,
   fogEnd: FOG_CLAMP,
   fogDensity: { round2: true, min: 0, max: 100 },
@@ -121,6 +125,8 @@ const ORDERED: readonly (readonly InfoNumberKey[])[] = [
   ["waterMinOpacity", "waterMaxOpacity"],
   ["fogStart", "fogEnd"],
   ["terrainFogLinearStart", "terrainFogLinearEnd"],
+  // The other way round: Height Start is kept at or above Height End (measured 2026-11-25).
+  ["terrainFogHeightEnd", "terrainFogHeightStart"],
 ];
 
 type Obj = Record<string | number, unknown>;
