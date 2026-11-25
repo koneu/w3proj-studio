@@ -243,7 +243,7 @@ summary .n { color: var(--muted); font-weight: 400; } ul { margin: 6px 0 4px; pa
 table { border-collapse: collapse; width: 100%; margin-top: 6px; } td, th { text-align: left; padding: 2px 8px 2px 0; font-size: 12px; }
 .bar { display: inline-block; height: 8px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
 .sec { color: var(--muted); font-size: 12px; } #tip { position: fixed; pointer-events: none; background: var(--card); border: 1px solid var(--grid);
-  border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap; }
+  border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; max-width: min(360px, calc(100vw - 16px)); z-index: 10; }
 </style></head><body><main>
 <h1>Open points burndown</h1>
 <p class="sub">From <code>openpoints/*.md</code>. Latest snapshot: ${escapeHtml(latest ? latest.time : "none")}. "Active" counts bugs, features (both also as low-priority display items), engineering, tests and the user's items; blocked and on hold are shown but not counted.</p>
@@ -297,9 +297,15 @@ function draw() {
   entries.forEach((e, i) => {
     const dot = el("circle", { cx: x(i), cy: y(e.active), r: 4, fill: getComputedStyle(document.body).color });
     dot.addEventListener("mousemove", (ev) => {
-      tip.style.display = "block"; tip.style.left = ev.clientX + 12 + "px"; tip.style.top = ev.clientY + 12 + "px";
+      tip.style.display = "block";
       tip.innerHTML = "<b>" + e.time + "</b>" + (e.note ? "<br>" + e.note : "") + "<br>active " + e.active + ", total " + e.total + (e.lines ? "<br>build " + e.lines.build + ", agents " + e.lines.agents + ", user " + e.lines.user + "<br>primary " + e.primary + ", extra " + e.extra : "") + "<br>" +
         files.map((f) => f.label + ": " + (e.byFile[f.file] || 0)).join("<br>");
+      // Keep the box inside the window: left of the pointer near the right edge, above it near the bottom.
+      const w = tip.offsetWidth, h = tip.offsetHeight, vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      let tx = ev.clientX + 12, ty = ev.clientY + 12;
+      if (tx + w > vw - 8) tx = ev.clientX - 12 - w;
+      if (ty + h > vh - 8) ty = ev.clientY - 12 - h;
+      tip.style.left = Math.max(8, tx) + "px"; tip.style.top = Math.max(8, ty) + "px";
     });
     dot.addEventListener("mouseleave", () => { tip.style.display = "none"; });
     svg.append(dot);
