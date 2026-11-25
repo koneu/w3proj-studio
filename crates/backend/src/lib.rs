@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 use w3proj::{project, Registry};
 
+pub mod fastgame;
 pub mod flatview;
 pub mod mergehook;
 pub mod script;
@@ -489,6 +490,22 @@ impl GameCache {
         let g = Arc::new(casc::GameData::open(Path::new(install)).map_err(|e| format!("game data: {e}"))?);
         *guard = Some((PathBuf::from(install), g.clone()));
         Ok(g)
+    }
+
+    /// The storage of `install` if it is the one open now; never opens one (the fast transfer's lookups).
+    pub fn current(&self, install: &str) -> Option<Arc<casc::GameData>> {
+        let guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().filter(|(dir, _)| dir == Path::new(install)).map(|(_, g)| g.clone())
+    }
+}
+
+/// The fast transfer (fastgame.rs) reads only from the storage the commands opened.
+impl fastgame::GameSource for GameCache {
+    fn read(&self, install: &str, path: &str, mode: &str, tileset: &Option<String>) -> Result<Vec<u8>, fastgame::ReadError> {
+        let g = self.current(install).ok_or(fastgame::ReadError::NotOpened)?;
+        game_read(&g, path, mode, tileset).map_err(|e| {
+            if e.starts_with("not found: ") { fastgame::ReadError::NotFound(e) } else { fastgame::ReadError::Failed(e) }
+        })
     }
 }
 

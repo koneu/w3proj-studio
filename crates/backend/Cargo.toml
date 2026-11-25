@@ -13,3 +13,6 @@ casc.workspace = true
 w3proj.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The fast game file transfer's token (fastgame.rs): 128 bits from the OS random generator. Already in the lock
+# through Tauri's dependencies; pinned so it never changes under the token.
+getrandom = "=0.4.3"

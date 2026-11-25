@@ -28,7 +28,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, Socket } from "node:net";
+import { networkInterfaces } from "node:os";
 import { inflateSync } from "node:zlib";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3177,10 +3178,13 @@ async function triggerParamColorTools(page, found) {
     await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
     const shown = await page.evaluate(`(() => { const p = ${root}.querySelector(".color-tools-preview"); return { hidden: p.hidden, text: p.textContent }; })()`);
     if (shown.hidden || shown.text !== "Hello world") fail(`preview ${lit(shown)}`);
+    // Line break puts |n (the form a script string holds), not a real line break.
+    await page.evaluate(`(() => { const e = ${root}.querySelector("input.picker-search"); e.focus(); e.setSelectionRange(0, 0); e.dispatchEvent(new Event("select")); })()`);
+    await page.evaluate(`[...${root}.querySelectorAll(".color-tools-button")].find((x) => x.textContent === "Line break").click()`);
     await page.evaluate(`document.querySelector(".trig-dialog-body .primary").click()`);
     await until("the dialog closed", () => page.evaluate(`window.__colorResult !== undefined`), 20000);
     const got = await page.evaluate(`window.__colorResult?.value ?? null`);
-    if (got !== "Hello |cffFF0303world|r") fail(`the dialog returned ${lit(got)}`);
+    if (got !== "|nHello |cffFF0303world|r") fail(`the dialog returned ${lit(got)}`);
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
 }
 
@@ -8716,6 +8720,55 @@ async function soundEditorKeys(page, found) {
   } catch (e) { found.push(`sound editor keys: ${e.message}`); }
 }
 
+/** The Sound Editor's speaker name and dialogue text have the colour tools: a colour on the selection is stored as typed
+ *  (|c..|r) in the string table, "Line break" inserts |n, each use is one undo step, and the toolbar's edit commits at once. */
+async function soundEditorColorTools(page, found) {
+  const fail = (what) => found.push(`sound editor colour tools: ${what}`);
+  try {
+    const k = await heightKit(page, "SoundColors");
+    const w3s = "map/war3map.w3s.json", wtsFile = join(k.root, "map", "war3map.wts");
+    const sound = {
+      name: "gg_snd_Colored", file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_Colored", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "Hello world", speakerNameKey: -1, speakerName: "Hello world", unknown1: 0,
+      speakerUnitType: "hfoo", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(async () => { await w3.workspace.writeText(${lit(w3s)}, ${lit(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [sound] }))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.editors.open(${lit(w3s)})`);
+    await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 1`), 20000);
+    await page.evaluate(`document.querySelector("tr.snd-row").click()`);
+    await until("the dialogue fields", () => page.evaluate(`!!document.querySelector("textarea.snd-dialogue-text")`), 10000);
+    const strings = () => new Map([...readFileSync(wtsFile, "utf8").matchAll(/STRING (\d+)\r?\n\{\r?\n([^}]*?)\r?\n\}/g)].map((m) => [Number(m[1]), m[2]]));
+    for (const [sel, label] of [["input.snd-speaker-name", "speaker name"], ["textarea.snd-dialogue-text", "text"]]) {
+      const root = `document.querySelector(${lit(sel)}).closest(".color-tools")`;
+      const value = () => page.evaluate(`document.querySelector(${lit(sel)})?.value ?? null`);
+      if (!(await page.evaluate(`!!${root}`))) { fail(`the ${label} field has no colour tools`); continue; }
+      if ((await value()) !== "Hello world") { fail(`the ${label} shows ${lit(await value())} (control)`); continue; }
+      await page.evaluate(`(() => { const e = document.querySelector(${lit(sel)}); e.focus(); e.setSelectionRange(6, 11); e.dispatchEvent(new Event("select")); })()`);
+      await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
+      await settled(page);
+      if ((await value()) !== "Hello |cffFF0303world|r") { fail(`the ${label} after the colour: ${lit(await value())}`); continue; }
+      // The box is made anew when the keys are; the line break goes in at the start of the new one.
+      await page.evaluate(`(() => { const e = document.querySelector(${lit(sel)}); e.focus(); e.setSelectionRange(0, 0); e.dispatchEvent(new Event("select")); })()`);
+      const brk = await page.evaluate(`(() => { const b = [...${root}.querySelectorAll(".color-tools-button")].find((x) => x.textContent === "Line break"); return b.disabled ? null : (b.click(), true); })()`);
+      await settled(page);
+      if (brk !== true || (await value()) !== "|nHello |cffFF0303world|r") { fail(`the ${label} after Line break: ${lit(await value())} (${lit(brk)})`); continue; }
+    }
+    await page.evaluate(`w3.editors.saveAll()`);
+    await until("saved", async () => (await page.evaluate(`w3.editors.unsavedPaths().length`)) === 0, 15000).catch(() => fail("still unsaved after the save"));
+    await settled(page);
+    const saved = [...strings().values()];
+    if (saved.filter((s) => s === "|nHello |cffFF0303world|r").length !== 2) fail(`war3map.wts holds ${lit(saved)}, not the typed |c..|r form twice`);
+    // One undo step per use: the line break first, then the colour.
+    const text = () => page.evaluate(`document.querySelector("textarea.snd-dialogue-text")?.value ?? null`);
+    await page.evaluate(`document.querySelector("textarea.snd-dialogue-text").dispatchEvent(new Event("blur"))`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await settled(page);
+    if ((await text()) !== "Hello |cffFF0303world|r") fail(`one undo left the text ${lit(await text())}, not without the line break`);
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** Ctrl+S with the cursor still in a field of an editor that takes a field's text when the field is left (its `change`
  *  event): the save has the typed text and leaves the tab saved. A key doesn't leave the field, so the save used to go
  *  without the text, and the tab stayed saved too until the field was left. The Object Editor (a value cell), Map
@@ -11918,6 +11971,132 @@ async function gameReadsOnce(page, found) {
   } finally {
     await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
     await restoreWindow(page);
+  }
+}
+
+/** One raw HTTP exchange with 127.0.0.1:port: the answer as text, "error <code>" when the connection fails. */
+function rawHttp(port, text, host = "127.0.0.1") {
+  return new Promise((done) => {
+    const s = new Socket();
+    let data = "";
+    const end = (v) => { s.destroy(); done(v); };
+    s.setTimeout(5000, () => end(data || "timeout"));
+    s.on("data", (d) => { data += d.toString("latin1"); });
+    s.on("end", () => end(data));
+    s.on("close", () => end(data));
+    s.on("error", (e) => end(`error ${e.code}`));
+    s.connect(port, host, () => s.write(text));
+  });
+}
+
+/** The fast game file transfer (`game.fastTransfer`, backend fastgame.rs) in the real app with the real game: a map
+ *  opened with it on reads its game files over 127.0.0.1 and none by game_read; a few files (a table, a model, a texture,
+ *  a 20 MB map) have game_read's bytes; requests without the token, with another Origin or Host, or not GET are refused,
+ *  and the port takes no connection on another address; the speed of both routes on the big file is printed; with the
+ *  port closed (the server stopped under the page) reads fall back to game_read with the same bytes. Needs the game. */
+async function fastGameTransfer(page, found) {
+  const fail = (what) => found.push(`fast game transfer: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const BIG = "War3.w3mod:Campaign/Reforged/TFT/NightElfX03.w3x";
+  const FILES = ["Units\\UnitData.slk", "Units\\Human\\Footman\\Footman.mdx", "ReplaceableTextures\\CommandButtons\\BTNFootman.blp", BIG];
+  const counts = () => page.evaluate(`({ fast: w3Workbench.game.fastReads, fallbacks: w3Workbench.game.fastFallbacks, reads: w3Workbench.game.backendReads })`);
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.settings.set("game.fastTransfer", true, "user"); w3Workbench.game.reload(); })()`);
+    // A map opened with it on: the terrain's models and textures come over 127.0.0.1.
+    const root = join(work, "fast-game-transfer");
+    rmSync(root, { recursive: true, force: true });
+    cpSync(FIXTURE, root, { recursive: true });
+    await page.evaluate(`w3.workspace.open(${lit(root)})`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
+    // The project's own reads (the Object Manager's tables) done first: what is counted is the terrain's.
+    await settled(page);
+    await until("the game reads to settle", () => page.evaluate(`w3Workbench.game.readsPending === 0`), 30000);
+    const before = await counts();
+    const servedBefore = await page.evaluate(`w3.backend.invoke("game_fast_transfer_served")`);
+    await mcpTool(page)("terrain_screenshot", { maxSize: 64 });
+    await settled(page);
+    const opened = await counts();
+    const served = (await page.evaluate(`w3.backend.invoke("game_fast_transfer_served")`)) - servedBefore;
+    const reads = opened.reads - before.reads, fast = opened.fast - before.fast;
+    console.log(`  fast game transfer: the map's opening read ${reads} game files, ${fast} over 127.0.0.1 (the server served ${served}), ${opened.fallbacks - before.fallbacks} fell back`);
+    if (reads < 10) fail(`the map's opening read only ${reads} game files (control: it reads its models and textures)`);
+    // The first read may find the storage not open in the backend yet (409, game_read opens it); after that, none.
+    if (fast < reads - 1 || served < fast) fail(`of ${reads} game files the opening read, ${fast} came over 127.0.0.1 and the server served ${served}`);
+    // The same bytes as game_read, each read through the server (nothing kept in between).
+    const same = await page.evaluate(`(async () => {
+      const g = w3Workbench.game, out = [];
+      for (const path of ${lit(FILES)}) {
+        g.reload();
+        const fastBefore = g.fastReads;
+        const viaFast = await g.read(path, undefined, false, true);
+        const viaIpc = new Uint8Array(await w3.backend.invoke("game_read", { install: w3.settings.get("game.installDir"), modeName: w3.settings.get("game.graphicsMode"), path, tileset: null }));
+        out.push({ path, fast: g.fastReads - fastBefore, size: viaFast.length, ipcSize: viaIpc.length, same: viaFast.length === viaIpc.length && viaFast.every((b, i) => b === viaIpc[i]) });
+      }
+      return out;
+    })()`);
+    for (const r of same) {
+      if (r.fast !== 1) fail(`${r.path} wasn't read over 127.0.0.1`);
+      if (!r.same) fail(`${r.path}: ${r.size} bytes over 127.0.0.1, ${r.ipcSize} by game_read, not the same`);
+    }
+    if (!(same.at(-1)?.size > 10e6)) fail(`the big file has ${same.at(-1)?.size} bytes (control: about 20 MB)`);
+    // Speed on the big file: the best of three reads through each route.
+    const speed = await page.evaluate(`(async () => {
+      const g = w3Workbench.game, args = { install: w3.settings.get("game.installDir"), modeName: w3.settings.get("game.graphicsMode"), path: ${lit(BIG)}, tileset: null };
+      let fast = Infinity, ipc = Infinity, size = 0;
+      for (let i = 0; i < 3; i++) {
+        g.reload();
+        let t = performance.now();
+        size = (await g.read(args.path, undefined, false, true)).length;
+        fast = Math.min(fast, performance.now() - t);
+        t = performance.now();
+        await w3.backend.invoke("game_read", args);
+        ipc = Math.min(ipc, performance.now() - t);
+      }
+      return { size, fast, ipc };
+    })()`);
+    const mbs = (ms) => (speed.size / 1e6 / (ms / 1000)).toFixed(0);
+    console.log(`  fast game transfer: ${(speed.size / 1e6).toFixed(1)} MB in ${speed.fast.toFixed(0)} ms over 127.0.0.1 (${mbs(speed.fast)} MB/s), ${speed.ipc.toFixed(0)} ms by game_read (${mbs(speed.ipc)} MB/s)`);
+    // From outside the page: the token, Host, Origin and method are checked; the port is on 127.0.0.1 only.
+    const { port, token } = await page.evaluate(`w3.backend.invoke("game_fast_transfer", { on: true })`);
+    const origin = await page.evaluate(`location.origin`);
+    const install = await page.evaluate(`w3.settings.get("game.installDir")`);
+    const target = `/${token}/read?install=${encodeURIComponent(install)}&mode=hd&path=Units%5CUnitData.slk`;
+    const ask = (method, path, headers) => rawHttp(port, `${method} ${path} HTTP/1.1\r\n${headers}Connection: close\r\n\r\n`).then((a) => a.split(" ")[1] ?? a);
+    const hostH = `Host: 127.0.0.1:${port}\r\n`, originH = `Origin: ${origin}\r\n`;
+    const wrongToken = target.replace(token, token.replace(/.$/, (c) => (c === "0" ? "1" : "0")));
+    const tries = {
+      "the right request (control)": [await ask("GET", target, hostH + originH), "200"],
+      "no token": [await ask("GET", target.replace(`/${token}`, ""), hostH + originH), "403"],
+      "a wrong token": [await ask("GET", wrongToken, hostH + originH), "403"],
+      "no Origin": [await ask("GET", target, hostH), "403"],
+      "another Origin": [await ask("GET", target, hostH + "Origin: http://evil.example\r\n"), "403"],
+      "another Host": [await ask("GET", target, `Host: localhost:${port}\r\n` + originH), "403"],
+      "POST": [await ask("POST", target, hostH + originH + "Content-Length: 0\r\n"), "405"],
+      "a filesystem path": [await ask("GET", target.replace("Units%5CUnitData.slk", "%2Fetc%2Fpasswd"), hostH + originH), "400"],
+      "an /fs route": [await ask("GET", `/${token}/fs?path=%2Fetc%2Fpasswd`, hostH + originH), "404"],
+    };
+    for (const [what, [got, want]] of Object.entries(tries)) if (got !== want) fail(`${what}: ${got}, expected ${want}`);
+    const outside = Object.values(networkInterfaces()).flat().find((a) => a && a.family === "IPv4" && !a.internal)?.address;
+    if (outside) {
+      const got = await rawHttp(port, `GET ${target} HTTP/1.1\r\nHost: ${outside}:${port}\r\n\r\n`, outside);
+      if (!got.startsWith("error ")) fail(`the port takes connections on ${outside}: ${got.slice(0, 40)}`);
+    } else console.log("  fast game transfer: no other address to try the port on");
+    // The port closed under the page (the server stopped, the setting still on): reads fall back to game_read.
+    await page.evaluate(`w3.backend.invoke("game_fast_transfer", { on: false })`);
+    const closed = await rawHttp(port, `GET ${target} HTTP/1.1\r\n${hostH}${originH}\r\n`);
+    if (!closed.startsWith("error ")) fail(`the port still answers after the server stopped: ${closed.slice(0, 40)}`);
+    const back = await page.evaluate(`(async () => {
+      const g = w3Workbench.game, path = "Units\\\\Human\\\\Peasant\\\\Peasant.mdx";
+      const at = [g.fastReads, g.fastFallbacks];
+      const bytes = await g.read(path, undefined, false, true);
+      const viaIpc = new Uint8Array(await w3.backend.invoke("game_read", { install: w3.settings.get("game.installDir"), modeName: w3.settings.get("game.graphicsMode"), path, tileset: null }));
+      const again = await g.read("ReplaceableTextures\\\\CommandButtons\\\\BTNPeasant.blp", undefined, false, true);
+      return { fast: g.fastReads - at[0], fallbacks: g.fastFallbacks - at[1], size: bytes.length, same: bytes.length === viaIpc.length && bytes.every((b, i) => b === viaIpc[i]), again: again.length };
+    })()`);
+    if (back.fast !== 0 || back.fallbacks !== 2) fail(`with the port closed: ${back.fast} reads over 127.0.0.1, ${back.fallbacks} fell back (expected 0 and 2)`);
+    if (!back.same || !(back.size > 0) || !(back.again > 0)) fail(`with the port closed the fallback's bytes aren't game_read's (${back.size} bytes)`);
+  } finally {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.settings.set("game.fastTransfer", undefined, "user"); w3Workbench.game.reload(); })()`).catch(() => {});
   }
 }
 
@@ -17711,6 +17890,7 @@ async function run() {
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
         editorUndoStacks,
+        fastGameTransfer,
         floatingDoodads,
         flyingHeights,
         gameReadsOnce,
@@ -17785,6 +17965,7 @@ async function run() {
         shadowLeftOut,
         shadowTextureOrder,
         shouldHaves,
+        soundEditorColorTools,
         soundEditorKeys,
         soundNumbersRefused,
         specialDoodads,
@@ -18150,6 +18331,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "byHand", found);
   await soundEditorKeys(page, found).catch((e) => found.push(`sound editor keys: ${e.message}`));
   await leftOpen(page, "soundEditorKeys", found);
+  await soundEditorColorTools(page, found).catch((e) => found.push(`sound editor colour tools: ${e.message}`));
+  await leftOpen(page, "soundEditorColorTools", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
   await aiNumbersRefused(page, found);
@@ -18218,6 +18401,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "paletteMouse", found);
   await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
   await leftOpen(page, "gameReadsOnce", found);
+  await fastGameTransfer(page, found).catch((e) => found.push(`fast game transfer: ${e.message}`));
+  await leftOpen(page, "fastGameTransfer", found);
   await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
   await leftOpen(page, "editorTabRaces", found);
   await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
