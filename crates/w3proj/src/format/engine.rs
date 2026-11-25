@@ -417,6 +417,12 @@ fn field_value(f: &Node, obj: &Map<String, Value>, frames: &[Map<String, Value>]
             (None, _) => None,
         };
         if let Some(v) = found {
+            // The older JSON's type for these bytes (wasType): written as that, read back as the field's.
+            if let (Some(old_ty), Kind::Prim(ty)) = (f.was_type, &f.kind) {
+                let mut bytes = Vec::with_capacity(4);
+                write_prim(old_ty, v, &mut bytes, &format!("{path} (the older field {old})"))?;
+                return read_prim(*ty, &mut Reader { d: &bytes, p: 0 });
+            }
             return Ok(v.clone());
         }
     }

@@ -47,13 +47,18 @@
       { "name": "density", "type": "f32" },
       { "name": "color", "type": "rgba" }
     ] },
+    // The World Editor's Height Start, Height End, Linear Start, Linear End, Max Opacity and Draw Fog Over Sky (Map
+    // Options with the Height fog style; measured 2026-11-25: its war3map.j passes the first four to SetTerrainFogExV
+    // after the fog block's style, z and density, Max Opacity to BlzSetTerrainFogMaxLinearDensity, the last to
+    // BlzSetTerrainFogDrawOverSky). Older JSON named them style (i32), overSky (i32), ..., height (f32): read with
+    // their bits.
     { "name": "terrainFog", "type": "struct", "if": "version >= 39", "fields": [
-      { "name": "style", "type": "i32" },
-      { "name": "overSky", "type": "i32" },
+      { "name": "heightStart", "type": "f32", "was": "style", "wasType": "i32" },
+      { "name": "heightEnd", "type": "f32", "was": "overSky", "wasType": "i32" },
       { "name": "linearStart", "type": "f32" },
       { "name": "linearEnd", "type": "f32" },
       { "name": "maxOpacity", "type": "f32" },
-      { "name": "height", "type": "f32" }
+      { "name": "drawOverSky", "type": "i32", "was": "height", "wasType": "f32", "doc": "1 when ticked" }
     ] },
     { "name": "weather", "type": "id", "if": "version >= 25" },
     { "name": "soundEnvironment", "type": "cstring", "if": "version >= 25" },
