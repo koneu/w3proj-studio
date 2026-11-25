@@ -48,6 +48,9 @@ pub struct Options {
     /// Pathing, shadows and the minimap even when they follow the terrain and doodads, and the script also over one
     /// that isn't the one Studio wrote last (its line says it replaced it).
     pub force: bool,
+    /// The script replaced by the generated one, as the app's "Replace the script": one that isn't Studio's is backed
+    /// up first (`back_up_scripts`). Refused without triggers; a script the generator keeps (vJASS) fails the run.
+    pub replace_script: bool,
     /// The game folder (its data: tables, models, textures).
     pub game: String,
     /// The graphics mode the app's setting would give (sd, hd, de); None: the project's, else the app's default.
@@ -67,6 +70,17 @@ pub fn run(o: Options) -> Result<ExitCode> {
         println!("moved      {path} (a split terrain keeps derived files in .w3proj/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
     }
     let mut parts = due(&o, &root)?;
+    // --replace-script: refused before anything is made; the script it replaces is kept aside before the generator runs.
+    let backups = if o.replace_script {
+        if !parts.run.iter().any(|p| p == "script") {
+            bail!("--replace-script replaces the map script: --only must name script too");
+        }
+        replacement_inputs(&root)?;
+        back_up_scripts(&root)?
+    } else {
+        Vec::new()
+    };
+    let mut script_result: Option<(String, String)> = None;
     // Taken before anything is made: a terrain or doodad file written meanwhile shows as changed since.
     let sources = derived::sources(&root)?;
     let mut failed = false;
@@ -97,7 +111,8 @@ pub fn run(o: Options) -> Result<ExitCode> {
             backend::mode(mode).map_err(anyhow::Error::msg)?;
             settings["game.graphicsMode"] = json!(mode);
         }
-        let job = json!({ "task": "rebuild", "root": info.root, "parts": parts.run, "force": o.force, "settings": settings });
+        // The host's `force` is about the script only (what of the rest is made is decided here, `due`).
+        let job = json!({ "task": "rebuild", "root": info.root, "parts": parts.run, "force": o.force || o.replace_script, "settings": settings });
         let report = run_host(&job, &server)?;
         if let Some(e) = report.get("error").and_then(Value::as_str) {
             bail!("the rebuild stopped: {e}");
@@ -109,6 +124,9 @@ pub fn run(o: Options) -> Result<ExitCode> {
             let note = r["note"].as_str().map(|n| format!(": {n}")).unwrap_or_default();
             println!("{status:<9}  {files} ({}){note}", what(part));
             failed |= status == "failed";
+            if part == "script" {
+                script_result = Some((status.to_string(), r["note"].as_str().unwrap_or("").to_string()));
+            }
             if status == "written" || status == "unchanged" {
                 done.push(PARTS.iter().find(|p| **p == part).copied().unwrap_or("?"));
             }
@@ -126,6 +144,9 @@ pub fn run(o: Options) -> Result<ExitCode> {
                 }
             }
         }
+    }
+    if o.replace_script {
+        failed |= replace_outcome(&root, &backups, script_result.as_ref());
     }
     for (parts, why) in &parts.skipped {
         println!("skipped    {}: {why}", parts.iter().map(|p| what(p)).collect::<Vec<_>>().join(", "));
@@ -170,6 +191,139 @@ pub fn script_is_studios(root: &Path) -> Result<bool, String> {
         }
     }
     Ok(false)
+}
+
+// ---------------------------------------------------------------- --replace-script
+
+/// Where `w3proj rebuild --replace-script` keeps the scripts it replaced, relative to the project (the CLI has no
+/// checkpoints). Local, as the derived files are: `REPLACED_IGNORED` goes into the project's `.gitignore`.
+pub const REPLACED_DIR: &str = ".w3proj/replaced-scripts";
+const REPLACED_IGNORED: &str = "/.w3proj/replaced-scripts/";
+
+/// A script kept aside before the generator replaces it.
+struct Backup {
+    /// The project's script file (`SCRIPT_FILES`).
+    file: &'static str,
+    path: PathBuf,
+    /// `path` relative to the project, as printed.
+    shown: String,
+    bytes: Vec<u8>,
+}
+
+/// Err when the project has nothing to make a replacement from: no triggers (map/triggers/ or a raw war3map.wtg). The
+/// generator would make a script without any (as a pack of a map without one does), but writing that over a script
+/// that has code of its own would only lose it.
+fn replacement_inputs(root: &Path) -> Result<()> {
+    let map = root.join(w3proj::project::MAP_DIR);
+    for rel in [w3proj::trigger_layout::ROOT_FILE, w3proj::trigger_layout::WTG] {
+        match map.join(rel).try_exists() {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(e) => bail!("--replace-script: {}/{rel} can't be looked at ({e}); nothing was replaced", w3proj::project::MAP_DIR),
+        }
+    }
+    bail!(
+        "--replace-script: the project has no triggers to make a map script from ({}/{} or {}/{}); nothing was replaced",
+        w3proj::project::MAP_DIR,
+        w3proj::trigger_layout::DIR,
+        w3proj::project::MAP_DIR,
+        w3proj::trigger_layout::WTG
+    )
+}
+
+/// Copies the project's script files byte for byte to `REPLACED_DIR` when they aren't the script Studio wrote last
+/// (`script_is_studios`: Studio's own is made again anyway, nothing of it is lost), under the file's name with the time
+/// (UTC) in it: `war3map.20261125-143005.j`. On disk (synced) before the generator runs. A script that is there but
+/// can't be read is an error: it can't be kept aside, so it isn't replaced.
+fn back_up_scripts(root: &Path) -> Result<Vec<Backup>> {
+    match script_is_studios(root) {
+        Ok(true) => return Ok(Vec::new()),
+        Ok(false) => {}
+        Err(why) => bail!("--replace-script: {why}; nothing was replaced"),
+    }
+    let stamp = utc_stamp(std::time::SystemTime::now());
+    let dir = root.join(REPLACED_DIR);
+    let mut out = Vec::new();
+    for file in SCRIPT_FILES {
+        let bytes = match std::fs::read(root.join(file)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => bail!("--replace-script: {file} is there but can't be read ({e}); nothing was replaced"),
+        };
+        std::fs::create_dir_all(&dir).with_context(|| format!("--replace-script: making {REPLACED_DIR}"))?;
+        let (stem, ext) = file.trim_start_matches("map/").rsplit_once('.').expect("a script file has an extension");
+        // Never over an earlier backup: two runs in one second get -2, -3, ...
+        let mut n = 1;
+        let (path, mut f) = loop {
+            let name = if n == 1 { format!("{stem}.{stamp}.{ext}") } else { format!("{stem}.{stamp}-{n}.{ext}") };
+            let path = dir.join(&name);
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(f) => break (path, f),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+                Err(e) => bail!("--replace-script: {REPLACED_DIR}/{name} can't be written ({e}); nothing was replaced"),
+            }
+        };
+        let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        f.write_all(&bytes)
+            .and_then(|_| f.sync_all())
+            .with_context(|| format!("--replace-script: writing {REPLACED_DIR}/{name}; nothing was replaced"))?;
+        out.push(Backup { file, path, shown: format!("{REPLACED_DIR}/{name}"), bytes });
+    }
+    if !out.is_empty() {
+        if let Err(e) = derived::ensure_lines(root, &[REPLACED_IGNORED]) {
+            println!("note: {REPLACED_IGNORED} isn't in .gitignore ({e}): the backups below would be committed");
+        }
+    }
+    Ok(out)
+}
+
+/// After a rebuild with --replace-script: says where each replaced script went, removes the backups of files the run
+/// left as they were (nothing of them was replaced), and tells when the script wasn't replaced. True: the run failed
+/// at what was asked (the script kept, failed, or not reported).
+fn replace_outcome(root: &Path, backups: &[Backup], script: Option<&(String, String)>) -> bool {
+    for b in backups {
+        let now = std::fs::read(root.join(b.file)).ok();
+        if now.as_deref() == Some(b.bytes.as_slice()) {
+            let _ = std::fs::remove_file(&b.path);
+        } else {
+            println!("backup     {} (the replaced {}, byte for byte)", b.shown, b.file);
+        }
+    }
+    // Only when empty: earlier backups stay.
+    let _ = std::fs::remove_dir(root.join(REPLACED_DIR));
+    match script {
+        Some((status, _)) if status == "written" || status == "unchanged" => false,
+        Some((status, note)) => {
+            let jasshelper = if note.contains("vJASS") || note.contains("JassHelper") {
+                ": w3proj rebuild doesn't run JassHelper (the vJASS extension isn't loaded here); make the script in the app (Regenerate Map Script…) or the World Editor"
+            } else {
+                ""
+            };
+            eprintln!("error: --replace-script: the map script wasn't replaced ({status}){jasshelper}");
+            true
+        }
+        None => {
+            eprintln!("error: --replace-script: the map script wasn't made (the rebuild reported nothing for it)");
+            true
+        }
+    }
+}
+
+/// `t` in UTC as `YYYYMMDD-HHMMSS`.
+fn utc_stamp(t: std::time::SystemTime) -> String {
+    let secs = t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let (days, rest) = (secs / 86_400, secs % 86_400);
+    // Days since 1970-01-01 to a civil date (H. Hinnant's days_from_civil, inverted).
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}", rest / 3600, rest % 3600 / 60, rest % 60)
 }
 
 /// What `w3proj pack` did with a project's map script before packing (`script_for_pack`).
@@ -756,6 +910,15 @@ mod tests {
     }
 
     /// A pipe that ends before the report is told apart from a report (Node died).
+    #[test]
+    fn backup_names_carry_the_utc_time() {
+        let at = |s: u64| utc_stamp(std::time::UNIX_EPOCH + Duration::from_secs(s));
+        assert_eq!(at(0), "19700101-000000");
+        assert_eq!(at(951_782_400), "20000229-000000", "a leap day");
+        assert_eq!(at(1_700_000_000), "20231114-221320");
+        assert_eq!(at(4_102_444_799), "20991231-235959");
+    }
+
     #[test]
     fn a_pipe_that_ends_without_a_report_is_none() {
         let dir = scratch("eof");

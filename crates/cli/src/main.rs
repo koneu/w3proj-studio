@@ -560,6 +560,13 @@ enum Cmd {
         /// triggers don't make is lost; the line says which file was replaced). vJASS stays kept.
         #[arg(long)]
         force: bool,
+        /// Replace the map script with the one the triggers make, as the app's "Replace the script":
+        /// a war3map.j / war3map.lua that isn't the script Studio wrote last is copied byte for byte
+        /// to .w3proj/replaced-scripts/ first (git-ignored; the line says where). Refused for a
+        /// project without triggers (map/triggers/ or war3map.wtg); vJASS isn't compiled (no
+        /// JassHelper here), so it fails.
+        #[arg(long)]
+        replace_script: bool,
         /// Game install folder: its tables, models and textures go into the files.
         #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         game: String,
@@ -1040,8 +1047,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 return Ok(ExitCode::FAILURE);
             }
         }
-        Cmd::Rebuild { project, only, force, game, mode } => {
-            return rebuild::run(rebuild::Options { project, only, force, game, mode, formats: extra });
+        Cmd::Rebuild { project, only, force, replace_script, game, mode } => {
+            return rebuild::run(rebuild::Options { project, only, force, replace_script, game, mode, formats: extra });
         }
         Cmd::Check { project, only, path, melee, unit_size, warnings_fail, json, game, mode } => {
             return check::run(check::Options { project, only, path, melee, unit_size, warnings_fail, json, game, mode, formats: extra });
