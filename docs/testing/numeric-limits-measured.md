@@ -122,8 +122,55 @@ Chance box (1000,265) starts at 100; OK 1067,736. Six items typed into one set i
 Saved: 0, 0, 0, 0, 89, 11 (each new item's chance scales the set's others down to the rest of 100). So both boxes take
 digits only and go to 100 at most; the group box's least is 0, the item box's 1; a chance that takes the total past 100
 scales the other lines (sets, items) down in proportion so the total is 100, and a lower chance leaves them. Studio
-(`map-info/techtree.ts` `techNumber`, `TECH_LIMITS.chance`) refuses a chance past 0..100 and keeps every line as typed,
-the total shown; not changed (the rounding of the scaling was not pinned down: every measured case divided evenly).
+(`map-info/techtree.ts` `techNumber`) still refuses a typed chance past 0..100 (an item's below 1, `TECH_LIMITS.itemChance`)
+rather than dropping letters; the scaling it now does as the editor (below).
+
+### Rounding of the scaling
+
+Branch feat/chance-scaling, 2026-11-25, SD, we-drive slot 0. Input: random-group.w3m with groups C00.. whose lines hold
+the chances below and two item tables (made with `w3proj unpack`/`pack`); in the Random Groups dialog each group's row
+(428,424 + 13 per row), the set's row, Edit Set, the value typed into Chance, OK; in Item Tables (Advanced > Item
+Tables...) an item's row (700,445 + 16 per row), Edit Item (884,520) or New Item (884,480), Chance (1000,265), OK; the
+map saved and read back. "Line" counts from 1.
+
+| Chances before | Line set | Typed | Saved |
+|---|---|---|---|
+| 17, 17, 16, 17, 17, 16 | 1 | 25 | 25, 15, 15, 15, 15, 15 |
+| 30, 14, 14, 14, 14, 14 | 1 | 33 | 33, 13, 13, 13, 14, 14 |
+| 30, 14, 14, 14, 14, 14 | 6 | 20 | 28, 13, 13, 13, 13, 20 |
+| 100, 0, 0 | 2 | 40 | 60, 40, 0 |
+| 10, 20, 30, 40 | 1 | 25 | 25, 17, 25, 33 |
+| 10, 20, 30, 40 | 4 | 50 | 8, 17, 25, 50 |
+| 1, 1, 1, 97 | 4 | 99 | 0, 0, 1, 99 |
+| 1, 1, 1, 97 | 1 | 50 | 50, 1, 1, 48 |
+| 33, 33, 34 | 1 | 50 | 50, 25, 25 |
+| 5, 5, 5, 5, 80 | 5 | 90 | 3, 3, 2, 2, 90 |
+| 25, 25, 25, 25 | 2 | 26 | 25, 26, 25, 24 |
+| 17, 17, 16, 17, 17, 16 | 1 | 10 | 10, 17, 16, 17, 17, 16 |
+| 100, 0, 0, 0, 0, 0 | 1 | 40 | 40, 0, 0, 0, 0, 0 |
+| 18, 18, 49, 15 | 3 | 96 | 1, 1, 96, 2 |
+| 22, 50, 2, 2, 13, 11 | 1 | 48 | 48, 33, 1, 2, 9, 7 |
+| 19, 70, 1, 10 | 4 | 84 | 3, 12, 1, 84 |
+| 71, 17, 12, 0 | 4 | 22 | 55, 13, 10, 22 |
+| 36, 28, 8, 28 | 1 | 51 | 51, 21, 7, 21 |
+| 27, 6, 65, 0, 1, 1 | 1 | 94 | 94, 0, 5, 0, 0, 1 |
+| 65, 0, 15, 6, 14 | 3 | 37 | 48, 1, 37, 4, 10 |
+| 40, 30, 20, 10 | 3 | 90 | 5, 4, 90, 1 |
+| 7, 11, 13, 17, 19, 33 | 6 | 50 | 5, 8, 10, 13, 14, 50 |
+| 89, 7, 1, 3 | 4 | 69 | 28, 2, 1, 69 |
+| 53, 0, 28, 10, 5, 4 | 4 | 74 | 15, 1, 8, 74, 1, 1 |
+| 18, 26, 0, 31, 19, 6 | 4 | 51 | 13, 18, 1, 51, 13, 4 |
+| item set 17, 17, 16, 17, 17, 16 | 1 | 25 | 25, 15, 15, 15, 15, 15 |
+| item set 1, 1, 1, 97 | 4 | 99 | 0, 0, 1, 99 |
+| item set 0, 0, 1, 99 | New Item | 50 | 0, 0, 1, 49, 50 |
+
+**The rule** (all 28 cases, and the AI Editor's hero chances of bugs.md, 2026-11-20): the other lines get
+`100 - typed` in proportion to what they held, each rounded half up; what that leaves over is taken one at a time from
+the largest line, what it leaves short given one at a time to the smallest, the later line first on a tie (a line at 0
+can get one). Rounding by remainders (largest remainder, ties to the earlier line: the AI Editor's rule before) gives 13
+of these cases otherwise (e.g. 18, 18, 49, 15 → 96: 2, 1, 96, 1). The hero chances use the same rounding but keep the total at 100 both ways, and a box set while the other
+five are 0 goes back to 100. Studio: `lib/chances.ts` `scaleChances` (cases in `chances.test.ts`), used by Map
+Properties' chance boxes (`map-info/techtree.ts`) and the AI Editor (`ai-editor/numbers.ts`).
 
 ## Trigger Editor: the Value dialog of a limited parameter
 
