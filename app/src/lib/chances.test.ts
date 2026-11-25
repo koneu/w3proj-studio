@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { scaleChances } from "./chances";
+import { addChance, scaleChances } from "./chances";
 
 // The World Editor's results (we-drive 2026-11-25, SD; docs/testing/numeric-limits-measured.md "Rounding of the
 // scaling"): chances before, the line set (from 0), the value typed, the saved chances.
@@ -82,4 +82,14 @@ test("chances: the total stays at 100 and whole, the line set keeps its value", 
     }
   }
   assert.deepEqual(scaleChances([10, 20], 0, 30, "cap"), [30, 20], "lowering or a total up to 100 moves nothing else");
+});
+
+test("chances: a new item enters at 100 and scales the set, or at the value typed (we-drive 2026-11-25)", () => {
+  assert.deepEqual(addChance([0, 0, 1, 99], 50), [0, 0, 1, 49, 50]);
+  assert.deepEqual(addChance([0, 0, 1, 99]), [0, 0, 0, 0, 100]);
+  assert.deepEqual(addChance([]), [100]);
+  assert.deepEqual(addChance([100]), [0, 100]);
+  const before = [3, 4];
+  addChance(before);
+  assert.deepEqual(before, [3, 4]);
 });

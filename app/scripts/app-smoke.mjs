@@ -2866,6 +2866,18 @@ async function techtreeRandomLevels(page, found) {
     if ((await setChances()) !== "0,0,1,99") fail(`99 typed into an item of 1, 1, 1, 97 gave ${await setChances()}, not the editor's 0, 0, 1, 99`);
     await typeChance(`${setBoxes}[2]`, "0");
     if (!(await page.evaluate(`${setBoxes}[2]?.classList.contains("invalid") ?? false`))) fail("an item's chance of 0 wasn't refused");
+    // Add item…: the new item enters at 100 and the set's others scale down (0,0,1,99 -> 0,0,0,0,100); one undo takes it back.
+    const addItem = `[...document.querySelectorAll(${lit("[data-anchor=\"item-table-0\"] .techtree-set")})][1]?.querySelector(":scope > button")`;
+    if (!(await page.evaluate(`!!(${addItem})`))) fail("the second item set has no Add item button");
+    else {
+      await page.evaluate(`(${addItem}).click()`);
+      await until("the item picker", () => has(".picker-rows > .picker-row"), 30000).catch(() => fail("Add item… opened no picker"));
+      await page.evaluate(`document.querySelector(".picker-rows > .picker-row")?.click()`);
+      await until("the item added", async () => (await setChances()).split(",").length === 5, 5000).catch(() => {});
+      if ((await setChances()) !== "0,0,0,0,100") fail(`Add item… on 0, 0, 1, 99 gave ${await setChances()}, not the editor's 0, 0, 0, 0, 100`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await until("the add undone", async () => (await setChances()) === "0,0,1,99", 5000).catch(async () => fail(`one undo after Add item… shows ${await setChances()}`));
+    }
 
     // The per-player grid: the knight, unavailable to player 1, ticked available again.
     await k.hands.click("[data-switch=\"techs\"] .techtree-view-grid");

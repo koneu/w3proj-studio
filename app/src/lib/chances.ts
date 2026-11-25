@@ -36,3 +36,9 @@ export function scaleChances(chances: readonly number[], index: number, value: n
   }
   return out;
 }
+
+/** The chances after a new line joins a set: it enters as `value` (the editor's New Item box starts at 100) and the
+ *  others scale down as if `value` had been typed into it (`cap`). Never changes the input. */
+export function addChance(chances: readonly number[], value = 100): number[] {
+  return scaleChances([...chances, 0], chances.length, value, "cap");
+}
