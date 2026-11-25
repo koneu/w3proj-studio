@@ -58,7 +58,8 @@ import { applyOpenRulesToProject, openRuleSourceOf } from "./openrules";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { RebuildJobs } from "./rebuildjob";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
+import { savedUnitsLayout } from "../../lib/terrain/tftflag";
+import { afterPlacedEdit, storedFlags } from "./placedsave";
 import { editorUnitsVersion, UPGRADED_UNITS_VERSIONS } from "../../lib/terrain/unitsversion";
 import { editorDooVersion, lightBlocks, UPGRADED_DOO_VERSIONS, type DoodadLights } from "../../lib/terrain/dooversion";
 import { meleeAfterSave, meleeFiles, MINES, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, surroundingsFrom, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
@@ -104,7 +105,7 @@ import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from 
 import { cornersOpen, DERIVED_CLOSED_KEY, editableAt, loadOpenState, notOpenText, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
 import { specialsAfterCliffs } from "../../lib/terrain/specialfit";
 import { pictureTarget } from "./picturetarget";
-import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
@@ -549,23 +550,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (editor) await editor.handle.objects.openRules(list);
       // In the version the open editor's save writes (version 13), for the same reason.
       ownEditor()?.handle.objects.saveVersion(doc, key);
-      const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
-      // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
+      // The players and the w3i's flags, as the terrain view's save settles them (placedsave.ts).
       const infoPath = "map/war3map.w3i.json", infoText = key === "units" ? await read(infoPath).catch(() => null) : null;
-      type Info = { flags?: unknown; players?: unknown; forces?: unknown };
-      let info: Info | null = null;
-      try { info = infoText === null ? null : JSON.parse(infoText) as Info; } catch { /* left alone */ }
-      if (info && typeof info.flags === "number" && Array.isArray(info.players) && Array.isArray(info.forces)) {
-        let changed = false;
-        // Placed, moved or removed start locations add, move or remove the map's players, as the terrain editor's
-        // save does, in the same edit (one undo step).
-        if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
-        // Placing can make a player own something: Melee goes off as the save would take it off. The ground is the
-        // saved terrain's (a start under water).
-        const flags = info.flags as number, after = (await savedMelee(meleeFiles(w3), info as unknown as MeleeInfo, list)).flags;
-        if (after !== flags) { info.flags = after; changed = true; }
-        if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
-      }
+      const infoAfter = await afterPlacedEdit({ key, doc, list, infoText, startsBefore,
+        flagsAfter: async (info, placed) => (await savedMelee(meleeFiles(w3), info, placed)).flags });
+      const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
+      if (infoAfter !== null) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: infoAfter }) });
       return files;
     }, async () => {
       // Doodads block pathing and cast shadows. With no editor open the ground is the project's, as the rebuild finds it.
@@ -629,6 +619,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dropped = dropFallenSpecials(parsed, terrain, (id) => sizes.get(id), partialNow ? (i) => partialNow.corners[i] === OPEN_CORNER : undefined).length;
           specialsRemoved += dropped;
         }
+        // Units that followed the ground are written in the layout of flag 0x4000, as the terrain view's save writes them.
+        if (key === "units" && count) savedUnitsLayout(parsed, await storedFlags(read));
         if (count || dropped) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
       }
       return files;
@@ -6767,11 +6759,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             if (objectsTouched) await settleMoved();
             // Saved with flag 0x4000 (Requires The Frozen Throne data), the units file gets the layout with item tables
-            // and hero attributes, as the World Editor's save writes it (tftflag.ts tftUnitsLayout): only written with
+            // and hero attributes, as the World Editor's save writes it (tftflag.ts savedUnitsLayout): only written with
             // the objects, and never back (a file of 11 keeps its tables). A w3i that can't be read leaves it as it is.
             if (objectsTouched && unitsFile && Number(unitsFile.doc.subversion) === 9 && typeof (edgeInfo as { flags?: unknown } | null)?.flags === "number") {
               const after = await savedMelee(meleeFiles(w3), edgeInfo as unknown as MeleeInfo, unitsFile.list).catch(() => null);
-              if (after && after.flags & REQUIRES_TFT) tftUnitsLayout(unitsFile.doc);
+              savedUnitsLayout(unitsFile.doc, after?.flags);
             }
             // The tilesets' own lists, which the w3e is written with under the flag 0 (savedTerrain).
             await ownReady;
