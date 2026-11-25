@@ -20,7 +20,7 @@ import { parseIni, parseSlk } from "./formats/text";
 import { decodeImage } from "./image";
 import { encodeBlp1Jpeg } from "./image/encode";
 import { checkJass, emptyEnv, envFrom } from "./jass/check";
-import { checkLua } from "./lua/check";
+import { checkLua, luaKnownNames } from "./lua/check";
 import { readLightMdl, readLightMdx } from "./model/dnclight";
 import { uploadableLevels } from "./model/gltexture";
 import { parseModel } from "./model/mdl";
@@ -90,7 +90,11 @@ const TARGETS: Record<string, (b: Uint8Array) => unknown> = {
     checkJass(s, emptyEnv());
     envFrom([s]);
   },
-  lua(b) { checkLua(latin1(b)); },
+  lua(b) {
+    const s = latin1(b);
+    // The names pass too (it runs only on text the syntax check passed), and the globals of a script as another's.
+    checkLua(s, luaKnownNames(new Set(), [s]) ?? new Set());
+  },
   slk(b) { parseSlk(latin1(b)); },
   ini(b) { parseIni(latin1(b)); },
   triggerData(b) { parseTriggerData(latin1(b)); },

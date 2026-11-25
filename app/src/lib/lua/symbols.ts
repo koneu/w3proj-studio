@@ -4,6 +4,7 @@
 import type { CodeSpot } from "../jass/callsite";
 import type { JassEnv } from "../jass/check";
 import { jassSymbols, type JassSymbol } from "../jass/env";
+import { LUA_STANDARD } from "./check";
 
 /** Looks back at most this far for the call. */
 const WINDOW = 4000;
@@ -58,9 +59,8 @@ export function luaSpot(text: string, pos: number): CodeSpot & { quote?: string 
 }
 
 const KEYWORDS = ["and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"];
-/** Lua's own globals that map scripts can use. */
-const STANDARD = ["FourCC", "assert", "coroutine", "error", "getmetatable", "io", "ipairs", "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget", "rawlen",
-  "rawset", "require", "select", "setmetatable", "string", "table", "tonumber", "tostring", "type", "utf8", "xpcall"];
+/** Lua's own globals that map scripts can use (the checker knows them too). */
+const STANDARD = LUA_STANDARD;
 /** Lua 5.3's standard libraries: their members (offered after `math.`). */
 const LIBRARIES: Record<string, string[]> = {
   math: ["abs", "ceil", "cos", "deg", "exp", "floor", "fmod", "huge", "log", "max", "maxinteger", "min", "mininteger", "modf", "pi", "rad", "random",
