@@ -3184,6 +3184,32 @@ async function triggerParamColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
 }
 
+/** The parameter dialog's Value tab pulls a number past the function's limits (_Limits) to the nearer one, as the World
+ *  Editor's dialog does (docs/testing/numeric-limits-measured.md): an integer of 0..100 typed 150 is 100, a real of 1..10000
+ *  typed 0 is 1.00; one inside is kept; an empty box is 0. */
+async function triggerValueLimits(page, found) {
+  const fail = (what) => found.push(`trigger value limits: ${what}`);
+  try {
+    await page.evaluate(`(async () => {
+      const gui = await w3.services.get("w3.triggers.gui");
+      const data = { functions: [new Map(), new Map(), new Map(), new Map()], find: () => undefined, categories: new Map(), presets: new Map(),
+        types: new Map([["integer", { name: "Integer", base: "integer", global: false }], ["real", { name: "Real", base: "real", global: false }]]) };
+      window.__limitDialog = (type, limits) => { window.__limitResult = undefined; gui.editParam({ data, display: { data }, type, current: { type: 3, value: "1" }, limits }).then((p) => { window.__limitResult = p ?? null; }); };
+    })()`);
+    // An emptied box, or text the box drops to nothing, is 0 (then the limits): Wait typed empty 0.00, a filter state typed abc 0.
+    for (const [type, limits, typed, want] of [["integer", [0, 100], "150", "100"], ["real", [1, 10000], "0", "1.00"], ["integer", [0, 100], "42", "42"],
+      ["real", [0, null], "", "0.00"], ["integer", [0, 2], "abc", "0"], ["real", [1, 10000], "", "1.00"]]) {
+      await page.evaluate(`window.__limitDialog(${lit(type)}, ${JSON.stringify(limits)})`);
+      await until("the value dialog", () => page.evaluate(`!!document.querySelector(".trig-dialog-body input.picker-search")`), 20000);
+      await page.evaluate(`(() => { const e = document.querySelector(".trig-dialog-body input.picker-search"); e.value = ${lit(typed)}; e.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector(".trig-dialog-body .primary").click(); })()`);
+      await until("the dialog closed", () => page.evaluate(`window.__limitResult !== undefined`), 20000).catch(() => {});
+      const got = await page.evaluate(`window.__limitResult === undefined ? "(still open: " + (document.querySelector(".trig-value-note")?.textContent ?? "") + ")" : window.__limitResult?.value ?? null`);
+      if (got !== want) fail(`${type} limited to ${limits} typed ${typed} gave ${lit(got)}, the World Editor keeps ${want}`);
+      await page.evaluate(`document.querySelector(".picker-overlay")?.remove()`);
+    }
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -17797,6 +17823,7 @@ async function run() {
         triggerParamColorTools,
         triggersAndAi,
         triggerTree,
+        triggerValueLimits,
         truncatedChapter,
         turtleCliffSave,
         typedFieldSave,
@@ -18021,6 +18048,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectPickerSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
+  await triggerValueLimits(page, found).catch((e) => found.push(`trigger value limits: ${e.message}`));
+  await leftOpen(page, "triggerValueLimits", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
   await leftOpen(page, "mapInfoUndoKept", found);
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));

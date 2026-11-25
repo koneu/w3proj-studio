@@ -6,7 +6,7 @@ import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/s
 import { withColorTools } from "../../extensions/colortools";
 import { keyOf } from "../../lib/keys";
 import { paramText } from "../../lib/triggers/display";
-import { filterTriggerTyping, isTypedCode, typedTriggerNumber } from "../../lib/triggers/literals";
+import { filterTriggerTyping, isTypedCode, limitTriggerNumber, typedTriggerNumber } from "../../lib/triggers/literals";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
 import { focusAfterClick, h } from "../../workbench/dom";
@@ -126,28 +126,28 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       categoryName: categoryName(ed), preview: (f) => functionPreview(ed, f),
     }) });
     if (takesValue(data, type)) tabs.push({ label: "Value", build: () => {
-      // Numbers must be numbers the script can hold (literals.ts: a 32-bit integer, a 32-bit float) within the
-      // function's limits (_Limits).
+      // Numbers must be numbers the script can hold (literals.ts: a 32-bit integer, a 32-bit float); one past the
+      // function's limits (_Limits) is pulled to the nearer one, as the World Editor's dialog does.
       const base = data.types.get(type)?.base ?? type;
       const problem = (v: string): string | null => {
         if (isTypedCode(type, v)) return null;
         if (base !== "integer" && base !== "real") return null;
         const t = typedTriggerNumber(base, v);
         if ("refused" in t || t.value === null) return /code$/.test(type) ? "Enter an object code of 4 characters, like hfoo." : "refused" in t ? t.refused : "Enter a number.";
-        const n = Number(t.value);
-        const [min, max] = limits ?? [null, null];
-        if (min !== null && n < min) return `The lowest value is ${min}.`;
-        if (max !== null && n > max) return `The highest value is ${max}.`;
         return null;
       };
       const note = h("div.trig-value-note", {}, limits && (limits[0] !== null || limits[1] !== null)
         ? `Allowed: ${limits[0] ?? "…"} to ${limits[1] ?? "…"}` : "");
+      // An empty number box is 0 to the World Editor's dialog (measured: Wait typed empty is 0.00); a code isn't a number.
+      const typed = () => (base === "integer" || base === "real") && !/code$/.test(type) && input.value.trim() === "" ? "0" : input.value;
       const take = () => {
-        const err = problem(input.value);
+        const v = typed();
+        const err = problem(v);
         if (err) { note.textContent = err; note.classList.add("error"); input.focus(); return; }
         // A typed number is kept as the World Editor keeps it (literals.ts typedTriggerNumber); a code as typed.
-        const n = base === "integer" || base === "real" ? typedTriggerNumber(base, input.value) : null;
-        done({ type: VALUE, value: n && "value" in n && n.value !== null && !isTypedCode(type, input.value) ? n.value : base === "integer" || base === "real" ? input.value.trim() : input.value });
+        const n = base === "integer" || base === "real" ? typedTriggerNumber(base, v) : null;
+        const kept = n && "value" in n && n.value !== null && !isTypedCode(type, v) ? limitTriggerNumber(base as "integer" | "real", n.value, limits ?? [null, null]) : null;
+        done({ type: VALUE, value: kept ?? (base === "integer" || base === "real" ? v.trim() : v) });
       };
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
         onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") take(); },

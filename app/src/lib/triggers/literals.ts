@@ -85,5 +85,18 @@ export function typedTriggerNumber(base: "integer" | "real", typed: string): { v
     return { value: String(clamp(Math.fround(wrapped)) + 0) };
   }
   if (!/^-?(\d+\.?\d*|\.\d+)$/.test(raw)) return { refused: "Enter a number, like 1.5." };
-  return { value: Math.fround(clamp(Number(raw))).toFixed(2).replace(/^-0\.00$/, "0.00") };
+  return { value: realBoxText(clamp(Number(raw))) };
+}
+
+const realBoxText = (n: number): string => Math.fround(n).toFixed(2).replace(/^-0\.00$/, "0.00");
+
+/** A value the box kept (`typedTriggerNumber`'s text) pulled into the parameter's limits from TriggerData's _Limits
+ *  (null: open), as the World Editor's Value dialog does (measured 2026-11-25, docs/testing/numeric-limits-measured.md:
+ *  Wait -5 is 0.00, an opacity of 0..100 typed 150 is 100, a handicap of 1..10000 typed 0 is 1.00). */
+export function limitTriggerNumber(base: "integer" | "real", kept: string, limits: readonly [number | null, number | null]): string {
+  const [min, max] = limits;
+  const n = Number(kept);
+  if (min !== null && n < min) return base === "integer" ? String(min) : realBoxText(min);
+  if (max !== null && n > max) return base === "integer" ? String(max) : realBoxText(max);
+  return kept;
 }
