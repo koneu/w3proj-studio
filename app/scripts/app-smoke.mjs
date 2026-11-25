@@ -310,7 +310,6 @@ async function newMaps(page, found) {
         throw new Error(`no map at ${map}: ${await page.evaluate(`[...document.querySelectorAll(".notification, .toast, .notifications *")].map((e) => e.textContent).join(" | ").slice(0, 300)`)}`);
       }
       await settled(page);
-      if (args.water === "deep") await viewCommands(page, fail, join(work, "view-shots"), size);
       const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
 
@@ -1360,6 +1359,7 @@ async function pasteWaitsForSizes(page, found) {
   // A change of the doodad data, with a type that looks the same: the sizes are emptied and not read again by itself.
   await k.tool("create_object", { kind: "destructables", base: "LTbr" });
   await settled(page);
+  // A fixed wait on purpose: the check is that the sizes are NOT read again by themselves, so there is no state to wait for.
   await new Promise((r) => setTimeout(r, 1500));
   await settled(page);
   const early = await pasteOnce(640);
@@ -7765,10 +7765,33 @@ async function toolbarNarrow(page, found) {
   }
 }
 
+/** viewCommandsOn on a new map as newMaps makes the deep-water one (NEW_MAPS: Grass, 128 × 96, with the doodads, the
+ *  footman and the item placed and saved), the check of its own. */
+async function viewCommands(page, found) {
+  const { args, size } = NEW_MAPS.find((m) => m.args.water === "deep");
+  const fail = (what) => found.push(`new map "${args.name}": ${what}`);
+  try {
+    const folder = join(work, "view-map");
+    mkdirSync(folder, { recursive: true });
+    const tool = mcpTool(page);
+    await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+    await tool("new_map", { ...args, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "CPct", x: 512, y: 512 }], ignoreRoom: true });
+    await tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+    await tool("place_objects", { objects: [{ id: "ratf", x: -256, y: 0, player: 1 }], ignoreRoom: true });
+    await tool("save_project");
+    await settled(page);
+    await viewCommandsOn(page, fail, join(work, "view-shots"), size);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
-async function viewCommands(page, fail, shots, size) {
+async function viewCommandsOn(page, fail, shots, size) {
   const bad = (what) => fail(`view commands: ${what}`);
   mkdirSync(shots, { recursive: true });
   const run = (id) => page.evaluate(`w3.commands.execute(${lit(id)}).then(() => null, (e) => String(e))`);
@@ -7919,12 +7942,12 @@ async function viewCommands(page, fail, shots, size) {
   let westFlat, eastFlat;
   try {
     await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...info, water: { ...(info.water ?? {}), reflectivity: 0 } }, null, 2))})`);
-    await sleep(1500);
+    await settled(page); // the view's reload after the w3i's write done (picture waits too)
     [westFlat, eastFlat] = await reflecting("water-no-reflection");
   } finally {
     await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(infoText)})`);
   }
-  await sleep(1500);
+  await settled(page);
   if (Math.abs(westFlat[0] - eastFlat[0]) > 4 || westFlat[0] > 8 || [westFlat, eastFlat].some((c) => Math.abs(c[1] - 48) > 8 || Math.abs(c[2] - 69) > 8)) {
     bad(`with the map's reflectivity 0 the deep water isn't the editor's flat 0, 48, 69: ${round(westFlat)} in the west, ${round(eastFlat)} in the east`);
   }
@@ -7973,12 +7996,12 @@ async function viewCommands(page, fail, shots, size) {
   let still;
   try {
     await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...waveInfo, water: { ...(waveInfo.water ?? {}), wavesNormalMapStrength: 0 } }, null, 2))})`);
-    await sleep(1500);
+    await settled(page);
     still = await colourSpread(page, await waterShot("water-no-waves"), waveBox);
   } finally {
     await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(waveInfoText)})`);
   }
-  await sleep(1500);
+  await settled(page);
   const places = (c) => c.map((v) => v.toFixed(1)).join(",");
   if (waved.spread < 2 || waved.spread > 7) bad(`HD water's waves aren't the editor's strength: green ${waved.spread.toFixed(2)} levels apart (colour ${places(waved.mean)})`);
   if (still.spread > 1.2 || still.spread * 2.5 > waved.spread) bad(`with the map's wave strength 0 the water isn't flat: green ${still.spread.toFixed(2)} levels apart, ${waved.spread.toFixed(2)} with waves`);
@@ -8314,11 +8337,11 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       const at = { x: canvas.x + dx, y: canvas.y + dy };
       await hands.mouse("mouseMoved", at.x, at.y);
       await hands.mouse("mousePressed", at.x, at.y, 1);
+      // The hold is the thing measured (longer than the stroke's tick): a time, not a state to wait for.
       await sleep(150);
       await hands.mouse("mouseMoved", at.x, at.y, 1);
       await hands.mouse("mouseReleased", at.x, at.y);
-      await sleep(100);
-      await save();
+      await save(); // at rest first, then saved
       const n = changed(section);
       if (n !== want) fail(`a ${title.slice(0, -1)} click of size ${size} (${dx},${dy} px off the middle) changed ${n} corners' ${section}, the World Editor's ${want}`);
       if (title === "Raise:") {
@@ -8345,7 +8368,6 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
     await hands.mouse("mouseMoved", canvas.x, canvas.y);
     await hands.mouse("mousePressed", canvas.x, canvas.y, 1);
     await hands.mouse("mouseReleased", canvas.x, canvas.y);
-    await sleep(100);
     await save();
   };
   await press("−2:", 3);
@@ -11838,7 +11860,7 @@ const TWO_PLAYERS_REMOVED = [
 /** Map Properties › Players of the two-player map after the save: without Modify ally priorities the choices show what
  *  the save works out (player 1's for player 2 High) and are greyed; turned on, they can be chosen and start from
  *  those, and the save keeps a changed one (Low) with the flag. */
-async function mapPropertiesPriorities(page, fail, file) {
+async function mapPropertiesPrioritiesUi(page, fail, file) {
   const W3I = "map/war3map.w3i.json";
   const cells = () => page.evaluate(`[...document.querySelectorAll(".map-info table.map-priorities-ally select")].map((s) => ({ value: s.value, disabled: s.disabled }))`);
   await page.evaluate(`w3.editors.open(${lit(W3I)})`);
@@ -11873,6 +11895,17 @@ async function realMapSave(page, found) {
   const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
   if (!existsSync(map)) { console.log(`real map save: skipped, ${map} isn't there`); return; }
   await realMapSaveRound(page, found, map, "cliff", null);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
+/** The save of the two-player version of the same map (the start locations, the script's lines, the ally priorities),
+ *  then Map Properties › Players (mapPropertiesPrioritiesUi): the second round of the real map save, a check of its own. */
+async function mapPropertiesPriorities(page, found) {
+  try {
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
+  if (!existsSync(map)) { console.log(`map properties priorities: skipped, ${map} isn't there`); return; }
   await realMapSaveRound(page, found, map, "cliff-two", (dir) => {
     // Player 2 and its start location, as the World Editor's reference save had them.
     const at = [1280, -1472];
@@ -12200,7 +12233,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     // war3mapUnits.doo: the start locations' hit points and mana -1, as the World Editor saves 0.
     const startsAfter = JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
     if (startsAfter.some((u) => u.hp !== -1 || u.mana !== -1)) fail(`the start locations' hit points and mana are ${lit(startsAfter.map((u) => [u.hp, u.mana]))}, the World Editor saves -1`);
-    if (two) await mapPropertiesPriorities(page, fail, file);
+    if (two) await mapPropertiesPrioritiesUi(page, fail, file);
   } finally {
     await page.evaluate(`if (window.__rmsWarn) { w3.window.notify = window.__rmsWarn; delete window.__rmsWarn; }`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
@@ -14159,7 +14192,8 @@ async function chapterObjects(page, found) {
       .catch(() => fail("the object browser has no campaign object"));
     await page.evaluate(`(() => { const e = [...document.querySelectorAll(".picker-campaign")].map((b) => b.parentElement).find((r) => r?.textContent.includes("c001")); e?.click(); })()`);
     const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")])
-      .finally(() => page.evaluate(`delete window.__pick`).catch(() => {}));
+      // On a failure the overlay is still open over the later steps: a mouse down on the overlay itself closes it (picker.ts).
+      .finally(() => page.evaluate(`(() => { document.querySelector(".picker-overlay")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); delete window.__pick; })()`).catch(() => {}));
     if (picked !== "c001") fail(`choosing the campaign object in the browser gave ${lit(picked)}`);
 
     // ---- the MCP object tools in the chapter: the campaign's objects listed, changed only in the campaign ----
@@ -14210,6 +14244,28 @@ async function chapterObjects(page, found) {
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)) fail("Delete on a campaign object changed the chapter's unit data");
     await page.evaluate(`w3.editors.saveAll()`);
     if (readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8") !== before) fail("the chapter's Object Editor changed war3campaign.w3u");
+    // The control for the Delete above: the same key on a normal chapter object removes it, so that "nothing was
+    // removed" means the campaign object is protected, not that the key reaches nothing.
+    {
+      const tool = mcpTool(page);
+      const normal = JSON.parse(await tool("create_object", { kind: "units", base: "hfoo" })).id;
+      const row = `[...document.querySelectorAll(".obj-item")].find((e) => e.querySelector("code")?.textContent === ${lit(normal)})`;
+      const listsIt = () => page.evaluate(`!!${row}`);
+      const ctlErr = await run("w3.objectEditor.open", "w3u", normal);
+      if (ctlErr) fail(`opening the Object Editor at the chapter's own ${normal}: ${ctlErr}`);
+      else if (!(await soon(() => page.evaluate(`[...document.querySelectorAll(".obj-item.selected")].some((e) => e.textContent.includes(${lit(normal)}))`), 20000))) fail(`the chapter's own ${normal} isn't selected in the Object Editor (control)`);
+      else {
+        // A click on its row selects it (the open command only shows it), as a user does before pressing Delete.
+        await page.evaluate(`${row}?.click()`);
+        await page.evaluate(`document.querySelector(".obj-list")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }))`);
+        if (!(await soon(async () => !(await listsIt()), 10000))) fail(`Delete on the chapter's own ${normal} removed nothing (control: the Delete check above would pass for nothing)`);
+      }
+      // Back to the campaign object, which the next step edits.
+      await run("w3.objectEditor.open", "w3u", "c001");
+      await until("the campaign object again", () => page.evaluate(`!!document.querySelector(".obj-edit-in-campaign")`), 30000)
+        .catch(() => fail("the Object Editor didn't return to the campaign's c001 after the control"));
+      await page.evaluate(`w3.editors.saveAll()`);
+    }
 
     // ---- Edit in the Campaign ----
     await page.evaluate(`document.querySelector(".obj-edit-in-campaign").click()`);
@@ -14341,9 +14397,10 @@ async function triggersAndAi(page, found) {
     const row = `[...document.querySelectorAll(".problem-row.clickable")].find((r) => r.textContent.includes(${lit(text)}))`;
     if (!(await soon(() => page.evaluate(`!!${row}`), 5000))) return false;
     await page.evaluate(`${row}.click()`);
-    await soon(() => page.evaluate(shown), 10000);
+    // Not shown within the time: reported as no row to click (the callers fail on false).
+    const arrived = await soon(() => page.evaluate(shown), 10000);
     await settled(page);
-    return true;
+    return arrived;
   };
   /** Selects the tree's row of the trigger `name` (with `open`, closed categories opened first) and waits for it in
    *  the name box. False: no such row. */
@@ -14354,14 +14411,14 @@ async function triggersAndAi(page, found) {
       row?.click();
       return !!row;
     })()`);
-    if (clicked) await soon(() => page.evaluate(`document.querySelector("input.trig-name")?.value === ${lit(name)}`), 5000);
-    return clicked;
+    // Not in the name box within the time: as no such row (the callers fail on false).
+    return clicked && (await soon(() => page.evaluate(`document.querySelector("input.trig-name")?.value === ${lit(name)}`), 5000));
   };
   /** Types `to` as the selected trigger's name (its change event), then waits for the question about custom script
    *  and for the app at rest. */
   const renameTrigger = async (to) => {
     await page.evaluate(`(() => { const input = document.querySelector(".trig-name"); input.value = ${lit(to)}; input.dispatchEvent(new Event("change")); })()`);
-    await soon(() => page.evaluate(`window.__warned.length > 0`), 5000);
+    if (!(await soon(() => page.evaluate(`window.__warned.length > 0`), 5000))) fail(`renaming the trigger to ${to} asked nothing about the custom script`);
     await settled(page);
   };
   try {
@@ -14480,7 +14537,7 @@ async function triggersAndAi(page, found) {
     /** The open Trigger Editor holding gg_rct_`name` (and no longer the other name), and the app at rest. */
     const follows = async (name) => {
       const other = name === "Smoke_Arch" ? "Smoke_Door" : "Smoke_Arch";
-      await soon(async () => { const now = await held(); return now.includes(`gg_rct_${name}`) && !now.includes(`gg_rct_${other}`); }, 5000);
+      if (!(await soon(async () => { const now = await held(); return now.includes(`gg_rct_${name}`) && !now.includes(`gg_rct_${other}`); }, 5000))) fail(`the open Trigger Editor didn't come to hold gg_rct_${name} instead of gg_rct_${other}`);
       await settled(page);
     };
     const r2 = await renameRegion("Smoke Door", "Smoke Arch", false);
@@ -17583,6 +17640,7 @@ async function run() {
         lightNumbersRefused,
         mapInfoColorTools,
         mapInfoUndoKept,
+        mapPropertiesPriorities,
         mapSizeUi,
         mcpGuides,
         mcpLimits,
@@ -17677,6 +17735,7 @@ async function run() {
         unitProperties,
         unreadableChapter,
         verify3Steps,
+        viewCommands,
         viewModes,
         vjassCheck,
         waterPathing,
@@ -17871,6 +17930,9 @@ async function firstHalf(page, found) {
   // 2026-11-12: part 1 327 s, part 2 271 s from ~136 s on; unitProperties ~37 s).
   await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
   await leftOpen(page, "unitProperties", found);
+  // Last: it makes a map of its own, which the checks above would find open.
+  await viewCommands(page, found).catch((e) => found.push(`view commands: ${e.message}`));
+  await leftOpen(page, "viewCommands", found);
   return made;
 }
 
@@ -18071,6 +18133,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectPreview", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
   await leftOpen(page, "realMapSave", found);
+  await mapPropertiesPriorities(page, found).catch((e) => found.push(`map properties priorities: ${e.message}`));
+  await leftOpen(page, "mapPropertiesPriorities", found);
   await moveTextsToTable(page, found).catch((e) => found.push(`move texts to string table: ${e.message}`));
   await leftOpen(page, "moveTextsToTable", found);
   await stringsBeforeListing(page, found).catch((e) => found.push(`strings before the file list: ${e.message}`));
