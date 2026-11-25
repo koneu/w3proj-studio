@@ -1,0 +1,10 @@
+{
+  "format": "w3proj.lights/1",
+  "magic": "W3L!",
+  "version": 3,
+  "terrainModel": "",
+  "unitModel": "",
+  "terrainEnabled": 0,
+  "unitEnabled": 0,
+  "unknown": 0
+}

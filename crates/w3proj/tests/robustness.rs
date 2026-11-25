@@ -153,21 +153,54 @@ fn map_bytes(_name: &str) -> Vec<u8> {
         .clone()
 }
 
-/// Files of the map that a codec reads.
-fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
-    let archive = Archive::from_bytes(map_bytes(&format!("{test}.w3x"))).unwrap();
-    let codecs = registry();
-    archive
-        .read("(listfile)")
-        .map(|l| String::from_utf8_lossy(&l).lines().map(str::to_string).collect::<Vec<_>>())
-        .unwrap()
-        .into_iter()
-        .filter(|name| codecs.for_archive_name(name).any(|c| c.unpacks()))
-        .map(|name| {
-            let bytes = archive.read(&name).unwrap();
-            (name, bytes)
+/// The made-up campaign (`tests/fixtures/mini-campaign`: war3campaign.w3f, .imp, .w3u) as a campaign archive. A map
+/// can't hold campaign info (war3campaign.w3f makes it a campaign), so it is a fixture of its own.
+fn campaign_bytes() -> Vec<u8> {
+    static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let _guard = TmpGuard::new();
+            let out = tmp("shared-campaign.w3n");
+            w3proj::pack(&fixture().join("../mini-campaign"), Some(&out), &registry()).unwrap();
+            fs::read(out).unwrap()
         })
-        .collect()
+        .clone()
+}
+
+/// Files of the mini map and the mini campaign that a codec reads.
+fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
+    let codecs = registry();
+    let mut out = Vec::new();
+    for bytes in [map_bytes(&format!("{test}.w3x")), campaign_bytes()] {
+        let archive = Archive::from_bytes(bytes).unwrap();
+        let names = archive
+            .read("(listfile)")
+            .map(|l| String::from_utf8_lossy(&l).lines().map(str::to_string).collect::<Vec<_>>())
+            .unwrap();
+        for name in names.into_iter().filter(|name| codecs.for_archive_name(name).any(|c| c.unpacks())) {
+            let bytes = archive.read(&name).unwrap();
+            out.push((name, bytes));
+        }
+    }
+    out
+}
+
+/// The hostile rounds reach every format: each format definition and each kind of object data has a file in the
+/// fixtures (a new definition without one would get no damaged input in the commit tier).
+#[test]
+fn the_fixtures_hold_a_file_for_every_codec() {
+    let codecs = registry();
+    let files = codec_files("coverage");
+    let used: std::collections::BTreeSet<String> =
+        files.iter().flat_map(|(name, _)| codecs.for_archive_name(name).map(|c| c.id().to_string()).collect::<Vec<_>>()).collect();
+    let missing: Vec<&str> = codecs.formats().iter().map(|f| w3proj::Codec::id(*f)).filter(|id| !used.contains(*id)).collect();
+    assert!(missing.is_empty(), "format definitions without a file in tests/fixtures/mini-map or mini-campaign: {missing:?}");
+    let kinds: std::collections::BTreeSet<String> =
+        files.iter().filter_map(|(name, _)| name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase())).collect();
+    // (war3map.wtg and .wct have hostile rounds of their own: damaged_trigger_files_split_or_are_refused.)
+    for kind in ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q", "w3e"] {
+        assert!(kinds.contains(kind), "no .{kind} file in the fixtures");
+    }
 }
 
 thread_local! {

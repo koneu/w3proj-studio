@@ -1,0 +1,20 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [
+    {
+      "base": "Rhme",
+      "end": "Rhme",
+      "mods": [
+        {
+          "field": "gglb",
+          "type": "int",
+          "level": 0,
+          "data": 0,
+          "value": 150
+        }
+      ]
+    }
+  ],
+  "custom": []
+}

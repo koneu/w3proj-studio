@@ -1,0 +1,20 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [
+    {
+      "base": "AHbz",
+      "end": "AHbz",
+      "mods": [
+        {
+          "field": "Hbz1",
+          "type": "int",
+          "level": 1,
+          "data": 1,
+          "value": 8
+        }
+      ]
+    }
+  ],
+  "custom": []
+}

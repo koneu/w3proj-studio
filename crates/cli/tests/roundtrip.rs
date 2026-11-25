@@ -214,13 +214,48 @@ fn verify_finds_every_codec_at_work() {
         ("war3map.w3r", "format:regions"),
         ("war3map.w3c", "format:cameras"),
         ("war3map.mmp", "format:minimap"),
+        ("war3map.w3s", "format:sounds"),
+        ("war3map.w3l", "format:lights"),
+        ("war3map.imp", "format:imports"),
         ("war3map.w3u", "objdata-json"),
+        ("war3map.w3t", "objdata-json"),
+        ("war3map.w3b", "objdata-json"),
+        ("war3map.w3d", "objdata-json"),
+        ("war3map.w3a", "objdata-json"),
+        ("war3map.w3h", "objdata-json"),
+        ("war3map.w3q", "objdata-json"),
         ("war3map.w3e", "w3e-text"),
         // The fixture has the trigger folders: both files go into map/triggers/.
         ("war3map.wtg", "trigger-folders"),
         ("war3map.wct", "trigger-folders"),
     ] {
         assert_eq!(codec(file).as_deref(), Some(id), "{file} in\n{table}");
+    }
+}
+
+/// The made-up campaign (`tests/fixtures/mini-campaign`; campaign info can't go into the mini map, it would make it a
+/// campaign): pack → unpack → pack is identical, its files come back as they are, and every one of them went through
+/// its codec.
+#[test]
+fn the_mini_campaign_round_trips_through_its_codecs() {
+    let dir = workdir("campaign");
+    let fixture = fixture().join("../mini-campaign");
+    let (first, project, second, baseline) = (dir.join("first.w3n"), dir.join("project"), dir.join("second.w3n"), dir.join("baseline.tsv"));
+    ok(&["pack", s(&fixture), "-o", s(&first)]);
+    ok(&["unpack", s(&first), s(&project), "--game", "none"]);
+    ok(&["pack", s(&project), "-o", s(&second)]);
+    assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "the campaign changed");
+    let (want, got) = (files(&fixture.join("map")), files(&project.join("map")));
+    assert_eq!(want.keys().collect::<Vec<_>>(), got.keys().collect::<Vec<_>>());
+    for (name, bytes) in &want {
+        assert!(*bytes == got[name], "{name} came back different");
+    }
+
+    ok(&["verify", s(&first), "--game", "none", "--baseline", s(&baseline), "--update-baseline"]);
+    let table = fs::read_to_string(&baseline).unwrap();
+    for (file, id) in [("war3campaign.w3f", "format:campaign"), ("war3campaign.imp", "format:imports"), ("war3campaign.w3u", "objdata-json")] {
+        let row = table.lines().map(|l| l.split('\t').collect::<Vec<_>>()).find(|c| c.get(1) == Some(&file)).map(|c| c[2].to_string());
+        assert_eq!(row.as_deref(), Some(id), "{file} in\n{table}");
     }
 }
 

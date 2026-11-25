@@ -145,14 +145,15 @@ function schemaFiles(dir: string): string[] {
   return found;
 }
 
-test("the mini-map's files pass their schemas", () => {
-  const files = schemaFiles(fixturePath("mini-map"));
+test("the mini-map's and the mini-campaign's files pass their schemas", () => {
+  const files = [...schemaFiles(fixturePath("mini-map")), ...schemaFiles(fixturePath("mini-campaign"))];
   const seen = new Set(files.map((f) => schemaFor(f)));
-  for (const name of ["w3i", "doodads", "units", "regions", "cameras", "minimap"]) assert.ok(seen.has(name), `the mini-map has a ${name} file`);
+  // Every schema has a file: the campaign info is in the mini-campaign (in a map it would make the map a campaign).
+  for (const { name } of SCHEMAS) assert.ok(seen.has(name), `the mini-map or the mini-campaign has a ${name} file`);
   for (const f of files) assert.equal(problems(schemaFor(f)!, JSON.parse(readFileSync(f, "utf8"))), "", f);
 });
 
-// What unpack wrote for formats the mini-map lacks, cut to one or two items: light_map.w3m (lights, imports),
+// What unpack wrote on real maps (values the made-up fixtures don't have), cut to one or two items: light_map.w3m (lights, imports),
 // FiresOverEversong (a sound whose distanceCutoff is the largest 32-bit float, a version 3 camera) and
 // CSW_Tides_Of_Darkness.w3n (campaign, version 2).
 const SAMPLES: Record<string, Json> = {
@@ -163,7 +164,7 @@ const SAMPLES: Record<string, Json> = {
   campaign: { format: "w3proj.campaign/1", version: 2, campaignVersion: 6187, editorVersion: 6117, name: "TRIGSTR_001", difficulty: "TRIGSTR_002", author: "TRIGSTR_004", description: "TRIGSTR_005", flags: 3, background: -1, backgroundPath: "UI\\Glues\\CampaignScreen\\MENUORCTOD.webm", minimapPath: "UI\\Glues\\CSWBannerSquare.tga", ambientSound: -1, ambientSoundPath: "_HD.w3mod\\UI\\Glues\\CampaignScreen\\MENUORCTODAMB.mp3", fogStyle: -1, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 1, unknown: [0], chapters: [{ flags: 3, chapter: "TRIGSTR_008", title: "TRIGSTR_009", map: "WC2OrcAct1.w3x" }], mapOrder: [{ unknown: "", map: "WC2OrcAct1.w3x" }] },
 };
 
-test("samples of what unpack writes for the formats the mini-map lacks pass their schemas", () => {
+test("samples of what unpack writes on real maps pass their schemas", () => {
   for (const [name, doc] of Object.entries(SAMPLES)) assert.equal(problems(name, doc), "", name);
 });
 

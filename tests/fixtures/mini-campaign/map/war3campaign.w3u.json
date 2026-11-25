@@ -1,0 +1,19 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [],
+  "custom": [
+    {
+      "base": "hpea",
+      "id": "h000",
+      "end": "h000",
+      "mods": [
+        {
+          "field": "unam",
+          "type": "string",
+          "value": "Campaign Peasant"
+        }
+      ]
+    }
+  ]
+}

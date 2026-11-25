@@ -1,0 +1,50 @@
+{
+  "format": "w3proj.campaign/1",
+  "version": 3,
+  "campaignVersion": 2,
+  "editorVersion": 6116,
+  "name": "Mini Campaign",
+  "difficulty": "Normal",
+  "author": "the tests",
+  "description": "A campaign for tests.",
+  "flags": 1,
+  "background": 0,
+  "backgroundPath": "",
+  "minimapPath": "",
+  "ambientSound": 0,
+  "ambientSoundPath": "",
+  "fogStyle": 0,
+  "fogStartZ": 1000.0,
+  "fogEndZ": 8000.0,
+  "fogDensity": 0.5,
+  "fogColor": [
+    10,
+    20,
+    30,
+    255
+  ],
+  "race": 2,
+  "unknown3": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
+  "chapters": [
+    {
+      "flags": 1,
+      "chapter": "Chapter One",
+      "title": "First Steps",
+      "map": "Mini.w3x"
+    }
+  ],
+  "mapOrder": [
+    {
+      "unknown": "",
+      "map": "Mini.w3x"
+    }
+  ]
+}

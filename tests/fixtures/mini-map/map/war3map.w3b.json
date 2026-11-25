@@ -1,0 +1,18 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [
+    {
+      "base": "LTlt",
+      "end": "LTlt",
+      "mods": [
+        {
+          "field": "bhps",
+          "type": "unreal",
+          "value": 75.0
+        }
+      ]
+    }
+  ],
+  "custom": []
+}

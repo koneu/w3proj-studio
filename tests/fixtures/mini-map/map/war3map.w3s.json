@@ -1,0 +1,43 @@
+{
+  "format": "w3proj.sounds/1",
+  "version": 3,
+  "sounds": [
+    {
+      "name": "gg_snd_Hint",
+      "file": "Sound\\Interface\\Hint.wav",
+      "eaxEffect": "DefaultEAXON",
+      "flags": 6,
+      "fadeInRate": 10,
+      "fadeOutRate": 10,
+      "volume": 100,
+      "pitch": 1.0,
+      "pitchVariance": 0.5,
+      "priority": 3,
+      "channel": 0,
+      "minDistance": 600.0,
+      "maxDistance": 10000.0,
+      "distanceCutoff": 3000.0,
+      "coneInside": 4294967300.0,
+      "coneOutside": 4294967300.0,
+      "coneOutsideVolume": 127,
+      "coneOrientation": [
+        4294967300.0,
+        4294967300.0,
+        4294967300.0
+      ],
+      "variableName": "gg_snd_Hint",
+      "assetLabel": "",
+      "assetFile": "Sound\\Interface\\Hint.wav",
+      "dialogueTextKey": -1,
+      "dialogueText": "",
+      "speakerNameKey": -1,
+      "speakerName": "",
+      "unknown1": 0,
+      "speakerUnitType": "",
+      "facialAnimationLabel": "",
+      "facialAnimationGroupLabel": "",
+      "facialAnimationSetFile": "",
+      "unknown2": 1
+    }
+  ]
+}

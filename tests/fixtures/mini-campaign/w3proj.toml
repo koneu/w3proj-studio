@@ -1,0 +1,7 @@
+# w3proj project manifest. Pack with `w3proj pack`.
+format = 1
+
+[archive]
+sector_size_shift = 3
+
+[pack]
