@@ -667,6 +667,114 @@ async function mcpGuides(page, found) {
   }
 }
 
+/** Source Control's history and branches in a scratch repository of 260 tiny commits (made with git fast-import in the
+ *  project folder): the first page is 200, Load more adds the rest, the search finds by message, author and path (and says
+ *  "No matches."), and branches are renamed and deleted: the current one and an unmerged one only after a question. */
+async function sourceControlHistory(page, found) {
+  try {
+  const fail = (what) => found.push(`source control history: ${what}`);
+  const folder = join(work, "scm-history");
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await mcpTool(page)("new_map", { name: "ScmHistory", width: 64, height: 64, folder });
+  const root = await page.evaluate(`w3.workspace.project().root`);
+  const env = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(root) };
+  const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8", env });
+  const branchNames = () => git("branch", "--format=%(refname:short)").stdout.split("\n").filter(Boolean).sort();
+  if (git("init", "-q", "-b", "main").status !== 0) return fail("git init failed");
+  // 260 commits, each changing hist.txt; #7 adds special/marker.txt, #123 says "needle", every 50th is by Bob.
+  const stream = [];
+  const data = (s) => `data ${Buffer.byteLength(s)}\n${s}\n`;
+  for (let i = 0; i < 260; i++) {
+    const who = i % 50 === 0 ? "Bob" : "Ann";
+    const at = `${who} <${who.toLowerCase()}@example.invalid> ${1700000000 + i} +0000`;
+    stream.push(`commit refs/heads/main\nauthor ${at}\ncommitter ${at}\n${data(i === 123 ? "the needle" : `tiny commit ${i}`)}M 644 inline hist.txt\n${data(`${i}\n`)}`);
+    if (i === 7) stream.push(`M 644 inline special/marker.txt\n${data("marker\n")}`);
+  }
+  const imported = spawnSync("git", ["fast-import", "--quiet"], { cwd: root, input: stream.join(""), encoding: "utf8", env });
+  if (imported.status !== 0) return fail(`fast-import: ${imported.stderr}`);
+  git("reset", "-q", "--hard");
+  const count = git("rev-list", "--count", "HEAD").stdout.trim();
+  if (count !== "260") return fail(`the scratch repository has ${count} commits, not 260`);
+  const rows = () => page.evaluate(`document.querySelectorAll(".scm-log-row").length`);
+  const hasMore = () => page.evaluate(`!!document.querySelector(".scm-log-more")`);
+  const search = async (text) => {
+    await page.evaluate(`(() => { const b = document.querySelector(".scm-log-search"); b.value = ${lit(text)}; b.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  };
+  const subjects = () => page.evaluate(`[...document.querySelectorAll(".scm-log-subject")].map((e) => e.textContent)`);
+  await page.evaluate(`w3.commands.execute("w3.scm.show")`);
+  await until("the first page", async () => (await rows()) === 200, 20000)
+    .catch(async () => fail(`the first page has ${await rows()} commits, not 200`));
+  if (!(await hasMore())) fail("no Load more after the first page of a 260 commit history");
+  await page.evaluate(`document.querySelector(".scm-log-more").click()`);
+  await until("all commits", async () => (await rows()) === 260, 20000)
+    .catch(async () => fail(`Load more: ${await rows()} commits, not 260`));
+  if (await hasMore()) fail("Load more is still there after the last commit");
+  if (new Set(await subjects()).size !== 260) fail("a commit is listed twice or not at all after Load more");
+  // The search: by message, by author, by path; none; and cleared it is the first page again.
+  await search("needle");
+  await until("the message search", async () => (await rows()) === 1, 10000).catch(async () => fail(`searching "needle" gives ${await rows()} rows`));
+  if ((await subjects())[0] !== "the needle") fail(`searching "needle" shows ${lit(await subjects())}`);
+  await search("author:Bob");
+  await until("the author search", async () => (await rows()) === 6, 10000).catch(async () => fail(`author:Bob gives ${await rows()} rows, not 6`));
+  await search("path:special/marker.txt");
+  await until("the path search", async () => (await rows()) === 1, 10000).catch(async () => fail(`path:special/marker.txt gives ${await rows()} rows`));
+  if ((await subjects())[0] !== "tiny commit 7") fail(`the path search shows ${lit(await subjects())}`);
+  await search("no such words anywhere");
+  await until("the empty search", async () => (await rows()) === 0 && (await page.evaluate(`document.querySelector(".scm-log-empty")?.textContent`)) === "No matches.", 10000)
+    .catch(async () => fail(`a search without a match shows ${await rows()} rows and ${lit(await page.evaluate(`document.querySelector(".scm-log-empty")?.textContent`))}`));
+  await search("");
+  await until("the cleared search", async () => (await rows()) === 200 && await hasMore(), 10000).catch(async () => fail(`the cleared search shows ${await rows()} rows`));
+
+  // Branches. The question dialogs and pickers are answered here.
+  await page.evaluate(`(() => {
+    window.__asked = [];
+    window.__answer = "Cancel";
+    window.__typed = undefined;
+    w3.window.showWarning = async (m) => { window.__asked.push(m); return window.__answer; };
+    w3.window.inputBox = async () => window.__typed;
+  })()`);
+  const run = (cmd, ...args) => page.evaluate(`w3.commands.execute(${lit(cmd)}, ...${lit(args)}).then(() => null, (e) => String(e && e.message || e))`);
+  const typed = (v) => page.evaluate(`window.__typed = ${lit(v)}`);
+  git("branch", "merged");
+  git("switch", "-q", "-c", "unmerged");
+  git("commit", "-q", "--allow-empty", "-m", "only here");
+  git("switch", "-q", "main");
+  const err1 = await run("w3.scm.deleteBranch", "main");
+  if (!/branch the project is on/.test(err1 ?? "") || !branchNames().includes("main")) fail(`deleting the current branch: ${err1}`);
+  const err2 = await run("w3.scm.deleteBranch", "--delete");
+  if (!err2) fail("a branch called --delete was taken");
+  await run("w3.scm.deleteBranch", "merged");
+  if (branchNames().includes("merged")) fail("a merged branch wasn't deleted");
+  if ((await page.evaluate(`window.__asked.length`)) !== 0) fail("deleting a merged branch asked a question");
+  await run("w3.scm.deleteBranch", "unmerged");
+  if (!branchNames().includes("unmerged") || (await page.evaluate(`window.__asked.length`)) !== 1) fail(`an unmerged branch: ${lit(branchNames())}, asked ${await page.evaluate(`window.__asked.length`)} (Cancel keeps it)`);
+  await page.evaluate(`window.__answer = "Delete Branch"`);
+  await run("w3.scm.deleteBranch", "unmerged");
+  if (branchNames().includes("unmerged")) fail("an unmerged branch wasn't deleted after the question was answered Delete Branch");
+  // Rename: refused names change nothing; the current branch and another one are renamed.
+  git("branch", "side");
+  for (const bad of ["--delete", "a b", "x..y", "a; rm -rf"]) {
+    await typed(bad);
+    const e = await run("w3.scm.renameBranch", "side");
+    if (!e || lit(branchNames()) !== lit(["main", "side"])) fail(`renaming to ${lit(bad)}: ${e}, branches ${lit(branchNames())}`);
+  }
+  await typed("main");
+  if ((await run("w3.scm.renameBranch", "side")) === null) fail("renaming onto an existing branch was taken");
+  await typed("topic/one");
+  const e3 = await run("w3.scm.renameBranch", "side");
+  if (e3 || !branchNames().includes("topic/one") || branchNames().includes("side")) fail(`renaming another branch: ${e3}, ${lit(branchNames())}`);
+  await typed("trunk");
+  const e4 = await run("w3.scm.renameBranch", "main");
+  if (e4 || git("branch", "--show-current").stdout.trim() !== "trunk") fail(`renaming the current branch: ${e4}, now ${git("branch", "--show-current").stdout.trim()}`);
+  await until("the status bar to show the new name", () => page.evaluate(`document.body.textContent.includes("⎇ trunk")`), 10000)
+    .catch(() => fail("the status bar doesn't show the renamed current branch"));
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** move_object on a start location moves the player's start in war3map.w3i too, in the same edit: one undo takes both
  *  back. (The terrain editor's own save does this for its moves; a tool's edit reloads the editor, so its save never did.) */
 async function mcpStartMove(page, found) {
@@ -18098,6 +18206,7 @@ async function run() {
         soundEditorColorTools,
         soundEditorKeys,
         soundNumbersRefused,
+        sourceControlHistory,
         specialDoodads,
         staleEditors,
         startDeleteUndo,
@@ -18293,6 +18402,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "tilesInPlace", found);
   await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
   await leftOpen(page, "tileCleanup", found);
+  await sourceControlHistory(page, found).catch((e) => found.push(`source control history: ${e.message}`));
+  await leftOpen(page, "sourceControlHistory", found);
   await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
   await leftOpen(page, "objectsWhileOpening", found);
   // Test Map needs a map it could start: the one objectsWhileOpening left open.
