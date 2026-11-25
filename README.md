@@ -716,7 +716,13 @@ The app reads the game's files straight from the CASC storage in `Data/`:
 - Extensions use `w3.game.read("Units\\UnitData.slk")` etc. Plain paths resolve like the
   game does: locale → art layer (`game.graphicsMode`: `hd`/`sd`/`de`) → base, with
   `FileAliases.json` and `.blp`→`.dds` fallback.
-- Settings: `game.installDir`, `game.graphicsMode`.
+- Settings: `game.installDir`, `game.graphicsMode`, `game.cacheMegabytes`, `game.fastTransfer`.
+- `game.fastTransfer` (off by default) reads game files over HTTP from a small server inside the app instead of
+  its internal messages: on 127.0.0.1 only, a port the system picks, a 128-bit secret token in every request,
+  only the app's own page (Host and Origin checked), GET of a game path only (never a filesystem path). It closes
+  with the app or when the setting goes off, and a request that fails is read the usual way. Measured on a 20 MB
+  file (debug build): Linux about 180 MB/s against 200 the usual way (no gain there); on Windows the spike measured
+  about 480 against 100–120.
 
 ### Model viewer
 
