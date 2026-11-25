@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trigger tree root (map/triggers/triggers.json)",
+  "description": "The trigger tree's versions, root item and script mode (docs/trigger-folders-spec.md, section 2), read and written by crates/w3proj/src/trigger_layout.rs. Unknown keys are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "reforged", "version", "wctVersion"],
+  "properties": {
+    "format": { "description": "w3proj.triggers/1; a later 1.x reads the same, a newer major version is refused", "type": "string", "pattern": "^w3proj\\.triggers/1(\\..*)?$" },
+    "reforged": { "type": "boolean", "description": "war3map.wtg has the Reforged marker (root item, ids, folds, nesting, comments, script items, variable nodes)" },
+    "version": { "$ref": "#/$defs/u32", "description": "war3map.wtg's version (4 or 7)" },
+    "unknown": { "$ref": "#/$defs/u32", "description": "war3map.wtg's number after the variables count; 2 when missing" },
+    "wctVersion": { "$ref": "#/$defs/u32", "description": "war3map.wct's version; 1 and later have a custom script header" },
+    "wctComment": { "$ref": "#/$defs/text", "description": "war3map.wct's comment; empty when missing" },
+    "wctReforged": { "type": "boolean", "description": "only where war3map.wct's Reforged marker differs from `reforged`" },
+    "root": {
+      "description": "the map item at the top of a Reforged tree; missing in a classic one",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/u32", "description": "imported maps only" },
+        "name": { "$ref": "#/$defs/text" },
+        "isComment": { "$ref": "#/$defs/u32", "description": "0 when missing" },
+        "expanded": { "$ref": "#/$defs/u32", "description": "1 when missing" }
+      }
+    },
+    "script": { "description": "generated: war3map.j/.lua is made from the map; kept: it is a tracked source. kept when missing", "enum": ["generated", "kept"] },
+    "counts": {
+      "description": "imported maps only: war3map.wtg's id counters per item type, with their deleted ids, as stored",
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["count", "deleted"],
+        "properties": {
+          "count": { "$ref": "#/$defs/u32" },
+          "deleted": { "type": "array", "items": { "$ref": "#/$defs/u32" } }
+        }
+      }
+    },
+    "variableOrder": { "description": "imported maps only: the variable table's order, where it differs from the tree's", "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "text": { "description": "a name or value war3map.wtg stores: no zero character", "type": "string", "pattern": "^[^\\u0000]*$" }
+  }
+}

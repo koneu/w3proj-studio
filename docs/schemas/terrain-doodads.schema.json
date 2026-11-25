@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A subterrain's doodads (map/terrain/<folder>/doodads.json)",
+  "description": "The doodads and special doodads of war3map.doo.json whose position lies in this subterrain, read and written by crates/w3proj/src/terrain_objects.rs (docs/terrain-subterrains-spec.md, section 4). An entry is the flat file's entry (doodads.schema.json) with an optional `order` first. The file's version lives in terrain.json's dooHeader, so the keys a version needs aren't checked here. Other keys at the top are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["doodads", "specials"],
+  "properties": {
+    "doodads": {
+      "type": "array",
+      "items": {
+        "allOf": [{ "$ref": "doodads.schema.json#/properties/doodads/items" }],
+        "properties": { "order": { "$ref": "#/$defs/order" } }
+      }
+    },
+    "specials": {
+      "type": "array",
+      "items": {
+        "allOf": [{ "$ref": "doodads.schema.json#/properties/specials/items" }],
+        "properties": { "order": { "$ref": "#/$defs/order" } }
+      }
+    }
+  },
+  "$defs": {
+    "order": { "description": "its index in the flat file, where that isn't its place in this file's sorted order", "type": "integer", "minimum": 0 }
+  }
+}

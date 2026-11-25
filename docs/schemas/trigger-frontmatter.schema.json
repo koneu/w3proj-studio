@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Script file frontmatter (first line of map/triggers/**/*.j, .vjass, .lua)",
+  "description": "The JSON after `// @w3proj` (JASS) or `-- @w3proj` (Lua) on the first line of a custom-text trigger or script item (docs/trigger-folders-spec.md, section 3B), read and written by crates/w3proj/src/trigger_layout.rs. A file without that line is a trigger or script item made outside Studio. Unknown keys are errors there, so they are refused here too. Editors can't apply this schema to a comment line; the test checks it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "name"],
+  "properties": {
+    "type": { "description": "8 a custom-text trigger, 32 a script item (Reforged)", "enum": [8, 32] },
+    "id": { "$ref": "#/$defs/u32", "description": "imported maps only" },
+    "name": { "$ref": "#/$defs/text" },
+    "description": { "$ref": "#/$defs/text", "description": "empty when missing" },
+    "isComment": { "$ref": "#/$defs/u32", "description": "0 when missing" },
+    "enabled": { "type": "boolean", "description": "true when missing" },
+    "isCustom": { "type": "boolean", "description": "true when missing; only a script item (type 32) can be false" },
+    "initiallyOff": { "type": "boolean", "description": "false when missing" },
+    "runOnInit": { "type": "boolean", "description": "false when missing" },
+    "ecas": { "description": "what an imported item carries beside its text, kept; none when missing", "type": "array", "items": { "$ref": "trigger-gui.schema.json#/$defs/eca" } }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["type"], "properties": { "type": { "const": 8 } } },
+      "then": { "properties": { "isCustom": { "const": true } } }
+    }
+  ],
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "text": { "description": "a name or value war3map.wtg stores: no zero character", "type": "string", "pattern": "^[^\\u0000]*$" }
+  }
+}

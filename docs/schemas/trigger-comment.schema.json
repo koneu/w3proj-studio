@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trigger comment (map/triggers/**/*.comment.json)",
+  "description": "A comment item of a Reforged trigger tree (docs/trigger-folders-spec.md, section 3C), read and written by crates/w3proj/src/trigger_layout.rs. Unknown keys are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "type": { "const": 16, "description": "16 when missing" },
+    "id": { "$ref": "#/$defs/u32", "description": "imported maps only" },
+    "name": { "$ref": "#/$defs/text" },
+    "description": { "$ref": "#/$defs/text", "description": "the comment's text; empty when missing" },
+    "isComment": { "$ref": "#/$defs/u32", "description": "1 when missing" },
+    "enabled": { "type": "boolean", "description": "true when missing; written only when false" },
+    "isCustom": { "type": "boolean", "description": "false when missing; written only when true" },
+    "initiallyOff": { "type": "boolean", "description": "false when missing; written only when true" },
+    "runOnInit": { "type": "boolean", "description": "false when missing; written only when true" },
+    "ecas": { "description": "what an imported comment item carries, kept; none when missing", "type": "array", "items": { "$ref": "trigger-gui.schema.json#/$defs/eca" } }
+  },
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "text": { "description": "a name or value war3map.wtg stores: no zero character", "type": "string", "pattern": "^[^\\u0000]*$" }
+  }
+}

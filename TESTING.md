@@ -53,7 +53,7 @@ oracle only proves the code does what the code does.
 | System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` | every commit, CI |
 | Hostile input | never panics; what parses still round-trips | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
 | Hostile input, app | damaged files neither hang the app nor use up its memory, under a watchdog that kills a stuck parser | `app/src/lib/hostile.test.ts`, `app/scripts/hostile-seeds.mjs` | every commit (made-up files), corpus tier (the game's files) |
-| JSON Schemas | each schema in `docs/schemas` names its format definition's fields and types; the mini-map (commit tier) and every corpus map's unpacked files (corpus tier) pass, broken samples fail | `app/src/lib/formats/schemas.test.ts` (Ajv) | every commit, corpus tier |
+| JSON Schemas | each schema in `docs/schemas` names its format definition's fields and types, or the keys its codec reads (object data, split terrain, pathing, trigger folders); the fixtures (commit tier) and every corpus map's unpacked and split files (corpus tier) pass, broken samples fail | `app/src/lib/formats/schemas.test.ts` (Ajv) | every commit, corpus tier |
 | Random maps | the JASS and Lua checkers on every generated script | `app/src/lib/script/random-maps.test.ts` | every commit, CI |
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
 | Real app | the map it packs is the CLI's, byte for byte; nothing changes without an edit | `app/scripts/app-smoke.mjs` | locally, before merging |
