@@ -30,7 +30,8 @@ export interface Job {
   /** The project folder. */
   root: string;
   parts: Part[];
-  /** The script also over one that isn't the one Studio wrote last (`w3proj rebuild --force`); the note names it. */
+  /** The script also over one that isn't the one Studio wrote last (`w3proj rebuild --force` or `--replace-script`,
+   *  which backs it up first); the note names it. */
   force?: boolean;
   /** Settings that win over the project's and the defaults (the game folder, the graphics mode). */
   settings: Record<string, unknown>;
