@@ -76,6 +76,21 @@ export interface CheckError {
   code?: string;
 }
 
+/** One line of the log as a line number and a message: "Line 12: msg" (what jasshelper.exe writes), and, defensively,
+ *  "file(12): msg" and "path:12: msg" (also with a drive letter and backslashes, Windows or Wine paths). Anything
+ *  else, or a line number that isn't a sane integer, is null. Never throws. */
+export function splitLine(l: string): { line: number; message: string } | null {
+  const m = /^Line (\d{1,15}):\s*(.*)$/i.exec(l) ?? /^[^\s(][^()]*\((\d{1,15})\):\s*(.*)$/.exec(l) ?? /^(?:[A-Za-z]:)?[^:]+:(\d{1,15}):\s*(.*)$/.exec(l);
+  if (!m) return null;
+  const line = Number(m[1]);
+  return line >= 1 ? { line, message: m[2] } : null;
+}
+
+/** The checked text's errors that have a line of its own, for markers in the code editor. */
+export function lineProblems(errors: CheckError[], own: number): { line: number; message: string }[] {
+  return errors.filter((e) => e.text === own && e.line !== undefined).map((e) => ({ line: e.line!, message: e.message }));
+}
+
 /** JassHelper's errors with the text and line each belongs to.
  *  `log`: logs\compileerrors.txt; `input`: the script it was given (generated from markTexts' result);
  *  `current`: logs\currentmapscript.j, null if it couldn't be read. */
@@ -89,10 +104,10 @@ export function placeErrors(log: string, input: string, current: string | null, 
     const l = raw.trim();
     // The script's file name comes first, the number of errors last.
     if (!l || /^logs[\\/]/i.test(l) || /^\d+$/.test(l)) continue;
-    const m = /^Line (\d+):\s*(.*)$/.exec(l);
+    const m = splitLine(l);
     if (!m) { step = l; other.push(l); continue; }
-    const n = Number(m[1]);
-    const message = m[2];
+    const n = m.line;
+    const message = m.message;
     // Step 1 reads the input.
     if (/\bStep 1\b/.test(step)) {
       const r = inRanges.find((x) => n >= x.first && n <= x.last);
