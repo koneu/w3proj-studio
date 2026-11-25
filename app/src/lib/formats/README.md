@@ -6,4 +6,5 @@ TypeScript, its project form and its tests is in
 [crates/w3proj/formats/README.md](../../../../crates/w3proj/formats/README.md).
 
 `schemas.test.ts` here checks the JSON Schemas of the project's map JSON files
-([docs/schemas](../../../../docs/schemas/README.md)) against the format definitions, the mini-map and the corpus.
+([docs/schemas](../../../../docs/schemas/README.md)) against the format definitions and the codecs' source, the
+fixtures and the corpus.

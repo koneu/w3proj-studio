@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Split terrain layout (map/terrain/terrain.json)",
+  "description": "The canvas, palettes, default corner and subterrains of a split terrain (docs/terrain-subterrains-spec.md), read and written by crates/w3proj/src/terrain_layout.rs. Unknown keys are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "tileset", "customTilesets", "ground", "cliffs", "corners", "offset", "w3eVersion", "trailer", "defaultCorner", "subterrains"],
+  "properties": {
+    "format": { "const": "w3proj.terrain/1" },
+    "tileset": { "description": "the tileset's letter (e.g. L for Lordaeron Summer)", "type": "string", "pattern": "^[!-~]$" },
+    "customTilesets": { "$ref": "#/$defs/u32", "description": "1 when the map has its own tile list" },
+    "ground": { "description": "the ground tiles; a corner's texture is an index into this list", "type": "array", "items": { "$ref": "#/$defs/tileId" } },
+    "cliffs": { "description": "the cliff types; a corner's cliffTexture is an index into this list", "type": "array", "items": { "$ref": "#/$defs/tileId" } },
+    "corners": { "description": "the canvas in corners, [width, height] (tiles + 1)", "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 2, "maxItems": 2 },
+    "offset": { "description": "the world position of corner (0, 0), [x, y]", "type": "array", "items": { "$ref": "#/$defs/offset" }, "minItems": 2, "maxItems": 2 },
+    "w3eVersion": { "description": "war3map.w3e's version: 11 classic, 12 Reforged", "enum": [11, 12] },
+    "trailer": { "description": "war3map.w3e's bytes after the corners, as hex", "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+    "defaultCorner": {
+      "description": "what every corner no subterrain covers is; the grids' fields with the names of war3map.w3e.txt",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["height", "water", "waterBits", "texture", "textureBits", "variation", "cliffVariation", "cliffTexture", "layer", "flags"],
+      "properties": {
+        "height": { "type": "integer", "minimum": -40960, "maximum": 24575, "description": "without the 0x2000 offset" },
+        "water": { "type": "integer", "minimum": -8192, "maximum": 8191, "description": "without the 0x2000 offset" },
+        "waterBits": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "texture": { "type": "integer", "minimum": 0, "maximum": 63 },
+        "textureBits": { "type": "integer", "minimum": 0, "maximum": 63 },
+        "variation": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "cliffVariation": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "cliffTexture": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "layer": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "flags": { "type": "integer", "minimum": 0, "maximum": 15, "description": "1 ramp, 2 blight, 4 water, 8 boundary" }
+      }
+    },
+    "dooHeader": {
+      "description": "the versions of war3map.doo and war3mapUnits.doo once their objects live in the subterrains",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doodadsVersion", "doodadsSubversion", "unitsVersion", "unitsSubversion", "skinIds"],
+      "properties": {
+        "doodadsVersion": { "enum": [7, 8, 12, 13] },
+        "doodadsSubversion": { "$ref": "#/$defs/u32" },
+        "unitsVersion": { "enum": [7, 8, 12, 13] },
+        "unitsSubversion": { "$ref": "#/$defs/u32" },
+        "skinIds": { "type": "boolean" }
+      }
+    },
+    "objects": {
+      "description": "which flat object files live in the subterrains, and what else they hold; every subterrain then has that kind's file",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "doodads": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["magic", "specialVersion"],
+          "properties": {
+            "magic": { "$ref": "#/$defs/id" },
+            "specialVersion": { "$ref": "#/$defs/u32" },
+            "skinIds": { "type": "boolean", "description": "only where it differs from dooHeader's" }
+          }
+        },
+        "units": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["magic"],
+          "properties": {
+            "magic": { "$ref": "#/$defs/id" },
+            "skinIds": { "type": "boolean", "description": "only where it differs from dooHeader's" }
+          }
+        },
+        "regions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version"],
+          "properties": {
+            "version": { "enum": [5, 7] }
+          }
+        }
+      }
+    },
+    "subterrains": {
+      "description": "the named rectangles; at least one, not overlapping, within the canvas",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "folder", "x", "y", "w", "h", "idRange"],
+        "properties": {
+          "name": { "type": "string", "pattern": "\\S", "description": "unique" },
+          "folder": {
+            "description": "its folder under map/terrain/: unique ignoring case, one plain folder name on every system (no device name like CON or COM1, not terrain.json)",
+            "type": "string",
+            "pattern": "^(?! )[^/\\\\:*?\"<>|\\u0000-\\u001f\\u007f-\\u009f]*[^/\\\\:*?\"<>|\\u0000-\\u001f\\u007f-\\u009f. ]$"
+          },
+          "x": { "$ref": "#/$defs/u32", "description": "its south-west corner" },
+          "y": { "$ref": "#/$defs/u32", "description": "its south-west corner" },
+          "w": { "$ref": "#/$defs/u32", "minimum": 1, "description": "in corners" },
+          "h": { "$ref": "#/$defs/u32", "minimum": 1, "description": "in corners" },
+          "idRange": {
+            "description": "the creation numbers new objects in it get: one range [min, max], or a list of them once one was full",
+            "anyOf": [
+              { "$ref": "#/$defs/range" },
+              { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/range" } }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["w3eVersion"], "properties": { "w3eVersion": { "const": 11 } } },
+      "then": { "properties": { "defaultCorner": { "properties": { "texture": { "maximum": 15 }, "textureBits": { "const": 0 } } } } }
+    },
+    {
+      "if": { "required": ["objects"], "properties": { "objects": { "anyOf": [{ "required": ["doodads"] }, { "required": ["units"] }] } } },
+      "then": { "required": ["dooHeader"] }
+    }
+  ],
+  "$defs": {
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "id": { "description": "four bytes: four printable ASCII characters (\"W3do\"), or \"0x\" and 8 hex digits", "type": "string", "pattern": "^(0x[0-9a-fA-F]{8}|[ -~]{4})$" },
+    "tileId": { "description": "four printable ASCII characters (\"Ldrt\"), or \"hex:\" and 8 hex digits", "type": "string", "pattern": "^([!-~]{4}|hex:[0-9a-fA-F]{8})$" },
+    "offset": {
+      "description": "a whole number, or \"bits:\" and the 32-bit float's bits in hex",
+      "anyOf": [
+        { "type": "integer" },
+        { "type": "string", "pattern": "^bits:[0-9a-fA-F]{1,8}$" }
+      ]
+    },
+    "range": { "description": "[min, max], min not past max", "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 2, "maxItems": 2 }
+  }
+}

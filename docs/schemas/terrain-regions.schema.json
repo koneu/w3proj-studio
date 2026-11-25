@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A subterrain's regions (map/terrain/<folder>/regions.json)",
+  "description": "The regions of war3map.w3r.json whose minimum corner (left, bottom) lies in this subterrain, read and written by crates/w3proj/src/terrain_objects.rs (docs/terrain-subterrains-spec.md, section 4). An entry is the flat file's entry (regions.schema.json) with an optional `order` first. The file's version lives in terrain.json's objects.regions, so the keys it needs aren't checked here. Other keys at the top are errors there, so they are refused here too.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["regions"],
+  "properties": {
+    "regions": {
+      "type": "array",
+      "items": {
+        "allOf": [{ "$ref": "regions.schema.json#/properties/regions/items" }],
+        "properties": { "order": { "$ref": "#/$defs/order" } }
+      }
+    }
+  },
+  "$defs": {
+    "order": { "description": "its index in the flat file, where that isn't its place in this file's sorted order", "type": "integer", "minimum": 0 }
+  }
+}
