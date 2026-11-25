@@ -16,7 +16,8 @@
 // preview out exactly where its melee save calls the start invalid (meleesave.ts START_SQUARE, MINE_CLEARANCE): water of
 // any depth in the square, Lrok, a cliff, a tree, rock doodad, pathing blocker or special in it, a gold mine nearer than
 // 750; kept: dry ground, a plateau, a cliff, Lrok or water from 384 away, a tree 384 away, blight, a farm on the start; the
-// stored war3map.wpm (map wpm) changes nothing.
+// stored war3map.wpm (map wpm) changes nothing. Map overlap (2026-11-25): another start 488 east or north hid both
+// previews, 496, 504 and 512 kept both; a footman on a start kept it, with the nearest mine 900 away or none near.
 //
 // A spot's fields (dx, dy: offsets in corners from its corner; corners within 3 of it make its "pool"):
 //   depth    water over the whole pool (flag 4), the surface this deep over the ground (world units); the w3e text holds
@@ -29,6 +30,7 @@
 //   flags    bits on the pool's corners (2 blight)
 //   doodads  [[id, dx, dy]] (world units from the start)
 //   units    [[id, dx, dy, player]] (player 24 Neutral Hostile, 27 Neutral Passive)
+//   starts   [[dx, dy]]: more start locations (world units from the spot's), each a player of its own after the spots'
 //   special  a special doodad (war3map.doo's second list) on the start's tile
 //   wpm      { value, size }: the stored war3map.wpm's cells within size cells (4 a tile) of the start set to value after
 //            the pathing map is made again (w3proj rebuild), to see whether the editor reads the stored one
@@ -111,6 +113,20 @@ export const MAPS = {
     const [dx, dy] = Array.isArray(d) ? d : [d, 0];
     return [{ label: `mine ${Array.isArray(d) ? d.join(",") : d}`, units: [["ngol", dx, dy, 27]] }, null];
   }),
+  // another start this far east (or north) of the spot's, around the melee save's overlap rule (meleesave.ts START_SQUARE:
+  // 488 invalid, 496 not); and a footman on a start with the nearest mine 900 away (beyond MINE_CLEARANCE), its control
+  // without the footman, and a footman with no mine near. Every other column is empty.
+  overlap: [
+    { label: "start +488", starts: [[488, 0]] }, null,
+    { label: "start +496", starts: [[496, 0]] }, null,
+    { label: "start +504", starts: [[504, 0]] }, null,
+    { label: "start +512", starts: [[512, 0]] }, null,
+    { label: "start north +488", starts: [[0, 488]] }, null,
+    { label: "start north +496", starts: [[0, 496]] }, null,
+    { label: "footman on start, mine +900", units: [["hfoo", 0, 0, 24], ["ngol", 900, 0, 27]] }, null,
+    { label: "mine +900", units: [["ngol", 900, 0, 27]] }, null,
+    { label: "footman on start", units: [["hfoo", 0, 0, 24]] }, null,
+  ],
 };
 
 const run = (...args) => {
@@ -213,6 +229,10 @@ function make(name, spots) {
       const [x, y] = world(k);
       list.push({ ...start, position: [x, y, 0], player, editorId: n++ });
     });
+    // the spots' more start locations, players after the spots' own
+    const extra = used.flatMap((k) => (spots[k].starts ?? []).map(([dx, dy]) => [world(k)[0] + dx, world(k)[1] + dy]));
+    if (used.length + extra.length > 24) throw new Error(`${name}: ${used.length + extra.length} start locations, 24 at most`);
+    extra.forEach(([x, y], i) => list.push({ ...start, position: [x, y, 0], player: used.length + i, editorId: n++ }));
     spots.forEach((s, k) => {
       if (!s) return;
       const [x, y] = world(k);
@@ -249,7 +269,7 @@ function make(name, spots) {
     const infoFile = join(map, "war3map.w3i.json");
     const info = JSON.parse(readFileSync(infoFile, "utf8"));
     const like = info.players[0];
-    info.players = used.map((k, id) => ({ ...like, id, race: 1, controller: 1, name: `Player ${id + 1}`, start: world(k) }));
+    info.players = [...used.map((k) => world(k)), ...extra].map((at, id) => ({ ...like, id, race: 1, controller: 1, name: `Player ${id + 1}`, start: at }));
     writeFileSync(infoFile, JSON.stringify(info, null, 2));
     run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
     if (spots.some((s) => s?.wpm)) editWpm(join(map, "war3map.wpm"), spots);
