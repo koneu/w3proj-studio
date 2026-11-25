@@ -895,7 +895,9 @@ fn wts_pruning_survives_damaged_files() {
                 }
                 found.accepted += 1;
                 let refs = wts::map_string_refs(&f, &codecs).unwrap();
-                let (was, now) = (wts::strings(&String::from_utf8_lossy(&before)), wts::strings(&String::from_utf8_lossy(&f["war3map.wts"])));
+                // As the table is read (a damaged one isn't UTF-8 any more): `lossless`, so a string is compared byte for byte.
+                let lossless = w3proj::lossless::decode;
+                let (was, now) = (wts::strings(&lossless(&before)), wts::strings(&lossless(&f["war3map.wts"])));
                 for (n, v) in &was {
                     if refs.contains(n) {
                         assert_eq!(now.get(n), Some(v), "{target}, seed {seed}: string {n} referenced but not kept as it was");

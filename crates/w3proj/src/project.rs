@@ -1807,7 +1807,7 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
                 .files
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("war3map.wts") || k.eq_ignore_ascii_case("war3campaign.wts"))
-                .map(|(_, bytes)| wts::strings(&String::from_utf8_lossy(bytes)))
+                .map(|(_, bytes)| wts::strings(&crate::lossless::decode(bytes)))
                 .unwrap_or_default();
             unresolved.extend(refs.iter().filter(|n| !table.contains_key(n)).map(|n| format!("{at}TRIGSTR_{:0>3}", n.to_string())));
         }
