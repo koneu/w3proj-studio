@@ -7,9 +7,9 @@
       "end": "BHbd",
       "mods": [
         {
-          "field": "ftip",
+          "field": "fta0",
           "type": "string",
-          "value": "Cold feet"
+          "value": "chest"
         }
       ]
     }

@@ -11239,7 +11239,11 @@ async function graphicsModes(page, found) {
   let picked = await pickFor("LCct", "de", "citybridgeextralarge45 grassbridge");
   if (picked !== "done") fail(`choosing a DE model failed: ${picked}`);
   let after1 = await objectData(pick);
-  if (after1.original.some((o) => o.base !== "LCct")) fail(`the picker opened from LCct changed other types: ${after1.original.map((o) => o.base).join()} (before: ${w3dBefore ? "a file" : "none"})`);
+  // The mini map's own doodad data (another type) stays as it was.
+  const othersOf = (doc) => JSON.stringify((doc?.original ?? []).filter((o) => o.base !== "LCct"));
+  const othersBefore = othersOf(w3dBefore ? JSON.parse(w3dBefore) : null);
+  if (w3dBefore && othersBefore === "[]") fail("the mini map's war3map.w3d.json changes no other type (control)");
+  if (othersOf(after1) !== othersBefore) fail(`the picker opened from LCct changed other types: ${after1.original.map((o) => o.base).join()} (before: ${othersBefore})`);
   if (!after1.original.some((o) => o.base === "LCct")) fail("the picker opened from LCct did not change LCct");
   list = await check();
   if (list.some((p) => p.message.includes("(LCct)"))) fail("after choosing a DE model, the type is still reported");
