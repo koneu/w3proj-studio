@@ -9,6 +9,7 @@ import { addPage, BRANCH_FORMAT, branchProblem, chunks, commitPaths, deleteBranc
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { isFullPath } from "../../lib/paths";
+import { isLosslessPath, readTextFile } from "../../lib/formats/wts";
 import { keyOf } from "../../lib/keys";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
@@ -455,11 +456,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const render = async () => {
           const r = root();
           if (!r) throw new Error("No project is open.");
-          const shown = (spec: string | undefined) => w3.backend.invoke<string | null>("git_show", { root: r, path, rev: spec }).then((t) => ({ text: t }), (e) => ({ text: null, error: String(e) }));
+          // A string table or map script in an old code page as lossless text, as the editors read it (lib/formats/wts
+          // readTextFile); the backend does the same for a commit's copy.
+          const lossless = isLosslessPath(path);
+          const shown = (spec: string | undefined) => w3.backend.invoke<string | null>("git_show", { root: r, path, rev: spec, lossless }).then((t) => ({ text: t }), (e) => ({ text: null, error: String(e) }));
           // A file of a commit: against its parent. Otherwise the working copy against the last commit.
           const [before, after] = await Promise.all([
             shown(rev ? `${rev}^` : undefined),
-            rev ? shown(rev) : w3.workspace.readText(path).then((t) => ({ text: t as string | null }), (e) => ({ text: null, error: (e as Error).name === "NotUtf8Error" ? "binary file" : String(e) })),
+            rev ? shown(rev) : readTextFile(w3.workspace, path).then((t) => ({ text: t as string | null }), (e) => ({ text: null, error: (e as Error).name === "NotUtf8Error" ? "binary file" : String(e) })),
           ]);
           const missing = (x: { text: string | null; error?: string }) => x.text === null && !x.error;
           view?.destroy();

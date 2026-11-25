@@ -1253,17 +1253,26 @@ async fn git_status(root: String) -> CmdResult<Option<GitStatus>> {
     .map_err(err)?
 }
 
+/// A committed file's bytes as text: lossless text (w3proj::lossless, as the editors read a string table or
+/// map script in an old code page) when `lossless`, else UTF-8 or "binary file".
+fn shown_text(bytes: Vec<u8>, lossless: bool) -> CmdResult<String> {
+    if lossless {
+        return Ok(w3proj::lossless::decode(&bytes));
+    }
+    String::from_utf8(bytes).map_err(|_| "binary file".to_string())
+}
+
 /// A project file as committed in HEAD: its text, or None when HEAD doesn't have it. Fails for
-/// files that aren't UTF-8 text.
+/// files that aren't UTF-8 text, unless `lossless` (see `shown_text`).
 #[tauri::command]
-async fn git_show(root: String, path: String, rev: Option<String>) -> CmdResult<Option<String>> {
+async fn git_show(root: String, path: String, rev: Option<String>, lossless: Option<bool>) -> CmdResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let spec = format!("{}:./{path}", rev.as_deref().unwrap_or("HEAD"));
         if git(&root, &["cat-file", "-e", &spec]).is_err() {
             return Ok(None);
         }
         let bytes = git(&root, &["show", &spec])?;
-        String::from_utf8(bytes).map(Some).map_err(|_| "binary file".to_string())
+        shown_text(bytes, lossless == Some(true)).map(Some)
     })
     .await
     .map_err(err)?
@@ -1855,6 +1864,22 @@ mod config_dir_tests {
         assert_eq!(chosen_config_dir(Some("smoke/config".into()), system).unwrap(), PathBuf::from("smoke/config"));
         assert_eq!(chosen_config_dir(Some("".into()), system).unwrap(), PathBuf::from("system"));
         assert_eq!(chosen_config_dir(None, system).unwrap(), PathBuf::from("system"));
+    }
+}
+
+#[cfg(test)]
+mod shown_text_tests {
+    use super::shown_text;
+
+    #[test]
+    fn code_page_bytes_are_lossless_text_only_when_asked() {
+        // GBK bytes, as an old Chinese map's string table has them: not UTF-8.
+        let gbk = vec![b'a', 0xd6, 0xd0, b'\n'];
+        assert_eq!(shown_text(gbk.clone(), false).unwrap_err(), "binary file");
+        let text = shown_text(gbk.clone(), true).unwrap();
+        assert_eq!(text, "a\u{10ffd6}\u{10ffd0}\n");
+        assert_eq!(w3proj::lossless::encode(&text), gbk);
+        assert_eq!(shown_text(b"plain".to_vec(), false).unwrap(), "plain");
     }
 }
 
