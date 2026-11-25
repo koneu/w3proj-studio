@@ -7,7 +7,7 @@
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
-import { checkStringIds, compactStringIds, renumberStringRefs, StringTable } from "../../lib/formats/wts";
+import { checkStringIds, compactStringIds, readWts, renumberStringRefs, StringTable } from "../../lib/formats/wts";
 import { adjustStringTables, isLocaleWts, localeOnlyNumbers } from "../../lib/formats/localewts";
 import { readPrunedStrings, reservedStringIds } from "../../lib/formats/prunedstrings";
 import { resetTriggers } from "../../lib/triggers/defaults";
@@ -375,7 +375,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.replaceChildren(errorView(`Can't read ${doc.path}: ${errorText(e)}`, folders ? null : h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
-        let wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let wtsText = game ? null : await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
         let strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
         // Ids that show up later (new parameters) are looked up on demand; the view redraws once.
@@ -509,7 +509,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           reloadFile: async (path: string) => {
             if (folders && isTriggerLayoutPath(path)) return reloadFolders();
             if (path !== WTS) return false;
-            const text = await w3.workspace.readText(WTS).catch(() => null);
+            const text = await readWts(w3.workspace, WTS).catch(() => null);
             if (view.closed) return true;
             if (text === null || text === wtsText) return true;
             wtsText = text;
@@ -630,7 +630,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === WTS);
   if (!listed) throw new Error("This map has no string table (war3map.wts).");
   // There but unreadable is an error, not an empty table.
-  const table = new StringTable(await w3.workspace.readText(WTS));
+  const table = new StringTable(await readWts(w3.workspace, WTS));
   // Numbers an earlier drop recorded stay free: a reference to one can come back (a record that can't be read refuses).
   const reserved = reservedStringIds(await readPrunedStrings(w3), table);
   // The languages' tables follow the same numbers (lib/formats/localewts); their own numbers stay, and stay free. One
@@ -638,7 +638,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const localePaths = w3.workspace.files().map((f) => f.path).filter(isLocaleWts);
   const locales: { path: string; wts: string }[] = [];
   for (const path of localePaths) {
-    const wts = await w3.workspace.readText(path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
+    const wts = await readWts(w3.workspace, path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
     locales.push({ path, wts });
   }
   const localeOnly = localeOnlyNumbers(table, locales);

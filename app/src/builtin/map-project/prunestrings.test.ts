@@ -7,7 +7,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { dropUnusedStrings } from "./prunestrings";
-import { StringTable } from "../../lib/formats/wts";
+import { readTextFile, StringTable, writeTextFile } from "../../lib/formats/wts";
+import { decodeLossless, encodeLossless } from "../../lib/formats/lossless";
 import { PRUNED_STRINGS_FILE, parsePrunedStrings } from "../../lib/formats/prunedstrings";
 import type { W3Api } from "../../extensions/api";
 import { fixturePath } from "../../lib/testhelpers/testutil";
@@ -36,39 +37,48 @@ function fakeW3(files: Record<string, string>, opts: { unsaved?: string[]; editL
   const unsaved = () => opts.unsaved ?? [];
   const listed = { pending: !!opts.listing };
   opts.listing?.then(() => { listed.pending = false; }, () => {});
-  const readText = async (p: string) => {
+  // A file's text is its bytes as lossless.ts reads them: one that isn't UTF-8 (a table in an old code page) holds its
+  // private-use characters, and readText refuses it as the backend does.
+  const readBytes = async (p: string) => {
     if (!(p in files)) throw new Error(`${p}: No such file or directory (os error 2)`);
     if (files[p] === "\u0000unreadable") throw new Error(`can't read ${p}`);
-    return files[p];
+    return encodeLossless(files[p]);
+  };
+  const readText = async (p: string) => {
+    const bytes = await readBytes(p);
+    try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { throw Object.assign(new Error(`${p} is not valid UTF-8`), { name: "NotUtf8Error" }); }
+  };
+  const workspace = {
+    project: () => ({ root: opts.root?.() ?? "/p" }),
+    files: () => Object.keys(files).filter((path) => !listed.pending || !opts.unlisted?.includes(path)).map((path) => ({ path })),
+    filesReady: async () => { await opts.listing; },
+    readText,
+    readBytes,
+    writeText: async (p: string, t: string) => { writes.push(p); files[p] = decodeLossless(new TextEncoder().encode(t)); },
+    writeBytes: async (p: string, b: Uint8Array) => { writes.push(p); files[p] = decodeLossless(b); },
   };
   // The edit log as the MCP extension's (builtin/mcp-server/edits.ts) behaves for this: refuses while anything is
-  // unsaved, writes what changed, one record per edit that changed something, which holds the file as it was.
+  // unsaved, writes what changed, one record per edit that changed something, which holds the file as it was. It
+  // reads and writes as the MCP extension does (readTextFile, writeTextFile).
   const records: { files: { path: string; before: string | null }[] }[] = [];
   const log = {
     list: () => records,
     edit: async (_title: string, change: (read: (p: string) => Promise<string | null>) => Promise<{ path: string; text: string }[]>) => {
       if (unsaved().length) throw new Error(`Not changed: ${unsaved().join(", ")} has unsaved changes in the editor.`);
-      const read = async (p: string) => (p in files ? readText(p) : null);
+      const read = async (p: string) => (p in files ? readTextFile(workspace, p) : null);
       const changed = [];
       for (const f of await change(read)) {
         const before = await read(f.path);
         if (before !== f.text) changed.push({ ...f, before });
       }
       if (!changed.length) return false;
-      for (const f of changed) { writes.push(f.path); files[f.path] = f.text; }
+      for (const f of changed) await writeTextFile(workspace, f.path, f.text);
       records.push({ files: changed });
       return true;
     },
   };
   const w3 = {
-    workspace: {
-      project: () => ({ root: opts.root?.() ?? "/p" }),
-      files: () => Object.keys(files).filter((path) => !listed.pending || !opts.unlisted?.includes(path)).map((path) => ({ path })),
-      filesReady: async () => { await opts.listing; },
-      readText,
-      readBytes: async (p: string) => new TextEncoder().encode(await readText(p)),
-      writeText: async (p: string, t: string) => { writes.push(p); files[p] = t; },
-    },
+    workspace,
     editors: { unsavedPaths: unsaved },
     services: { get: async () => { if (opts.editLog === false) throw new Error("no such service"); return { edit: log.edit }; } },
     backend: { invoke: async () => { throw new Error("no backend"); } },
@@ -167,6 +177,41 @@ test("undo after a pack: a dropped string that is referred to again comes back o
   assert.deepEqual((await dropUnusedStrings(w3)).dropped, [3]);
   assert.deepEqual([...parsePrunedStrings(files[PRUNED_STRINGS_FILE])], [[3, "text 3"], [9, "text 9"]]);
 });
+
+// The table of crates/w3proj/src/wts.rs "a_table_in_a_code_page_is_pruned_byte_for_byte": GBK "中文", CP949 "한국" (unused),
+// Big5 "中文", a GBK character whose second byte is `}` (the text ends there, as at any `}`), and the junk the game's
+// BonusCredits.w3m holds in its table. Both sides must give the same bytes.
+const codePageBlock = (n: number, text: number[]) => [...new TextEncoder().encode(`STRING ${n}\r\n{\r\n`), ...text, ...new TextEncoder().encode("\r\n}\r\n\r\n")];
+const CODE_PAGE = [
+  [0xef, 0xbb, 0xbf],
+  codePageBlock(1, [0xd6, 0xd0, 0xce, 0xc4]),
+  codePageBlock(2, [...new TextEncoder().encode("orphan "), 0xc7, 0xd1, 0xb1, 0xb9]),
+  codePageBlock(3, [0xa4, 0xa4, 0xa4, 0xe5]),
+  codePageBlock(4, [...new TextEncoder().encode("cut "), 0x81, 0x7d]),
+  codePageBlock(5, [0xee, 0xee, 0xb1, 0x12, 0xdd]),
+];
+
+for (const editLog of [true, false]) {
+  test(`a table that isn't UTF-8 (an old map's code page) is pruned byte for byte${editLog ? "" : ", without the edit log too"}`, async () => {
+    const files = project();
+    const bytes = new Uint8Array(CODE_PAGE.flat());
+    files["map/war3map.wts"] = decodeLossless(bytes);
+    files["map/war3map.w3i.json"] = JSON.stringify({ a: "TRIGSTR_001", b: "TRIGSTR_003", c: "TRIGSTR_004", d: "TRIGSTR_005" });
+    for (const p of ["map/war3map.w3u.json", "map/war3map.wct.txt", "map/war3map.w3r.json", "map/war3map.w3s.json", "map/war3map.wtg", "map/war3mapImported/note.png"]) delete files[p];
+    const { w3, writes } = fakeW3(files, { editLog });
+    // The control: the table can't be read as text, which is what kept it whole before.
+    await assert.rejects(w3.workspace.readText("map/war3map.wts"), { name: "NotUtf8Error" });
+    assert.deepEqual(await dropUnusedStrings(w3), { dropped: [2], restored: [], kept: null });
+    const expected = new Uint8Array([CODE_PAGE[0], CODE_PAGE[1], CODE_PAGE[3], CODE_PAGE[4], CODE_PAGE[5]].flat());
+    assert.deepEqual(encodeLossless(files["map/war3map.wts"]), expected);
+    assert.deepEqual(writes, [PRUNED_STRINGS_FILE, "map/war3map.wts"]);
+    // The record holds the dropped text as lossless text (JSON can't hold its bytes); restored, it is those bytes again.
+    assert.deepEqual(encodeLossless(parsePrunedStrings(await w3.workspace.readText(PRUNED_STRINGS_FILE)).get(2)!), new Uint8Array(CODE_PAGE[2].slice(13, 24)));
+    files["map/war3map.w3i.json"] = JSON.stringify({ a: "TRIGSTR_001", b: "TRIGSTR_003", c: "TRIGSTR_004", d: "TRIGSTR_005", e: "TRIGSTR_002" });
+    assert.deepEqual(await dropUnusedStrings(w3), { dropped: [], restored: [2], kept: null });
+    assert.deepEqual(encodeLossless(files["map/war3map.wts"]), new Uint8Array([...expected, ...CODE_PAGE[2]]));
+  });
+}
 
 const twinFixture = (): string => fixturePath("wts-prune");
 

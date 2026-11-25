@@ -10,7 +10,7 @@ import { pickObject } from "./picker";
 import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
-import { StringTable } from "../../lib/formats/wts";
+import { readWts, StringTable } from "../../lib/formats/wts";
 import { readMapDoc } from "../../lib/formats/mapdoc";
 import { readImportedFor } from "../../lib/imports";
 import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
@@ -66,7 +66,7 @@ async function customObjects(w3: W3Api, kind: string, kd: KindData): Promise<Cus
   };
   const [main, skin] = await Promise.all([read("war3map"), read("war3mapSkin")]);
   const merged = main || skin ? mergeSkin(main ?? { format: "w3proj.objects/1", version: skin!.version, original: [], custom: [] }, skin, { addSkinOnly: true }) : null;
-  const own = merged ? entriesOf(kind, kd, merged.custom as RawObject[], await w3.workspace.readText("map/war3map.wts").catch(() => null), false) : [];
+  const own = merged ? entriesOf(kind, kd, merged.custom as RawObject[], await readWts(w3.workspace, "map/war3map.wts").catch(() => null), false) : [];
   // The campaign's are only offered: one that can't be read leaves them out, not the map's own.
   const campaign = await campaignObjects(w3, kind).catch(() => null);
   if (!campaign) return own;
@@ -85,7 +85,7 @@ export async function campaignObjects(w3: W3Api, kind: string, root?: string): P
   const base = { format: "w3proj.objects/1", version: main?.version ?? skin?.version ?? 3, original: main?.original ?? [], custom: main?.custom ?? [] } as EditFile;
   const merged = mergeSkin(base, skin && { ...skin, original: skin.original ?? [], custom: skin.custom ?? [] }, { addSkinOnly: true });
   const wtsPath = joinPath(campaign, "map", "war3campaign.wts");
-  const wts = await w3.workspace.readText(wtsPath).then((t) => t, (e) => {
+  const wts = await readWts(w3.workspace, wtsPath).then((t) => t, (e) => {
     if (isNotFoundError(e)) return null;
     throw new Error(`${wtsPath} is there but can't be read (${e instanceof Error ? e.message : String(e)}).`);
   });

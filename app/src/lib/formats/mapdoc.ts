@@ -1,7 +1,7 @@
 // Reading a map's files whichever form they're in, for code that only looks at them.
 
 import type { W3Api } from "../../extensions/api";
-import { StringTable } from "./wts";
+import { readWts, StringTable } from "./wts";
 import { refsIn } from "./movetexts";
 import { readPrunedStrings } from "./prunedstrings";
 import { isLocaleWts, localeNumbers } from "./localewts";
@@ -86,7 +86,7 @@ export async function stringRefsInMap(w3: W3Api, paths: Iterable<string>, skip: 
  *  tables (lib/formats/localewts), whose own strings would show in place of a new one. Throws when any can't be read. */
 export async function stringNumbersTaken(w3: W3Api, paths: Iterable<string>): Promise<Set<number>> {
   const list = [...paths];
-  const locales = list.filter(isLocaleWts).map((path) => w3.workspace.readText(path)
+  const locales = list.filter(isLocaleWts).map((path) => readWts(w3.workspace, path)
     .catch((e) => { throw new Error(`${path} is there but can't be read (${errorText(e)}), so the string numbers it uses can't be told.`); }));
   const [refs, record, tables] = await Promise.all([stringRefsInMap(w3, list), readPrunedStrings(w3), Promise.all(locales)]);
   for (const n of record.keys()) refs.add(n);
@@ -97,7 +97,7 @@ export async function stringNumbersTaken(w3: W3Api, paths: Iterable<string>): Pr
 /** Turns "TRIGSTR_012" into the text in war3map.wts (`path`: another string table, such as a campaign's
  *  map/war3campaign.wts); anything else stays. */
 export async function mapStrings(w3: W3Api, path = "map/war3map.wts"): Promise<(value: string) => string> {
-  const text = await w3.workspace.readText(path).catch(() => null);
+  const text = await readWts(w3.workspace, path).catch(() => null);
   if (text === null) return (value) => value;
   const table = new StringTable(text);
   return (value) => table.resolve(value);

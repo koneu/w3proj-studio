@@ -3,7 +3,7 @@ import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesServ
 import { soundDurationMs } from "../../lib/audio/duration";
 import { soundVariants } from "../../lib/audio/variants";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { StringTable } from "../../lib/formats/wts";
+import { readWts, StringTable } from "../../lib/formats/wts";
 import { isScriptInput, KEPT_SCRIPT_WORDS, lostFunctions, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash, staleScriptReason,
   type ScriptState } from "../../lib/script/guard";
 import { isNotFoundError } from "../../lib/oserror";
@@ -223,7 +223,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!language && !held && info.scriptType !== 1 && (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current))) {
       return { path, text: "", vjass: VJASS_OUTPUT.test(current) ? "its script was compiled from vJASS" : "its triggers contain vJASS" };
     }
-    const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+    const wtsText = await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
     const wts = wtsText === null ? null : new StringTable(wtsText);
     const w3ePath = terrainPath(w3.workspace.files().map((f) => f.path));
     const w3e = w3ePath ? await readTerrainBytes(w3ePath, { readText: () => w3.workspace.readText(w3ePath), readBytes: () => w3.workspace.readBytes(w3ePath) }).catch(() => null) : null;

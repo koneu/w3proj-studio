@@ -18,7 +18,7 @@ import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { replaceQuestion, wouldDelete } from "../../lib/syncdeletes";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
-import { StringTable, WtsCutError, wtsCuts } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { parseIni } from "../../lib/formats/text";
 import { imagePresetOf, parseImagePresets, parsePresets, presetOptions, type ImagePreset, type Preset } from "./presets";
@@ -173,7 +173,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("button", { onclick: run(() => w3.commands.execute("w3.campaign.addMap")), title: "Add an existing .w3x/.w3m as the next chapter" }, "Add map…")));
         void (async () => {
           const info: CampaignInfo = JSON.parse(await w3.workspace.readText(FILE));
-          const wts = await w3.workspace.readText(WTS).catch(() => null);
+          const wts = await readWts(w3.workspace, WTS).catch(() => null);
           const strings = wts !== null ? new StringTable(wts) : null;
           const text = (v: string) => strings?.resolve(v) ?? v;
           list.replaceChildren(...info.chapters.map((c, i) => row(`${text(c.chapter)}: ${text(c.title)}`, run(() => open("chapters", i)),
@@ -189,7 +189,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const info: CampaignInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
-        const wtsText = await w3.workspace.readText(WTS).catch(() => null);
+        const wtsText = await readWts(w3.workspace, WTS).catch(() => null);
         const save = async () => {
           const root = w3.workspace.project()!.root;
           await view.checkCuts();
@@ -264,7 +264,7 @@ class CampaignView {
     if (!this.strings || !this.texts.size) return;
     for (const [n, t] of this.texts) this.strings.set(n, t);
     if (!this.strings.dirty) return;
-    await this.w3.workspace.writeText(WTS, this.strings.serialize());
+    await writeWts(this.w3.workspace, WTS, this.strings.serialize());
     this.strings.markSaved();
   }
 

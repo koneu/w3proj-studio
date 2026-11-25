@@ -20,7 +20,7 @@ import { exportSound, replaceSound } from "./soundfiles";
 import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
-import { StringTable, WtsCutError } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
 import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -295,7 +295,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 async function readDialogueStrings(w3: W3Api): Promise<{ strings: DialogueStrings | null; error: string | null }> {
   const listed = w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === WTS);
   try {
-    return { strings: new DialogueStrings(await w3.workspace.readText(WTS)), error: null };
+    return { strings: new DialogueStrings(await readWts(w3.workspace, WTS)), error: null };
   } catch (e) {
     if (!listed && isNotFoundError(e)) return { strings: new DialogueStrings(null), error: null };
     return { strings: null, error: errorText(e) };
@@ -307,7 +307,7 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
   if (!strings.pending().size) return;
   let current: string | null;
   try {
-    current = await w3.workspace.readText(WTS);
+    current = await readWts(w3.workspace, WTS);
   } catch (e) {
     if (!isNotFoundError(e)) throw e;
     current = null;
@@ -324,7 +324,7 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
     await w3.workspace.filesReady();
     if (w3.workspace.project()?.root !== root) throw new Error("Not saved: the project changed meanwhile.");
     for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
-      const text = await w3.workspace.readText(path).catch((e) => {
+      const text = await readWts(w3.workspace, path).catch((e) => {
         throw new Error(`Not saved: ${path} can't be read (${errorText(e)}), so the new dialogue strings can't be added to it.`);
       });
       // A number the table has already came from an earlier save of these strings that stopped before war3map.wts was
@@ -334,9 +334,9 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
       if (out !== text) locales.push({ path, text: out });
     }
   }
-  for (const l of locales) await w3.workspace.writeText(l.path, l.text);
+  for (const l of locales) await writeWts(w3.workspace, l.path, l.text);
   if (merged !== current) {
-    await w3.workspace.writeText(WTS, merged);
+    await writeWts(w3.workspace, WTS, merged);
     if (current === null) await w3.workspace.refresh();
   }
   strings.saved(merged);

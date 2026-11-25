@@ -11,7 +11,7 @@ import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { StateStack } from "../../lib/undo";
 import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { StringTable, WtsCutError, wtsCuts } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { settingsFiles, settingsOf } from "./files";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
@@ -145,7 +145,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const { mode, wts, campaign } = settingsOf(doc.path);
         el.append(h("div.muted.gs-loading", {}, "Loading game data…"));
-        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), w3.workspace.readText(wts).catch(() => null),
+        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), readWts(w3.workspace, wts).catch(() => null),
           w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null), loadColumns(w3).catch(() => ({ defense: [], attack: [] }))]);
         const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), objects, cols,
           wts, doc.path.replace(/\\/g, "/").split("/").pop() ?? doc.path, campaign);
@@ -217,9 +217,9 @@ class SettingsView {
     const base = this.strings.serialize();
     const edited = new StringTable(base);
     for (const [n, t] of this.texts) edited.set(n, t);
-    const current = await this.w3.workspace.readText(this.wts).catch(() => base);
+    const current = await readWts(this.w3.workspace, this.wts).catch(() => base);
     const merged = StringTable.merge(base, edited, current);
-    if (merged !== current) await this.w3.workspace.writeText(this.wts, merged);
+    if (merged !== current) await writeWts(this.w3.workspace, this.wts, merged);
     this.strings.rebase(merged);
   }
 

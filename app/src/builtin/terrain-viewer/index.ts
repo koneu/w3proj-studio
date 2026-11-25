@@ -64,7 +64,7 @@ import { editorDooVersion, lightBlocks, UPGRADED_DOO_VERSIONS, type DoodadLights
 import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
-import { StringTable } from "../../lib/formats/wts";
+import { readWts, StringTable, writeWts } from "../../lib/formats/wts";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { campsOf } from "./meleecheck";
@@ -4796,7 +4796,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  is there but can't be read: before anything is written. */
         const resizeFirstString = async (): Promise<number> => {
           await w3.workspace.filesReady();
-          const wts = await w3.workspace.readText(RESIZE_WTS).catch((e) => {
+          const wts = await readWts(w3.workspace, RESIZE_WTS).catch((e) => {
             if (isNotFoundError(e)) return null;
             throw new Error(`${RESIZE_WTS} is there but can't be read (${errorText(e)}), so the map's texts can't be given string numbers.`);
           });
@@ -4812,12 +4812,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const addResizeStrings = async (added: { num: number; text: string }[]) => {
           if (!added.length) return;
           for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
-            const text = await w3.workspace.readText(path);
+            const text = await readWts(w3.workspace, path);
             const out = addLocaleStrings(path, text, added);
-            if (out !== text) await w3.workspace.writeText(path, out);
+            if (out !== text) await writeWts(w3.workspace, path, out);
           }
-          const wts = await w3.workspace.readText(RESIZE_WTS).catch((e) => { if (isNotFoundError(e)) return null; throw e; });
-          await w3.workspace.writeText(RESIZE_WTS, addLocaleStrings(RESIZE_WTS, wts ?? "﻿", added));
+          const wts = await readWts(w3.workspace, RESIZE_WTS).catch((e) => { if (isNotFoundError(e)) return null; throw e; });
+          await writeWts(w3.workspace, RESIZE_WTS, addLocaleStrings(RESIZE_WTS, wts ?? "﻿", added));
           if (wts === null) await w3.workspace.refresh();
         };
         const applyResize = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {

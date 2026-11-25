@@ -2,7 +2,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { withColorTools } from "../../extensions/colortools";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { importStrings, StringTable, WtsCutError, wtsCutLines } from "../../lib/formats/wts";
+import { importStrings, readWts, StringTable, writeWts, wtsBytes, WtsCutError, wtsCutLines, wtsText } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
@@ -323,24 +323,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // Strings go out as the map's own war3map.wts, a text file a translator can work in.
     w3.commands.register("w3.strings.export", async () => {
-      const text = await w3.workspace.readText(STRINGS).catch(() => null);
+      const text = await readWts(w3.workspace, STRINGS).catch(() => null);
       if (text === null) throw new Error("This map has no strings.");
       const path = await w3.window.pickSaveFile({ title: "Export strings", defaultPath: "strings.txt", filters: [{ name: "Strings (.txt)", extensions: ["txt"] }] });
       if (!path) return;
-      await w3.backend.writeBytes(path, new TextEncoder().encode(text));
+      await w3.backend.writeBytes(path, wtsBytes(text));
       void w3.window.showInfo(`Exported ${[...new StringTable(text).entries()].length} strings.`);
     }),
     // What the World Editor does to the texts when it saves (Studio's save keeps them): see movetexts.ts.
     w3.commands.register("w3.strings.moveToTable", () => moveTextsToStringTable(w3)),
     w3.commands.register("w3.strings.import", async () => {
-      const text = await w3.workspace.readText(STRINGS).catch(() => null);
+      const text = await readWts(w3.workspace, STRINGS).catch(() => null);
       if (text === null) throw new Error("This map has no strings.");
       const path = await w3.window.pickFile({ title: "Import strings", filters: [{ name: "Strings (.txt, .wts)", extensions: ["txt", "wts"] }] });
       if (!path) return;
-      const { text: next, changed, unknown } = importStrings(text, new TextDecoder().decode(await w3.backend.readBytes(path)));
+      const { text: next, changed, unknown } = importStrings(text, wtsText(await w3.backend.readBytes(path)));
       const extra = unknown ? ` ${unknown} in the file ${unknown === 1 ? "isn't" : "aren't"} in this map, and stay${unknown === 1 ? "s" : ""} out.` : "";
       if (!changed) { void w3.window.showInfo(`No strings to change.${extra}`); return; }
-      await w3.workspace.writeText(STRINGS, next);
+      await writeWts(w3.workspace, STRINGS, next);
       void w3.window.showInfo(`Imported ${changed} string${changed === 1 ? "" : "s"}.${extra}`);
     }),
     w3.views.register("w3.scenario.sections", {
@@ -366,7 +366,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
         // war3map.wts as read or last saved here: saving merges this editor's string edits onto
         // the file as it is then (other editors may have saved strings meanwhile).
-        let wtsBase = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let wtsBase = await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
         const strings = wtsBase !== null ? new StringTable(wtsBase) : null;
         const v = info.version;
         // Start locations (war3mapUnits.doo, either project form): players without one can't be added.
@@ -856,9 +856,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             extraSaved = extraNow;
             if (strings && wtsBase !== null) {
               const base = wtsBase;
-              const current = await w3.workspace.readText("map/war3map.wts").catch(() => base);
+              const current = await readWts(w3.workspace, "map/war3map.wts").catch(() => base);
               const merged = StringTable.merge(base, strings, current);
-              if (merged !== current) await w3.workspace.writeText("map/war3map.wts", merged);
+              if (merged !== current) await writeWts(w3.workspace, "map/war3map.wts", merged);
               strings.rebase(merged);
               wtsBase = merged;
             }

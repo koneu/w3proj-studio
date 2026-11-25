@@ -9,7 +9,7 @@ import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
 import { GUIDES, guideTemplate, hasRules, isTopic, layoutIdea, ownTopics, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
-import { wtsStrayLines } from "../../lib/formats/wts";
+import { readTextFile, writeTextFile, wtsStrayLines } from "../../lib/formats/wts";
 import { joinPath } from "../../lib/paths";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { resizeHistory } from "../../lib/terrain/resizeundo";
@@ -45,7 +45,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const out = w3.output.channel("MCP");
   const log = new EditLog({
-    read: (path) => w3.workspace.readText(path).catch(async (e) => {
+    // A string table as lossless text (lib/formats/wts readWts): one in an old code page can be edited and undone too.
+    read: (path) => readTextFile(w3.workspace, path).catch(async (e) => {
       // Absent only when the whole list lacks it: a file not listed yet (right after an open) that can't be read
       // isn't a new one, and would be written over.
       await w3.workspace.filesReady();
@@ -54,7 +55,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     write: async (path, text) => {
       const isNew = !w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase());
-      if (text === null) await w3.workspace.delete(path); else await w3.workspace.writeText(path, text);
+      if (text === null) await w3.workspace.delete(path); else await writeTextFile(w3.workspace, path, text);
       if (isNew || text === null) await w3.workspace.refresh();
     },
     unsaved: () => w3.editors.unsavedPaths(),
@@ -344,7 +345,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       open();
       if (typeof path !== "string") throw new Error("read_file needs a path.");
       const file = projectPath(path);
-      const text = await w3.workspace.readText(file).catch((e) => {
+      const text = await readTextFile(w3.workspace, file).catch((e) => {
         throw new Error(e?.name === "NotUtf8Error" ? `${file} is a binary file.` : `Can't read ${file}: ${e}`);
       });
       const start = typeof offset === "number" && offset > 0 ? offset : 0;

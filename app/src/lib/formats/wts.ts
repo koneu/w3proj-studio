@@ -1,6 +1,44 @@
 // war3map.wts (trigger strings): `STRING <n> [// comment] { text }`.
 // Edits replace only the text of changed blocks, so the rest of the file
 // (comments, order, line endings) stays byte-identical.
+//
+// A table's text is its bytes as lossless.ts reads them (readWts, writeWts): a table in an old map's code page (not
+// UTF-8) keeps those bytes as private-use characters and can be edited all the same. Every character of the format
+// itself (STRING, digits, spaces, braces, `//`, line ends) is ASCII, which lossless keeps as it is, so blocks are found
+// where they are in the bytes, as crates/w3proj/src/wts.rs finds them.
+
+import { decodeLossless, encodeLossless } from "./lossless";
+
+/** A string table's text from its bytes (any bytes: see the top); `wtsBytes` gives the same bytes back. */
+export const wtsText = (bytes: Uint8Array): string => decodeLossless(bytes);
+
+/** The bytes of a string table's text (one from `wtsText`, edited or not). */
+export const wtsBytes = (text: string): Uint8Array => encodeLossless(text);
+
+/** Whether a file is a string table, to be read with `readWts`. */
+export const isWtsPath = (path: string): boolean => /\.wts$/i.test(path);
+
+/** Reads a string table (war3map.wts, war3campaign.wts, a language's copy) as text, whatever its encoding. Rejects as
+ *  `io.readBytes` does (a missing file: not found). */
+export async function readWts(io: { readBytes(path: string): Promise<Uint8Array> }, path: string): Promise<string> {
+  return wtsText(await io.readBytes(path));
+}
+
+/** Writes a string table's text as `readWts` read it: its own bytes where it isn't UTF-8. */
+export function writeWts<T>(io: { writeBytes(path: string, bytes: Uint8Array): Promise<T> }, path: string, text: string): Promise<T> {
+  return io.writeBytes(path, wtsBytes(text));
+}
+
+/** Any text file of a project, a string table read with `readWts` (for what edits any file: the MCP edit log). */
+export function readTextFile(io: { readText(path: string): Promise<string>; readBytes(path: string): Promise<Uint8Array> }, path: string): Promise<string> {
+  return isWtsPath(path) ? readWts(io, path) : io.readText(path);
+}
+
+/** Writes what `readTextFile` read. */
+export async function writeTextFile(io: { writeText(path: string, text: string): Promise<unknown>; writeBytes(path: string, bytes: Uint8Array): Promise<unknown> },
+  path: string, text: string): Promise<void> {
+  await (isWtsPath(path) ? writeWts(io, path, text) : io.writeText(path, text));
+}
 
 /** A header `STRING <digits> [// …\n]* {` + `\r*\n`: where it starts, where its digits are, its number, where its
  *  text starts. */
