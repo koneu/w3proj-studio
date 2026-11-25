@@ -90,12 +90,13 @@ export function clampInfoNumber(key: InfoNumberKey, v: number): number {
   return v;
 }
 
-/** The text a field's box lets through as it is typed: some boxes drop "-" and "." and hold only so many characters. */
-const TYPING: { readonly [K in InfoNumberKey]?: { readonly drop?: string; readonly maxLength?: number } } = {
-  ...Object.fromEntries(WATER_NUMBERS.filter((k) => INFO_CLAMPS[k]).map((k) => [k, { drop: "-." }])),
-  zoomMin: { drop: "-.", maxLength: 4 },
-  zoomMax: { drop: "-.", maxLength: 4 },
-  zoomDefault: { drop: "-.", maxLength: 4 },
+/** The text a field's box lets through as it is typed: the water and zoom boxes take digits only (measured: "-5" is 5,
+ *  "1e2" is 12, "abc" leaves the box empty; docs/testing/numeric-limits-measured.md) and the zoom boxes hold 4. */
+const TYPING: { readonly [K in InfoNumberKey]?: { readonly digitsOnly: true; readonly maxLength?: number } } = {
+  ...Object.fromEntries(WATER_NUMBERS.filter((k) => INFO_CLAMPS[k]).map((k) => [k, { digitsOnly: true }])),
+  zoomMin: { digitsOnly: true, maxLength: 4 },
+  zoomMax: { digitsOnly: true, maxLength: 4 },
+  zoomDefault: { digitsOnly: true, maxLength: 4 },
 };
 
 /** What field `key`'s box holds after `text` was typed into it ("-5" is "5" in a water field, 12345 is 1234 in a zoom
@@ -103,7 +104,7 @@ const TYPING: { readonly [K in InfoNumberKey]?: { readonly drop?: string; readon
 export function filterInfoTyping(key: InfoNumberKey, text: string): string {
   const t = TYPING[key];
   if (!t) return text;
-  let out = t.drop ? [...text].filter((c) => !t.drop!.includes(c)).join("") : text;
+  let out = text.replace(/[^0-9]/g, "");
   if (t.maxLength !== undefined) out = out.slice(0, t.maxLength);
   return out;
 }
@@ -131,8 +132,9 @@ const place = (info: object, key: InfoNumberKey): [Obj, string | number] | undef
   return o && typeof o === "object" ? [o as Obj, path.at(-1)!] : undefined;
 };
 
-/** After `key` got a value: pulls the other fields of its group into order. A zoom default above the maximum is the
- *  maximum (the typed one gives way); every other edit pushes the others. The water pair only pulls Min down. */
+/** After `key` got a value: pulls the other fields of its group into order. A zoom default outside minimum..maximum
+ *  is pulled to the nearer one (the typed one gives way; measured: Min 2000, Max 2500, Default typed 1500 is 2000);
+ *  every other edit pushes the others (water Min typed 80 above Max 50 makes Max 80). */
 function keepOrder(info: object, key: InfoNumberKey): void {
   const group = ORDERED.find((g) => g.includes(key));
   if (!group) return;
@@ -141,8 +143,7 @@ function keepOrder(info: object, key: InfoNumberKey): void {
   const val = (i: number) => cells[i]![0][cells[i]![1]] as number;
   const put = (i: number, v: number) => { cells[i]![0][cells[i]![1]] = v; };
   const at = group.indexOf(key);
-  if (group[0] === "waterMinOpacity") { if (at === 1 && val(0) > val(1)) put(0, val(1)); return; }
-  if (key === "zoomDefault") { if (val(1) > val(2)) put(1, val(2)); if (val(1) < val(0)) put(0, val(1)); return; }
+  if (key === "zoomDefault") { if (val(1) > val(2)) put(1, val(2)); if (val(1) < val(0)) put(1, val(0)); return; }
   for (let i = at + 1; i < group.length; i++) if (val(i) < val(i - 1)) put(i, val(i - 1));
   for (let i = at - 1; i >= 0; i--) if (val(i) > val(i + 1)) put(i, val(i + 1));
 }
@@ -157,6 +158,8 @@ export function infoNumber(info: object, key: InfoNumberKey, player?: number): n
 /** Sets a typed value into `info`; a value the field's stored type can't hold is refused and `info` stays as it was. */
 export function setInfoNumber(info: object, key: InfoNumberKey, typed: string, player?: number): { value: number } | { refused: string } {
   const field = INFO_NUMBERS[key];
+  // An empty digits-only box is 0 to the editor (then pulled into range: water 0, zoom 1250).
+  if (TYPING[key] && typed === "") typed = "0";
   const t0 = typedNumber(field.kind, typed, field.label);
   if ("refused" in t0) return t0;
   const t = { value: clampInfoNumber(key, t0.value) };
