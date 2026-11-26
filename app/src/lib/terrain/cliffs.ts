@@ -270,10 +270,12 @@ export interface RampClick { done: "built" | "removed" | "none"; problem?: strin
  *  neighbours along the cliff are both low (a lone corner sticking out). On a 45-degree diagonal cliff, which bends
  *  at every corner, the high steps take nothing and a low step (high beside it along x, along y and between) the 3×3
  *  block round it, for a click inside the tile those four corners make (spec ramp-diagonal.json, 2026-11-18). A wider
- *  ramp is more clicks, or a drag, along the edge. A click on a line that is a ramp already does nothing in the World
- *  Editor; here it takes off the ramp it belongs to (all flagged corners joined to it), unless `keep` (a drag going
- *  over it). */
-export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog, keep = false): RampClick {
+ *  ramp is more clicks, or a drag, along the edge. A click on a line that is a ramp already does nothing. With
+ *  `remove` (Shift held) the click takes the flag off the corners it would have flagged, as far as they are flagged,
+ *  and nothing else (we-drive 2026-11-26: of three lines side by side only the clicked one went; on a plateau's corner
+ *  the whole block, below it just its line; over a block with one line built, that line; right, Ctrl and Alt clicks
+ *  and the cliff Level tool leave a ramp). */
+export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog, remove = false): RampClick {
   const cx = Math.round((wx - t.offsetX) / 128), cy = Math.round((wy - t.offsetY) / 128);
   const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? t.corners[y * t.width + x] : null);
   const c = at(cx, cy);
@@ -333,34 +335,21 @@ export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog,
     }
   }
   if (!found.length) {
+    if (remove) return { done: "none" };
     const near = dirs.map(([dx, dy]) => at(cx + dx, cy + dy)).filter((n): n is Corner => !!n);
     if (near.some((n) => Math.abs(n.layer - c.layer) > 1)) return { done: "none", problem: "Ramps only work on cliffs one level high; this one is higher." };
     if (near.some((n) => n.layer !== c.layer)) return { done: "none", problem: "The cliff isn't straight here: click its edge where it runs straight for a ramp." };
     return { done: "none", problem: "Click a cliff one level high to build a ramp." };
   }
-  const cells = found.flat();
-  if (cells.every(([x, y]) => at(x, y)!.ramp)) {
-    if (keep) return { done: "none" };
-    // Take off the ramp: every flagged corner joined to these.
-    const todo = [...cells], seen = new Set<number>();
-    while (todo.length) {
-      const [x, y] = todo.pop()!;
-      const k = at(x, y);
-      if (!k?.ramp || seen.has(y * t.width + x)) continue;
-      seen.add(y * t.width + x);
-      stroke.touch(t, y * t.width + x);
-      k.ramp = false;
-      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (i || j) todo.push([x + i, y + j]);
-    }
-    return { done: "removed" };
-  }
-  for (const [x, y] of cells) {
+  let changed = false;
+  for (const [x, y] of found.flat()) {
     const k = at(x, y)!;
-    if (k.ramp) continue;
+    if (k.ramp !== remove) continue;
     stroke.touch(t, y * t.width + x);
-    k.ramp = true;
+    k.ramp = !remove;
+    changed = true;
   }
-  return { done: "built" };
+  return { done: !changed ? "none" : remove ? "removed" : "built" };
 }
 
 /** A ramp on a cliff that bends, as the World Editor flags one: every corner of the cliff tiles, and the low

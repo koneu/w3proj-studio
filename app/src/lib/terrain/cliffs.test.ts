@@ -317,7 +317,7 @@ test("on a straight edge each click is one line, on a plateau's corner a 3x3 blo
   const t = rect();
   assert.equal(rampClick(t, 5 * 128, 3 * 128, log).done, "built");
   assert.deepEqual(flagged(t), ["5,1", "5,2", "5,3"]);
-  assert.equal(rampClick(t, 6.4 * 128, 2.4 * 128, log, true).done, "built", "the next line, from the middle corner");
+  assert.equal(rampClick(t, 6.4 * 128, 2.4 * 128, log).done, "built", "the next line, from the middle corner");
   assert.deepEqual(flagged(t), ["5,1", "6,1", "5,2", "6,2", "5,3", "6,3"]);
   const c = rect();
   assert.equal(rampClick(c, 2 * 128, 3 * 128, log).done, "built");
@@ -328,12 +328,25 @@ test("on a straight edge each click is one line, on a plateau's corner a 3x3 blo
   const n = rect();
   assert.equal(rampClick(n, 7 * 128, 7 * 128, log).done, "built");
   assert.deepEqual(flagged(n), ["7,7", "7,8", "7,9"]);
-  // A drag over what's built adds nothing and takes nothing off; a click on it takes the ramp off (the World Editor
-  // leaves it: p-twice).
-  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log, true), { done: "none" });
+  // A click (or a drag) over what's built adds nothing and takes nothing off, as the World Editor's.
+  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log), { done: "none" });
   assert.equal(flagged(t).length, 6);
-  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log), { done: "removed" });
-  assert.deepEqual(flagged(t), []);
+  // With Shift the click takes off what it would have built: its own line, not the one beside it; a second Shift
+  // click there finds nothing and builds nothing, saying nothing.
+  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log, true), { done: "removed" });
+  assert.deepEqual(flagged(t), ["6,1", "6,2", "6,3"]);
+  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log, true), { done: "none" });
+  assert.deepEqual(flagged(t), ["6,1", "6,2", "6,3"]);
+  // On a plateau's corner the whole block goes; below the corner just its line; over a block with one line built,
+  // that line.
+  assert.equal(rampClick(c, 2 * 128, 2 * 128, log, true).done, "removed");
+  assert.deepEqual(flagged(c), ["0,1", "1,1", "0,2", "1,2", "0,3", "1,3"]);
+  assert.equal(rampClick(c, 2 * 128, 3 * 128, log, true).done, "removed");
+  assert.deepEqual(flagged(c), []);
+  assert.equal(rampClick(c, 2 * 128, 2 * 128, log).done, "built");
+  assert.equal(rampClick(c, 2 * 128, 3 * 128, log, true).done, "removed");
+  assert.deepEqual(rampClick(rect(), 5 * 128, 3 * 128, log, true), { done: "none" });
+  assert.deepEqual(rampClick(rect(), 128, 128, log, true), { done: "none" }, "no cliff there: nothing to say either");
   // A cliff two levels high has no ramp.
   const tall = land(["4444", "4444", "2222", "2222", "2222"]);
   assert.match(rampClick(tall, 128, 3 * 128, log).problem ?? "", /higher/);

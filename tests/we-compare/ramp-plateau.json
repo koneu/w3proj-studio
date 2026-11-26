@@ -627,7 +627,7 @@
   },
   {
     "name": "ramp-plateau-twice",
-    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), two clicks at 750,630: DIFFERS (2026-11-14, on purpose): the editor keeps the line (32, 25..27) the first click built, Studio's second click on a ramp takes it off (its way to remove one; the editor's own isn't known). Named from a real run (2026-11-17, branch fix-we-specs): the w3e differs only in the ramp flags of corners 32,25..27, the wpm only in the 32 cells x 124..131, y 100..103 (the editor's 0xca under its ramp line, Studio's 0x40)",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), two clicks at 750,630: the second leaves the line (32, 25..27) the first built, in both (Studio took it off until 2026-11-26: Shift takes a ramp off, spec ramp-plateau-shift)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
     },
@@ -713,15 +713,277 @@
     "compare": [
       {
         "file": "war3map.wpm",
-        "as": "wpm-cells",
-        "expect": "differs",
-        "expectPaths": ["cells.124,100","cells.125,100","cells.126,100","cells.127,100","cells.128,100","cells.129,100","cells.130,100","cells.131,100","cells.124,101","cells.125,101","cells.126,101","cells.127,101","cells.128,101","cells.129,101","cells.130,101","cells.131,101","cells.124,102","cells.125,102","cells.126,102","cells.127,102","cells.128,102","cells.129,102","cells.130,102","cells.131,102","cells.124,103","cells.125,103","cells.126,103","cells.127,103","cells.128,103","cells.129,103","cells.130,103","cells.131,103"]
+        "as": "wpm-cells"
       },
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs",
-        "expectPaths": ["corners.32,25.ramp","corners.32,26.ramp","corners.32,27.ramp"]
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-shift",
+    "description": "plateau.w3x, the Ramp (palette 1505,311): three lines side by side (clicks at 700, 750, 800 x 630), then a Shift click at 750,630: only the middle line goes (we-drive 2026-11-26)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "700,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "800,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--drag-mod",
+          "shift"
+        ],
+        [
+          "--drag",
+          "750,630:750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              700,
+              630
+            ],
+            [
+              "click",
+              750,
+              630
+            ],
+            [
+              "click",
+              800,
+              630
+            ],
+            [
+              "dragMod",
+              "shift"
+            ],
+            [
+              "drag",
+              750,
+              630,
+              750,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm-cells"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-shift-drag",
+    "description": "plateau.w3x, the Ramp (palette 1505,311): three lines side by side, then a Shift drag from 700,630 to 800,630: all go",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "700,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "800,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--drag-mod",
+          "shift"
+        ],
+        [
+          "--drag",
+          "700,630:800,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              700,
+              630
+            ],
+            [
+              "click",
+              750,
+              630
+            ],
+            [
+              "click",
+              800,
+              630
+            ],
+            [
+              "dragMod",
+              "shift"
+            ],
+            [
+              "drag",
+              700,
+              630,
+              800,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm-cells"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
       }
     ],
     "limit": 40
