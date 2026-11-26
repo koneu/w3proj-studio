@@ -21,7 +21,7 @@ import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundErro
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { mdxPathOf } from "../../lib/model/mdxpath";
-import { ICON_FIELD, KINDS, trigstrText } from "./shared";
+import { MODEL_FIELD, ICON_FIELD, KINDS, trigstrText } from "./shared";
 import { REPLACEABLE, TEAM_COLORS } from "../../lib/model/renderer";
 import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks } from "./previewart";
 import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
@@ -1127,9 +1127,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         };
         // A live view of the selected object's model (units, items, doodads, destructables).
-        const MODEL_FIELD: Record<string, { model: string; variations?: string }> = {
-          w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
-        };
         const preview = MODEL_FIELD[kind] || kind === "w3a" ? new ModelPreview(w3) : null;
         // What the user chose to look at: a player colour, a replaceable texture (destructables), an ability's art field.
         const picks = freshPicks();

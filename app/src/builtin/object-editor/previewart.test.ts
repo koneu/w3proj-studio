@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ABILITY_ART, abilityArt, firstModel, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks } from "./previewart";
+import { ABILITY_ART, abilityArt, firstModel, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks, firstShownModel } from "./previewart";
 import { skinTextures } from "../../lib/model/replaceable";
 
 test("a tree's own texture is btxf under btxi, with .blp added when it has no extension", () => {
@@ -61,4 +61,14 @@ test("the preview's choices reset when another object is shown, not for the same
   assert.equal(picks.model, 2);
   assert.equal(syncPicks(picks, "o:hpea"), true);
   assert.deepEqual(picks, { key: "o:hpea", team: null, texture: null, art: undefined, model: 0 });
+});
+
+test("the model an object shows first: the list's first, the first variation of several", () => {
+  const shown = (values: Record<string, string>, fields?: { model: string; variations?: string }) => firstShownModel(fields, (f) => values[f]);
+  const doodad = { model: "dfil", variations: "dvar" };
+  assert.equal(shown({ dfil: "Doodads\\Rock.mdl", dvar: "10" }, doodad), "Doodads\\Rock0");
+  assert.equal(shown({ dfil: "Doodads\\Arch.mdl", dvar: "1" }, doodad), "Doodads\\Arch.mdl");
+  assert.equal(shown({ umdl: "a.mdx,b.mdx" }, { model: "umdl" }), "a.mdx");
+  assert.equal(shown({ umdl: "_" }, { model: "umdl" }), null);
+  assert.equal(shown({}, undefined), null, "a kind without a model");
 });

@@ -33,6 +33,7 @@
         "terrain.placement.owner": { "type": "number", "default": 1, "minimum": 1, "maximum": 28, "description": "Owner of placed units, as last chosen: players 1 to 24, 25 Neutral Hostile, 26 Neutral Extra, 27 Neutral Victim, 28 Neutral Passive." },
         "terrain.placement.scatter": { "type": "boolean", "default": false, "description": "Scatter (fill the brush), as last set." },
         "terrain.placement.scatterSize": { "type": "number", "default": 2, "minimum": 1, "maximum": 10, "description": "Scatter brush radius in tiles, as last set." },
+        "terrain.placement.preview3d": { "type": "boolean", "default": false, "description": "Place… shows a turning 3D preview of the highlighted object beside the list." },
         "terrain.placement.respectPathing": { "type": "boolean", "default": true, "description": "Place objects only where their footprint is free: no cliffs, deep water, unwalkable ground or other objects." },
         "terrain.placement.randomVariation": { "type": "boolean", "default": false, "description": "Place Random Variation: each object placed one at a time gets a random variation of its type (else the one chosen in the toolbar, the first by default)." },
         "terrain.placement.randomRotation": { "type": "boolean", "default": true, "description": "Random Rotation (doodads only, as the World Editor's Randomly Rotate Doodads): each doodad placed one at a time faces a random way (else 270°); types with a fixed rotation keep theirs." },

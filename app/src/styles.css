@@ -333,6 +333,11 @@ code { font-family: var(--mono); font-size: 12px; }
 .picker-facet { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
 .picker-facet-label { width: 72px; flex-shrink: 0; font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .picker-rows { flex: 1; overflow-y: auto; min-height: 120px; border-top: 1px solid var(--border); }
+.picker.with-preview { width: min(1120px, 96%); height: calc(100% - 64px); }
+.picker-body { flex: 1; display: flex; min-height: 0; gap: 8px; }
+.picker-body .picker-rows { min-width: 0; }
+.picker-preview { width: 260px; flex-shrink: 0; border-top: 1px solid var(--border); padding-top: 8px; }
+.picker-preview .obj-preview { float: none; margin: 0; width: 100%; height: 260px; }
 .picker-browse { width: min(1120px, 96%); height: calc(100% - 64px); }
 .browse-body { flex: 1; display: flex; min-height: 0; gap: 8px; }
 .browse-body .picker-rows { min-width: 0; }

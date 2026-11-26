@@ -14801,6 +14801,19 @@ async function placerAndCampaign(page, found) {
       await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
       await until("the object browser closed", () => page.evaluate(`!document.querySelector(".picker-overlay")`), 5000);
     };
+    // The 3D preview is off by default; on, it shows the highlighted object's model and follows the highlight.
+    await openPlace();
+    if (await page.evaluate(`!!document.querySelector(".picker-preview")`)) fail("Place… has a 3D preview with the setting off");
+    await closePlace();
+    await page.evaluate(`w3.settings.set("terrain.placement.preview3d", true)`);
+    await openPlace();
+    const previewed = () => page.evaluate(`(() => { const e = document.querySelector(".picker-preview .obj-preview"); return e?.dataset.state ? JSON.parse(e.dataset.state) : null; })()`);
+    await until("the preview's model", async () => { const st = await previewed(); return !!st?.path && st.ready; }, 30000).catch(async () => fail(`the 3D preview shows nothing: ${lit(await previewed())}`));
+    const first = (await previewed())?.path;
+    await page.evaluate(`(() => { const i = document.querySelector("input.picker-search"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); i.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); })()`);
+    if (!(await soon(async () => { const st = await previewed(); return !!st?.path && st.path !== first; }, 30000))) fail(`the preview stayed ${first} when the highlight moved`);
+    await closePlace();
+    await page.evaluate(`w3.settings.set("terrain.placement.preview3d", false)`);
     await openPlace();
     await page.evaluate(`[...document.querySelectorAll(".picker-tabs button")].at(-1).click()`);
     await until("the doodads", () => page.evaluate(`!!document.querySelector(".picker-overlay input.picker-search") && [...document.querySelectorAll(".picker-tabs button")].at(-1).classList.contains("on")`), 20000);

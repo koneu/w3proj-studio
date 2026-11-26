@@ -265,7 +265,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const choose = async () => {
     try {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
-      const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"], remember: "place" });
+      const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"], remember: "place", preview: w3.settings.get<boolean>("terrain.placement.preview3d") === true });
       if (r) { labels.set(r.id, r.label ?? r.name); startPlacing({ kind: r.kind, id: r.id, name: r.name }); }
     } catch (e) {
       w3.window.showError(String((e as Error).message ?? e));
