@@ -217,7 +217,8 @@ impl Heads {
             let what = format!("objects.{key}");
             let mut need = vec!["magic"];
             need.extend_from_slice(extra);
-            let f = tl::object(v, &what, &need, &["skinIds", TWICE_KEY])?;
+            // The optional keys written out: app/src/lib/formats/schemas.test.ts reads them from here (TWICE_KEY).
+            let f = tl::object(v, &what, &need, &["skinIds", "importedTwice"])?;
             let h = header.ok_or_else(|| tl::bad(format!("{what} is there, dooHeader isn't")))?;
             let (version, subversion) = if key == "doodads" { (h.doodads_version, h.doodads_subversion) } else { (h.units_version, h.units_subversion) };
             let skin_ids = match f.get("skinIds") {
@@ -235,7 +236,7 @@ impl Heads {
         let regions = match o.get("regions") {
             None => None,
             Some(v) => {
-                let r = tl::object(v, "objects.regions", &["version"], &[TWICE_KEY])?;
+                let r = tl::object(v, "objects.regions", &["version"], &["importedTwice"])?;
                 Some(tl::uint(&r["version"], "objects.regions.version", u32::MAX as u64)? as u32)
             }
         };
