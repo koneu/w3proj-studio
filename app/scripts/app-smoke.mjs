@@ -1066,7 +1066,11 @@ async function waterPathing(page, found) {
   if (err) fail(`commit: ${err}`);
   const left = git("status", "--porcelain").stdout.trim();
   if (left) fail(`a commit straight after a tool's edit left changes uncommitted: ${left.split(/[\r\n]+/).slice(0, 4).join(" | ")}`);
-  if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
+  // The split layout keeps the pathing map in .w3proj/derived/, out of git: the commit has the water's terrain, and the
+  // rebuilt pathing map is in the store (the derived files' record follows the commit's terrain).
+  const stat = git("show", "--stat", "--format=", "HEAD").stdout;
+  if (!stat.includes("terrain/main/terrain.txt")) fail(`the commit straight after a tool's edit has no terrain: ${stat.trim().slice(0, 200)}`);
+  if (stat.includes("war3map.wpm")) fail("the commit has a pathing map: the split layout keeps it out of git");
 
   // An external `w3proj pack` (the CLI, with the app only saving) after an edit and its save: the pathing map in the pack is
   // the project's, and it is not the one from before the edit (verify round 3, package 2).
@@ -2051,8 +2055,11 @@ async function terrainSelectCameras(page, found) {
   await settled(page);
   await k.tool("terrain_screenshot", { maxSize: 64 }).catch((e) => fail(e.message));
   if ((await active()) !== TXT) fail(`terrain_screenshot switched from the text terrain's tab to ${await active()}`);
-  await k.tool("terrain_screenshot", { maxSize: 64, file: BIN }).catch((e) => fail(`with file: ${e.message}`));
-  if ((await active()) !== BIN) fail(`terrain_screenshot of ${BIN} left ${await active()} in front`);
+  // With file: the project's terrain (the binary copy outside map/ isn't one of its terrain files) comes to the front.
+  await page.evaluate(`w3.editors.open(${lit(BIN)}, "w3.terrainViewer")`);
+  await until(`the editor of ${BIN} in front`, async () => (await active()) === BIN, 30000);
+  await k.tool("terrain_screenshot", { maxSize: 64, file: TXT }).catch((e) => fail(`with file: ${e.message}`));
+  if ((await active()) !== TXT) fail(`terrain_screenshot of ${TXT} left ${await active()} in front`);
   const wrong = await k.tool("terrain_screenshot", { maxSize: 64, file: "map/war3map.j" }).then(() => null, (e) => e.message);
   if (!wrong || !/terrain files/.test(wrong)) fail(`terrain_screenshot of a file that isn't terrain: ${wrong ?? "a picture"}`);
   await page.evaluate(`w3.editors.closeAll()`);
@@ -5167,7 +5174,7 @@ async function areaReplaceCt0Steps(page, found) {
   }
   // The file's list: 2 of the own tiles from the second on; the flag stays 0, so slot 0 is drawn as own[0].
   await page.evaluate(`w3.editors.closeAll()`);
-  writeFileSync(file, text().replace(/^ground .*$/m, `ground ${own.slice(1, 3).join(" ")}`));
+  await writeMapFile(page, file, text().replace(/^ground .*$/m, `ground ${own.slice(1, 3).join(" ")}`));
   await page.evaluate(`w3.editors.open(${lit(TXT)})`);
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)}`), 20000);
   const listed = () => page.evaluate(`Number(/^Ground textures \\((\\d+)\\)/.exec([...document.querySelectorAll("h4")].map((e) => e.textContent).find((t) => t.startsWith("Ground textures")) ?? "")?.[1] ?? -1)`);
@@ -6384,7 +6391,7 @@ async function resizeDooV13(page, found) {
     // A version-8 doodads file, as a map saved before Reforged's 3.0 fields has it (the mini map's layout).
     const doo = JSON.parse(readFileSync(file, "utf8"));
     Object.assign(doo, { version: 8, skinIds: true, doodads: [{ id: "LTbr", variation: 0, position: [256, 256, 0], angle: 0, scale: [1, 1, 1], skinId: "LTbr", flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 7 }] });
-    writeFileSync(file, JSON.stringify(doo, null, 2));
+    await writeMapFile(page, file, JSON.stringify(doo, null, 2));
     const v8 = readFileSync(file);
     await page.evaluate(`w3.workspace.refresh()`);
     await page.evaluate(`w3.editors.open(${lit(TXT)}, "w3.terrainViewer")`);
@@ -6678,7 +6685,8 @@ async function resizeUnreadable(page, found) {
     };
 
     // war3map.shd: a folder in its place (unreadable on every system; not a file the project lists).
-    const shdPath = join(map, "war3map.shd");
+    // The split layout keeps it in .w3proj/derived/ (read by its map/ name).
+    const shdPath = join(dirname(map), ".w3proj", "derived", "war3map.shd");
     const shd = readFileSync(shdPath);
     rmSync(shdPath);
     mkdirSync(shdPath);
@@ -6687,16 +6695,14 @@ async function resizeUnreadable(page, found) {
     rmSync(shdPath, { recursive: true });
     writeFileSync(shdPath, shd);
 
-    // war3map.w3r kept raw, with bytes the codec can't decode.
-    const w3rJson = join(map, "war3map.w3r.json"), w3r = join(map, "war3map.w3r");
-    const regions = existsSync(w3rJson) ? readFileSync(w3rJson) : null;
-    if (!regions) fail("the new map has no war3map.w3r.json (control)");
+    // The regions (in the split layout map/terrain/main/regions.json, read as war3map.w3r.json) not JSON.
+    const w3rJson = join(map, "terrain", "main", "regions.json");
+    const regions = existsSync(w3rJson) ? readDiskFile(w3rJson) : null;
+    if (!regions) fail("the new map has no map/terrain/main/regions.json (control)");
     else {
-      rmSync(w3rJson);
-      writeFileSync(w3r, Buffer.from("not a region file"));
+      writeFileSync(w3rJson, Buffer.from("not a region file"));
       await page.evaluate(`w3.workspace.refresh()`);
-      await refused(/war3map\.w3r can't be read/, "an undecodable war3map.w3r");
-      rmSync(w3r);
+      await refused(/war3map\.w3r|regions\.json/, "an undecodable regions file");
       writeFileSync(w3rJson, regions);
       await page.evaluate(`w3.workspace.refresh()`);
     }
@@ -6855,7 +6861,7 @@ async function subterrains(page, found) {
     {
       const lit_ = await page.evaluate(`(() => { const c = document.querySelector(".terrain-minimap-canvas"); if (!c || c.closest("[hidden]")) return -1;
         const d = c.getContext("2d").getImageData(10, 10, c.width - 20, c.height - 20).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 30) n++; return n; })()`);
-      if (lit_ === -1) fail("after the split there is no shown minimap panel to check");
+      if (lit_ === -1) fail(`after the cut there is no shown minimap panel to check (terrain.minimap.panel ${lit(await page.evaluate(`w3.settings.get("terrain.minimap.panel")`))}, active ${await page.evaluate(`w3.editors.activePath()`)}, panels ${await page.evaluate(`document.querySelectorAll(".terrain-minimap-canvas").length`)})`);
       else if (lit_ < 100) fail(`after the split's reload and settled() the minimap panel is black (${lit_} lit pixels)`);
     }
     for (const f of ["terrain/terrain.json", "terrain/ne/terrain.txt", "terrain/sw/units.json", "terrain/nw/doodads.json", "terrain/se/regions.json"]) {
@@ -10299,7 +10305,7 @@ async function mcpReplaceSnap(page, found) {
 
     // Opened again from the stored places: only the snapped barrel (992, 992) is in this area, not the stored one (1000, 1000).
     await page.evaluate(`w3.editors.closeAll()`);
-    writeFileSync(file, JSON.stringify(doo, null, 2));
+    await writeMapFile(page, file, JSON.stringify(doo, null, 2));
     await settled(page);
     await page.evaluate(`w3.editors.open(${lit(TXT)})`);
     await until("the doodads loaded", async () => (await live()) !== null, 30000);
@@ -12808,7 +12814,7 @@ async function mapPropertiesPriorities(page, found) {
   try {
   const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
   if (!existsSync(map)) { console.log(`map properties priorities: skipped, ${map} isn't there`); return; }
-  await realMapSaveRound(page, found, map, "cliff-two", (dir) => {
+  await realMapSaveRound(page, found, map, "cliff-two", async (dir) => {
     // Player 2 and its start location, as the World Editor's reference save had them.
     const at = [1280, -1472];
     const infoFile = join(dir, "map", "war3map.w3i.json"), unitsFile = join(dir, "map", "war3mapUnits.doo.json");
@@ -12816,7 +12822,7 @@ async function mapPropertiesPriorities(page, found) {
     i.players.push({ ...i.players[0], id: 1, start: at, allyLow: 0, allyHigh: 0, enemyLow: 0, enemyHigh: 0 });
     u.units.push({ ...u.units[0], player: 1, position: [...at, 0], editorId: 1 });
     writeFileSync(infoFile, JSON.stringify(i, null, 2));
-    writeFileSync(unitsFile, JSON.stringify(u, null, 2));
+    await writeMapFile(page, unitsFile, JSON.stringify(u, null, 2));
   });
   } finally {
     await restoreWindow(page);
@@ -13066,7 +13072,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
   mkdirSync(dirname(dir), { recursive: true });
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${lit(map)}, dir: ${lit(dir)}, allowIncomplete: false, install: ${lit(game ?? gamePath(repo))} }); })()`);
   const file = (f) => join(dir, "map", f);
-  prepare?.(dir);
+  await prepare?.(dir);
   const script = readFileSync(file("war3map.j"), "utf8"), info = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
   const terrain = readMapFile(file("war3map.w3e.txt"), "utf8");
   // The control: the start locations as the World Editor's save found them, at 0 hit points and mana, the masks empty.
