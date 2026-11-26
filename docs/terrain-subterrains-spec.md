@@ -1,5 +1,12 @@
 # Spec: Split Terrain & Subterrains (`map/terrain/`)
 
+> **Decision 2026-11-26: the split layout becomes the only one**, even with one subterrain; the flat layout is dropped. Where this spec says "optional", "flat stays the default" or "Merge Subterrains goes back to the flat files", that is the state before the decision and goes as the stages below land.
+>
+> - **Built (branch `terrain-split-default`):** an unpack into a new project writes `map/terrain/` with one subterrain `main` and puts the map's derived files into `.w3proj/derived/`; an unpack into a flat project converts it first (as `w3proj terrain split`); a map that came without shadows or a minimap packs back without them (`derived-from.json` lists them under `absent`, forgotten once the derived files are made anew); a new project's agent file describes the split layout.
+> - **Stays flat for now:** a map whose terrain can't be split is unpacked flat as before. Two of the sample maps are such (wowr4.6 and FOE: doodads sharing a creation number); also a terrain kept raw and a map without terrain (a campaign).
+> - **Left:** (1) creation numbers found twice in an imported map kept as they came (proposal: `terrain.json` lists them per kind, a number not listed is still refused, so a merge's duplicates are still caught); (2) the app: a new map and the open of a flat project; (3) the flat reader, `w3proj terrain merge` and "Merge Subterrains" removed, the fixtures and tests that write flat files moved over; (4) this spec and the schemas' README rewritten for one layout.
+> - **Consequences that now reach every project:** the derived files are no longer in git, so a fresh clone can't be packed without the game (`w3proj rebuild`); and every file under `map/terrain/` counts as a source of the derived files, so a pack right after a hand edit of a region or unit is refused until `w3proj rebuild` (or `--force-stale`).
+
 ## Goal & Motivation
 
 In today's unpacked map format (`map/war3map.w3e.txt`, `map/war3map.doo.json`, `map/war3mapUnits.doo.json`, `map/war3map.w3r.json`), the entire map's terrain and placed objects live in single map-wide files:

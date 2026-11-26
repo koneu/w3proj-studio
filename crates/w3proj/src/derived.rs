@@ -104,14 +104,14 @@ pub fn record(project: &Path, sources: &Sources) -> Result<()> {
     if sources.is_empty() {
         return Ok(());
     }
-    write_group(project, "files", Some(sources))
+    write_group(project, "files", Some(sources), Absent::Clear)
 }
 
 /// Sets one group of the record (`files`: pathing, shadows and the minimap; `script`: the map script), or removes it
 /// (None); the other stays. A record that can't be read is written anew by `record` (it says what pathing, shadows and
 /// the minimap follow, all a record said before the script had a group), and is an error for the script's group: written
 /// over, a record whose terrain group refused a pack would let it through.
-fn write_group(project: &Path, key: &str, sources: Option<&Sources>) -> Result<()> {
+fn write_group(project: &Path, key: &str, sources: Option<&Sources>, absent: Absent) -> Result<()> {
     let _held = RecordLock::take(project);
     let path = project.join(STAMP_FILE);
     let old = match fs::read(&path) {
@@ -139,7 +139,19 @@ fn write_group(project: &Path, key: &str, sources: Option<&Sources>) -> Result<(
             doc.remove(key);
         }
     }
-    if doc.len() == 1 {
+    match absent {
+        Absent::Keep => {}
+        Absent::Clear => {
+            doc.remove(ABSENT_KEY);
+        }
+        Absent::Set(names) if names.is_empty() => {
+            doc.remove(ABSENT_KEY);
+        }
+        Absent::Set(names) => {
+            doc.insert(ABSENT_KEY.into(), names.into());
+        }
+    }
+    if !doc.keys().any(|k| k != "format" && k != ABSENT_KEY) {
         // Only the format is left: no record.
         if old.is_some() {
             fs::remove_file(&path)?;
@@ -184,9 +196,44 @@ impl RecordLock {
     }
 }
 
-/// Records the sources as they are now.
+/// Records the sources as they are now, for derived files that weren't made anew: they follow the same map as before
+/// under other file names (a split, a merge, a relayout), so what the map came without (`absent`) stays.
 pub fn record_now(project: &Path) -> Result<()> {
-    record(project, &sources(project)?)
+    let sources = sources(project)?;
+    if sources.is_empty() {
+        return Ok(());
+    }
+    write_group(project, "files", Some(&sources), Absent::Keep)
+}
+
+/// Records the sources as a sync from a map left them: its derived files follow them, and those of `REQUIRED` it came
+/// without (`store`: the ones it has) are noted as absent, so a pack of the unchanged project leaves them out as the
+/// map did instead of refusing (`missing`). Making the derived files anew (`record`) forgets the note.
+pub fn record_synced(project: &Path, store: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    let sources = sources(project)?;
+    if sources.is_empty() {
+        return Ok(());
+    }
+    let absent = REQUIRED.iter().filter(|names| !store.keys().any(|k| names.iter().any(|n| n.eq_ignore_ascii_case(k)))).map(|names| names[0].to_string()).collect();
+    write_group(project, "files", Some(&sources), Absent::Set(absent))
+}
+
+/// What a write of the record does with its list of derived files the map came without (`record_synced`).
+enum Absent {
+    Keep,
+    Clear,
+    Set(Vec<String>),
+}
+
+const ABSENT_KEY: &str = "absent";
+
+/// The derived files the record says the map came without (`record_synced`); none without a record.
+fn absent(project: &Path) -> Vec<String> {
+    let doc: Option<serde_json::Value> = fs::read(project.join(STAMP_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    doc.as_ref()
+        .and_then(|d| d.get(ABSENT_KEY)?.as_array().cloned())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, PartialEq)]
@@ -393,7 +440,7 @@ pub fn script_sources_open(project: &Path) -> Result<Sources> {
 /// Records that the generated map script in the store follows `sources` (`script_sources`, taken before it was made);
 /// the record's other group stays.
 pub fn record_script(project: &Path, sources: &Sources) -> Result<()> {
-    write_group(project, "script", Some(sources))
+    write_group(project, "script", Some(sources), Absent::Keep)
 }
 
 /// Records the script's sources as they are now.
@@ -404,7 +451,7 @@ pub fn record_script_now(project: &Path) -> Result<()> {
 /// Removes the script's group from the record (the script is a tracked file again).
 pub fn clear_script_record(project: &Path) -> Result<()> {
     match fs::read(project.join(STAMP_FILE)) {
-        Ok(b) if parse(&b, true).is_some_and(|g| g.is_some()) => write_group(project, "script", None),
+        Ok(b) if parse(&b, true).is_some_and(|g| g.is_some()) => write_group(project, "script", None, Absent::Keep),
         _ => Ok(()),
     }
 }
@@ -573,13 +620,20 @@ pub fn migrate(project: &Path) -> Result<Vec<String>> {
 }
 
 /// The derived files a pack needs that a split project's store lacks (`REQUIRED`, the first name of each). None in a
-/// flat project (its pack takes what `map/` has, as always).
+/// flat project (its pack takes what `map/` has, as always). Ones the map itself came without (`record_synced`) aren't
+/// missing: the record that lists them says the store still follows that map, or the pack is refused as stale anyway.
 pub fn missing(project: &Path) -> Result<Vec<&'static str>> {
     if !uses_store(project)? {
         return Ok(Vec::new());
     }
     let have = read_store(project)?;
-    Ok(REQUIRED.iter().filter(|names| !have.keys().any(|k| names.iter().any(|n| n.eq_ignore_ascii_case(k)))).map(|names| names[0]).collect())
+    let absent = absent(project);
+    Ok(REQUIRED
+        .iter()
+        .filter(|names| !have.keys().any(|k| names.iter().any(|n| n.eq_ignore_ascii_case(k))))
+        .map(|names| names[0])
+        .filter(|name| !absent.iter().any(|a| a.eq_ignore_ascii_case(name)))
+        .collect())
 }
 
 /// Adds the `IGNORED` lines the project's `.gitignore` lacks (makes the file when there is none). A file that is there

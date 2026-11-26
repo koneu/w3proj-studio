@@ -103,7 +103,7 @@ fn unpack_writes_it_once_and_never_rewrites_it() {
     ok(&["pack", s(&fixture()), "-o", s(&map)]);
     ok(&["unpack", s(&map), s(&project), "--game", "none"]);
     let file = project.join("AGENTS.md");
-    assert_eq!(fs::read_to_string(&file).unwrap(), agent_file::text(Kind::Flat));
+    assert_eq!(fs::read_to_string(&file).unwrap(), agent_file::text(Kind::Split));
     assert!(!project.join("CLAUDE.md").exists());
     // The user edits it; a sync (unpack again) and a rebuild leave it alone.
     fs::write(&file, "mine\n").unwrap();
@@ -149,10 +149,10 @@ fn create_writes_it_for_a_map_and_a_campaign() {
     let (map, camp) = (dir.join("map"), dir.join("camp"));
     w3proj::create(&map, Some(w3proj::header::MapHeader { name: "M".into(), flags: 0, max_players: 1, unknown: 0 })).unwrap();
     w3proj::create(&camp, None).unwrap();
-    assert_eq!(fs::read_to_string(map.join("AGENTS.md")).unwrap(), agent_file::text(Kind::Flat));
+    assert_eq!(fs::read_to_string(map.join("AGENTS.md")).unwrap(), agent_file::text(Kind::Split));
     assert_eq!(fs::read_to_string(camp.join("AGENTS.md")).unwrap(), agent_file::text(Kind::Campaign));
     // A map without a header (World Editor 3.0.1's) is no campaign.
     let bare = dir.join("bare");
     w3proj::project::create_as(&bare, None, false).unwrap();
-    assert_eq!(fs::read_to_string(bare.join("AGENTS.md")).unwrap(), agent_file::text(Kind::Flat));
+    assert_eq!(fs::read_to_string(bare.join("AGENTS.md")).unwrap(), agent_file::text(Kind::Split));
 }

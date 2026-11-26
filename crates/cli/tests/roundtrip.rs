@@ -50,6 +50,16 @@ fn unpack(map: &Path, project: &Path) -> String {
     ok(&["unpack", s(map), s(project), "--game", "none", "--trigger-data", s(&trigger_data())])
 }
 
+/// `unpack`, then the terrain merged back into the flat files: a project as they were before the split terrain layout
+/// became the only one an unpack writes (war3map.w3e.txt and the flat object files, the derived files in map/).
+fn unpack_flat(map: &Path, project: &Path) {
+    unpack(map, project);
+    // A map whose terrain can't be split (a creation number found twice) is unpacked flat as it is.
+    if project.join("map/terrain/terrain.json").is_file() {
+        ok(&["terrain", "merge", s(project)]);
+    }
+}
+
 fn pack(project: &Path, out: &Path) {
     // [Refactored] When packing the unmodified fixture() for setup, reuse cached packed bytes instead of spawning a new w3proj subprocess 20+ times.
     if project == fixture() {
@@ -115,6 +125,9 @@ fn fixture_unpacked(map: &Path) -> BTreeMap<String, Vec<u8>> {
     let (wtg, wct) = (w3proj(&["cat", s(map), "war3map.wtg"]).stdout, w3proj(&["cat", s(map), "war3map.wct"]).stdout);
     let data = w3proj::triggerdata::TriggerData::parse(&fs::read_to_string(trigger_data()).unwrap());
     want.extend(tl::split_map(&wtg, &wct, &data, tl::Lang::Jass).unwrap());
+    // The terrain and placed objects go into one subterrain, the derived files into the store (.w3proj/derived/).
+    w3proj::terrain_layout::split(&mut want, &[]).unwrap();
+    w3proj::derived::take(&mut want);
     want
 }
 
@@ -352,9 +365,13 @@ fn a_changed_project_file_reaches_the_map() {
     pack(&fixture(), &first);
     unpack(&first, &project);
 
-    let path = project.join("map/war3map.w3r.json");
+    let path = project.join("map/terrain/main/regions.json");
     fs::write(&path, fs::read_to_string(&path).unwrap().replace("Middle", "Edited")).unwrap();
-    pack(&project, &edited);
+    // Every file under map/terrain/ is a source of the derived files, a region's too: a pack right after an edit by
+    // hand says so, and --force-stale packs them as they are.
+    let o = w3proj(&["pack", s(&project), "-o", s(&edited)]);
+    assert!(!o.status.success() && text(&o).contains("map/terrain/main/regions.json changed"), "{}", text(&o));
+    ok(&["pack", s(&project), "-o", s(&edited), "--force-stale"]);
 
     let o = w3proj(&["cat", s(&edited), "war3map.w3r"]);
     assert!(String::from_utf8_lossy(&o.stdout).contains("Edited"));
@@ -753,8 +770,8 @@ fn a_pack_right_after_a_terrain_or_doodad_edit_refuses_the_old_derived_files() {
     let map = dir.join("map.w3x");
     pack(&fixture(), &map);
     let edits: [(&str, &str, &str); 2] = [
-        ("map/war3map.w3e.txt", "0*4 -12\n", "0*4 -11\n"),
-        ("map/war3map.doo.json", "64.0,", "96.0,"),
+        ("map/terrain/main/terrain.txt", "0*4 -12\n", "0*4 -11\n"),
+        ("map/terrain/main/doodads.json", "64.0,", "96.0,"),
     ];
     for (file, from, to) in edits {
         let (project, out) = (dir.join(format!("project-{}", file.len())), dir.join("out.w3x"));
@@ -770,7 +787,7 @@ fn a_pack_right_after_a_terrain_or_doodad_edit_refuses_the_old_derived_files() {
         assert!(!o.status.success(), "a pack right after editing {file} went ahead: {}", text(&o));
         assert!(!out.exists(), "the refused pack left a map behind");
         let said = text(&o);
-        for words in ["war3map.wpm", file.trim_start_matches("map/"), "--force-stale"] {
+        for words in [".w3proj/derived/", file, "--force-stale"] {
             assert!(said.contains(words), "the refusal doesn't name {words}: {said}");
         }
         ok(&["pack", s(&project), "-o", s(&out), "--force-stale"]);
@@ -940,7 +957,7 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
     let grid = vec!["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"];
     for (name, rects) in [("main", vec![]), ("grid", grid.clone())] {
         let project = dir.join(format!("project-{name}"));
-        unpack(&first, &project);
+        unpack_flat(&first, &project);
         let flat_objects: Vec<Vec<u8>> = OBJECTS.iter().map(|f| fs::read(project.join("map").join(f)).unwrap()).collect();
         let mut args = vec!["terrain", "split", s(&project)];
         for r in &rects {
@@ -986,7 +1003,7 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
     // The footman (creation number 2) at 0,0 lies in sw; moved to the north-east, it goes into ne/units.json on the
     // next sync with its creation number, and only the two files change.
     let project = dir.join("project-move");
-    unpack(&first, &project);
+    unpack_flat(&first, &project);
     let mut args = vec!["terrain", "split", s(&project)];
     for r in &grid {
         args.extend(["--rect", r]);
@@ -1017,7 +1034,7 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
 
     // A split that would drop corners (the rest of the canvas isn't one corner value) writes nothing.
     let project = dir.join("project-partial");
-    unpack(&first, &project);
+    unpack_flat(&first, &project);
     let o = w3proj(&["terrain", "split", s(&project), "--rect", "corner:0,0,2,2"]);
     assert!(!o.status.success(), "{}", text(&o));
     assert!(text(&o).contains("would be lost"), "{}", text(&o));
@@ -1045,7 +1062,7 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
     let first = dir.join("first.w3x");
     pack(&fixture(), &first);
     let project = dir.join("project");
-    unpack(&first, &project);
+    unpack_flat(&first, &project);
     let (map, store) = (project.join("map"), project.join(".w3proj").join("derived"));
     // Shadows and a minimap image besides the mini map's pathing and minimap icons: all four derived files.
     fs::write(map.join("war3map.shd"), b"shadows").unwrap();
@@ -1133,31 +1150,41 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
     assert_eq!(fs::read(&flat).unwrap(), fs::read(&merged).unwrap());
 }
 
-/// A flat project is as before: its derived files stay in map/, its pathing overrides in .w3proj/pathing.json, a pack
-/// takes them without a store or the new flag, and nothing of the split layout's appears.
+/// A project from before the split terrain layout became the only one an unpack writes (flat: war3map.w3e.txt, the
+/// derived files in map/, pathing overrides in .w3proj/pathing.json) still packs as it is, moving nothing. The next
+/// unpack into it converts it: the terrain into one subterrain, the derived files into the store, the overrides into
+/// the subterrain's pathing.txt; it packs the same map.
 #[test]
-fn a_flat_project_keeps_its_derived_files_in_map() {
+fn a_flat_project_packs_as_it_is_and_the_next_unpack_splits_it() {
     let dir = workdir("terrain_stage3_flat");
     let first = dir.join("first.w3x");
     pack(&fixture(), &first);
     let project = dir.join("project");
-    unpack(&first, &project);
+    unpack_flat(&first, &project);
+    assert!(project.join("map/war3map.w3e.txt").is_file() && project.join("map/war3map.wpm").is_file() && !project.join(".w3proj/derived").exists());
     fs::write(project.join(".w3proj/pathing.json"), PATHING).unwrap();
     let before = files(&project);
     let second = dir.join("second.w3x");
     ok(&["pack", s(&project), "-o", s(&second)]);
     assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
     assert_eq!(files(&project), before, "a flat project's pack moves nothing");
-    assert!(project.join("map/war3map.wpm").is_file() && !project.join(".w3proj/derived").exists());
-    // Unpacked again: nothing written, the derived files in map/.
-    let said = unpack(&first, &project);
-    assert!(said.contains("0 written"), "{said}");
-    assert!(project.join("map/war3map.wpm").is_file() && !project.join(".w3proj/derived").exists());
-    // A stale record still stops its pack as before; --force-stale goes on.
-    fs::write(project.join("map/war3map.doo.json"), fs::read(project.join("map/war3map.doo.json")).unwrap().iter().chain(b"\n").copied().collect::<Vec<u8>>()).unwrap();
-    let o = w3proj(&["pack", s(&project), "-o", s(&second)]);
-    assert!(!o.status.success() && text(&o).contains("map/war3map.doo.json changed"), "{}", text(&o));
-    ok(&["pack", s(&project), "-o", s(&second), "--force-stale"]);
+    // Unpacked again: converted.
+    unpack(&first, &project);
+    let map = project.join("map");
+    assert!(map.join("terrain/terrain.json").is_file() && map.join("terrain/main/pathing.txt").is_file());
+    for gone in ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.wpm"] {
+        assert!(!map.join(gone).exists(), "{gone} stayed in map/");
+    }
+    assert!(project.join(".w3proj/derived/war3map.wpm").is_file() && !project.join(".w3proj/pathing.json").exists());
+    // A fresh unpack of the same map has the same map/ files but the overrides.
+    let fresh = dir.join("fresh");
+    unpack(&first, &fresh);
+    let mut converted = files(&map);
+    assert!(converted.remove("terrain/main/pathing.txt").is_some());
+    assert_eq!(converted, files(&fresh.join("map")), "the converted project isn't the one a fresh unpack writes");
+    let third = dir.join("third.w3x");
+    ok(&["pack", s(&project), "-o", s(&third)]);
+    assert_eq!(fs::read(&first).unwrap(), fs::read(&third).unwrap());
 }
 
 /// `w3proj terrain seams` (the app's Check Terrain Seams, run in Node): two edits of neighbouring subterrains, each fine
@@ -1169,7 +1196,7 @@ fn terrain_seams_reports_two_merged_edits_and_a_pack_refuses_them() {
     let map = dir.join("first.w3x");
     pack(&fixture(), &map);
     let project = dir.join("project");
-    unpack(&map, &project);
+    unpack_flat(&map, &project);
     assert!(!w3proj(&["terrain", "seams", s(&project)]).status.success(), "flat: refused");
     let mut args = vec!["terrain", "split", s(&project)];
     for r in GRID {
@@ -1218,7 +1245,7 @@ fn terrain_relayout_packs_the_same_map() {
     let first = dir.join("first.w3x");
     pack(&fixture(), &first);
     let project = dir.join("project");
-    unpack(&first, &project);
+    unpack_flat(&first, &project);
     let flat_text = fs::read(project.join("map/war3map.w3e.txt")).unwrap();
     fs::write(project.join(".w3proj/pathing.json"), PATHING).unwrap();
     let mut args = vec!["terrain", "split", s(&project)];
@@ -1258,7 +1285,7 @@ fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     let map = dir.join("first.w3x");
     pack(&fixture(), &map);
     let project = dir.join("project");
-    unpack(&map, &project);
+    unpack_flat(&map, &project);
     assert!(ok(&["terrain", "check", s(&project)]).contains("0 found twice"), "flat: checked, nothing twice");
     let mut args = vec!["terrain", "split", s(&project)];
     for r in ["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"] {
@@ -1295,7 +1322,7 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
     let map = dir.join("first.w3x");
     pack(&fixture(), &map);
     let project = dir.join("project");
-    unpack(&map, &project);
+    unpack_flat(&map, &project);
     let doo_path = project.join("map/war3map.doo.json");
     let mut doo: serde_json::Value = serde_json::from_slice(&fs::read(&doo_path).unwrap()).unwrap();
     let list = doo["doodads"].as_array_mut().unwrap();
@@ -1309,7 +1336,7 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
     // As unpack writes it, so the plan's file differs from it by the numbers only.
     let twice = dir.join("twice.w3x");
     ok(&["pack", s(&project), "-o", s(&twice), "--force-stale"]);
-    unpack(&twice, &project);
+    unpack_flat(&twice, &project);
     let o = w3proj(&["terrain", "check", s(&project)]);
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
     for m in ["map/war3map.doo.json [2]", "map/war3map.doo.json [3]", "map/war3map.doo.json [4]", "an exact copy of [3]", "fix-ids"] {
@@ -1343,7 +1370,7 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
 
     // Delete Copies on the map as it was: only the copy goes, the one that differs stays and is said.
     let project = dir.join("project2");
-    unpack(&twice, &project);
+    unpack_flat(&twice, &project);
     let said = ok(&["terrain", "fix-ids", s(&project), "--delete-copies", "--apply"]);
     assert!(said.contains("deleted") && said.contains("stays (not an exact copy)") && said.contains("1 deleted, 2 still sharing a number"), "{said}");
     let doo: serde_json::Value = serde_json::from_slice(&fs::read(project.join("map/war3map.doo.json")).unwrap()).unwrap();
@@ -1363,7 +1390,7 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
     let project = repo.join("maps").join("My Map");
     let map = dir.join("first.w3x");
     pack(&fixture(), &map);
-    unpack(&map, &project);
+    unpack_flat(&map, &project);
     let mut args = vec!["terrain", "split", s(&project)];
     for r in GRID {
         args.extend(["--rect", r]);

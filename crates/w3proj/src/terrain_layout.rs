@@ -826,7 +826,7 @@ pub fn split(files: &mut BTreeMap<String, Vec<u8>>, rects: &[Rect]) -> Result<()
 /// project returns none.
 pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<String, Vec<u8>>> {
     if !is_split_on_disk(map_dir)? {
-        return Ok(BTreeMap::new());
+        return split_incoming(map_dir, files);
     }
     let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE))?)?;
     let pathing: Vec<String> = layout.subterrains.iter().map(crate::terrain_pathing::path).collect();
@@ -852,6 +852,34 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
     files.extend(sliced);
     read_if_there(map_dir, &pathing.iter().map(String::as_str).collect::<Vec<_>>(), files)?;
     Ok(crate::derived::take(files))
+}
+
+/// A sync into a project without a terrain layout yet (a new project): the map's terrain and placed objects are cut
+/// into one subterrain `main` over the whole canvas (`split`), its derived files taken out for the store, as in a split
+/// project. The split layout is the only one a sync writes. The files stay flat, and nothing is returned, where there
+/// is nothing to split or it can't be: a flat terrain file still on disk (a project `flat_on_disk` couldn't convert),
+/// a map without terrain (a campaign), a terrain kept raw, files of the map's own under `terrain/`.
+fn split_incoming(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<String, Vec<u8>>> {
+    if flat_on_disk(map_dir)? || key(files, FLAT_FILE).is_none() {
+        return Ok(BTreeMap::new());
+    }
+    let mut cut = files.clone();
+    if split(&mut cut, &[]).is_err() {
+        return Ok(BTreeMap::new());
+    }
+    *files = cut;
+    Ok(crate::derived::take(files))
+}
+
+/// Whether a project's `map/` folder holds a flat terrain file (text or raw): the layout before the split one became
+/// the only one.
+pub fn flat_on_disk(map_dir: &Path) -> Result<bool> {
+    for name in [FLAT_FILE, FLAT_RAW] {
+        if map_dir.join(name).try_exists().map_err(|e| Error::Project(format!("map/{name} can't be checked: {e}")))? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub use crate::folder_codec::write_changed;

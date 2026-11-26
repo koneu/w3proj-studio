@@ -1046,8 +1046,14 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     };
     // A project with the split terrain layout keeps it: the map's terrain goes into its subterrains, its derived files
     // into the store (`crate::derived`; ones in map/ from before the store existed go, the map's replace them).
-    let split = crate::terrain_layout::is_split_on_disk(&map_dir)?;
+    // A project still in the flat layout (made before the split one became the only one) is converted first, as
+    // `w3proj terrain split` does; one that can't be (its terrain kept raw) stays flat.
+    if !crate::terrain_layout::is_split_on_disk(&map_dir)? && map_dir.join(crate::terrain_layout::FLAT_FILE).is_file() && there(&project.join(MANIFEST))? {
+        let _ = crate::terrain_layout::split_project(project, &[]);
+    }
     let derived = crate::terrain_layout::prepare_sync(&map_dir, &mut ex.files)?;
+    // A new project's terrain is split too (one subterrain over the whole canvas).
+    let split = crate::terrain_layout::is_split_on_disk(&map_dir)? || crate::terrain_layout::is_split(&ex.files)?;
     // The trigger folders keep the names they have on disk; a script Studio generated goes into the store
     // (`crate::trigger_layout::prepare_sync`).
     let script = crate::trigger_layout::prepare_sync(project, &mut ex.files)?;
@@ -1096,7 +1102,11 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
         crate::agent_file::ensure(project, crate::agent_file::Kind::of(project)?)?;
     }
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
-    crate::derived::record_now(project)?;
+    if split {
+        crate::derived::record_synced(project, &derived)?;
+    } else {
+        crate::derived::record_now(project)?;
+    }
     // A generated script lives in the store, not in git, and follows the map's files as Studio wrote it; a kept one is
     // in map/ (a generated one the project had goes).
     crate::derived::sync_script_store(project, script.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())))?;
@@ -1257,7 +1267,7 @@ pub fn create_as(project: &Path, header: Option<MapHeader>, campaign: bool) -> R
         return Err(Error::Project(format!("{} is not empty", project.display())));
     }
     fs::create_dir_all(project.join(MAP_DIR))?;
-    let kind = if campaign { crate::agent_file::Kind::Campaign } else { crate::agent_file::Kind::Flat };
+    let kind = if campaign { crate::agent_file::Kind::Campaign } else { crate::agent_file::Kind::Split };
     let manifest = Manifest {
         format: FORMAT_VERSION,
         map: header,
