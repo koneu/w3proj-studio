@@ -58,7 +58,8 @@
           "properties": {
             "magic": { "$ref": "#/$defs/id" },
             "specialVersion": { "$ref": "#/$defs/u32" },
-            "skinIds": { "type": "boolean", "description": "only where it differs from dooHeader's" }
+            "skinIds": { "type": "boolean", "description": "only where it differs from dooHeader's" },
+            "importedTwice": { "$ref": "#/$defs/importedTwice" }
           }
         },
         "units": {
@@ -67,7 +68,8 @@
           "required": ["magic"],
           "properties": {
             "magic": { "$ref": "#/$defs/id" },
-            "skinIds": { "type": "boolean", "description": "only where it differs from dooHeader's" }
+            "skinIds": { "type": "boolean", "description": "only where it differs from dooHeader's" },
+            "importedTwice": { "$ref": "#/$defs/importedTwice" }
           }
         },
         "regions": {
@@ -75,7 +77,8 @@
           "additionalProperties": false,
           "required": ["version"],
           "properties": {
-            "version": { "enum": [5, 7] }
+            "version": { "enum": [5, 7] },
+            "importedTwice": { "$ref": "#/$defs/importedTwice" }
           }
         }
       }
@@ -131,6 +134,12 @@
         { "type": "string", "pattern": "^bits:[0-9a-fA-F]{1,8}$" }
       ]
     },
-    "range": { "description": "[min, max], min not past max", "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 2, "maxItems": 2 }
+    "range": { "description": "[min, max], min not past max", "type": "array", "items": { "$ref": "#/$defs/u32" }, "minItems": 2, "maxItems": 2 },
+    "importedTwice": {
+      "description": "the creation numbers the imported map holds more than once in this kind, kept as they came (written sorted; left out when there are none). A number found twice that isn't listed is an error (a Git merge's); a write drops a number once the content holds it only once, and never adds one",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/u32" }
+    }
   }
 }

@@ -72,7 +72,8 @@ file).
   - Ids and tile ids accept the forms the codecs write (`hfoo` or `0x…`; tile ids `Ldrt` or `hex:…`), as above.
 - **Not expressible here, checked by the codecs**: in `terrain.json`, rectangles that overlap or reach past the
   canvas, names and folders used twice (folders ignoring case), device names (`CON`, `COM1`) as folders, id ranges
-  that start after they end or overlap, a canvas too large; in a subterrain file, a creation number used twice; in
+  that start after they end or overlap, a canvas too large; in the subterrain files, a creation number used twice that
+  `terrain.json` doesn't list in `importedTwice`; in
   the trigger folders, a variable defined twice differently, the zero character written as U+10FF00, a classic tree
   holding what it can't (nesting, comments, script items); in `pathing.json`, a cell outside the map, twice, or
   setting and clearing one bit.
