@@ -371,7 +371,13 @@ fn connections_and_requests_per_connection_are_bounded() {
     assert_eq!(read_answer(&mut s, &mut pending).unwrap().body, b"ID;PWXL;N;E\r\n");
     let a = read_answer(&mut s, &mut pending).unwrap();
     assert_eq!((a.body, a.headers["connection"].as_str()), (vec![1, 2, 3], "close"));
-    // Connections: four held open, a fifth is refused.
+    // Connections: four held open, a fifth is refused. A server of its own: on the one above a connection that is still
+    // closing counts among the four (then a held one gets the 503 and the fifth its place), and idle ones are dropped
+    // after 0.3 s, which a busy machine can take before the fifth is there (both: the fifth served, 8 of 150 runs
+    // beside a CPU load, 2026-11-26).
+    let patient = Duration::from_secs(30);
+    let (server, _) = start(Limits { read_timeout: patient, head_deadline: patient, ..quick() });
+    let t = target(&server, "Units\\UnitData.slk");
     let held: Vec<TcpStream> = (0..4).map(|_| connect(server.addr())).collect();
     let deadline = Instant::now() + Duration::from_secs(3);
     while server.connections() < 4 && Instant::now() < deadline {
@@ -383,7 +389,7 @@ fn connections_and_requests_per_connection_are_bounded() {
     let a = read_answer(&mut fifth, &mut Vec::new());
     assert!(a.as_ref().is_none_or(|a| a.status == 503), "{a:?}");
     drop(held);
-    // Freed places are taken again (the held ones time out or end).
+    // Freed places are taken again once the held ones have ended.
     let deadline = Instant::now() + Duration::from_secs(5);
     while server.connections() > 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
