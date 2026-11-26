@@ -78,6 +78,8 @@ for (const [n, map] of maps.entries()) {
   const dir = join(tmp, `p${n}`);
   try {
     execFileSync(bin, ["unpack", map, dir, "--game", game], { stdio: "pipe" });
+    // An unpack writes the split terrain (map/terrain/): merged, war3map.w3e.txt is Rust's text of the whole terrain.
+    if (existsSync(join(dir, "map", "terrain", "terrain.json"))) execFileSync(bin, ["terrain", "merge", dir], { stdio: "pipe" });
   } catch (e) {
     skipped++;
     console.log(`skip ${map}: ${String(e.stderr ?? e).trim().split("\n").pop()}`);
