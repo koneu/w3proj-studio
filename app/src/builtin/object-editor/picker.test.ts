@@ -88,3 +88,23 @@ test("game rows show 'Name - Editor Suffix', and the suffix is searched; the sor
   list.setQuery("dalaran");
   assert.deepEqual(list.entries.filter((e) => list.matches(e)).map((e) => e.id), ["nmr3"]);
 });
+
+test("doodads of one name are told apart by their tilesets, which a search finds them by", () => {
+  const field = { id: "dtil", label: "Tilesets", type: "tilesetList", field: "tilesets", repeat: 0 } as FieldMeta;
+  const SETS: Record<string, string> = { ASra: "A", BSar: "B", LSra: "L,F,W,Y", ZZal: "*" };
+  const doodads = {
+    kind: "w3d", facetDefs: [], facets: () => ({}), fields: [field], fieldById: new Map([["dtil", field]]), searchText: () => "",
+    names: new Map(Object.keys(SETS).map((id) => [id, id === "ZZal" ? "Pile" : "Archway"])), baseIds: Object.keys(SETS),
+    levels: () => 1, fieldsFor: () => [field], defaultValue: (id: string) => SETS[id],
+  } as unknown as KindData;
+  const list = pickerList(doodads, { custom: [{ id: "D000", base: "ASra", name: "My Archway" }] });
+  const label = (id: string) => list.entries.find((e) => e.id === id)!.label;
+  assert.equal(label("ASra"), "Archway · Ashenvale");
+  assert.equal(label("BSar"), "Archway · Barrens");
+  assert.equal(label("LSra"), "Archway · Lordaeron Summer, Lordaeron Fall +2");
+  assert.equal(label("ZZal"), "Pile", "every tileset: nothing to tell");
+  assert.equal(label("D000"), "My Archway", "a custom object's own tilesets aren't known here");
+  const found = (q: string) => { list.setQuery(q); return list.entries.filter((e) => list.matches(e)).map((e) => e.id).sort(); };
+  assert.deepEqual(found("archway barrens"), ["BSar"]);
+  assert.deepEqual(found("archway cityscape"), ["LSra"], "a tileset past the two shown");
+});

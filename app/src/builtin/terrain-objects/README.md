@@ -2,6 +2,8 @@
 
 Extension `w3.terrainObjects`. Object Placer of the terrain editor: units, items, doodads and destructables, single or scattered, optionally respecting pathing.
 
+The toolbar's Recent list takes up one of the last five objects placed again (kept per user). The owner, Scatter and its size, like the random options, are settings and stay as left; Place… opens on the tab, search and filters it was left with. In it doodads and destructables name their tilesets (an Archway per tileset).
+
 ## Data
 Reads and writes placed objects in map/war3mapUnits.doo.json and map/war3map.doo.json; reads map/war3map.w3i.json. Settings control placement defaults.
 

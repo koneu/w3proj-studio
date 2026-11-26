@@ -1,5 +1,6 @@
 // Objects as the MCP tools tell about them: names and labels in place of four-letter codes.
 
+import { TILESETS } from "../../lib/terrain/tilesets";
 import type { KindData } from "../../lib/objects/metadata";
 
 export const OBJECT_KINDS: Record<string, string> = {
@@ -42,6 +43,18 @@ export function labelWithSuffix(name: string, suffix: string): string {
 
 /** Where a kind says which tilesets an object is made for. */
 const TILESET_FIELDS = ["btil", "dtil"];
+
+/** The tilesets a game doodad or destructable is made for, to tell apart those of one name (an "Archway" each for
+ *  Ashenvale, Barrens, …): `all` their names, `short` the first two and how many more. Null for one made for every
+ *  tileset ("*"), one that says none, and for other kinds. */
+export function tilesetTag(kind: Pick<KindData, "fieldById" | "defaultValue">, id: string): { short: string; all: string } | null {
+  const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
+  const list = field ? kind.defaultValue(id, field, 0) ?? "" : "";
+  const letters = list.split(",").map((l) => l.trim()).filter((l) => l && l !== "_" && l !== "-");
+  if (!letters.length || letters.includes("*")) return null;
+  const names = letters.map((l) => TILESETS[l] ?? TILESETS[l.toUpperCase()] ?? l);
+  return { short: names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", "), all: names.join(", ") };
+}
 
 const MODEL_FIELDS = ["umdl", "ifil", "bfil", "dfil"];
 const SCALE_FIELDS = [["bmis", "bmas"], ["dmis", "dmas"]];

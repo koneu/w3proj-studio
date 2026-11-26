@@ -6,7 +6,7 @@ import { focusAfterClick, h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { shownValue, type EditorType } from "./fields";
-import { editorSuffix, labelWithSuffix } from "./objectinfo";
+import { editorSuffix, labelWithSuffix, tilesetTag } from "./objectinfo";
 import { builderField, compare, formatFilter, defaultOp, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, tokenize, type FieldFilter, type Op } from "./filters";
 
 const MAX_ROWS = 300;
@@ -20,8 +20,10 @@ interface Entry {
   /** A built-in entry the caller adds (a random item): listed first, found by words only, no facets or fields. */
   extra?: boolean;
   name: string;
-  /** What a row shows: the name with the Editor Suffix ("Mercenary Camp (Lordaeron Winter)", as the World Editor lists it); the name for sorting stays plain. */
+  /** What a row shows: the name with the Editor Suffix ("Mercenary Camp (Lordaeron Winter)", as the World Editor lists it), a doodad's or destructable's tilesets after it; the name for sorting stays plain. */
   label: string;
+  /** All the tilesets of that kind of object, for the row's tooltip. */
+  tilesets?: string;
   facets: Record<string, string>;
   haystack: string;
 }
@@ -48,6 +50,10 @@ export interface PickOptions {
   extra?: { id: string; name: string }[];
   /** Initial search text. */
   query?: string;
+  /** Initially chosen facet values (facet id → values); ones the kind hasn't are left out. */
+  chosen?: Record<string, string[]>;
+  /** The search text and the chosen facet values whenever they are drawn, to be kept for next time. */
+  onState?: (query: string, chosen: Record<string, string[]>) => void;
   /** Icon (data URL) of an entry, loaded as rows are shown. */
   iconOf?: (id: string, base?: string) => Promise<string | null>;
   /** UnitEditorData's value types: a field filter on a choice/list/flags field matches its labels too, and
@@ -70,7 +76,9 @@ export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pin
     const facets = kd.facets(base ?? id);
     // Game objects only: a custom one's own suffix isn't known here, its base's would mislead.
     const suffix = base === undefined ? editorSuffix({ base: id }, kd, (v) => kd.westring?.(v) ?? v) : "";
-    return { id, base, campaign, name, label: labelWithSuffix(name, suffix), facets, haystack: `${name} ${suffix} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
+    const tag = base === undefined && kd.fieldById ? tilesetTag(kd, id) : null;
+    const shownLabel = tag ? `${labelWithSuffix(name, suffix)} · ${tag.short}` : labelWithSuffix(name, suffix);
+    return { id, base, campaign, name, label: shownLabel, tilesets: tag?.all, facets, haystack: `${name} ${suffix} ${tag?.all ?? ""} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
   };
   const entries: Entry[] = [
     ...(opts.custom ?? []).map((c) => entry(c.id, strip(c.name), c.base, c.campaign)),
@@ -133,6 +141,10 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       if (overlay.isConnected) render();
     });
     const { entries, chosen } = list;
+    for (const [facet, values] of Object.entries(opts.chosen ?? {})) {
+      const known = new Set(entries.map((e) => e.facets[facet]));
+      for (const v of values) if (known.has(v)) chosen.get(facet)?.add(v);
+    }
     const finish = (id: string | undefined) => {
       overlay.remove();
       resolve(id === undefined ? undefined : { id });
@@ -253,7 +265,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
           onmouseenter: () => { active = i; for (const [j, r] of [...rowsEl.children].entries()) r.classList.toggle("active", j === i); },
         },
           opts.iconOf ? (e.extra ? h("img.picker-icon.none", { alt: "" }) : icon(e)) : null,
-          h("span.picker-name", {}, e.label),
+          h("span.picker-name", { title: e.tilesets ? `Tilesets: ${e.tilesets}` : "" }, e.label),
           h("code", {}, e.id),
           e.extra ? h("span.badge", { title: "Picked when the game starts" }, "random") : null,
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,
@@ -267,6 +279,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
 
     const render = () => {
       parseQuery();
+      opts.onState?.(search.value, Object.fromEntries([...chosen].filter(([, v]) => v.size).map(([k, v]) => [k, [...v]])));
       shown = entries.filter((e) => matches(e));
       active = Math.max(0, Math.min(active, shown.length - 1));
       countEl.textContent = shown.length > MAX_ROWS ? `${shown.length} matches — showing ${MAX_ROWS}, refine to see more` : `${shown.length} matches`;

@@ -17,6 +17,7 @@ import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from
 import { applyRandom, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
+import { parseRecent, withRecent, type RecentPlaced } from "./recent";
 import { readArea } from "../../lib/terrain/area";
 import { h } from "../../workbench/dom";
 
@@ -49,7 +50,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   /** Type chosen with "Place…", or a random unit, building or item chosen with "Random…". */
   let placing: { kind: string; id: string; name: string; random?: RandomSpec } | null = null;
-  let owner = 0, scatter = false, size = 2;
+  // The owner, Scatter and its size stay as they were left (settings, as the other placement options).
+  const kept = (key: string, low: number, high: number, fallback: number) => {
+    const v = w3.settings.get<number>(key);
+    return typeof v === "number" && Number.isInteger(v) && v >= low && v <= high ? v : fallback;
+  };
+  let owner = kept("terrain.placement.owner", 1, 28, 1) - 1, size = kept("terrain.placement.scatterSize", 1, 10, 2);
+  let scatter = w3.settings.get<boolean>("terrain.placement.scatter") === true;
+  const keepOwner = () => void w3.settings.set("terrain.placement.owner", owner + 1);
+  const RECENT_KEY = "w3.placer.recent";
+  let recent: RecentPlaced[] = parseRecent((() => { try { return localStorage.getItem(RECENT_KEY); } catch { return null; } })());
+  /** The label the object browser gave the type being placed (with its tilesets), else its name. */
+  const labels = new Map<string, string>();
   const respect = () => w3.settings.get<boolean>("terrain.placement.respectPathing");
   const deg = (d: number) => (d * Math.PI) / 180;
 
@@ -176,6 +188,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       entries.push(e);
     }
     ed.objects.insert(entries);
+    noteRecent({ kind, id, label: labels.get(id) ?? name, ...(random ? { random } : {}) });
     if (stroke) stroke.entries.push(...entries);
     else {
       ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
@@ -190,11 +203,12 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); ed.focus(); } });
     return h("label.terrain-place-opt", { title }, box, ` ${label}`);
   };
-  const ownerSel = h("select", { title: "Owner of placed units", onchange: () => { owner = Number(ownerSel.value); ed.focus(); } },
+  const ownerSel = h("select", { title: "Owner of placed units", onchange: () => { owner = Number(ownerSel.value); keepOwner(); ed.focus(); } },
     ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: i === owner }, ownerName(i))));
   const ownerWrap = h("span.terrain-tool-opt", {}, "for ", ownerSel);
   const sizeWrap = h("label.terrain-tool-opt", { title: "Scatter brush radius in tiles" }, "Size ",
-    h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } }));
+    h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); },
+      onchange: () => { void w3.settings.set("terrain.placement.scatterSize", size); } }));
   const densityWrap = h("label.terrain-place-opt", { title: "Scatter density: 100% packs objects as close as their footprints allow (setting terrain.placement.scatterDensity)" }, "Density ",
     h("input", { type: "range", min: "10", max: "100", value: String(Math.round((w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1) * 100)),
       onchange: (e: Event) => { void w3.settings.set("terrain.placement.scatterDensity", Number((e.target as HTMLInputElement).value) / 100); ed.focus(); } }));
@@ -251,8 +265,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const choose = async () => {
     try {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
-      const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"] });
-      if (r) startPlacing({ kind: r.kind, id: r.id, name: r.name });
+      const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"], remember: "place" });
+      if (r) { labels.set(r.id, r.label ?? r.name); startPlacing({ kind: r.kind, id: r.id, name: r.name }); }
     } catch (e) {
       w3.window.showError(String((e as Error).message ?? e));
     }
@@ -281,6 +295,28 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     }
     ed.focus();
   };
+  const recentSel = h("select.terrain-place-recent", { title: "The last objects placed: choose one to place it again",
+    onchange: () => { const r = recent[Number(recentSel.value)]; recentSel.value = ""; if (r) void takeRecent(r); ed.focus(); } });
+  const fillRecent = () => {
+    recentSel.replaceChildren(h("option", { value: "" }, "Recent…"), ...recent.map((r, i) => h("option", { value: String(i) }, r.random ? r.label : `${r.label} (${r.id})`)));
+    recentSel.value = "";
+    recentSel.disabled = !recent.length;
+  };
+  const noteRecent = (placed: RecentPlaced) => {
+    recent = withRecent(recent, placed);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(recent)); } catch { /* not remembered */ }
+    fillRecent();
+  };
+  const takeRecent = async (r: RecentPlaced) => {
+    labels.set(r.id, r.label);
+    if (r.random) { startPlacing({ kind: r.kind, id: r.id, name: r.label, random: r.random }); return; }
+    // A custom object of another map isn't in this one.
+    const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+    const name = await objects.name(r.id, [r.kind]).catch(() => undefined);
+    if (name === undefined) { void w3.window.showWarning(`${r.label} (${r.id}) isn't an object of this map.`); return; }
+    startPlacing({ kind: r.kind, id: r.id, name });
+  };
+
   const select = async (what: { kind: string; id: string; player?: number }) => {
     if (what.id === START.id) startPlacing(START);
     else if (/^[uib]DNR$/.test(what.id)) {
@@ -291,7 +327,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
       startPlacing({ kind: what.kind, id: what.id, name: await objects.name(what.id, [what.kind]).catch(() => undefined) ?? what.id });
     }
-    if (what.kind === "w3u" && typeof what.player === "number" && what.player >= 0 && what.player < 28) { owner = what.player; ownerSel.value = String(owner); }
+    if (what.kind === "w3u" && typeof what.player === "number" && what.player >= 0 && what.player < 28) { owner = what.player; ownerSel.value = String(owner); keepOwner(); }
     update();
     void showGhost(null);
     return true;
@@ -302,15 +338,16 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       onclick: () => void chooseRandom() }, "Random…"),
     h("button", { title: "Place or move a player's start location; saving adds, moves or removes the map's players to match",
       onclick: () => { startPlacing(START); ed.focus(); } }, "Start location"),
-    hint, ownerWrap, variationWrap, rotationWrap, scaleWrap,
+    recentSel, hint, ownerWrap, variationWrap, rotationWrap, scaleWrap,
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
-      () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
+      () => scatter, (v) => { scatter = v; void w3.settings.set("terrain.placement.scatter", v); update(); void showGhost(null); }),
     sizeWrap, densityWrap,
     toggle("Auto cycle random groups", "Every 3 seconds the units and items from a random group are drawn as a random line of the group (maybe the same again), as the World Editor does; setting terrain.placement.autoCycleRandomGroups",
       () => autoCycle(), (v) => void w3.settings.set("terrain.placement.autoCycleRandomGroups", v)),
     toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
       () => respect(), (v) => void w3.settings.set("terrain.placement.respectPathing", v)),
   );
+  fillRecent();
   update();
 
   return {

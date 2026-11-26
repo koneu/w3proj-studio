@@ -1,6 +1,7 @@
 // The "w3.objects" service (see extensions/services.ts): the object browser
 // for other extensions, over game objects and the map's custom objects.
 
+import { tilesetTag } from "./objectinfo";
 import type { W3Api } from "../../extensions/api";
 import type { ObjectsService, PickedObject } from "../../extensions/services";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
@@ -153,6 +154,18 @@ export function soundLabels(w3: W3Api): Promise<string[]> {
   return labels;
 }
 
+/** What a remembering browser was left at; null for nothing or nonsense. */
+function readKept(name: string): { tab: number; query: string; chosen: Record<string, string[]> } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(`w3.picker.${name}`) ?? "null");
+    if (!v || !Number.isInteger(v.tab) || v.tab < 0 || typeof v.query !== "string") return null;
+    const chosen = Object.fromEntries(Object.entries(v.chosen ?? {}).filter((e): e is [string, string[]] => Array.isArray(e[1]) && e[1].every((x) => typeof x === "string")));
+    return { tab: v.tab, query: v.query, chosen };
+  } catch {
+    return null;
+  }
+}
+
 export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFor" | "bringTypes" | "liveObjects" | "onDidEdit">): ObjectsService {
   const icons = iconLoader(w3);
   const images = imageLoader(w3);
@@ -198,7 +211,14 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
     },
     async pick(host, opts): Promise<PickedObject | undefined> {
       const key = opts.kinds.join(",");
-      let tab = Math.min(lastTab.get(key) ?? 0, opts.kinds.length - 1), query = "";
+      // `remember`: the browser opens as it was left (its tab, search and filters), also after a restart.
+      const kept = opts.remember ? readKept(opts.remember) : null;
+      let tab = Math.min(kept?.tab ?? lastTab.get(key) ?? 0, opts.kinds.length - 1), query = kept?.query ?? "";
+      let chosen = kept?.chosen;
+      const keep = (q: string, c: Record<string, string[]>) => {
+        if (!opts.remember) return;
+        try { localStorage.setItem(`w3.picker.${opts.remember}`, JSON.stringify({ tab, query: q, chosen: c })); } catch { /* not remembered */ }
+      };
       for (;;) {
         const kind = opts.kinds[tab];
         const kd = await loadKind(w3, kind);
@@ -206,14 +226,17 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
         // Not awaited: the browser opens at once and labels its values when the types arrive.
         const editorTypes = loadEditorTypes(w3).catch(() => null);
         const r = await pickObject(host, kd, {
-          title: opts.title, custom, query, editorTypes, extra: opts.extra,
+          title: opts.title, custom, query, chosen, onState: keep, editorTypes, extra: opts.extra,
           iconOf: (id, base) => icons(kd, kind, id, base, custom.find((c) => c.id === id)?.icon),
           tabs: opts.kinds.length > 1 ? { labels: opts.kinds.map((k) => KIND_LABELS[k] ?? k), active: tab } : undefined,
         });
         if (!r) return undefined;
-        if ("tab" in r) { tab = r.tab; query = r.query; lastTab.set(key, tab); continue; }
+        // The other kind's facets are its own.
+        if ("tab" in r) { tab = r.tab; query = r.query; chosen = undefined; lastTab.set(key, tab); continue; }
         const c = custom.find((x) => x.id === r.id);
-        return { kind, id: r.id, name: c?.name ?? stripColors(kd.names.get(r.id) ?? r.id), base: c?.base };
+        const name = c?.name ?? stripColors(kd.names.get(r.id) ?? r.id);
+        const tag = c ? null : tilesetTag(kd, r.id);
+        return { kind, id: r.id, name, label: tag ? `${name} · ${tag.short}` : name, base: c?.base };
       }
     },
   };
