@@ -454,10 +454,11 @@ export function retypeCliffs(t: Terrain, stroke: Stroke, cliffGround: string[], 
 
 
 /** Paints ground texture `tex` (index into terrain.groundTiles) under the brush. */
-export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke): boolean {
+export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke, covers = true): boolean {
   let changed = false;
   for (const { i } of cornersIn(t, b)) {
-    stroke.cover(i);
+    // `covers` off: paint inside a cliff brush's stroke, whose covered corners take the cliff type.
+    if (covers) stroke.cover(i);
     const c = t.corners[i];
     if (c.texture === tex) continue;
     stroke.touch(t, i);

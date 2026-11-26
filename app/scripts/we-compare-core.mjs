@@ -40,6 +40,7 @@ export function checkUiActions(actions, where = "ui") {
     const bad = (m) => { throw new Error(`${where}[${i}] ${JSON.stringify(act)}: ${m}`); };
     if (["view", "tab", "tool", "texture", "cliff", "shape"].includes(kind)) { if (typeof a[0] !== "string") bad("wants a name"); }
     else if (kind === "size") { if (!num(a[0])) bad("wants a number"); }
+    else if (kind === "paintToo") { if (a.length) bad("wants nothing"); }
     else if (kind === "sleep") { if (!(num(a[0]) && a[0] >= 0)) bad("wants milliseconds"); }
     // The modifier held during the next drag, as we-drive's --drag-mod (Ctrl and the left button: face the pointer).
     else if (kind === "dragMod") { if (!(a.length === 1 && ["alt", "shift", "ctrl"].includes(a[0]))) bad("wants alt, shift or ctrl"); }

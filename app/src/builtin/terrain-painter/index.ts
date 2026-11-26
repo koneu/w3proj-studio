@@ -119,6 +119,10 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     stepped?: { at: [number, number]; px: [number, number]; next?: { g: [number, number]; px: [number, number] } };
     /** Takes the cliff type the stroke's start appended (claimDefaultCliffType) back out when the stroke changes nothing. */
     takeBack?: () => void;
+    /** A cliff or water stroke that paints the chosen tile too (the World Editor's Apply Texture beside Apply Cliff). */
+    paints?: boolean;
+    /** The cliff brush can do nothing here (a Decrease from the floor): the stroke only paints. */
+    paintOnly?: boolean;
   } | null = null;
 
   /** The World Editor's Enforce Water Height Limits (the terrain editor's switch, on unless set off). */
@@ -152,7 +156,9 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const stamp = (x: number, y: number): boolean => {
     if (!stroke) return false;
     const brush = brushOf(tool, terrain, x, y, size, square);
-    return tool === "paint"
+    // Both at once: the tile first, then the cliff, as the two strokes after each other give the Editor's file.
+    const painted = !!stroke.paints && paintTexture(terrain, brushOf("paint", terrain, x, y, size, square), paintTex, stroke.s, false);
+    const done = stroke.paintOnly ? false : tool === "paint"
       ? paintTexture(terrain, brush, paintTex, stroke.s)
       : tool === "blight" || tool === "unblight"
       ? paintBlight(terrain, brush, tool === "blight", stroke.s)
@@ -161,6 +167,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       : isLayerTool(tool)
       ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s, enforceWater())
       : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : 0, stroke.s);
+    return done || painted;
   };
   /** The brush at a ground point, and along the way from the last one. */
   const applyAt = (p: [number, number, number]) => {
@@ -281,10 +288,16 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const cliffWrap = h("span.terrain-tool-opt", {}, h("label.terrain-tool-opt", { title: "Which cliff new cliffs get (the map's cliff types: Edit Tileset / Terrain Settings)" }, "Cliff type ", cliffSelect));
   /** While the button is held on the Ramp tool: the drag builds on. What the press had to say, if nothing built. */
   let rampRemove = false, rampProblem: string | null = null;
+  /** The tools whose stroke can paint a tile too: the cliff and water brushes (not Studio's own Dry). */
+  const cliffPaints = (t: Tool) => isLayerTool(t) && t !== "dry";
+  let paintToo = false;
+  const paintTooBox = h("input", { type: "checkbox", onchange: () => { paintToo = paintTooBox.checked; setTool(tool); } }) as HTMLInputElement;
+  const paintTooWrap = h("label.terrain-tool-opt.painter-paint-too", { title: "Each stamp paints the chosen ground tile too, as the World Editor's Apply Texture beside Apply Cliff (one undo step)" }, paintTooBox, "Paint texture too");
   const setTool = (t: Tool) => {
     tool = t;
     for (const [k, b] of buttons) b.classList.toggle("active", k === t);
-    texWrap.hidden = t !== "paint";
+    paintTooWrap.hidden = !cliffPaints(t);
+    texWrap.hidden = !(t === "paint" || (paintToo && cliffPaints(t)));
     cliffWrap.hidden = !isLayerTool(t) || t === "dry";
     if (!cliffWrap.hidden) void fillCliffTypes();
     ed.setBrush(null);
@@ -305,7 +318,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("label.terrain-tool-opt", { title: "Brush shape (not for Raise, Lower and ramps: they stay round, as the World Editor's)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
-    cliffWrap, texWrap),
+    cliffWrap, paintTooWrap, texWrap),
   );
   setTool("paint");
   editorsSet.add(ed);
@@ -328,7 +341,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         return true;
       }
       const start = async () => {
-        if (tool === "paint") {
+        const paints = paintToo && cliffPaints(tool);
+        if (tool === "paint" || paints) {
           const i = await ed.ensureGroundTile(paintTile);
           if (i === null) return;
           paintTex = i;
@@ -338,17 +352,21 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const c = terrain.corners[cy * terrain.width + cx];
         // A Decrease from too low a level does nothing, as the editor's (layerTarget): no stroke, no undo step.
         const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), enforceLimits()) : { layer: c.layer };
+        let paintOnly = false;
         if (layer === null) {
           // Past the top is refused with a word (topRefusal); a Decrease from the floor stays quiet, as the editor's.
           const why = c && isLayerTool(tool) ? topRefusal(tool, c.layer, enforceLimits()) : null;
           if (why) void w3.window.showWarning(why);
-          return;
+          // With Paint texture too the tile is painted all the same, as the editor does (painted-with-cliff-floor).
+          if (!paints || !c) return;
+          paintOnly = true;
         }
         // On the palette's default a cliff list without the tileset's default cliff gets it first, as the World
         // Editor's water brush (CAgr CLdi became CAgr CLdi CLgr on Lordaeron Summer; claimDefaultCliffType).
-        const claim = isLayerTool(tool) && tool !== "dry" && cliffType === "default" ? ed.claimDefaultCliffType() : null;
-        if (claim) layer.cliffType = claim.type >= 0 ? claim.type : undefined;
-        stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY], takeBack: claim?.takeBack };
+        const claim = !paintOnly && isLayerTool(tool) && tool !== "dry" && cliffType === "default" ? ed.claimDefaultCliffType() : null;
+        const target: LayerTarget = layer ?? { layer: c?.layer ?? 2 };
+        if (claim) target.cliffType = claim.type >= 0 ? claim.type : undefined;
+        stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer: target, last: performance.now(), px: [p.event.clientX, p.event.clientY], takeBack: claim?.takeBack, paints, paintOnly };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g, [p.event.clientX, p.event.clientY]);
         else applyAt(g);
       };

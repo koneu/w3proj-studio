@@ -108,38 +108,56 @@
     "limit": 40
   },
   {
+    "name": "painted-with-cliff-drag",
+    "description": "flat.w3x; Grass and Increase One at once, size 3, a drag of 4 s from 500,500 to 1000,500: one stroke in both (at 1.5 s the editor, doing both under software rendering, ended its stroke short of the drag; at 4 and 8 s the same file)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1505,282"],["--click","1409,367"],["--click","1456,569"],["--drag","500,500:1000,500@4000"],["--sleep","1500"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+1:"],["size",3],["paintToo"],["texture","Lgrs"],["drag",500,500,1000,500,4000]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-with-cliff-floor",
+    "description": "flat.w3x; a Decrease Two pit (size 3, to level 0), then Grass with Decrease Two still on, clicked on its floor where the cliff brush can do nothing: the tile is painted all the same",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1409,367"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,144"],["--click","748,500"],["--sleep","1500"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["paintToo"],["texture","Lgrs"],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
     "name": "painted-with-cliff-down1",
-    "description": "the editor's tile and cliff brush at once (Grass picked, then Decrease One: both Apply boxes on), one click of size 3: the same file as Studio's Paint stroke followed by its -1 stroke at that spot (branch painted-cliff-type-we, 2026-11-14)",
+    "description": "the editor's tile and cliff brush at once (Grass picked, then Decrease One: both Apply boxes on), one click of size 3: the same file as Studio's -1 stroke with Paint texture too (branch painted-cliff-type-we, 2026-11-14)",
     "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
     "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1441,282"],["--click","1409,367"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
-    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−1:"],["size",3],["click",748,500]]},{"sleep":1000}]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−1:"],["size",3],["paintToo"],["texture","Lgrs"],["click",748,500]]},{"sleep":1000}]},
     "compare": [{"file":"war3map.w3e","as":"w3e"}],
     "limit": 40
   },
   {
     "name": "painted-with-cliff-up1-dirt",
-    "description": "Grass and Increase One at once with Dirt Cliff chosen, size 5: the new cliff is Dirt Cliff (the chosen type, not the tile's), as Studio's two strokes (branch painted-cliff-type-we, 2026-11-14)",
+    "description": "Grass and Increase One at once with Dirt Cliff chosen, size 5: the new cliff is Dirt Cliff (the chosen type, not the tile's), as Studio's one stroke with Paint texture too (branch painted-cliff-type-we, 2026-11-14)",
     "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
     "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1505,282"],["--click","1441,367"],["--click","1488,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
-    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",5],["click",748,500],["tool","+1:"],["cliff","Dirt"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+1:"],["cliff","Dirt"],["size",5],["paintToo"],["texture","Lgrs"],["click",748,500]]},{"sleep":1000}]},
     "compare": [{"file":"war3map.w3e","as":"w3e"}],
     "limit": 40
   },
   {
     "name": "painted-with-cliff-beside-pit",
-    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt picked with Apply Cliff still on (Decrease Two), size 5, clicked beside the pit: a second pit and the Dirt, as Studio's Paint and -2 strokes there (branch painted-cliff-type-we, 2026-11-14)",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt picked with Apply Cliff still on (Decrease Two), size 5, clicked beside the pit: a second pit and the Dirt, as Studio's -2 stroke with Paint texture too there (branch painted-cliff-type-we, 2026-11-14)",
     "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
     "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1409,367"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1488,569"],["--click","960,500"],["--sleep","500"],["--sleep","1000"]]},
-    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",960,500],["tool","−2:"],["size",5],["click",960,500]]},{"sleep":1000}]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","−2:"],["size",5],["paintToo"],["texture","Ldrt"],["click",960,500]]},{"sleep":1000}]},
     "compare": [{"file":"war3map.w3e","as":"w3e"}],
     "limit": 40
   },
   {
     "name": "painted-with-cliff-rock-level",
-    "description": "plateau.w3x; Rock and Level at once, size 3, on the south edge: levels and ground as Studio's two strokes; 7 corners on the rim of the cliff brush's cliff-type stencil differ (cliff-type-stencil.json's known difference next to a cliff) (branch painted-cliff-type-we, 2026-11-14)",
+    "description": "plateau.w3x; Rock and Level at once, size 3, on the south edge: levels and ground as Studio's one stroke with Paint texture too; 7 corners on the rim of the cliff brush's cliff-type stencil differ (cliff-type-stencil.json's known difference next to a cliff) (branch painted-cliff-type-we, 2026-11-14)",
     "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
     "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1505,112"],["--click","1473,282"],["--click","1409,367"],["--click","1456,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
-    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lrok"],["size",3],["click",750,630],["tool","Level:"],["size",3],["click",750,630]]},{"sleep":1000}]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Level:"],["size",3],["paintToo"],["texture","Lrok"],["click",750,630]]},{"sleep":1000}]},
     "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs","expectPaths":["corners.29,28.cliffType","corners.35,28.cliffType","corners.30,29.cliffType","corners.34,29.cliffType","corners.31,30.cliffType","corners.32,30.cliffType","corners.33,30.cliffType"]}],
     "limit": 40
   }

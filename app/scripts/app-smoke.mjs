@@ -8874,6 +8874,24 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }
     }
   }
+  // A cliff tool with "Paint texture too" (the World Editor's Apply Texture and Apply Cliff): one click changes the
+  // levels and the ground, and one undo takes both back. The box is off before, and the paint tool has none.
+  await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
+  await setSize(3);
+  // The tile stays the paint tool's (the check above: it differs from the ground).
+  if (await page.evaluate(`(() => { const b = document.querySelector(".painter-paint-too input"), before = b.checked; b.click(); return before; })()`)) fail("Paint texture too was on before anyone set it");
+  await hands.mouse("mouseMoved", canvas.x + 7, canvas.y - 5);
+  await hands.mouse("mousePressed", canvas.x + 7, canvas.y - 5, 1);
+  await hands.mouse("mouseReleased", canvas.x + 7, canvas.y - 5);
+  await save();
+  if (changed("layer") !== 13 || changed("texture") !== 13) fail(`+1 of size 3 with Paint texture too changed ${changed("layer")} corners' layer and ${changed("texture")} corners' texture, not 13 and 13`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("one undo didn't take the cliff and its paint back"); return; }
+  await page.evaluate(`document.querySelector(".painter-paint-too input").click()`);
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Paint:"]').click()`);
+  if (!(await page.evaluate(`document.querySelector(".painter-paint-too").hidden`))) fail("the Paint tool shows Paint texture too");
+
   // A Decrease that would go below level 0 is no stroke, as the World Editor's (we-compare cliff-floor, 2026-11-14):
   // −2 of size 3 makes a pit on level 0; −2 of size 5 on its floor changes nothing and leaves no undo step.
   const press = async (title, size) => {
