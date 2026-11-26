@@ -11,7 +11,7 @@
 import type { W3Api } from "../../extensions/api";
 import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { isFullPath, joinPath } from "../../lib/paths";
-import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { maxGroundTiles, heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { meleeFlagsAfter } from "../../lib/terrain/owner";
 import { tilesetFlagAfter } from "../../lib/terrain/tilesetflag";
 import { w3eToText } from "../../lib/terrain/w3etext";
@@ -35,7 +35,7 @@ export interface NewMapOptions {
   width: number;
   height: number;
   tileset: string;
-  /** Ground tiles (at most 16: the tileset's own, or a custom list) and the cliff types standing on them. */
+  /** Ground tiles (the tileset's own, or a custom list of at most 64) and the cliff types standing on them. */
   groundTiles: string[];
   cliffTiles: string[];
   /** The tile list differs from the tileset's. */
@@ -193,7 +193,8 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       base.replaceChildren(...tiles.map((x) => h("option", { value: x, selected: x === pick }, `${tileName(x)} (${x})`)));
       tilesSummary.textContent = `${tiles.length} tiles${custom ? " (custom)" : ""} `;
     };
-    // Custom tile list: up to 16 ground tiles from any tileset.
+    // Custom tile list: up to as many ground tiles from any tileset as a new map's (version 12) file holds.
+    const most = maxGroundTiles({ version: 12 });
     const tileList = h("div.newmap-tiles", { hidden: true });
     const editTiles = () => {
       const count = h("div.muted");
@@ -203,8 +204,8 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       });
       const sync = () => {
         const picked = boxes.filter((b) => b.box.checked).map((b) => b.t.id);
-        for (const b of boxes) b.box.disabled = !b.box.checked && picked.length >= 16;
-        count.textContent = `${picked.length} of at most 16 tiles`;
+        for (const b of boxes) b.box.disabled = !b.box.checked && picked.length >= most;
+        count.textContent = `${picked.length} of at most ${most} tiles`;
         if (picked.length) {
           tiles = picked;
           custom = picked.join() !== current().tiles.map((x) => x.id).join();
@@ -260,7 +261,7 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       row("Size", width, " × ", height, playable),
       row("Tileset", tileset),
       h("div.newmap-row", {}, h("span.newmap-label", {}, "Ground tiles"), tilesSummary,
-        h("button", { title: "Choose up to 16 ground tiles from any tileset", onclick: (e: Event) => { e.preventDefault(); if (tileList.hidden) editTiles(); else tileList.hidden = true; } }, "Edit…")),
+        h("button", { title: "Choose the ground tiles, from any tileset (at most 64, as the World Editor)", onclick: (e: Event) => { e.preventDefault(); if (tileList.hidden) editTiles(); else tileList.hidden = true; } }, "Edit…")),
       tileList,
       row("Base tile", base),
       row("Cliff level", layer, h("span.muted", {}, " initial ground height")),

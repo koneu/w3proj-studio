@@ -12,7 +12,7 @@ import { groundLimitText } from "./limits";
 import { variationText } from "./values";
 import { savedLife } from "./doodadrules";
 import { doodadGround } from "./objheights";
-import { drawnGroundTiles, paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterLevelWanted, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { maxGroundTiles, drawnGroundTiles, paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterLevelWanted, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -418,7 +418,7 @@ export function setUnitChoices(o: UnitChoices, e?: UnitEntry) {
 export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[] = [], own?: readonly string[]): number {
   const at = paintSlot(t, tile, own);
   if (at >= 0) return at;
-  if (t.groundTiles.length >= 16) throw new Error(`This map already has 16 ground tiles (${t.groundTiles.join(", ")}). Use one of those.`);
+  if (t.groundTiles.length >= maxGroundTiles(t)) throw new Error(`This map already has ${t.groundTiles.length} ground tiles (${t.groundTiles.join(", ")}), the most its file can hold. Use one of those.`);
   settleDrawnList(t, own);
   t.groundTiles.push(tile);
   // The list no longer matches the tileset's own: the game goes by this flag.

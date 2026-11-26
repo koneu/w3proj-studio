@@ -155,8 +155,16 @@ test("a tile not in the map's list gets a slot, while there's room", () => {
   assert.deepEqual([t.customTilesets, t.customTilesetsRaw], own);
   assert.equal(groundSlot(t, "Lgrs"), 2);
   assert.deepEqual([t.customTilesets, t.customTilesetsRaw], [true, 1]);
-  t.groundTiles = Array.from({ length: 16 }, (_, i) => `T${i}`);
+  // A version 11 file's corner holds 4 bits: 16 tiles. A version 12's holds 6: 64, the World Editor's limit too.
+  const sixteen = () => Array.from({ length: 16 }, (_, i) => `T${i}`);
+  t.version = 11;
+  t.groundTiles = sixteen();
   assert.throws(() => groundSlot(t, "Lgrs"), /already has 16/);
+  t.version = 12;
+  t.groundTiles = sixteen();
+  assert.equal(groundSlot(t, "Lgrs"), 16);
+  t.groundTiles = Array.from({ length: 64 }, (_, i) => `T${i}`);
+  assert.throws(() => groundSlot(t, "Lgrs"), /already has 64/);
 });
 
 test("custom tilesets 0: the paint tools' slot is the one drawn as the tile (the tileset's own list, not the file's)", () => {

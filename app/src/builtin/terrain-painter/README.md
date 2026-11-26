@@ -4,6 +4,8 @@ Extension `w3.terrainPainter`. Terrain tools (raise, lower, plateau, smooth, tex
 
 A cliff or water tool can paint the chosen tile too ("Paint texture too", the World Editor's Apply Texture beside Apply Cliff): each stamp paints, then moves the ground, in one undo step; where the cliff brush can do nothing the tile is painted all the same.
 
+The ground tile list takes as many tiles as the map's file has room for, as the World Editor's Modify Tileset: 64 (version 12), 16 (version 11).
+
 ## Data
 Reads and writes the terrain (map/war3map.w3e through the terrain viewer's document); tool brushes are described in brush.ts, file.ts.
 

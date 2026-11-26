@@ -99,7 +99,7 @@ import { judgedHidden, playerRaces, StartJudge, startPreviewHidden, startPreview
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { maxGroundTiles, drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -167,7 +167,6 @@ async function tileCatalog(w3: W3Api): Promise<Map<string, { path: string; name:
 }
 
 /** Maps hold at most this many ground tile types (World Editor limit). */
-const MAX_GROUND_TILES = 16;
 
 /** A ground tile texture. The map's own import wins; otherwise HD/DE modes use
  *  the Reforged "_Diffuse" texture (the plain name is the classic one). */
@@ -2360,8 +2359,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (terrain.groundTiles.length !== listed) { void syncTileList(); minimapStale.set(); }
             return have;
           }
-          if (terrain.groundTiles.length >= MAX_GROUND_TILES) {
-            w3.window.showWarning(`This map already uses ${MAX_GROUND_TILES} ground tile types, the most a map can have.`);
+          if (terrain.groundTiles.length >= maxGroundTiles(terrain)) {
+            w3.window.showWarning(`This map already uses ${maxGroundTiles(terrain)} ground tile types, the most its file can hold.`);
             return null;
           }
           const drawnAsOwn = terrain.customTilesetsRaw === 0;
@@ -5002,7 +5001,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           replaceGroundTiles: (tiles) => {
             if (!tiles.length) return;
-            changeTileList(tiles.slice(0, MAX_GROUND_TILES), (old) => Math.min(old, Math.min(tiles.length, MAX_GROUND_TILES) - 1));
+            const most = maxGroundTiles(terrain);
+            changeTileList(tiles.slice(0, most), (old) => Math.min(old, Math.min(tiles.length, most) - 1));
           },
           mapTileset: async () => {
             let id: string | null = null;
@@ -5497,7 +5497,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (!names.includes(req.from)) throw new Error(`${req.from} isn't one of this map's ground tiles: ${names.join(", ")}.`);
                 // From here to the commit there is no wait: a run that replaces nothing takes the added tile back.
                 const added = tryEnsureTile(req.to);
-                if (added.slot === null) throw new Error("This map has 16 ground tiles, the most it can have: remove one first.");
+                if (added.slot === null) throw new Error(`This map has ${terrain.groundTiles.length} ground tiles, the most its file can hold: remove one first.`);
                 to = added.slot;
                 takeBack = added.takeBack;
                 // Taken after adding: that may have settled the list (settleDrawnList), each slot drawn as before.

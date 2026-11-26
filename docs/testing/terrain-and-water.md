@@ -143,3 +143,5 @@ still lifts low ground under the brush (as with it on) and only leaves the dry r
   on all sides (Studio 16); HD's dark ground keeps 8 % of the lit ground's brightness (Studio 14 %). Studio: area.ts
   `darkWaterCorners`, renderer.ts `HD_WATER_EDGE`. HillsbradCreek's east and north water (the verify camera, HD), half
   colour from the editor's: 45 and 34 px before, 6 and 9 after; SD 2 and 7.
+
+- **Ground tiles: the limit is 64** (2026-11-26, we-drive HD): flat.w3x (w3e version 12) with 20 and with all 64 of Terrain.slk's first tiles and a patch of each, custom tileset flag 1: the editor draws every patch (View Entire Map) and its save keeps the list and every corner. Advanced > Modify Tileset (260,41 then 288,61) counts "Total Texture Space Used 16, Remaining 48" ("Cliff Texture Space" 4 of 15) and its Add Tile makes a 17th, which the save keeps (an additional texture's swatch at 613,600, Add Tile 438,676, OK 848,708). Studio's 16 was wrong. With the flag 0 the editor takes the tileset's own list (6 tiles for Lordaeron Summer) and sets every other slot's corners to 0.

@@ -148,6 +148,11 @@ export function paintSlot(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">,
 /** The most ground tiles a w3e's list has room for (the corner's 4 bits of a version 11 file). */
 const MAX_GROUND_LIST = 16;
 
+/** The most ground tiles a map's file has room for, the World Editor's own limit too (its Modify Tileset counts the
+ *  space used out of 64, and adds a 17th: we-drive 2026-11-26): a version 12 corner names one in 6 bits, a version 11
+ *  one in 4. */
+export const maxGroundTiles = (t: Pick<Terrain, "version">) => (t.version === 12 ? 64 : MAX_GROUND_LIST);
+
 /** The terrain as a save writes it. With the flag 0 the World Editor's save writes the tileset's own list, whole, as
  *  the file's ground list, whatever the file's was (another order, 3 or 9 tiles), and a corner on a slot past its end
  *  gets slot 0, its first tile: what each slot was drawn with stays. The flag and the cliff list stay (we-compare

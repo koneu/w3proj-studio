@@ -8,13 +8,13 @@
 import type { EditorInstance, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService } from "../../extensions/services";
 import { MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
+import { maxGroundTiles } from "../../lib/terrain/w3e";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { h } from "../../workbench/dom";
 
 /** The tab's document. */
 export const SETTINGS_DOC = "w3:terrain-settings";
 /** Maps hold at most this many ground tile types (World Editor limit). */
-export const MAX_GROUND_TILES = 16;
 
 export interface SettingsDeps {
   /** The project's open terrain editor, or null. */
@@ -71,7 +71,7 @@ export function settingsEditor(w3: W3Api, el: HTMLElement, deps: SettingsDeps): 
     const facts: [string, string][] = [
       ["Tileset", `${nameOf(terrain.tileset)} (${terrain.tileset})`],
       ["Canvas", `${terrain.width - 1} × ${terrain.height - 1} tiles (${terrain.width} × ${terrain.height} corners), corner 0,0 at ${terrain.offsetX}, ${terrain.offsetY}. Map Size changes it.`],
-      ["w3e version", `${terrain.version} (up to ${MAX_GROUND_TILES} ground tiles, ${MAX_CLIFF_TYPES} cliff types)`],
+      ["w3e version", `${terrain.version} (up to ${maxGroundTiles(terrain)} ground tiles, ${MAX_CLIFF_TYPES} cliff types)`],
       ["Custom tile list", terrain.customTilesetsRaw === 0 ? "no: the tileset's own tiles" : "yes"],
       ["Layout", layout ? `split into ${layout.subterrains} subterrains (map/terrain/terrain.json)${ed.partial ? ", some closed" : ""}` : "flat (map/war3map.w3e.txt)"],
     ];
@@ -111,14 +111,14 @@ export function settingsEditor(w3: W3Api, el: HTMLElement, deps: SettingsDeps): 
     for (const id of names.keys()) if (!inList.has(id)) byTileset.set(id[0], [...(byTileset.get(id[0]) ?? []), id]);
     const own = byTileset.get(terrain.tileset) ?? [];
     byTileset.delete(terrain.tileset);
-    const full = t.length >= MAX_GROUND_TILES;
+    const full = t.length >= maxGroundTiles(terrain);
     const addTile = h("select", {
       "data-settings": "add-tile",
-      title: full ? `A map holds ${MAX_GROUND_TILES} ground tiles: remove one first` : "Add a ground tile to the end of the map's list; one undo step",
+      title: full ? `This map's file holds ${maxGroundTiles(terrain)} ground tiles: remove one first` : "Add a ground tile to the end of the map's list; one undo step",
       disabled: full || !ed.editable,
       onchange: () => { const id = addTile.value; if (id) tryIt(() => ed.replaceGroundTiles([...t, id])); },
     },
-    h("option", { value: "", selected: true }, `Add tile… (${t.length}/${MAX_GROUND_TILES})`),
+    h("option", { value: "", selected: true }, `Add tile… (${t.length}/${maxGroundTiles(terrain)})`),
     ...(own.length ? [h("optgroup", { label: TILESETS[terrain.tileset] ?? terrain.tileset }, ...own.map((id) => h("option", { value: id }, `${names.get(id) ?? id} (${id})`)))] : []),
     ...[...byTileset].sort(([x], [y]) => (TILESETS[x] ?? x).localeCompare(TILESETS[y] ?? y))
       .map(([ts, ids]) => h("optgroup", { label: TILESETS[ts] ?? ts }, ...ids.map((id) => h("option", { value: id }, `${names.get(id) ?? id} (${id})`)))));

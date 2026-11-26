@@ -32,3 +32,12 @@ test("a cliff list of three and corners on number 2 round-trip (example map 29: 
   // The text's first row is the north one.
   assert.deepEqual(t.corners.slice(10, 15).map((c) => c.cliffTexture), [15, 2, 15, 2, 15]);
 });
+
+test("tile numbers up to 63 (more tiles than the World Editor's 16) round-trip", () => {
+  // The grid's digits for 15, 16, 35, 36 and 63: past base 36 they go on through the capitals, "+" and "/".
+  const ids = Array.from({ length: 64 }, (_, i) => `T${String(i).padStart(3, "0")}`).join(" ");
+  const text = TEXT.replace("ground Ldrt Lgrs Lrok", `ground ${ids}`).replace("[texture]\n12012\n20120\n01201", "[texture]\nfgzA/\n00000\n00000");
+  const bytes = w3eFromText(text);
+  assert.equal(w3eToText(bytes), text);
+  assert.deepEqual(parseW3e(bytes).corners.slice(10, 15).map((c) => c.texture), [15, 16, 35, 36, 63]);
+});
