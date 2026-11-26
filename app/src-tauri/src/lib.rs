@@ -261,10 +261,21 @@ async fn terrain_split(root: String, rects: Vec<String>) -> CmdResult<Value> {
         .map_err(err)?
 }
 
-/// Merges a split terrain back into `map/war3map.w3e.txt` and the flat object files (`backend::flatview::merge`).
+/// A new project's first terrain and placed objects (New Map), given as the flat files, written as the split layout
+/// (`backend::flatview::create`): no flat terrain file reaches the disk.
 #[tauri::command]
-async fn terrain_merge(root: String) -> CmdResult<Value> {
-    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::merge(&root)?).map_err(err))
+async fn terrain_create(root: String, files: std::collections::BTreeMap<String, String>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::create(&root, files)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// Converts a project opened in the app whose terrain is still flat, its chapter maps too (`backend::flatview::
+/// convert_on_open`): what was converted, what stayed flat and why, and the message for the user. Called once per open,
+/// before the project's files are listed (not by the refreshes that read `project_open` again).
+#[tauri::command]
+async fn terrain_convert_on_open(path: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::convert_on_open(&path)?).map_err(err))
         .await
         .map_err(err)?
 }
@@ -1375,7 +1386,8 @@ pub fn run() {
             script_record,
             script_set_mode,
             terrain_split,
-            terrain_merge,
+            terrain_create,
+            terrain_convert_on_open,
             terrain_merge_hook,
             terrain_relayout,
             terrain_relayout_undo,

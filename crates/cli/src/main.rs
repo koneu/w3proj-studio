@@ -671,7 +671,9 @@ enum Cmd {
         #[arg(long)]
         read_only: bool,
     },
-    /// Print one file from a map to stdout.
+    /// Print one file from a map to stdout. MAP may be a project folder: then FILE is under its map/ and is printed as
+    /// W3Proj Studio reads it (war3map.w3e.txt and the placed objects' files assembled from map/terrain/, pathing,
+    /// shadows and the minimap from .w3proj/derived/).
     Cat { map: PathBuf, file: String },
     /// List the format definitions in use (built-in, W3PROJ_FORMATS, project).
     Formats {
@@ -1227,7 +1229,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Cmd::Cat { map, file } => {
-            let bytes = mpq::Archive::open(&map)?.read(&file)?;
+            let bytes = if map.join(w3proj::project::MANIFEST).is_file() {
+                let path = file.split(['/', '\\']).fold(map.join(w3proj::project::MAP_DIR), |p, c| p.join(c));
+                backend::read_bytes(&path).map_err(|e| anyhow::anyhow!("{e}"))?
+            } else {
+                mpq::Archive::open(&map)?.read(&file)?
+            };
             write_stdout(&bytes)?;
         }
     }

@@ -1,6 +1,7 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { adoptOldTabKeys, tabsKey } from "./tabmemory";
 import { timeLimit } from "./timelimit";
+import { convertFlatTerrain } from "./layoutconvert";
 import { followGraphicsMode } from "./graphicsmode";
 import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
@@ -374,7 +375,12 @@ export class Workbench {
       output: { channel: (name) => wb.output.channel(name) },
       workspace: {
         project: () => wb.workspace.project(),
-        open: (p) => wb.workspace.open(p),
+        // A project still in the flat terrain layout is converted first (layoutconvert.ts), then told once it is open.
+        open: async (p) => {
+          const tell = await convertFlatTerrain(invoke, p);
+          await wb.workspace.open(p);
+          tell((severity, m) => void wb.notifications.show(severity, m, []));
+        },
         close: () => wb.workspace.close(),
         files: () => wb.workspace.files(),
         filesReady: () => wb.workspace.filesReady(),

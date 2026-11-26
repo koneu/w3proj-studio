@@ -551,9 +551,116 @@ pub fn relayout_undo(root: &str, id: u64, redo: bool) -> CmdResult<layout::Conve
     layout::restore_layout(Path::new(root), now, to).map_err(err)
 }
 
-/// "Merge Subterrains" (`terrain_merge`): the split terrain back into `map/war3map.w3e.txt` and the flat object files.
-pub fn merge(root: &str) -> CmdResult<layout::Converted> {
-    layout::merge_project(Path::new(root)).map_err(err)
+/// "terrain_create" (New Map): a new project's first terrain and placed objects, given as the flat files (`files`: names
+/// of `FLAT_NAMES`, relative to `map/`), written as the split layout with one subterrain `main` over the canvas; the
+/// flat files never reach the disk. `.gitignore` gets the derived files' store, where the map's pathing, shadows and
+/// minimap are written next (by their `map/` names, `write_view`). Refused, nothing written, when the project has a
+/// terrain already (either layout) or the files can't be split.
+pub fn create(root: &str, files: std::collections::BTreeMap<String, String>) -> CmdResult<layout::Converted> {
+    let project = Path::new(root);
+    let map_dir = project.join(w3proj::project::MAP_DIR);
+    if layout::is_split_on_disk(&map_dir).map_err(err)? || layout::flat_on_disk(&map_dir).map_err(err)? {
+        return Err("the project has a terrain already".into());
+    }
+    let mut cut = std::collections::BTreeMap::new();
+    for (name, text) in files {
+        let Some(flat) = FLAT_NAMES.iter().find(|n| n.eq_ignore_ascii_case(&name)) else {
+            return Err(format!("map/{name} isn't a terrain or placed objects file ({})", FLAT_NAMES.join(", ")));
+        };
+        if exists_checked(&map_dir.join(flat))? {
+            return Err(format!("map/{flat} is there already"));
+        }
+        cut.insert(flat.to_string(), text.into_bytes());
+    }
+    layout::split(&mut cut, &[]).map_err(err)?;
+    std::fs::create_dir_all(&map_dir).map_err(err)?;
+    let written = layout::write_changed(&map_dir, &cut).map_err(err)?;
+    let mut done = layout::Converted { written: written.iter().map(|p| format!("{}/{p}", w3proj::project::MAP_DIR)).collect(), removed: Vec::new() };
+    if w3proj::derived::ensure_lines(project, &w3proj::derived::IGNORED).map_err(err)? {
+        done.written.push(".gitignore".into());
+    }
+    Ok(done)
+}
+
+/// What opening a project did to a terrain still in the flat layout (`convert_on_open`): the split layout is the only
+/// one now (docs/terrain-subterrains-spec.md, decision of 2026-11-26).
+#[derive(Serialize, Debug, Default, PartialEq)]
+pub struct OpenConversion {
+    /// The projects converted: "" the opened one, `maps/<chapter>` a chapter map of the campaign opened.
+    pub converted: Vec<String>,
+    /// The projects left as they were, each with why.
+    pub kept: Vec<(String, String)>,
+    /// What to tell the user, in plain words; None when nothing was flat.
+    pub message: Option<String>,
+}
+
+/// "terrain_convert_on_open": a project opened in the app whose terrain is still flat (`map/war3map.w3e.txt` and the
+/// flat object files, the layout before the split one became the only one) is converted as `w3proj terrain split` does
+/// (one subterrain `main` over the canvas, derived files into `.w3proj/derived/`), the chapter maps of a campaign too.
+/// One that can't be (its terrain kept raw, objects sharing a creation number, …) stays as it is, and the message says
+/// why. A project whose layout can't be told is left alone: reading its files says what is wrong.
+pub fn convert_on_open(path: &str) -> CmdResult<OpenConversion> {
+    let root = crate::project_root(path);
+    let mut done = OpenConversion::default();
+    if !exists_checked(&root.join(w3proj::project::MANIFEST))? {
+        return Ok(done);
+    }
+    let mut projects = vec![(String::new(), root.clone())];
+    let maps = root.join(w3proj::project::MAPS_DIR);
+    if maps.is_dir() {
+        let mut chapters: Vec<(String, PathBuf)> = std::fs::read_dir(&maps)
+            .map_err(|e| format!("{}: {e}", maps.display()))?
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && e.path().join(w3proj::project::MANIFEST).is_file())
+            .map(|e| (format!("{}/{}", w3proj::project::MAPS_DIR, e.file_name().to_string_lossy()), e.path()))
+            .collect();
+        chapters.sort();
+        projects.extend(chapters);
+    }
+    for (rel, project) in projects {
+        let map_dir = project.join(w3proj::project::MAP_DIR);
+        let (Ok(false), Ok(true)) = (layout::is_split_on_disk(&map_dir), layout::flat_on_disk(&map_dir)) else { continue };
+        match layout::split_project(&project, &[]) {
+            Ok(_) => done.converted.push(rel),
+            Err(e) => done.kept.push((rel, kept_reason(&map_dir, &e.to_string()))),
+        }
+    }
+    // A chapter's store and record are local, as an unpack of the campaign leaves them (`CHAPTERS_IGNORED`).
+    if done.converted.iter().any(|r| !r.is_empty()) {
+        w3proj::derived::ensure_lines(&root, &w3proj::derived::CHAPTERS_IGNORED).map_err(err)?;
+    }
+    done.message = open_message(&done);
+    Ok(done)
+}
+
+/// Why a flat terrain stayed flat, in plain words: a raw one by its file, else the split's refusal.
+fn kept_reason(map_dir: &Path, refusal: &str) -> String {
+    if !map_dir.join(layout::FLAT_FILE).is_file() {
+        return "its terrain is kept as the map's own binary file (map/war3map.w3e), which can't be cut into subterrains".into();
+    }
+    format!("its terrain can't be cut into subterrains without a change: {}", refusal.trim_end_matches('.'))
+}
+
+fn open_message(done: &OpenConversion) -> Option<String> {
+    let name = |rel: &str| if rel.is_empty() { "This project".to_string() } else { format!("The chapter map {rel}") };
+    let mut lines = Vec::new();
+    if !done.converted.is_empty() {
+        let which = if done.converted == [""] {
+            "This project's terrain".to_string()
+        } else {
+            let list: Vec<String> = done.converted.iter().map(|r| if r.is_empty() { "this project".to_string() } else { r.clone() }).collect();
+            format!("The terrain of {}", list.join(", "))
+        };
+        lines.push(format!(
+            "{which} was in the old single-file layout (map/war3map.w3e.txt) and is now kept in map/terrain/, the layout every project uses: \
+             one subterrain, main, over the whole map. The map itself is the same. Pathing, shadows and the minimap moved to .w3proj/derived/, \
+             which git ignores. Commit the change."
+        ));
+    }
+    for (rel, why) in &done.kept {
+        lines.push(format!("{} keeps its terrain in the old single-file layout (map/war3map.w3e.txt): {why}. It opens and saves as before.", name(rel)));
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 /// "terrain_open_state": which subterrains of a split project are open (`w3proj::terrain_open::state`: names, rectangles,
@@ -855,9 +962,9 @@ mod tests {
         let _ = fs::remove_dir_all(flat.parent().unwrap());
     }
 
-    /// The commands behind "Split Terrain into Subterrains…" and "Merge Subterrains": a split the canvas can't keep
-    /// is refused with the corner and writes nothing; `2x2` and one `main` split; a merge gives the flat files back
-    /// byte for byte.
+    /// The split command (the Terrain Layout editor's Split Terrain of a project still flat): a split the canvas can't keep
+    /// is refused with the corner and writes nothing; `2x2` and one `main` split; a merge (`w3proj terrain merge`) gives
+    /// the flat files back byte for byte.
     #[test]
     fn split_and_merge_commands() {
         let (flat, split_dir) = split_mini("commands");
@@ -877,10 +984,10 @@ mod tests {
                 assert!(flat.join("map/terrain").join(n).join("terrain.txt").is_file(), "{n}");
             }
             assert!(split(&root, &rects).unwrap_err().contains("split already"));
-            merge(&root).unwrap();
+            layout::merge_project(&flat).unwrap();
             assert_eq!(snapshot(&flat), before, "split and merged again: the same files");
         }
-        assert!(merge(&root).unwrap_err().contains("isn't split"));
+        assert!(layout::merge_project(&flat).unwrap_err().to_string().contains("isn't split"));
         let _ = fs::remove_dir_all(split_dir.parent().unwrap());
     }
 
@@ -1046,5 +1153,108 @@ mod tests {
         assert!(listed.iter().any(|f| f.path == "map/war3map.w3e.txt"));
         assert!(!listed.iter().any(|f| f.path == "map/war3map.doo.json"), "which object kinds there are can't be told");
         let _ = fs::remove_dir_all(split.parent().unwrap());
+    }
+
+    fn fresh_dir(test: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("w3proj-backend-open-{test}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn mini() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map")
+    }
+
+    /// Opening a flat project converts it once: the layout's files there, no flat terrain or object file and no derived
+    /// file left in map/, the store ignored by git, the map read back through the flat names as it was; a second open
+    /// finds nothing to do and says nothing.
+    #[test]
+    fn opening_a_flat_project_converts_it() {
+        let dir = fresh_dir("flat");
+        copy_dir(&mini(), &dir);
+        let before: Vec<Vec<u8>> = FLAT_NAMES.iter().map(|n| fs::read(dir.join("map").join(n)).unwrap()).collect();
+        let done = convert_on_open(&dir.to_string_lossy()).unwrap();
+        assert_eq!(done.converted, [""]);
+        assert!(done.kept.is_empty());
+        assert!(done.message.as_deref().is_some_and(|m| m.contains("map/terrain/") && m.starts_with("This project's terrain")), "{:?}", done.message);
+        assert!(dir.join("map/terrain/terrain.json").is_file() && dir.join("map/terrain/main/terrain.txt").is_file());
+        for (name, bytes) in FLAT_NAMES.iter().zip(&before) {
+            assert!(!dir.join("map").join(name).exists(), "{name} left on disk");
+            assert_eq!(&read_bytes(&dir.join("map").join(name)).unwrap(), bytes, "{name} reads as before");
+        }
+        assert!(!dir.join("map/war3map.wpm").exists() && dir.join(".w3proj/derived/war3map.wpm").is_file());
+        let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert!(w3proj::derived::IGNORED.iter().all(|l| ignore.contains(l)), "{ignore}");
+        // The path of the manifest opens the same project.
+        let again = convert_on_open(&dir.join("w3proj.toml").to_string_lossy()).unwrap();
+        assert_eq!(again, OpenConversion::default());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A terrain kept raw can't be split: the project stays as it was, and the message says why in plain words.
+    #[test]
+    fn a_raw_terrain_stays_flat_and_says_why() {
+        let dir = fresh_dir("raw");
+        copy_dir(&mini(), &dir);
+        fs::rename(dir.join("map/war3map.w3e.txt"), dir.join("map/war3map.w3e")).unwrap();
+        let listed = |d: &Path| crate::list_tree(d).unwrap();
+        let before = listed(&dir);
+        let done = convert_on_open(&dir.to_string_lossy()).unwrap();
+        assert!(done.converted.is_empty());
+        assert_eq!(done.kept.len(), 1);
+        let m = done.message.unwrap();
+        assert!(m.starts_with("This project keeps its terrain in the old single-file layout") && m.contains("binary file"), "{m}");
+        assert_eq!(listed(&dir), before, "nothing written");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A campaign's chapter maps are converted too; the campaign's `.gitignore` covers their stores.
+    #[test]
+    fn a_campaigns_chapter_maps_are_converted() {
+        let dir = fresh_dir("campaign");
+        w3proj::project::create_as(&dir, None, true).unwrap();
+        copy_dir(&mini(), &dir.join("maps/One"));
+        // Control: a folder under maps/ that isn't a project is left alone.
+        copy_dir(&mini().join("map"), &dir.join("maps/Loose/map"));
+        let done = convert_on_open(&dir.to_string_lossy()).unwrap();
+        assert_eq!(done.converted, ["maps/One"]);
+        assert!(done.message.unwrap().contains("maps/One"));
+        assert!(dir.join("maps/One/map/terrain/terrain.json").is_file() && !dir.join("maps/One/map/war3map.w3e.txt").exists());
+        assert!(dir.join("maps/Loose/map/war3map.w3e.txt").is_file());
+        let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert!(w3proj::derived::CHAPTERS_IGNORED.iter().all(|l| ignore.contains(l)), "{ignore}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// New Map's terrain goes straight into the split layout: no flat file on disk, the flat names read the files given,
+    /// and a second terrain is refused with nothing written.
+    #[test]
+    fn a_new_maps_terrain_is_written_split() {
+        let dir = fresh_dir("create");
+        w3proj::project::create_as(&dir, None, false).unwrap();
+        let files: std::collections::BTreeMap<String, String> =
+            FLAT_NAMES.iter().map(|n| (n.to_string(), fs::read_to_string(mini().join("map").join(n)).unwrap())).collect();
+        let root = dir.to_string_lossy().into_owned();
+        let done = create(&root, files.clone()).unwrap();
+        assert!(done.written.iter().any(|p| p == "map/terrain/terrain.json") && done.written.iter().any(|p| p == ".gitignore"), "{done:?}");
+        for (name, text) in &files {
+            assert!(!dir.join("map").join(name).exists(), "{name} on disk");
+            assert_eq!(crate::read_text(&dir.join("map").join(name)).unwrap(), *text);
+        }
+        // A derived file written by its map/ name lands in the store.
+        crate::write_bytes(&dir.join("map/war3map.shd"), b"shadows").unwrap();
+        assert!(!dir.join("map/war3map.shd").exists() && dir.join(".w3proj/derived/war3map.shd").is_file());
+        let before = crate::list_tree(&dir).unwrap();
+        assert!(create(&root, files.clone()).unwrap_err().contains("has a terrain already"));
+        assert_eq!(crate::list_tree(&dir).unwrap(), before);
+        // Control: a name that isn't a terrain file is refused.
+        let other = fresh_dir("create-other");
+        w3proj::project::create_as(&other, None, false).unwrap();
+        let mut odd = files;
+        odd.insert("war3map.w3i.json".into(), "{}".into());
+        assert!(create(&other.to_string_lossy(), odd).unwrap_err().contains("war3map.w3i.json"));
+        assert!(!other.join("map/terrain").exists());
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&other);
     }
 }

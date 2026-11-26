@@ -467,17 +467,27 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await w3.editors.closeAll();
   await w3.workspace.open(o.dir);
   const root = w3.workspace.project()!.root;
-  const json = async (path: string, value: unknown) =>
-    w3.workspace.writeText(path, await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(value) }));
+  const canonical = async (path: string, value: unknown) => w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(value) });
+  const json = async (path: string, value: unknown) => w3.workspace.writeText(path, await canonical(path, value));
   const { doodads, units } = placements(t);
   const [sx, sy] = playableCentre(t);
+  // The terrain, placed objects and (empty) regions go straight into map/terrain/, one subterrain main over the map: the
+  // only layout (docs/terrain-subterrains-spec.md). From here on the editors read and write them by their flat names
+  // (crates/backend flatview.rs), and the derived files written below land in .w3proj/derived/.
+  await w3.backend.invoke("terrain_create", {
+    root,
+    files: {
+      "war3map.w3e.txt": w3eToText(writeW3e(t)),
+      "war3map.doo.json": await canonical("map/war3map.doo.json", doodads),
+      "war3mapUnits.doo.json": await canonical("map/war3mapUnits.doo.json", units),
+      "war3map.w3r.json": await canonical("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 7, regions: [] }),
+    },
+  });
+  await w3.workspace.refresh();
   await json("map/war3map.w3i.json", mapInfo(o, t));
-  await json("map/war3map.doo.json", doodads);
-  await json("map/war3mapUnits.doo.json", units);
-  // Empty regions and cameras, the default trigger (the World Editor needs the trigger files),
+  // Empty cameras, the default trigger (the World Editor needs the trigger files),
   // the player and force names, the start location's minimap icon, and the empty lights (no
   // edited lighting), object groups (format unknown) and conversation files World Editor 3.0.1 writes.
-  await json("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 7, regions: [] });
   await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 3, cameras: [] });
   // The trigger folders (map/triggers/), made here: the project has none yet. New items store no ids.
   await w3.workspace.writeTriggers({ file: defaultTriggerFile(o.name), custom: parseWct(defaultWct(), textTriggers(defaultTriggerFile(o.name)).length) }, { create: true });
@@ -490,7 +500,6 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await json("map/war3map.w3l.json", { format: "w3proj.lights/1", magic: "W3L!", version: 3, terrainModel: "", unitModel: "", terrainEnabled: 0, unitEnabled: 0, unknown: 0 });
   await w3.workspace.writeBytes("map/war3map.w3grp", new Uint8Array(12));
   await w3.workspace.writeText("map/conversation.json", '{\n    "stringTablePath": "war3map.wts",\n    "conversation": {}\n}');
-  await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));
   const script = mapScript(o, t, lights);
   await writeScriptFile(w3.workspace, o.lua ? "map/war3map.lua" : "map/war3map.j", script);
   // Written here, so it's this app's: the generator below replaces it without asking (lib/script/guard).
