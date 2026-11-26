@@ -15,6 +15,7 @@
       { "id": "w3.project.packAs", "when": "project", "menu": "File:4:3", "title": "Pack Release .w3x As…", "category": "Project" },
       { "id": "w3.project.openInWorldEditor", "when": "project", "menu": "File:4:4", "title": "Open in World Editor", "category": "Project", "keybinding": "f5" },
       { "id": "w3.project.testMap", "when": "project", "menu": "File:4:1", "title": "Test Map in Warcraft III", "category": "Project", "keybinding": "ctrl+f5" },
+      { "id": "w3.project.launchMap", "title": "Start the Game with a Map", "category": "Project", "hidden": true },
       { "id": "w3.project.reveal", "when": "project", "menu": "Tools:4:1", "title": "Reveal Project in File Explorer", "category": "Project" },
       { "id": "w3.project.showManifest", "title": "Open Project Manifest", "category": "Project" },
       { "id": "w3.project.close", "when": "project", "menu": "File:2:3", "title": "Close Project", "category": "Project" }

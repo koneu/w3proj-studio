@@ -21,3 +21,13 @@ Sound flags and new sounds (branch sound-flags-we, 2026-11-15; spec `sound-flags
   Studio edited (all colour keys green) opens with Enable Custom Light on, draws green, and its export of that light
   equals Studio's file. Ctrl+S goes to the Light Editor while it's open and --save refuses with it: save with its
   toolbar's disk (111,113), then copy target/we-drive/maps/<map>.
+
+- **Test AI** (branch feat/test-ai, 2026-11-26). Test Configuration slots (user's screenshot of GruntMaster.wai in the
+  World Editor with Maps\(4)LostTemple.w3m, a map of the game's storage): stored teams count from 0 (computers' 0 and 1
+  show Team 1 and Team 2), only used slots are stored (the dialog's None rows aren't), colour 0 Red, 2 Teal; the
+  watching user shows Observer: bit 1 of the control number (lib/ai/slots.ts). Its rules and messages are
+  UI\WorldEditStrings.txt WESTRING_ERROR_TESTAI_*. How the editor hands the setup to the game isn't known (its Test AI
+  button wasn't pressed: the we-drive farm holds the game's exe). Studio makes a copy of the map instead
+  (lib/ai/testmap.ts): the w3i's players, the script's config and an own AI start in place of MeleeStartingAI. In the
+  game (user, a hand-made map of the same shape) the computer slot joins and the imported AI runs. Not set: Game Speed
+  (a script has only the named speeds) and per-player AI Difficulty.

@@ -12,7 +12,8 @@ import {
   AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, FIRST_HERO_ONLY, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
-import { aiTypeText } from "./labels";
+import { decodeAiType, encodeAiType, type SlotAi, type SlotControl } from "../../lib/ai/slots";
+import { buildTestMap } from "./testrun";
 import { aiNumber, GAME_SPEED_LIMITS, HARVEST_WORKER_LIMITS, repeatWavesLimits, rescaleChances } from "./numbers";
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
@@ -128,6 +129,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.ai.exportScript", async () => {
       if (!current) throw new Error("Open an AI file in the AI Editor first.");
       await current.exportScript();
+    }),
+    // `launch: false` makes the test map and starts nothing (tests, AI clients): where it is and what it can't do.
+    w3.commands.register("w3.ai.testAi", async (options?: { launch?: boolean }) => {
+      if (!current) throw new Error("Open an AI file in the AI Editor first.");
+      const view = current;
+      const built = await w3.window.withProgress("Making the test map", () => view.buildTest());
+      if (built.plan.notes.length) void w3.window.showInfo(`Test AI: ${built.plan.notes.join(" ")}`);
+      if (options?.launch !== false) await w3.commands.execute("w3.project.launchMap", built.map);
+      return { map: built.map, notes: built.plan.notes };
     }),
     w3.commands.register("w3.ai.addToMap", async () => {
       if (!current) throw new Error("Open an AI file in the AI Editor first.");
@@ -384,8 +394,8 @@ class AiView {
       onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; if (v !== value) this.change(() => set(v)); },
     }));
   }
-  private select<T extends number | string>(value: T, options: [T, string][], set: (v: T) => void) {
-    return h("select", {
+  private select<T extends number | string>(value: T, options: [T, string][], set: (v: T) => void, cls?: string) {
+    return h(cls ? `select.${cls}` : "select", {
       disabled: !this.editable,
       onchange: (e: Event) => {
         const i = (e.target as HTMLSelectElement).selectedIndex;
@@ -782,31 +792,46 @@ class AiView {
   }
 
   // ---- test configuration --------------------------------------------------------------
+  private async browseTestMap() {
+    if (!this.editable) return;
+    const path = await this.w3.window.pickFile({ title: "Set Map: a melee map to test the AI on", filters: [{ name: "Warcraft III map (.w3x, .w3m)", extensions: ["w3x", "w3m"] }] });
+    if (path) this.change(() => { this.ai.mapPath = path; });
+  }
+
+  /** Test AI: the copy of the map for the configuration as it is here (unsaved changes included). */
+  buildTest() { return buildTestMap(this.w3, this.ai, this.data); }
+
   private testConfig() {
     const ai = this.ai;
     const races: [number, string][] = [[1, "Human"], [2, "Orc"], [4, "Undead"], [8, "Night Elf"], [32, "Random"]];
     const diffs: [number, string][] = [[0, "Easy"], [1, "Normal"], [2, "Insane"]];
     const withCurrent = (list: [number, string][], v: number) => (list.some(([x]) => x === v) ? list : [...list, [v, String(v)] as [number, string]]);
     return h("div.ai-page.ai-scroll", {},
-      h("p.muted", {}, "Settings for the World Editor's test game (stored with the AI; running a test game isn't supported here)."),
+      h("p.muted", {}, "Settings for the test game, stored with the AI. Test AI makes a copy of the map set up like this and starts it, as Test Map does; the map and the AI file stay as they are."),
+      h("div", {}, h("button.primary-inline.ai-test", { onclick: () => void this.w3.commands.execute("w3.ai.testAi").catch((e) => this.w3.window.showError(String((e as Error).message ?? e))) }, "Test AI")),
       this.field("Game Speed", this.num("Game Speed", ai.gameSpeed, (v) => { ai.gameSpeed = v; }, GAME_SPEED_LIMITS), h("span.muted", {}, " × regular game speed")),
       this.field("Game Options", h("div", {},
         this.check("Disable Fog of War", (ai.gameOptions & 1) !== 0, (on) => { ai.gameOptions = on ? ai.gameOptions | 1 : ai.gameOptions & ~1; }, "Option bit 1"),
         this.check("Disable Victory/Defeat Conditions", (ai.gameOptions & 2) !== 0, (on) => { ai.gameOptions = on ? ai.gameOptions | 2 : ai.gameOptions & ~2; }, "Option bit 2"))),
-      this.field("Map File (Melee only)", this.text(ai.mapPath, (v) => { ai.mapPath = v; })),
+      this.field("Map File (Melee only)", h("div.ai-map-file", {}, this.text(ai.mapPath, (v) => { ai.mapPath = v; }), h("button", { title: "Choose a melee map file", onclick: () => void this.browseTestMap() }, "Browse…"))),
       h("h3", {}, "Players"),
       ai.players.length ? h("table.ai-table", {},
-        h("thead", {}, h("tr", {}, ...["Slot", "Team", "Race", "Color", "Handicap", "AI", "AI Difficulty", "AI Script"].map((x) => h("th", {}, x)))),
+        h("thead", {}, h("tr", {}, ...["Slot", "Race", "Team", "Color", "Handicap", "Control", "AI", "AI Difficulty", "AI Script"].map((x) => h("th", {}, x)))),
         h("tbody", {}, ...ai.players.map((p) => h("tr", {},
           h("td", {}, String(p.index + 1)),
-          h("td", {}, this.num("Team", p.team, (v) => { p.team = v; }, { min: 0 })),
-          h("td", {}, this.select(p.race, withCurrent(races, p.race), (v) => { p.race = v; })),
+          h("td", {}, this.select(p.race, withCurrent(races, p.race), (v) => { p.race = v; }, "ai-race")),
+          h("td", {}, this.select(decodeAiType(p.aiType).observer && (p.aiType & 1) ? -1 : p.team,
+            [...(p.aiType & 1 ? [[-1, "Observer"] as [number, string]] : []), ...withCurrent(Array.from({ length: 12 }, (_, t) => [t, `Team ${t + 1}`] as [number, string]), p.team)],
+            (v) => { p.aiType = encodeAiType(p.aiType, { observer: v === -1 }); if (v !== -1) p.team = v; }, "ai-team")),
           h("td", {}, this.num("Color", p.color, (v) => { p.color = v; }, { min: 0 })),
           h("td", {}, this.num("Handicap", p.handicap, (v) => { p.handicap = v; }, { min: 50, max: 100 })),
-          h("td", { title: "Control and AI type as stored" }, ...((): Node[] => {
-            const text = h("span.muted.ai-type-text", {}, ` ${aiTypeText(p.aiType)}`);
-            return [this.num("AI type", p.aiType, (v) => { p.aiType = v; text.textContent = ` ${aiTypeText(v)}`; }, { min: 0 }), text];
-          })()),
+          h("td", {}, this.select(p.aiType & 1, [[1, "User"], [0, "Computer"]], (v) => {
+            const control: SlotControl = v === 1 ? "User" : "Computer";
+            // Only the user can watch: a slot given to the computer stops watching.
+            p.aiType = encodeAiType(p.aiType, { control, ...(v === 1 ? {} : { observer: false }) });
+          }, "ai-control")),
+          h("td", {}, this.select(["Standard", "Custom", "Current"].indexOf(decodeAiType(p.aiType).ai), [[0, "Standard"], [1, "Custom"], [2, "Current"]],
+            (v) => { p.aiType = encodeAiType(p.aiType, { ai: (["Standard", "Custom", "Current"] as SlotAi[])[v] }); }, "ai-which")),
           h("td", {}, this.select(p.difficulty, withCurrent(diffs, p.difficulty), (v) => { p.difficulty = v; })),
           h("td", {}, this.text(p.script, (v) => { p.script = v; })))))) : h("p.muted", {}, "No players configured."));
   }

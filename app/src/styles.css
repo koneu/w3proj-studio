@@ -305,6 +305,8 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-fold::before { content: "▸"; width: 1.2em; flex: none; }
 .obj-fold.open::before { content: "▾"; }
 .obj-subgroup { padding-left: 20px; }
+.ai-map-file { display: flex; gap: 6px; }
+.ai-map-file input { flex: 1; min-width: 0; }
 /* A light edited in the Lighting side bar (lighting-editor/session.ts): the editor's form, made narrow. */
 .lighting-session { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
 .lighting-clock { display: flex; gap: 8px; align-items: center; }

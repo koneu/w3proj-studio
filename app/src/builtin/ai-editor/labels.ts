@@ -90,16 +90,3 @@ export function removeGroup(ai: AiFile, index: number) {
   if (ai.minForces === index) ai.minForces = 0;
   else if (ai.minForces > index) ai.minForces--;
 }
-
-/** The player AI type number as the World Editor reads it (measured): bit 0 is
- *  Control (odd = User, even = Computer), (value >> 2) & 3 the AI (0 Standard,
- *  1 Custom, 2 and 3 Current); bit 1 changes nothing visible. */
-export function decodeAiType(value: number): { control: "User" | "Computer"; ai: "Standard" | "Custom" | "Current" } {
-  const v = value >>> 0;
-  const a = (v >>> 2) & 3;
-  return { control: v & 1 ? "User" : "Computer", ai: a === 0 ? "Standard" : a === 1 ? "Custom" : "Current" };
-}
-export function aiTypeText(value: number): string {
-  const d = decodeAiType(value);
-  return `${d.control} / ${d.ai}`;
-}

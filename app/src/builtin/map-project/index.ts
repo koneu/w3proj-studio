@@ -396,6 +396,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       w3.window.showInfo("Opened in the World Editor. Save there (Ctrl+S) and the project is updated.");
     }),
 
+    // Starts the game with a map file that isn't the project's build (the AI Editor's Test AI), as Test Map starts it.
+    w3.commands.register("w3.project.launchMap", async (map: unknown) => {
+      if (typeof map !== "string" || !map) throw new Error("w3.project.launchMap takes a map's path.");
+      const args = testMapArgs(testMapOptions(w3.settings));
+      await w3.backend.invoke("game_test_map", { exe: program("game.path", "Warcraft III.exe"), map, args });
+      out.append(`launched game with ${map} (${args.join(" ")})`);
+    }),
     w3.commands.register("w3.project.testMap", async () => {
       await needStartLocation();
       // The options are read before packing, so a wrong one stops before anything is written.

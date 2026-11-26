@@ -16382,6 +16382,42 @@ async function campaignNumbersRefused(page, found) {
   } catch (e) { found.push(`Campaign Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** AI Editor's Test AI (without starting the game): from the game's GruntMaster.wai on its Lost Temple, the copy
+ *  has a watching user, two computers on two teams, the edited AI imported and started, the standard AI for the other;
+ *  a second user is refused in the World Editor's words. */
+async function aiTestRun(page, found) {
+  try {
+  const fail = (what) => found.push(`Test AI: ${what}`);
+  if (!game) return;
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.editors.open("game:War3.w3mod:AI Scripts/GruntMaster.wai", "w3.aiEditor"); })()`);
+  await until("the AI Editor", () => page.evaluate(`!!document.querySelector(".ai-tabs button")`), 30000);
+  await page.evaluate(`[...document.querySelectorAll(".ai-tabs button")].find((b) => b.textContent === "Test Configuration").click()`);
+  await until("the Test AI button", () => page.evaluate(`!!document.querySelector("button.ai-test")`), 10000);
+  const teams = await page.evaluate(`[...document.querySelectorAll("select.ai-team")].map((s) => s.selectedOptions[0].textContent).join()`);
+  if (teams !== "Observer,Team 1,Team 2") fail(`the teams show ${teams}, as the World Editor shows Observer, Team 1, Team 2`);
+  const built = await page.evaluate(`w3.commands.execute("w3.ai.testAi", { launch: false })`);
+  const read = (name) => spawnSync(cli, ["cat", built.map, name], { encoding: "utf8", maxBuffer: 1 << 24 });
+  const script = read("war3map.j").stdout ?? "", ai = read("war3mapImported\\w3proj-testai-1.ai").stdout ?? "";
+  if (!ai.includes("Grunt Master")) fail("the edited AI isn't in the test map");
+  for (const line of ['call StartMeleeAI( Player(0), "war3mapImported\\\\w3proj-testai-1.ai" )', "call W3ProjTestAI_Standard( Player(1) )", "call W3ProjTestAI_RemoveUnits()", "call SetPlayerTeam( Player(1), 1 )"]) {
+    if (!script.includes(line)) fail(`the test map's script lacks ${line}`);
+  }
+  if (/call MeleeStartingAI|call MeleeInitVictoryDefeat/.test(script)) fail("the test map's script still starts the map's own AIs or victory conditions");
+  if (!built.notes.some((n) => /Game Speed 3/.test(n))) fail(`no note about the game speed: ${lit(built.notes)}`);
+  // A copy of the AI with a second user, as a file of the project's work folder.
+  const copy = join(work, "two-users.wai");
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.writeBytes(${lit(copy)}, await w3.game.read("War3.w3mod:AI Scripts/GruntMaster.wai")); await w3.editors.open(${lit(copy.replace(/\\/g, "/"))}, "w3.aiEditor"); })()`);
+  await until("the copy's AI Editor", () => page.evaluate(`!!document.querySelector(".ai-tabs button")`), 30000);
+  await page.evaluate(`[...document.querySelectorAll(".ai-tabs button")].find((b) => b.textContent === "Test Configuration").click()`);
+  await until("the control boxes", () => page.evaluate(`document.querySelectorAll("select.ai-control").length === 3`), 10000);
+  await page.evaluate(`(() => { const s = document.querySelectorAll("select.ai-control")[1]; s.selectedIndex = 0; s.dispatchEvent(new Event("change")); })()`);
+  await settled(page);
+  const said = await page.evaluate(`w3.commands.execute("w3.ai.testAi", { launch: false }).then(() => "built", (e) => String(e.message ?? e))`);
+  if (!/Multiple players specified as user-controlled/.test(said)) fail(`two users gave ${said}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+  } catch (e) { found.push(`Test AI: ${e.message}`); } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
+}
+
 /** The Lighting side bar: Customize copies a light into the map and opens its form there; the terrain view shows it at
  *  the preview's time; a change is saved at once and drawn, Undo takes it back; Export writes the .mdx and .mdl; Done
  *  gives the view its own light again. */
@@ -18471,6 +18507,7 @@ async function run() {
         addPathReady,
         aiClientSetup,
         aiNumbersRefused,
+        aiTestRun,
         areaLevels,
         areaReplaceCt0,
         artModeReload,
@@ -18965,6 +19002,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "lightNumbersRefused", found);
   await lightSideBar(page, found).catch((e) => found.push(`Lighting side bar: ${e.message}`));
   await leftOpen(page, "lightSideBar", found);
+  await aiTestRun(page, found).catch((e) => found.push(`Test AI: ${e.message}`));
+  await leftOpen(page, "aiTestRun", found);
   await soundNumbersRefused(page, found);
   await leftOpen(page, "soundNumbersRefused", found);
   await campaignNumbersRefused(page, found);
