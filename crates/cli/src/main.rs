@@ -732,8 +732,10 @@ enum TerrainCmd {
     },
     /// Check a project's creation numbers (what scripts call gg_unit_hfoo_0012, gg_dest_…): a number found twice in one
     /// kind (units and items, doodads, regions) is an error (exit code 1), listed with every object holding it, in a
-    /// flat project too; in a split one id ranges that overlap are errors as well, and objects whose number lies outside
-    /// their subterrain's idRange are listed as information only (moved objects and imported maps have them).
+    /// flat project too, except in a split one a number terrain.json keeps as the imported map had it
+    /// (objects.<kind>.importedTwice), which is listed as information; in a split one id ranges that overlap are errors
+    /// as well, and objects whose number lies outside their subterrain's idRange are listed as information only (moved
+    /// objects and imported maps have them).
     Check {
         project: PathBuf,
         /// The report as JSON.
@@ -1016,9 +1018,6 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     }
                 }
                 if let Ok(r) = report {
-                    for note in &r.notes {
-                        println!("note {} — {note}", map.display());
-                    }
                     warned += usize::from(!r.unresolved_strings.is_empty() || !r.strings_unchecked.is_empty());
                     if !r.unresolved_strings.is_empty() {
                         println!(

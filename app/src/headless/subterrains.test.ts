@@ -344,7 +344,20 @@ test("Fix Duplicate Creation Numbers on a flat project (three stacked doodads sh
   const check = await checkTerrainIds(w3, { quiet: true });
   assert.equal(check.errors, true);
   assert.deepEqual(check.duplicates.map((d) => [d.kind, d.number, d.members.map((m) => [m.index, m.id, m.copyOf ?? null])]), [["doodads", 581, [[2, "LOtr", null], [3, "LOtr", null], [4, "LOtr", 3]]]]);
-  await assert.rejects(splitTerrain(w3, { layout: "main", quiet: true }), /doodads\[2\], doodads\[3\] and doodads\[4\] have the same creation number 581.*fix-ids/);
+  // The same map split (another copy): terrain.json keeps 581 as the import had it, Check Terrain IDs tells it, no error;
+  // saving the doodads with an object moved keeps it.
+  const keptRoot = project("fixids-kept");
+  writeFileSync(join(keptRoot, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
+  const kept = await open(keptRoot);
+  await splitTerrain(kept, { layout: "main", quiet: true });
+  assert.match(readFileSync(join(keptRoot, "map", "terrain", "terrain.json"), "utf8"), /"importedTwice": \[581\]/);
+  const keptCheck = await checkTerrainIds(kept, { quiet: true });
+  assert.equal(keptCheck.errors, false, keptCheck.lines.join("\n"));
+  assert.deepEqual([keptCheck.duplicates.length, keptCheck.kept.map((d) => [d.number, d.members.length])], [0, [[581, 3]]]);
+  const keptDoo = (await loadPlacedFile(kept, "war3map.doo", "doodads"))!;
+  keptDoo.list[0].position = [10, 10, 0];
+  await savePlacedFile(kept, keptDoo);
+  assert.match(readFileSync(join(keptRoot, "map", "terrain", "terrain.json"), "utf8"), /"importedTwice": \[581\]/);
   // The plans, nothing written.
   const before = snapshot(root);
   const renumber = await fixCreationIds(w3, { mode: "renumber", dryRun: true, quiet: true });

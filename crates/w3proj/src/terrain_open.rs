@@ -991,6 +991,71 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    /// A map split with creation numbers found twice (1 twice in a0, 2 in a0 and in a2), as an imported map has them:
+    /// terrain.json keeps both; saving the doodads (all open, and with only a0 open) works and keeps the list, while a
+    /// save that makes a new number twice is refused and writes nothing; a relayout and Map Size carry the list.
+    #[test]
+    fn numbers_kept_twice_survive_saves_partial_loads_relayout_and_map_size() {
+        let dir = project("twice");
+        tl::merge_project(&dir).unwrap();
+        let flat_path = map(&dir).join("war3map.doo.json");
+        let mut doo = json_of(&fs::read(&flat_path).unwrap());
+        let list = doo["doodads"].as_array_mut().unwrap();
+        let with = |n: u64| list.iter().find(|d| d["editorId"] == n).unwrap().clone();
+        let (mut one, mut two) = (with(1), with(2));
+        one["position"][0] = 60.0.into();
+        two["position"][0] = 2344.0.into();
+        list.extend([one, two]);
+        fs::write(&flat_path, serde_json::to_vec_pretty(&doo).unwrap()).unwrap();
+        let rects: Vec<tl::Rect> = ["a0:0,0,8,8", "a1:8,0,8,8", "a2:16,0,9,8", "b0:0,8,8,9", "b1:8,8,8,9", "b2:16,8,9,9"].iter().map(|r| r.parse().unwrap()).collect();
+        tl::split_project(&dir, &rects).unwrap();
+        let all_files = |d: &Path| crate::project::walk(&map(d).join("terrain")).unwrap().into_iter().map(|r| (r.clone(), fs::read(crate::paths::join_rel(&map(d).join("terrain"), &r)).unwrap())).collect::<BTreeMap<_, _>>();
+        let kept = || layout(&dir).objects.twice.get(&objects::Kind::Doodads).cloned().unwrap_or_default().into_iter().collect::<Vec<_>>();
+        assert_eq!(kept(), [1, 2]);
+        let r = crate::terrain_ids::check(&dir).unwrap();
+        assert!(!r.has_errors() && r.kept.len() == 2, "{:?}", r.lines());
+        // A save of the doodads with everything open: a doodad moved, the list stays.
+        let edit = |bytes: &[u8], f: &dyn Fn(&mut Vec<Value>)| {
+            let mut v = json_of(bytes);
+            f(v["doodads"].as_array_mut().unwrap());
+            serde_json::to_vec_pretty(&v).unwrap()
+        };
+        let moved = edit(&tl::read_flat(&map(&dir), "war3map.doo.json").unwrap(), &|l| {
+            let d = l.iter_mut().find(|d| d["editorId"] == 3).unwrap();
+            d["position"][1] = 50.0.into();
+        });
+        assert!(!tl::write_flat(&map(&dir), "war3map.doo.json", &moved).unwrap().is_empty());
+        assert_eq!(kept(), [1, 2]);
+        // A new number twice (3 given to 4's doodad) is refused, nothing written.
+        let before = all_files(&dir);
+        let twice = edit(&moved, &|l| l.iter_mut().find(|d| d["editorId"] == 4).unwrap()["editorId"] = 3.into());
+        let e = tl::write_flat(&map(&dir), "war3map.doo.json", &twice).unwrap_err().to_string();
+        assert!(e.contains("same creation number 3") && !e.contains("number 1 ") && !e.contains("number 2 "), "{e}");
+        assert_eq!(all_files(&dir), before);
+        // Only a0 open: its two 1s and its 2 load, a0's save goes through, a new number twice there is refused.
+        open(&dir, &["a0"]);
+        let part = tl::read_flat(&map(&dir), "war3map.doo.json").unwrap();
+        let ids: Vec<u64> = json_of(&part)["doodads"].as_array().unwrap().iter().map(|d| d["editorId"].as_u64().unwrap()).collect();
+        assert_eq!((ids.iter().filter(|n| **n == 1).count(), ids.iter().filter(|n| **n == 2).count()), (2, 1), "{ids:?}");
+        let moved = edit(&part, &|l| {
+            let d = l.iter_mut().find(|d| d["editorId"] == 3).unwrap();
+            d["position"][1] = 60.0.into();
+        });
+        assert_eq!(tl::write_flat(&map(&dir), "war3map.doo.json", &moved).unwrap(), ["terrain/a0/doodads.json"]);
+        let twice = edit(&moved, &|l| l.iter_mut().find(|d| d["editorId"] == 4).unwrap()["editorId"] = 3.into());
+        assert!(tl::write_flat(&map(&dir), "war3map.doo.json", &twice).unwrap_err().to_string().contains("same creation number 3"));
+        fs::remove_file(path(&dir)).unwrap();
+        assert_eq!(kept(), [1, 2]);
+        // A relayout into one subterrain, and Map Size on it: the list goes along, the files come back.
+        let mut files = tl::read_layout_files(&map(&dir)).unwrap();
+        let plan: Vec<tl::Planned> = vec![format!("all=a0+a1+a2+b0+b1+b2:0,0,{W},{H}").parse().unwrap()];
+        tl::relayout(&mut files, &plan).unwrap();
+        let relaid = Layout::parse(&files[tl::LAYOUT_FILE]).unwrap();
+        assert_eq!(relaid.objects.twice, layout(&dir).objects.twice);
+        assert!(tl::map_size_round_trip(&files, 2).unwrap());
+        let _ = fs::remove_dir_all(dir);
+    }
+
     /// The derived files' record of a save made with subterrains closed says so: `check` takes them for stale (pack
     /// refuses), whatever the sources are; a record made with everything open is fresh again.
     #[test]

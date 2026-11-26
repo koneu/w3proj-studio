@@ -13,8 +13,9 @@
 //! in is never recorded.
 //!
 //! **Checking** (`check`, `w3proj terrain check`): numbers found twice in one kind namespace and ranges that overlap are
-//! errors; numbers outside their subterrain's ranges are information only (an object moved over a seam keeps its
-//! number, and an imported map's numbers lie anywhere).
+//! errors, except numbers `terrain.json` lists as kept twice (`objects.<kind>.importedTwice`: the imported map had them
+//! so), which are information; numbers outside their subterrain's ranges are information only (an object moved over a
+//! seam keeps its number, and an imported map's numbers lie anywhere).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -82,7 +83,11 @@ pub struct Outside {
 /// What `check` found.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Report {
+    /// Numbers found twice that `terrain.json` doesn't list as kept: errors (a Git merge's, a copied file).
     pub duplicates: Vec<Duplicate>,
+    /// Information only: numbers found twice that `terrain.json` lists as kept (`objects.<kind>.importedTwice`): the
+    /// imported map had them so, and they are written back as they came.
+    pub kept: Vec<Duplicate>,
     pub overlaps: Vec<RangeOverlap>,
     /// Information only: moved objects and imported maps have numbers outside their subterrain's ranges.
     pub outside: Vec<Outside>,
@@ -99,17 +104,20 @@ impl Report {
     /// The report as lines of text: errors, then information, then a summary line.
     pub fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for d in &self.duplicates {
+        let group = |out: &mut Vec<String>, d: &Duplicate, what: &str, why: &str| {
             let place = match d.files.as_slice() {
                 [first, rest @ ..] if rest.iter().all(|f| f == first) => format!("{} times in {first}", d.files.len()),
                 _ => format!("in {}", d.files.join(" and ")),
             };
-            out.push(format!("error: creation number {} ({}) is {place}", d.number, d.kind));
+            out.push(format!("{what}: creation number {} ({}) is {place}{why}", d.number, d.kind));
             for m in &d.members {
                 let at = m.x.zip(m.y).map(|(x, y)| format!(" at ({x:.0}, {y:.0})")).unwrap_or_default();
                 let copy = m.copy_of.map(|c| format!(", an exact copy of [{c}]")).unwrap_or_default();
                 out.push(format!("  {} [{}] {}{at}{copy}", m.file, m.index, m.id));
             }
+        };
+        for d in &self.duplicates {
+            group(&mut out, d, "error", "");
         }
         if !self.duplicates.is_empty() {
             out.push(format!("fix: {}", objects::FIX_HINT));
@@ -117,15 +125,19 @@ impl Report {
         for o in &self.overlaps {
             out.push(format!("error: {o}"));
         }
+        for d in &self.kept {
+            group(&mut out, d, "info", " (the imported map has it so; terrain.json keeps it, fix-ids still renumbers it)");
+        }
         for o in &self.outside {
             let more = if o.count > o.examples.len() { ", …" } else { "" };
             let list = o.examples.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
             out.push(format!("info: {} {} in \"{}\" have numbers outside its idRange ({list}{more})", o.count, o.kind, o.subterrain));
         }
         out.push(format!(
-            "{} creation numbers checked: {} found twice, {} overlapping ranges, {} outside their subterrain's ranges (information)",
+            "{} creation numbers checked: {} found twice, {} kept twice as imported (information), {} overlapping ranges, {} outside their subterrain's ranges (information)",
             self.numbers,
             self.duplicates.len(),
+            self.kept.len(),
             self.overlaps.len(),
             self.outside.iter().map(|o| o.count).sum::<usize>()
         ));
@@ -152,7 +164,11 @@ pub fn check_files(files: &BTreeMap<String, Vec<u8>>) -> Result<Report> {
             outside.entry((n.sub, n.kind)).or_default().push(n.number);
         }
     }
-    let duplicates = seen.into_iter().filter(|(_, f)| f.len() > 1).map(|((kind, number), files)| Duplicate { kind: kind.name(), number, files, members: Vec::new() }).collect();
+    let (kept, duplicates): (Vec<Duplicate>, Vec<Duplicate>) = seen
+        .into_iter()
+        .filter(|(_, f)| f.len() > 1)
+        .map(|((kind, number), files)| Duplicate { kind: kind.name(), number, files, members: Vec::new() })
+        .partition(|d| layout.objects.twice.iter().any(|(k, ns)| k.name() == d.kind && ns.contains(&d.number)));
     let outside = outside
         .into_iter()
         .map(|((sub, kind), mut ns)| {
@@ -160,14 +176,15 @@ pub fn check_files(files: &BTreeMap<String, Vec<u8>>) -> Result<Report> {
             Outside { subterrain: layout.subterrains[sub].name.clone(), kind: kind.name(), count: ns.len(), examples: ns.into_iter().take(EXAMPLES).collect() }
         })
         .collect();
-    Ok(Report { duplicates, overlaps: layout.range_overlaps(), outside, numbers: numbers.len() })
+    Ok(Report { duplicates, kept, overlaps: layout.range_overlaps(), outside, numbers: numbers.len() })
 }
 
 /// A project's creation numbers: `check_files` on a split project's `map/terrain/`; a flat project's object files for
 /// numbers found twice (it has no ranges). Each number found twice lists every object holding it (`fix_plan`).
 pub fn check(project: &Path) -> Result<Report> {
     let map_dir = project.join(crate::project::MAP_DIR);
-    let mut report = if tl::is_split_on_disk(&map_dir)? {
+    let split = tl::is_split_on_disk(&map_dir)?;
+    let mut report = if split {
         check_files(&tl::read_layout_files(&map_dir)?)?
     } else {
         let mut numbers = 0;
@@ -184,10 +201,11 @@ pub fn check(project: &Path) -> Result<Report> {
     if groups.is_empty() {
         return Ok(report);
     }
-    if report.duplicates.is_empty() {
+    // A flat project keeps no list: every number found twice is one to fix.
+    if !split {
         report.duplicates = groups.iter().map(|g| Duplicate { kind: g.kind, number: g.number, files: g.members.iter().map(|m| m.file.clone()).collect(), members: Vec::new() }).collect();
     }
-    for d in &mut report.duplicates {
+    for d in report.duplicates.iter_mut().chain(report.kept.iter_mut()) {
         if let Some(g) = groups.iter().find(|g| g.kind == d.kind && g.number == d.number) {
             d.members = g.members.clone();
         }
@@ -343,15 +361,24 @@ pub fn fix_plan(project: &Path, mode: Option<FixMode>) -> Result<FixPlan> {
             }
         }
         Some(mut layout) => {
-            let (_, sliced) = objects::slice(&changed, &subs, offset)?;
+            let (heads, sliced) = objects::slice(&changed, &subs, offset, Some(&layout.objects.twice))?;
             let disk = |rel: &str| std::fs::read(crate::paths::join_rel(&map_dir, rel)).ok();
             for (rel, bytes) in sliced {
                 if disk(&rel).as_deref() != Some(bytes.as_slice()) {
                     plan.files.insert(format!("{}/{rel}", crate::project::MAP_DIR), bytes);
                 }
             }
-            if subs != layout.subterrains {
+            // The numbers kept twice follow the content: one the fix took apart is no longer listed.
+            let mut twice = layout.objects.twice.clone();
+            for kind in changed.keys() {
+                match heads.twice.get(kind) {
+                    Some(ns) => twice.insert(*kind, ns.clone()),
+                    None => twice.remove(kind),
+                };
+            }
+            if subs != layout.subterrains || twice != layout.objects.twice {
                 layout.subterrains = subs;
+                layout.objects.twice = twice;
                 plan.files.insert(format!("{}/{}", crate::project::MAP_DIR, tl::LAYOUT_FILE), layout.to_json()?);
             }
         }
@@ -415,19 +442,6 @@ fn fix_flats(flats: &objects::Flats, mode: Option<FixMode>, split: bool, subs: &
         }
     }
     Ok(changed)
-}
-
-/// Renumber (as `fix_plan` with `FixMode::Renumber` on a flat project) on flat object files in memory (name relative to
-/// `map/`, `Kind::flat`, → bytes; other names are left alone): what `w3proj verify` does to its copy of a map before
-/// splitting it. How many numbers it gave anew and in how many groups.
-pub fn renumber_flat_files(files: &mut BTreeMap<String, Vec<u8>>) -> Result<(usize, usize)> {
-    let flats: objects::Flats = objects::KINDS.into_iter().filter_map(|k| files.get(k.flat()).map(|b| (k, b.clone()))).collect();
-    let mut plan = FixPlan::default();
-    let changed = fix_flats(&flats, Some(FixMode::Renumber), false, &mut Vec::new(), [0.0, 0.0], &mut plan)?;
-    for (kind, bytes) in changed {
-        files.insert(kind.flat().to_string(), bytes);
-    }
-    Ok((plan.renumbered, plan.groups.len()))
 }
 
 /// Writes a plan's files (`fix_plan`), relative to the project, as they are (a flat project's object files as JSON:
@@ -595,8 +609,8 @@ mod tests {
         assert_eq!(a["specials"], b["specials"]);
     }
 
-    /// A flat project's numbers found twice: the check lists every member (index, type, position, the exact copy), the
-    /// split refuses naming all three and pointing at the fix, nothing is written without a fix chosen; Renumber gives
+    /// A flat project's numbers found twice: the check lists every member (index, type, position, the exact copy) as
+    /// errors, nothing is written without a fix chosen; Renumber gives
     /// the second and third the next numbers above the highest, changes nothing else, and the map splits and merges back.
     #[test]
     fn numbers_found_twice_in_a_flat_project_are_listed_and_renumbered() {
@@ -610,8 +624,6 @@ mod tests {
         assert_eq!(m, [(2, "LT04", None), (3, "LT04", None), (4, "LT04", Some(3))]);
         assert_eq!((d.members[0].x, d.members[0].y), (Some(96.0), Some(96.0)));
         assert!(r.lines().iter().any(|l| l.contains("map/war3map.doo.json [4] LT04 at (96, 96), an exact copy of [3]")), "{:?}", r.lines());
-        let e = tl::split_project(&root, &[]).unwrap_err().to_string();
-        assert!(e.contains("doodads[2], doodads[3] and doodads[4] have the same creation number 581") && e.contains("fix-ids"), "{e}");
         // Without a fix chosen: the plan lists them, no files.
         let look = fix_plan(&root, None).unwrap();
         assert!(look.files.is_empty() && look.renumbered == 0 && look.groups[0].members.iter().all(|m| m.action == "keep"));
@@ -630,9 +642,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Delete Copies removes only the exact copy; the member that differs stays, still sharing the number, so the
-    /// split still refuses; a Renumber after it fixes the rest. A split project: renumbered within its subterrain's
-    /// range, then above every range (recorded in terrain.json) once that is full.
+    /// A flat project whose numbers are found twice splits as it is: terrain.json lists 581, the check tells it as
+    /// information (no error), merging gives the flat file back byte for byte. Delete Copies keeps it listed (two still
+    /// share it); Renumber takes it apart, and the list goes with it.
+    #[test]
+    fn numbers_found_twice_in_an_import_split_as_they_are() {
+        let (root, _) = stacked_twins("kept");
+        let flat = std::fs::read(root.join("map/war3map.doo.json")).unwrap();
+        tl::split_project(&root, &[]).unwrap();
+        let layout = || String::from_utf8(std::fs::read(root.join("map/terrain/terrain.json")).unwrap()).unwrap();
+        assert!(layout().contains("\"importedTwice\": [581]"), "{}", layout());
+        let r = check(&root).unwrap();
+        assert!(!r.has_errors() && r.duplicates.is_empty(), "{:?}", r.lines());
+        assert_eq!((r.kept.len(), r.kept[0].number, r.kept[0].members.len()), (1, 581, 3));
+        assert!(r.lines().iter().any(|l| l.starts_with("info: creation number 581 (doodads) is 3 times in map/terrain/main/doodads.json")), "{:?}", r.lines());
+        assert!(r.lines().iter().any(|l| l.contains("map/terrain/main/doodads.json [4] LT04 at (96, 96), an exact copy of [3]")), "{:?}", r.lines());
+        // Merged: the same flat file (the fixture's lacks only the final line break).
+        let mut files = tl::read_layout_files(&root.join("map")).unwrap();
+        tl::flatten(&mut files).unwrap();
+        assert!(files["war3map.doo.json"] == [&flat[..], b"\n"].concat(), "{}", String::from_utf8_lossy(&files["war3map.doo.json"]));
+        // Delete Copies: [3] stays sharing 581 with [2], so 581 stays listed.
+        fix_write(&root, &fix_plan(&root, Some(FixMode::DeleteCopies)).unwrap()).unwrap();
+        assert!(layout().contains("\"importedTwice\": [581]"), "{}", layout());
+        assert_eq!(check(&root).unwrap().kept[0].members.len(), 2);
+        // Renumber: no number twice is left, nor listed.
+        let plan = fix_plan(&root, Some(FixMode::Renumber)).unwrap();
+        assert!(plan.files.contains_key("map/terrain/terrain.json"), "{:?}", plan.files.keys());
+        fix_write(&root, &plan).unwrap();
+        assert!(!layout().contains("importedTwice"), "{}", layout());
+        let r = check(&root).unwrap();
+        assert!(!r.has_errors() && r.kept.is_empty(), "{:?}", r.lines());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Delete Copies removes only the exact copy; the member that differs stays, still sharing the number; a Renumber
+    /// after it fixes the rest. A split project: renumbered within its subterrain's range, then above every range
+    /// (recorded in terrain.json) once that is full.
     #[test]
     fn delete_copies_leaves_members_that_differ_and_split_projects_renumber_in_their_ranges() {
         let (root, before) = stacked_twins("delete");
@@ -644,7 +689,7 @@ mod tests {
         let mut expected = before.clone();
         expected["doodads"].as_array_mut().unwrap().remove(4);
         assert_eq!(after, expected, "only the copy went");
-        assert!(tl::split_project(&root, &[]).unwrap_err().to_string().contains("doodads[2] and doodads[3] have the same creation number 581"));
+        assert_eq!(check(&root).unwrap().duplicates[0].members.len(), 2, "[2] and [3] still share 581");
         fix_write(&root, &fix_plan(&root, Some(FixMode::Renumber)).unwrap()).unwrap();
         tl::split_project(&root, &[]).unwrap();
         let _ = std::fs::remove_dir_all(&root);
