@@ -30,6 +30,10 @@ export type RandomId =
 /** EQUIPMENT_TYPE_<name> by number (common.j; 9 is ANY), ITEMTAG_TYPE_<name> by number (8 is ANY). */
 export const EQUIPMENT_TYPES = ["NONE", "HEAD", "CHEST", "GLOVES", "BOOTS", "RING", "PRIMARY", "OFFHAND", "TRINKET"];
 export const ITEM_TAGS = ["UNDEFINED", "DROPPABLE", "QUESTREWARD", "BOSSDROP", "SECRET", "PUZZLE", "WORLD", "SHOP"];
+/** The names the World Editor's Choose Item lists them by, in the same order (its first entry of each list is "any"). */
+export const EQUIPMENT_LABELS = ["None", "Head", "Chest", "Gloves", "Boots", "Ring", "Primary", "Offhand", "Trinket"];
+export const ITEM_TAG_LABELS = ["Undefined", "Droppable", "Quest Reward", "Boss Drop", "Secret", "Puzzle", "World", "Shop"];
+export const ANY_EQUIPMENT = "Any Equipment Type", ANY_TAG = "Any Tag";
 
 /** The four bytes of an id as the codecs write it (4 characters, or "0x" and 8 hex digits for one that isn't
  *  printable), undefined for anything else. */
@@ -107,14 +111,26 @@ export function parseRandomId(id: string): RandomId | undefined {
 }
 
 /** The World Editor's name of a random object ("Random Level 3 Neutral Hostile Unit", "Random Any Level Permanent
- *  Item"), or undefined for any other id. */
+ *  Item"), or undefined for any other id. An item's equipment type and tag are added in brackets ("… Item (Head,
+ *  Droppable)"): the Editor's list names two entries that differ in them alike. */
 export function randomIdLabel(id: string): string | undefined {
   const r = parseRandomId(id);
   if (!r) return undefined;
   if (r.kind === "building") return "Random Neutral Passive Building";
   const level = r.level < 0 ? "Any Level" : `Level ${r.level}`;
   if (r.kind === "creep") return `Random ${level} Neutral Hostile Unit`;
-  return r.itemClass === 0 ? `Random ${level} Item` : `Random ${level} ${ITEM_CLASSES[r.itemClass].label} Item`;
+  const name = r.itemClass === 0 ? `Random ${level} Item` : `Random ${level} ${ITEM_CLASSES[r.itemClass].label} Item`;
+  const only = [r.equipment === undefined ? [] : [r.equipment === 0 ? "No Equipment Type" : EQUIPMENT_LABELS[r.equipment]],
+    r.tag === undefined ? [] : [r.tag === 0 ? "Undefined Tag" : ITEM_TAG_LABELS[r.tag]]].flat();
+  return only.length ? `${name} (${only.join(", ")})` : name;
+}
+
+/** A random item's id limited to an equipment type and a tag, each as Choose Item's list has it: -1 any, else its
+ *  number. Any other id comes back as it is. */
+export function withItemFilter(id: string, equipment: number, tag: number): string {
+  const r = parseRandomId(id);
+  if (r?.kind !== "item") return id;
+  return randomObjectId({ kind: "item", level: r.level, itemClass: r.itemClass, ...(equipment < 0 ? {} : { equipment }), ...(tag < 0 ? {} : { tag }) });
 }
 
 /** The random objects a random group's position of a type offers (0 unit, 1 building, 2 item), as the World Editor's

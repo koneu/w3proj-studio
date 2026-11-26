@@ -4,7 +4,8 @@
 // which makes each one undo step or refuses it whole (unitprops.ts checks, dropsview.ts works out bulk edits).
 
 import { h } from "../../workbench/dom";
-import { ITEM_CLASSES, MAX_ITEM_LEVEL, randomIdLabel, randomObjectId } from "../../lib/objects/randomids";
+import { ITEM_CLASSES, MAX_ITEM_LEVEL, randomIdLabel, randomObjectId, withItemFilter } from "../../lib/objects/randomids";
+import { itemFilterSelects } from "../../lib/objects/itemfilterui";
 import { dropChance, dropsText, dropsVariants, isEmptyItem, itemLabel, setHeading, setShares, type BulkDrops } from "./dropsview";
 import type { Placed } from "./objects";
 import { dropsOf, ownSetsOnly, redistribute, sameValue, setTotal, tableChoice, type DropItem } from "./unitprops";
@@ -147,7 +148,7 @@ export function randomItemEntries(): { id: string; name: string }[] {
   return randomItemChoices().map((c) => ({ id: c.id, name: randomIdLabel(c.id) ?? c.label }));
 }
 
-/** "Random item" by class and level, and "Item table…" for the map's tables, beside the item browser: `onPick` gets the id. */
+/** "Random item" by class, level, equipment type and tag, and "Item table…" for the map's tables, beside the item browser: `onPick` gets the id. */
 function randomPicker(host: DropsUiHost, onPick: (id: string) => void, withTable = true): HTMLElement[] {
   // In the Selection panel the data-props are their own: its Random Unit tab already uses random-class / random-level.
   const pre = withTable ? "" : "block-";
@@ -155,8 +156,9 @@ function randomPicker(host: DropsUiHost, onPick: (id: string) => void, withTable
     ...ITEM_CLASSES.map((c, i) => h("option", { value: String(i) }, c.label)));
   const lvl = h("select", { "data-prop": `${pre}random-level`, title: "Level of the random item" },
     h("option", { value: "-1" }, "Any level"), ...Array.from({ length: MAX_ITEM_LEVEL + 1 }, (_, i) => h("option", { value: String(i) }, `Level ${i}`)));
-  return [h("span.drops-random", {}, cls, lvl, h("button", { "data-prop": `${pre}add-random`, title: "Add a random item of this class and level, as the World Editor's Random item",
-    onclick: () => onPick(randomObjectId({ kind: "item", level: Number(lvl.value), itemClass: Number(cls.value) })) }, "Add random item")),
+  const filter = itemFilterSelects(pre);
+  return [h("span.drops-random", {}, cls, lvl, ...filter.elements, h("button", { "data-prop": `${pre}add-random`, title: "Add a random item of this class, level, equipment type and tag, as the World Editor's Random item",
+    onclick: () => onPick(withItemFilter(randomObjectId({ kind: "item", level: Number(lvl.value), itemClass: Number(cls.value) }), filter.equipment(), filter.tag())) }, "Add random item")),
   ...(withTable ? [h("button", { "data-prop": "item-tables", title: "Map Properties › Item tables", onclick: () => host.openItemTables() }, "Item table…")] : [])];
 }
 

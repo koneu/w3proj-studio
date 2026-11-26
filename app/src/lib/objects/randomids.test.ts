@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ITEM_CLASSES, parseRandomId, randomChoices, randomIdLabel, randomObjectId } from "./randomids";
+import { EQUIPMENT_LABELS, EQUIPMENT_TYPES, ITEM_CLASSES, ITEM_TAG_LABELS, ITEM_TAGS, parseRandomId, randomChoices, randomIdLabel, randomObjectId, withItemFilter } from "./randomids";
 
 // What the World Editor made and named (we-drive 2026-11-12): a new set of a random group with Random in each position
 // saved as "YYU/", "YYB/", "YYI/"; its Random Groups dialog named the probe group's ids so.
@@ -43,7 +43,17 @@ test("an item set entry with an equipment type or tag is the 'Z' form: class + 9
   assert.equal(parseRandomId("0x5a45480a"), undefined);
   assert.equal(parseRandomId("ZaI!"), undefined, "a printable high byte would be level 9 and up");
   assert.equal(parseRandomId("0x5a084900"), undefined, "class 8 isn't one");
-  assert.equal(randomIdLabel("0x5a45490a"), "Random Level 2 Permanent Item", "the editor's tree names it as before");
+  assert.equal(randomIdLabel("0x5a45490a"), "Random Level 2 Permanent Item (Head, Droppable)");
+  assert.equal(randomIdLabel("0x5a914909"), "Random Level 2 Permanent Item (Head)");
+  assert.equal(randomIdLabel("0x5a0d490d"), "Random Level 3 Charged Item (No Equipment Type, Undefined Tag)", "\"None\" and \"Undefined\" are limits, not \"any\"");
+  // What the pickers do with Choose Item's two lists (-1 any): the editor's own ids, from the plain id of class and level.
+  assert.equal(withItemFilter("YiI2", 1, 1), "0x5a45490a");
+  assert.equal(withItemFilter("YYI/", 1, 1), "0x5ac64900", "the editor's item table and random group, 2026-11-26");
+  assert.equal(withItemFilter("YiI2", -1, -1), "YiI2");
+  assert.equal(withItemFilter("0x5a45490a", -1, -1), "YiI2", "a limit taken away");
+  assert.equal(withItemFilter("YYU3", 1, 1), "YYU3", "only items have one");
+  assert.equal(EQUIPMENT_LABELS.length, EQUIPMENT_TYPES.length);
+  assert.equal(ITEM_TAG_LABELS.length, ITEM_TAGS.length);
 });
 
 test("the World Editor's names of the probe group's ids, and none for ids it left unnamed", () => {

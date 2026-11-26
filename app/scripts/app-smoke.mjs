@@ -2979,6 +2979,24 @@ async function techtreeRandomLevels(page, found) {
     const label = await text(`${cell(0)} .techtree-name`);
     if (label !== "Random Level 3 Neutral Hostile Unit") fail(`the unit position is named ${lit(label)}`);
     if ((await value(`${cell(0)} select.techtree-random`)) !== "") fail("the Random… choice didn't go back to its title");
+    // With Choose Item's equipment type and tag the item's id is the one the World Editor saved for that choice
+    // (level 2 Permanent, Head, Droppable); with both "any" again it is the plain one.
+    const filter = async (equipment, tag) => (await choose(`${cell(1)} [data-prop="random-equipment"]`, equipment)) && (await choose(`${cell(1)} [data-prop="random-tag"]`, tag));
+    if (await has(`${cell(0)} [data-prop="random-equipment"]`)) fail("the unit position offers an equipment type");
+    if (!(await filter("1", "1"))) fail("the item position has no equipment type Head and tag Droppable");
+    await choose(`${cell(1)} select.techtree-random`, "YiI2");
+    if ((await value(`${cell(1)} input.techtree-id`)) !== "0x5a45490a") fail(`level 2 Permanent, Head, Droppable is ${await value(`${cell(1)} input.techtree-id`)}, the editor saves 0x5a45490a`);
+    const filtered = await text(`${cell(1)} .techtree-name`);
+    if (filtered !== "Random Level 2 Permanent Item (Head, Droppable)") fail(`the filtered item is named ${lit(filtered)}`);
+    // The two lists are the item's own: changed back to "any", the item in the cell is the plain one again, and a
+    // typed filtered id shows its limits in them.
+    await filter("-1", "-1");
+    if ((await value(`${cell(1)} input.techtree-id`)) !== "YiI2") fail(`with any equipment type and tag again the item is ${await value(`${cell(1)} input.techtree-id`)}`);
+    await page.evaluate(`(() => { const i = document.querySelector(${lit(`${cell(1)} input.techtree-id`)}); i.value = "0x5a6a490c"; i.dispatchEvent(new Event("change")); })()`);
+    const shown = [await value(`${cell(1)} [data-prop="random-equipment"]`), await value(`${cell(1)} [data-prop="random-tag"]`)].join(",");
+    if (shown !== "2,7") fail(`a Chest, Shop item's lists show ${shown}`);
+    await filter("-1", "-1");
+    if ((await value(`${cell(1)} input.techtree-id`)) !== "YiI2") fail("the Chest, Shop item didn't become the plain one");
     // At 900 px (#app narrowed) the row's name label wraps or is cut with an ellipsis and a tooltip: never silently clipped by the pane.
     await page.evaluate(`document.getElementById("app").style.width = "900px"`);
     try {
@@ -3849,6 +3867,18 @@ async function itemDrops(page, found) {
   await redrawn();
   await k.save();
   if (JSON.stringify([troll(0, 0), troll(192, 0), troll(0, 192)]).includes("YkI2") || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the random power-up: ${lit([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets])}`);
+
+  // The same picker with an equipment type and a tag: the id the World Editor saved for level 2 Permanent, Head,
+  // Droppable goes into the units file, and one undo takes it back.
+  await page.evaluate(`(() => { const s = (p, v) => { const e = document.querySelector('.drops-tab [data-prop="' + p + '"]'); e.value = v; }; s("random-class", "1"); s("random-level", "2"); s("random-equipment", "1"); s("random-tag", "1"); })()`);
+  await k.hands.click(T("[data-prop=\"add-random\"]"));
+  await redrawn();
+  await k.save();
+  if (troll(192, 0)?.itemSets.at(-1)?.[0]?.id !== "0x5a45490a") fail(`a random item with an equipment type and a tag: ${lit(troll(192, 0)?.itemSets)}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await redrawn();
+  await k.save();
+  if (JSON.stringify([troll(0, 0), troll(192, 0), troll(0, 192)]).includes("0x5a45490a")) fail("one undo left the filtered random item");
 
   // The item browser itself lists the random items first, as a group: "Add a set to each…" opens it, a search for a
   // level 2 power-up leaves that entry on top and Enter adds YkI2 to each troll as a set, one undo step.

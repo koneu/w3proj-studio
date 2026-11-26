@@ -4,7 +4,8 @@
 // entry keeps its bytes.
 
 import { addChance, scaleChances } from "../../lib/chances";
-import { ITEM_CLASSES, parseRandomId, randomChoices, randomIdLabel } from "../../lib/objects/randomids";
+import { itemFilterSelects } from "../../lib/objects/itemfilterui";
+import { ITEM_CLASSES, parseRandomId, randomChoices, randomIdLabel, withItemFilter } from "../../lib/objects/randomids";
 import { h } from "../../workbench/dom";
 import { techGrid, upgradeGrid } from "./techgrid";
 
@@ -44,8 +45,10 @@ const section = (title: string, hint: string, ...children: Node[]) =>
 const removeButton = (title: string, onclick: () => void) => h("button.icon-button", { title, onclick }, "×");
 
 /** The random objects by level a position of a type offers ("Random Level 3 Neutral Hostile Unit"), as a choice that
- *  gives the chosen one's id and goes back to its title; the items by class. */
-function randomSelect(positionType: number, choose: (id: string) => void): HTMLSelectElement {
+ *  gives the chosen one's id and goes back to its title; the items by class, with Choose Item's equipment type and tag
+ *  beside them. Those two show the random item there is and change it; else they apply to the next one chosen.
+ *  `show`: the id of the cell changed. */
+function randomSelect(positionType: number, current: () => string, choose: (id: string) => void): { element: HTMLElement; show(id: string): void } {
   const choices = randomChoices(positionType);
   const byClass = positionType === 2
     ? ITEM_CLASSES.map((c, k) => h("optgroup", { label: c.label }, ...choices.filter((x) => { const r = parseRandomId(x.id); return r?.kind === "item" && r.itemClass === k; })
@@ -53,20 +56,30 @@ function randomSelect(positionType: number, choose: (id: string) => void): HTMLS
     : choices.map((x) => h("option", { value: x.id }, x.label));
   const sel = h("select.form-input.techtree-random", { title: "A random object of a level, chosen when the game starts" },
     h("option", { value: "" }, "Random…"), ...byClass);
+  const filter = positionType === 2 ? itemFilterSelects() : null;
   sel.addEventListener("change", () => {
     const id = sel.value;
     sel.value = "";
-    if (id) choose(id);
+    if (id) choose(filter ? withItemFilter(id, filter.equipment(), filter.tag()) : id);
   });
-  return sel;
+  if (!filter) return { element: sel, show: () => {} };
+  for (const f of filter.elements) {
+    f.classList.add("form-input", "techtree-filter");
+    f.addEventListener("change", () => {
+      if (parseRandomId(current())?.kind === "item") choose(withItemFilter(current(), filter.equipment(), filter.tag()));
+    });
+  }
+  return { element: h("span.techtree-random-item", {}, ...filter.elements, sel), show: (id) => filter.show(id) };
 }
 
 /** An object id with its name (filled in when known) and a button to pick another; with `randomType` (the position's
  *  type: 0 unit, 1 building, 2 item) also the random objects by level, which show the World Editor's names. */
 function objectCell(ctx: TechContext, kinds: string[], get: () => string, set: (id: string) => void, randomType?: number): HTMLElement {
   const label = h("span.muted.techtree-name");
+  let random: ReturnType<typeof randomSelect> | null = null;
   const show = () => {
     const id = get();
+    random?.show(id);
     label.textContent = label.title = randomIdLabel(id) ?? "";
     if (id && id !== NONE && !randomIdLabel(id)) void ctx.name(id).then((n) => { if (n && get() === id) label.textContent = label.title = n; });
   };
@@ -85,14 +98,14 @@ function objectCell(ctx: TechContext, kinds: string[], get: () => string, set: (
       ctx.changed();
     },
   }, "…");
-  const random = randomType === undefined ? [] : [randomSelect(randomType, (id) => {
+  if (randomType !== undefined) random = randomSelect(randomType, get, (id) => {
     input.value = id;
     set(id);
     show();
     ctx.changed();
-  })];
+  });
   show();
-  return h("span.techtree-object", {}, input, browse, ...random, label);
+  return h("span.techtree-object", {}, input, browse, ...(random ? [random.element] : []), label);
 }
 
 /** Checkboxes for the map's players over a player bit mask. */
