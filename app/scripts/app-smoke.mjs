@@ -94,6 +94,19 @@ function readMapFile(path, encoding) {
   return encoding ? r.stdout.toString(encoding) : r.stdout;
 }
 
+/** Writes a file under a project's map/ as another program editing the project would, in either layout: in a split
+ *  project a flat file (war3map.w3e.txt, the placed objects, the regions) goes into its subterrains through the app's
+ *  backend (fs_write_text: flatview's write, not the workspace's, so the app sees an outside change); any other file,
+ *  or any file of a flat project, is written as it is. */
+async function writeMapFile(page, path, text) {
+  const at = existsSync(path) ? null : projectMapFile(path);
+  if (at && existsSync(join(at.project, "map", "terrain", "terrain.json"))) {
+    await page.evaluate(`w3.backend.invoke("fs_write_text", { path: ${lit(path)}, text: ${lit(text)} })`);
+  } else {
+    writeFileSync(path, text);
+  }
+}
+
 /** Whether a file under a project's map/ is there as the app sees it (readMapFile). */
 function mapFileExists(path) {
   if (existsSync(path)) return true;
@@ -7741,8 +7754,11 @@ async function unreadableChapter(page, found) {
     if (JSON.stringify(paths) !== JSON.stringify(["maps/Chapter 2.w3x", "maps/Chapter 3.w3x/map"])) fail(`unreadable folders: ${lit(bad)}`);
     if (bad.some((u) => !u.error)) fail(`an unreadable folder without a reason: ${lit(bad)}`);
     await soon(async () => (await page.evaluate(`window.__chWarned.length`)) > 0, 5000).catch(() => {});
-    const warned = await page.evaluate(`window.__chWarned`);
+    // The readable flat chapter is converted on the open and said so (flatProjectOpens); that message aside, one warning.
+    const all = await page.evaluate(`window.__chWarned`);
+    const warned = all.filter((m) => !/old single-file layout/.test(m));
     if (warned.length !== 1 || !warned[0].includes("Chapter 2.w3x")) fail(`the warning: ${lit(warned)}`);
+    if (!all.some((m) => /The terrain of maps\/Chapter 1\.w3x was in the old single-file layout/.test(m)) || all.some((m) => /Chapter [234]\.w3x (keeps|was)/.test(m))) fail(`the conversion's message: ${lit(all)}`);
     const list = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.run()).then((p) => p.map((x) => x.message), (e) => ["failed: " + e])`).catch(() => null);
     if (list === null) fail("the Problems check couldn't be run");
     else if (!list.some((m) => m.includes('chapter "Chapter 2.w3x"') && /can't be read/.test(m))) fail(`no Problems entry names the chapter: ${lit(list).slice(0, 400)}`);
@@ -8280,7 +8296,8 @@ async function toggleGroups(page, found) {
     const groups = JSON.parse(await page.evaluate(`JSON.stringify(Object.fromEntries([...document.querySelectorAll(".model-toggle-group")].map((g) => [g.dataset.group, { labels: [...g.querySelectorAll(".model-toggle")].map((l) => l.textContent.trim()), selects: g.querySelectorAll("select").length, title: g.querySelector(".model-toggle-group-title")?.textContent }])))`));
     const WANT = {
       View: ["Doodads", "Units", "Water", "Blight", "Cliffs", "Effects", "Animate", "Lighting", "Fog", "Weather", "Shadows", "Boundary", "Minimap"],
-      Overlays: ["Height map", "Ground pathing", "Naval pathing", "Regions", "Camera objects", "Light ranges", "Camera bounds", "Info"],
+      // Subterrains: every new map is split (one subterrain main).
+      Overlays: ["Height map", "Ground pathing", "Naval pathing", "Regions", "Camera objects", "Light ranges", "Camera bounds", "Info", "Subterrains"],
       Behaviour: ["Water limits", "Keep pasted height", "Reset fixed heights", "Enforce camera bounds"],
     };
     const SELECTS = { View: 3, Overlays: 1, Behaviour: 0 };
@@ -8295,7 +8312,7 @@ async function toggleGroups(page, found) {
       Doodads: "toggleDoodads", Units: "toggleUnits", Water: "toggleWater", Blight: "toggleBlight", Cliffs: "toggleCliffs", Effects: "toggleEffects",
       Animate: "toggleAnimate", Lighting: "toggleLighting", Fog: "toggleFogEffects", Weather: "toggleWeather", Shadows: "toggleShadows", Boundary: "toggleBoundary", Minimap: "toggleMinimap",
       "Height map": "toggleHeightMap", "Ground pathing": "toggleGroundPathing", "Naval pathing": "toggleNavalPathing", Regions: "toggleRegions", "Camera objects": "toggleCameraObjects",
-      "Light ranges": "toggleLightRanges", "Camera bounds": "toggleCameraBounds", Info: "toggleInfoDisplay",
+      "Light ranges": "toggleLightRanges", "Camera bounds": "toggleCameraBounds", Info: "toggleInfoDisplay", Subterrains: "toggleSubterrains",
       "Water limits": "toggleEnforceWaterLimits", "Keep pasted height": "togglePreserveCopiedHeight", "Reset fixed heights": "toggleResetFixedHeights", "Enforce camera bounds": "toggleEnforceCameraBounds",
     };
     for (const [label, cmd] of Object.entries(COMMANDS)) {
@@ -10843,18 +10860,18 @@ async function rebuildCli(page, found) {
     if (existsSync(join(root, "map", "war3map.j"))) fail("the new map has a tracked map/war3map.j; its script should be generated (.w3proj/derived/)");
     const SCRIPT = ".w3proj/derived/war3map.j";
     const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", SCRIPT, "map/war3map.w3i.json", ".w3proj/derived-from.json", ".w3proj/generated-script"];
-    const read = (r, f) => (existsSync(join(r, f)) ? readFileSync(join(r, f)) : null);
+    const read = (r, f) => (mapFileExists(join(r, f)) ? readMapFile(join(r, f)) : null);
     const before = Object.fromEntries(FILES.map((f) => [f, read(root, f)]));
     // The edit outside the app (as an AI editing the text files would): the rock and the footman move.
-    const move = (file, list, id, dx) => {
-      const doc = JSON.parse(readFileSync(join(root, "map", file), "utf8"));
+    const move = async (file, list, id, dx) => {
+      const doc = JSON.parse(readMapFile(join(root, "map", file), "utf8"));
       const o = doc[list].find((e) => e.id === id);
       if (!o) throw new Error(`no ${id} in ${file}`);
       o.position[0] += dx;
-      writeFileSync(join(root, "map", file), `${JSON.stringify(doc, null, 2)}\n`);
+      await writeMapFile(page, join(root, "map", file), `${JSON.stringify(doc, null, 2)}\n`);
     };
-    move("war3map.doo.json", "doodads", "AOks", 384);
-    move("war3mapUnits.doo.json", "units", "hfoo", -512);
+    await move("war3map.doo.json", "doodads", "AOks", 384);
+    await move("war3mapUnits.doo.json", "units", "hfoo", -512);
     const copy = join(dir, "cli-copy");
     cpSync(root, copy, { recursive: true });
     // The app's copy, from its saved files.
@@ -10866,7 +10883,7 @@ async function rebuildCli(page, found) {
     const env = { ...process.env, ...(game ? { W3PROJ_GAME: game } : {}) };
     const pack = (label) => spawnSync(cli, ["pack", copy, ...fixtureTriggerData(copy), "-o",join(dir, `${label}.w3x`)], { encoding: "utf8" });
     const stale = pack("before");
-    if (stale.status === 0 || !/war3map\.doo\.json/.test(stale.stderr ?? "")) fail(`w3proj pack took the copy before its rebuild: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
+    if (stale.status === 0 || !/war3map\.doo\.json|terrain\/main\/doodads\.json/.test(stale.stderr ?? "")) fail(`w3proj pack took the copy before its rebuild: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
     const r = spawnSync(cli, ["rebuild", copy], { encoding: "utf8", env, timeout: 300000 });
     const said = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
     if (r.status !== 0) { fail(`w3proj rebuild failed (${r.status}): ${said.slice(-600)}`); return; }
@@ -11552,6 +11569,8 @@ async function moduleFunctionsChecks(page, found) {
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const hash = (p) => createHash("sha256").update(readMapFile(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
+/** hash of a file as the app reads it (readMapFile); undefined when it is nowhere. */
+const mapHash = (p) => { try { return hash(p); } catch { return undefined; } };
 
 /** Copying objects between maps brings what they refer to. Map A has a custom hero with a custom ability that uses a custom
  *  buff, and a custom barracks that trains a custom unit. The hero and the barracks are copied in the Object Editor
@@ -11569,7 +11588,7 @@ async function objectCopy(page, found) {
   mkdirSync(folder, { recursive: true });
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
   const rootOf = () => page.evaluate(`w3.workspace.project()?.root`);
-  const readIn = (root, file) => { const p = join(root, "map", file); return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : { custom: [], original: [] }; };
+  const readIn = (root, file) => { const p = join(root, "map", file); return mapFileExists(p) ? JSON.parse(readMapFile(p, "utf8")) : { custom: [], original: [] }; };
   const customs = (root, ext) => readIn(root, `war3map.${ext}.json`).custom;
   const idOf = async (name, args) => JSON.parse(await tool(name, args)).id;
   const save = async () => { await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
@@ -13711,7 +13730,8 @@ async function playerStarts(page, found, root) {
     if (!free.every((c) => c.input)) fail(`without a start location, Start X/Y can't be typed (control): ${lit(free)}`);
     // Player 1's start location, as the terrain editor places it.
     const doc = JSON.parse(before);
-    doc.units.push({ ...doc.units[0], id: "sloc", player: 0, position: [128, -256, 0], angle: 4.712389 });
+    // A creation number of its own: the split layout refuses one found twice.
+    doc.units.push({ ...doc.units[0], id: "sloc", player: 0, position: [128, -256, 0], angle: 4.712389, editorId: Math.max(...doc.units.map((u) => u.editorId)) + 1 });
     await page.evaluate(`(async () => w3.workspace.writeText(${lit(units)}, ${lit(JSON.stringify(doc))}))()`);
     await until("the start location to be read", async () => {
       await page.evaluate(players);
@@ -18067,8 +18087,11 @@ async function niceToHaves(page, found) {
     // The triggers compare by what they pack to: the folder's project keeps them as an import does (or raw).
     const fromFolder = triggersAsPacked(join(dir, "from-folder"));
     const fixtureFiles = triggersAsPacked(FIXTURE);
-    for (const [f, h] of fixtureFiles) if (fromFolder.get(f) !== h) fail(`the folder's project has ${f} ${fromFolder.has(f) ? "different" : "missing"}`);
-    if (fromFolder.size !== fixtureFiles.size) fail(`the folder's project has ${fromFolder.size} files, the fixture ${fixtureFiles.size}`);
+    // The import writes the split terrain layout: its flat and derived files compare as the app reads them.
+    for (const [f, h] of fixtureFiles) {
+      const got = fromFolder.get(f) ?? mapHash(join(dir, "from-folder", "map", f));
+      if (got !== h) fail(`the folder's project has ${f} ${got !== undefined ? "different" : "missing"}`);
+    }
     await page.evaluate(`(() => { const k = window.__niceKept; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`);
 
     const k = await heightKit(page, "Nice");
@@ -18931,11 +18954,13 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   await page.evaluate(`w3.editors.saveAll()`);
   await page.evaluate(`w3.editors.closeAll()`);
   await settled(page);
-  const after = snapshot(project);
+  // The open converted the flat project into the split layout (layoutconvert.ts): its files compare as the app reads them.
   for (const [f, h] of before) {
-    if (after.get(f) === undefined) found.push(`${f} is gone`);
-    else if (after.get(f) !== h) found.push(`${f} changed without an edit`);
+    const now = mapHash(join(project, f));
+    if (now === undefined) found.push(`${f} is gone`);
+    else if (now !== h) found.push(`${f} changed without an edit`);
   }
+  if (!existsSync(join(project, "map", "terrain", "terrain.json"))) found.push("opening the flat project didn't convert it into map/terrain/");
 
   // What the app packs is what the command line packs.
   await page.evaluate(`w3.backend.invoke("project_pack", { root: ${path}, output: ${lit(packed)} })`);
@@ -18960,7 +18985,8 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   // the trigger folders.
   const again = triggersAsPacked(unpacked);
   const expected = triggersAsPacked(FIXTURE);
-  for (const [f, h] of expected) if (again.get(f) !== h) found.push(`unpacking changed ${f}`);
+  // The unpack writes the split terrain layout: its flat and derived files compare as the app reads them.
+  for (const [f, h] of expected) if ((again.get(f) ?? mapHash(join(unpacked, "map", f))) !== h) found.push(`unpacking changed ${f}`);
 
   const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
   if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);

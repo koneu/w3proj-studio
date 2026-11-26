@@ -620,8 +620,21 @@ pub fn convert_on_open(path: &str) -> CmdResult<OpenConversion> {
     for (rel, project) in projects {
         let map_dir = project.join(w3proj::project::MAP_DIR);
         let (Ok(false), Ok(true)) = (layout::is_split_on_disk(&map_dir), layout::flat_on_disk(&map_dir)) else { continue };
+        // A manifest that can't be read: the open and the Problems view say so; nothing is converted.
+        if w3proj::project::Manifest::load(&project).is_err() {
+            continue;
+        }
+        // A flat project packs its derived files as map/ has them when no record says they don't follow the terrain;
+        // split, the same ones are recorded as following it, and those it had none of as absent (as an unpack records
+        // a map's), so the project packs as before. Stale ones stay stale.
+        let packed_as_is = matches!(w3proj::derived::check(&project), Ok(w3proj::derived::Freshness::Fresh | w3proj::derived::Freshness::Unknown));
         match layout::split_project(&project, &[]) {
-            Ok(_) => done.converted.push(rel),
+            Ok(_) => {
+                if packed_as_is {
+                    w3proj::derived::read_store(&project).and_then(|store| w3proj::derived::record_synced(&project, &store)).map_err(err)?;
+                }
+                done.converted.push(rel);
+            }
             Err(e) => done.kept.push((rel, kept_reason(&map_dir, &e.to_string()))),
         }
     }
@@ -923,7 +936,7 @@ mod tests {
 
         // Refused: deleting it, a terrain of another size whose offset moved by part of a tile (Map Size moves it by
         // tiles), text that isn't a terrain (nothing written).
-        assert!(refuse_moving(&w3e).unwrap_err().contains("Merge the subterrains"));
+        assert!(refuse_moving(&w3e).unwrap_err().contains("it is made from map/terrain/"));
         assert!(refuse_moving(&flat.join("map/war3map.w3e.txt")).is_ok(), "control");
         let files_before = layout_files(&split);
         // 15×1 corners: each section's three rows of five as one row (the size check is w3proj's own test).
@@ -1183,6 +1196,10 @@ mod tests {
             assert_eq!(&read_bytes(&dir.join("map").join(name)).unwrap(), bytes, "{name} reads as before");
         }
         assert!(!dir.join("map/war3map.wpm").exists() && dir.join(".w3proj/derived/war3map.wpm").is_file());
+        // It packs as the flat project did: no record before, so the derived files it has follow the map, and the
+        // shadows and minimap it never had are absent, not missing.
+        assert_eq!(w3proj::derived::check(&dir).unwrap(), w3proj::derived::Freshness::Fresh);
+        assert!(w3proj::derived::missing(&dir).unwrap().is_empty(), "{:?}", w3proj::derived::missing(&dir));
         let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
         assert!(w3proj::derived::IGNORED.iter().all(|l| ignore.contains(l)), "{ignore}");
         // The path of the manifest opens the same project.
