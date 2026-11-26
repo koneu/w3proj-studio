@@ -27,7 +27,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync as readDiskFile, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, Socket } from "node:net";
 import { networkInterfaces } from "node:os";
 import { inflateSync } from "node:zlib";
@@ -88,11 +88,15 @@ function projectMapFile(path) {
  *  project that stayed flat) is read as it is; one that is neither throws, as readFileSync does. */
 function readMapFile(path, encoding) {
   const at = existsSync(path) ? null : projectMapFile(path);
-  if (!at) return readFileSync(path, encoding);
+  if (!at) return readDiskFile(path, encoding);
   const r = spawnSync(cli, ["cat", at.project, at.name], { maxBuffer: 1 << 28 });
   if (r.status !== 0) throw new Error(`${path}: ${String(r.stderr).trim() || "can't be read"}`);
-  return encoding ? r.stdout.toString(encoding) : r.stdout;
+  const enc = typeof encoding === "string" ? encoding : encoding?.encoding;
+  return enc ? r.stdout.toString(enc) : r.stdout;
 }
+/** Every read of the checks is readMapFile: a project's flat terrain, object and derived files are read as the app reads
+ *  them in the split layout (the only one), every other file as it is on disk. */
+const readFileSync = readMapFile;
 
 /** Writes a file under a project's map/ as another program editing the project would, in either layout: in a split
  *  project a flat file (war3map.w3e.txt, the placed objects, the regions) goes into its subterrains through the app's
@@ -977,7 +981,7 @@ async function atmosphereTools(page, found) {
   if (readMapFile(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
   for (let i = 0; i < 4; i++) await tool("undo_last_edit");
   await tool("save_project");
-  if (read("war3map.w3i.json").weather !== "0x00000000" || (existsSync(join(root, "map", "war3map.w3r.json")) ? read("war3map.w3r.json").regions.length > 0 : true)) fail("the undos didn't bring back the map as it was");
+  if (read("war3map.w3i.json").weather !== "0x00000000" || (mapFileExists(join(root, "map", "war3map.w3r.json")) ? read("war3map.w3r.json").regions.length > 0 : true)) fail("the undos didn't bring back the map as it was");
   } finally {
     await restoreWindow(page);
   }
@@ -1923,7 +1927,7 @@ async function terrainSelectCameras(page, found) {
   try {
   const fail = (what) => found.push(`terrain select and cameras: ${what}`);
   const k = await heightKit(page, "SelectCameras");
-  const TXT = "map/war3map.w3e.txt", BIN = "map/war3map.w3e";
+  const TXT = "map/war3map.w3e.txt", BIN = "binary/war3map.w3e";
   const active = () => page.evaluate(`w3.editors.activePath()`);
   const cameras = () => k.read("war3map.w3c.json").cameras ?? [];
 
@@ -2031,12 +2035,14 @@ async function terrainSelectCameras(page, found) {
   await k.save();
   if (cameras().length !== 1) fail(`saved, the map has ${cameras().length} cameras`);
 
-  // Two terrain files: the binary one, from the packed map, next to the text one.
+  // Two terrain files: the binary one, from the packed map, beside the text one (in a folder of its own: next to the
+  // split layout's map/terrain/ a map/war3map.w3e would be a second terrain of the map).
   const map = join(work, "heights", "SelectCameras.w3x");
   const packed = spawnSync(cli, ["pack", k.root, ...fixtureTriggerData(k.root), "-o", map], { encoding: "utf8" });
   const w3e = packed.status === 0 ? spawnSync(cli, ["cat", map, "war3map.w3e"]) : null;
   if (!w3e || w3e.status !== 0 || !w3e.stdout.length) return fail(`no binary war3map.w3e: ${packed.stderr}${w3e?.stderr ?? ""}`);
-  writeFileSync(join(k.root, "map", "war3map.w3e"), w3e.stdout);
+  mkdirSync(join(k.root, "binary"), { recursive: true });
+  writeFileSync(join(k.root, "binary", "war3map.w3e"), w3e.stdout);
   await page.evaluate(`w3.workspace.refresh()`);
   for (const path of [BIN, TXT]) {
     await page.evaluate(`w3.editors.open(${lit(path)}, "w3.terrainViewer")`);
@@ -2050,7 +2056,7 @@ async function terrainSelectCameras(page, found) {
   const wrong = await k.tool("terrain_screenshot", { maxSize: 64, file: "map/war3map.j" }).then(() => null, (e) => e.message);
   if (!wrong || !/terrain files/.test(wrong)) fail(`terrain_screenshot of a file that isn't terrain: ${wrong ?? "a picture"}`);
   await page.evaluate(`w3.editors.closeAll()`);
-  rmSync(join(k.root, "map", "war3map.w3e"));
+  rmSync(join(k.root, "binary"), { recursive: true });
   await page.evaluate(`w3.workspace.refresh()`);
 
   // An object without a model: a footman given an id no table knows, written as another tool would.
@@ -6158,7 +6164,8 @@ async function pathingSquare(page, found) {
   await until("the stroke's cells", async () => /^25 cells/.test(await overridden()), 10000)
     .catch(async (e) => { throw new Error(`${e.message} (${await overridden()})`); });
   await k.save();
-  const cells = JSON.parse(readFileSync(join(k.root, ".w3proj", "pathing.json"), "utf8")).cells;
+  // The Pathing tool's file as the app reads it (a split terrain keeps the overrides in its subterrains' pathing.txt).
+  const cells = JSON.parse(await page.evaluate(`w3.workspace.readText(".w3proj/pathing.json")`)).cells;
   const xs = cells.map((c) => c[0]), ys = cells.map((c) => c[1]);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   if (cells.length !== 25 || x1 - x0 !== 4 || y1 - y0 !== 4) fail(`${cells.length} cells in ${x1 - x0 + 1} × ${y1 - y0 + 1}`);
@@ -6195,7 +6202,7 @@ async function resizeUndoChecks(page, found) {
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   const root = await page.evaluate(`w3.workspace.project()?.root`);
   const state = () => {
-    const files = snapshot(join(root, "map"));
+    const files = mapSnapshot(root);
     const pathing = join(root, ".w3proj", "pathing.json");
     return new Map([...files, ...(existsSync(pathing) ? [[".w3proj/pathing.json", hash(pathing)]] : [])]);
   };
@@ -6842,7 +6849,9 @@ async function subterrains(page, found) {
       const want = [["ne", 32, 32, 33, 33], ["nw", 0, 32, 32, 33], ["se", 32, 0, 33, 32], ["sw", 0, 0, 32, 32]];
       if (lit(grid) !== lit(want)) fail(`the cut gave ${lit(grid)}, not ${lit(want)}`);
     }
-    // The editor the command opened again is at rest with its minimap panel drawn (the reload showed it black).
+    // The editor the commands opened again is at rest with its minimap panel drawn (the reload showed it black).
+    await editorUp().catch(() => fail("the terrain editor isn't open again after the cut"));
+    await settled(page);
     {
       const lit_ = await page.evaluate(`(() => { const c = document.querySelector(".terrain-minimap-canvas"); if (!c || c.closest("[hidden]")) return -1;
         const d = c.getContext("2d").getImageData(10, 10, c.width - 20, c.height - 20).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 30) n++; return n; })()`);
@@ -9985,6 +9994,10 @@ async function doodadSnapOnLoad(page, found) {
     writeFileSync(unitsFile, JSON.stringify(units, null, 2));
     writeFileSync(join(root, "map", "war3map.w3b.json"), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [
       { base: "LTex", end: "LTex", mods: [{ field: "bmis", type: "unreal", value: 1.5 }, { field: "bmas", type: "unreal", value: 1.1 }] }], custom: [] }, null, 2));
+    // Split as the open would convert it (`w3proj terrain split`, the same code): what is held against the files
+    // afterwards is the split layout's text, not this hand-written JSON's.
+    const split = spawnSync(cli, ["terrain", "split", root], { encoding: "utf8" });
+    if (split.status !== 0) throw new Error(`w3proj terrain split ${root}: ${split.stderr}`);
     return root;
   };
   const f32 = Math.fround;
@@ -11111,7 +11124,7 @@ async function moduleFunctionsChecks(page, found) {
   {
     await openProject(b);
     try { await tool("rebuild_map"); } catch (e) { fail(`rebuild_map: ${e.message}`); }
-    await until("the minimap", () => existsSync(join(b, "map", "war3mapMap.blp")), 20000).catch(() => fail("no war3mapMap.blp to export"));
+    await until("the minimap", () => mapFileExists(join(b, "map", "war3mapMap.blp")), 20000).catch(() => fail("no war3mapMap.blp to export"));
     const out = join(dir, "minimap-out.png");
     await answer({ save: out });
     /** The PNG's size and its pixels' colours (one IDAT chunk, as lib/image/png writes it). */
@@ -11569,6 +11582,15 @@ async function moduleFunctionsChecks(page, found) {
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const hash = (p) => createHash("sha256").update(readMapFile(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
+/** A project's map/ files by path (snapshot), with the flat terrain, object and derived files as the app reads them in
+ *  the split layout (map/terrain/ and .w3proj/derived/ hold them). */
+const mapSnapshot = (root) => {
+  const files = snapshot(join(root, "map"));
+  for (const name of ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.mmp.json"]) {
+    if (!files.has(name)) { const h = mapHash(join(root, "map", name)); if (h !== undefined) files.set(name, h); }
+  }
+  return files;
+};
 /** hash of a file as the app reads it (readMapFile); undefined when it is nowhere. */
 const mapHash = (p) => { try { return hash(p); } catch { return undefined; } };
 
@@ -16208,13 +16230,15 @@ async function scriptGenerated(page, found) {
     if (!/gg_rct_Generated_Region/.test(readFileSync(store, "utf8"))) fail("saving a region didn't make the generated script again");
     if (existsSync(tracked)) fail("saving wrote map/war3map.j");
     if ((await state())?.freshness !== "fresh") fail(`after the save the generated script doesn't follow its sources: ${lit(await state())}`);
-    const ok = pack("fresh");
+    // Every file under map/terrain/ is a source of the derived files too: the region save leaves those to the next
+    // terrain save, so only the script is held here (its own record).
+    const ok = pack("fresh", ["--allow-terrain-only-derived"]);
     if (ok.status !== 0) fail(`w3proj pack refused the generated script the app recorded: ${(ok.stdout + ok.stderr).trim().slice(-300)}`);
     // A source changed outside the app: stale for the CLI until the app makes it again.
     const regionsFile = join(k.root, "map", "war3map.w3r.json");
-    writeFileSync(regionsFile, readFileSync(regionsFile, "utf8").replace("Generated Region", "Outside Region"));
-    const stale = pack("stale");
-    if (stale.status === 0 || !/war3map\.w3r\.json changed/.test(stale.stderr)) fail(`w3proj pack took the script after its regions changed outside the app: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
+    await writeMapFile(page, regionsFile, readFileSync(regionsFile, "utf8").replace("Generated Region", "Outside Region"));
+    const stale = pack("stale", ["--allow-terrain-only-derived"]);
+    if (stale.status === 0 || !/(war3map\.w3r|regions)\.json changed/.test(stale.stderr)) fail(`w3proj pack took the script after its regions changed outside the app: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
     await page.evaluate(`w3.workspace.refresh()`);
     await saveRegion("Back Region");
 
