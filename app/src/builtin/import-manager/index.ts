@@ -12,7 +12,7 @@ import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, newEntryFlags, pathForUse, projectPath, rowEntries, rowMoves, samePath, sidePathOf, SIDES, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type Side, type UseIn } from "../../lib/imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, modeMove, newEntryFlags, pathForUse, projectPath, rowEntries, rowMoves, samePath, sidePathOf, SIDES, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type Side, type UseIn } from "../../lib/imports";
 import { bringsTextures, followingTextures, modelTextures, shownEntry, SIDE_NAME, SIDE_PREFER, versionsToAdd, versionToAdd } from "./versions";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -478,6 +478,27 @@ class ImportView {
       void this.w3.window.showInfo(`Updated ${count} reference${count === 1 ? "" : "s"} to ${to}.`);
     });
   }
+  /** Moves one version of a row to another graphics mode (lib/imports.ts modeMove). What the map's data names is the
+   *  plain path, which stays, so no references change. One step of Change path's undo. */
+  private changeMode(row: ImportRow, side: Side, to: Side) {
+    void this.run("Change graphics mode", async () => {
+      const files = this.files();
+      const move = modeMove(row, side, to, (e) => this.shownPath(e, this.fileOf(e, files)));
+      if (!move) return;
+      if (this.taken(move.to)) throw new Error(`${move.to} is already in the map.`);
+      const f = this.fileOf(move.entry, files);
+      const before = { path: move.entry.path, flags: move.entry.flags };
+      if (f) await this.moveFile(f.path, projectPath(move.to));
+      move.entry.path = move.to;
+      move.entry.flags = move.flags;
+      const step: PathStep<ImportEntry> = { moves: [{ entry: move.entry, before, after: { path: move.to, flags: move.flags },
+        file: f ? { from: f.path, to: projectPath(move.to) } : undefined }], refs: [] };
+      this.history.splice(this.at, this.history.length, { path: step });
+      this.at = this.history.length;
+      await this.write();
+      this.select([classicPathOf(move.to)]);
+    });
+  }
   /** Removes entries from the list. Entries whose files are in the project ask whether the files go too: a file left
    *  in the map folder without an entry is still packed into the map and used by the game (the Problems view warns
    *  of it), so that is never done without saying so. */
@@ -876,6 +897,7 @@ class ImportView {
         ...(this.editable ? [h("button", { title: row.reforged || row.de ? "The other versions move along, below _HD.w3mod\\ and _DE.w3mod\\" : "", onclick: () => this.changePath(row, path.value) }, "Change path")] : [])),
       h("p.muted", {}, "Models, textures and sounds are referred to by this path (object data, triggers, other models)."),
       h("div.imp-field", {}, h("label", {}, "Graphics modes"), h("span.imp-modes", {}, modes)),
+      ...(this.editable ? versions.map((v) => this.modeSelect(row, SIDES.find((s) => row[s] === v.e)!, several)) : []),
       h("div.imp-field", {}, h("label", {}, "Type"), h("span", {}, `${kindOf(row.path)} · flags ${versions.map((v) => v.e.flags).join(" / ")}`)),
       versions.every((v) => v.f) ? null : h("p.imp-warn", {}, `${versions.length > 1 ? `The ${versions.filter((v) => !v.f).map((v) => v.mode).join(" and ")} version isn't` : "This file isn't"} in the project's map folder, so it isn't packed. (Blizzard's own maps list files the game provides itself.)`),
       h("div.imp-actions", {},
@@ -897,6 +919,15 @@ class ImportView {
           : `A file for Classic, stored as ${add.path}: Classic reads it, the other graphics modes keep their own version`,
         onclick: () => void this.addVersion(row, add.side) }, `Add ${SIDE_NAME[add.side]} Version…`))) : null,
       file ? this.preview(e.path, file, SIDES.find((s) => row[s] === e)!) : null);
+  }
+
+  /** A version's graphics mode, to change it (the World Editor's Mode column); the modes the row has already are off. */
+  private modeSelect(row: ImportRow, side: Side, several: boolean): HTMLElement {
+    const label = several ? `Move the ${SIDE_NAME[side]} version to` : "Move to";
+    const select = h("select.imp-mode", { "data-side": side, title: "The file moves to that mode's folder: the plain path for Classic, _HD.w3mod\\ for Reforged, _DE.w3mod\\ for 3.0 (Ctrl+Z takes it back)",
+      onchange: () => this.changeMode(row, side, select.value as Side) },
+    ...SIDES.map((s) => h("option", { value: s, selected: s === side, disabled: s !== side && !!row[s] }, SIDE_NAME[s]))) as HTMLSelectElement;
+    return h("div.imp-field", {}, h("label", {}, label), select);
   }
 
   /** The graphics modes of a row with a Reforged or 3.0 version ("Classic", "Reforged", "3.0"); none for a plain file

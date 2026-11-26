@@ -16966,6 +16966,23 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     // The note comes once the add has ended, which the list entry and file don't tell of.
     if (!(await soon(() => page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`), 10000))) fail(`no note of the added version: ${lit(await page.evaluate(`window.__impInfo`))}`);
 
+    // Move the Reforged version to 3.0: its file goes below _DE.w3mod and the entry gets the World Editor's flags for
+    // that (13 -> 29); Classic, which the row has, isn't offered. Undo puts both back.
+    const hdFile = "map/_HD.w3mod/war3mapImported/PairHero.mdx", deMoved = "map/_DE.w3mod/war3mapImported/PairHero.mdx";
+    await page.evaluate(`${row}[0]?.click()`);
+    const offered = await page.evaluate(`[...document.querySelectorAll('.imp-detail select.imp-mode[data-side="reforged"] option')].map((o) => o.value + (o.disabled ? " off" : ""))`);
+    if (offered.join() !== "classic off,reforged,de") fail(`the Reforged version's mode choices: ${lit(offered)}`);
+    await page.evaluate(`(() => { const s = document.querySelector('.imp-detail select.imp-mode[data-side="reforged"]'); s.value = "de"; s.dispatchEvent(new Event("change")); })()`);
+    if (!(await soon(() => !!entry(DE) && !entry(HD) && onDisk(deMoved) && !onDisk(hdFile), 20000))) fail(`moving the Reforged version to 3.0: the list holds ${lit(listed().filter((p) => /pairhero/i.test(p)))}`);
+    else if (entry(DE).flags !== 29) fail(`the moved entry's flags: ${entry(DE).flags}, the World Editor writes 29`);
+    await settled(page);
+    { const b = await badgesAre("Classic+3.0"); if (!b.ok) fail(`after the move the row shows ${lit(b.last)}`); }
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    if (!(await soon(() => !!entry(HD) && !entry(DE) && onDisk(hdFile) && !onDisk(deMoved), 20000))) fail(`undo of the move: the list holds ${lit(listed().filter((p) => /pairhero/i.test(p)))}`);
+    else if (entry(HD).flags !== 13) fail(`undo of the move left flags ${entry(HD).flags}`);
+    await settled(page);
+    { const b = await badgesAre("Classic+Reforged"); if (!b.ok) fail(`after the undo the row shows ${lit(b.last)}`); }
+
     // Add 3.0 Version…: the pair's row offers just that one, stored below _DE.w3mod with the flags of a Reforged entry.
     await page.evaluate(`w3.window.pickFile = async () => ${lit(src("DE"))}`);
     await page.evaluate(`${row}[0]?.click()`);

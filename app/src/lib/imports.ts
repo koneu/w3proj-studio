@@ -281,6 +281,22 @@ export function rowMoves(row: ImportRow, to: string, pathOf: (e: ImportEntry) =>
   return SIDES.filter((s) => row[s]).map((s) => ({ entry: row[s]!, from: pathOf(row[s]!), to: sidePathOf(target, s) }));
 }
 
+/** The bit the World Editor adds to an entry's flags when its Asset Manager's Mode changes it. */
+export const MODIFIED_FLAG = 0x10;
+
+/** What changing a version's graphics mode does (the World Editor's Asset Manager, Modify File Properties > Mode): the
+ *  file moves from its path to the same plain path in the other mode's folder, and the entry's flags get MODIFIED_FLAG
+ *  (we-drive 2026-11-26: HD→DE, HD→SD and DE→HD went from 13 to 29; SD→DE stayed 21). A standard-path entry (name
+ *  inside the import folder; `from` differs from what it stores) gets a custom path first, as Change path does. Null:
+ *  the row has no `side` version, or has a `to` version already. */
+export function modeMove(row: ImportRow, side: Side, to: Side, pathOf: (e: ImportEntry) => string = (e) => e.path): { entry: ImportEntry; from: string; to: string; flags: number } | null {
+  const entry = row[side];
+  if (!entry || side === to || row[to]) return null;
+  const from = pathOf(entry).replace(/\//g, "\\");
+  const flags = (entry.path === from ? entry.flags : CUSTOM_PATH_FLAGS) | MODIFIED_FLAG;
+  return { entry, from, to: sidePathOf(classicPathOf(from), to), flags };
+}
+
 /** The map's own names for an archive path in a graphics mode, in the order the game reads them: Classic ("sd") only the
  *  plain path; Reforged ("hd") the `_HD.w3mod\` version, then the plain one; 3.0 ("de") the `_DE.w3mod\` version, then
  *  the plain one, not the `_HD.w3mod\` one (the World Editor in 3.0 graphics shows the missing-model cube for a model

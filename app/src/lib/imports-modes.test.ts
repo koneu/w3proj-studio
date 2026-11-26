@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  classicPathOf, dePathOf, importedPathFor, isDePath, importRows, isReforgedPath, modeNames, newEntryFlags, ownNames, pathForUse, previewMode, readImportedFor,
+  classicPathOf, dePathOf, importedPathFor, isDePath, importRows, isReforgedPath, modeMove, modeNames, newEntryFlags, ownNames, pathForUse, previewMode, readImportedFor,
+  type ImportEntry, type ImportRow, type Side,
   reforgedPathOf, rowEntries, rowMoves, takenWithVersions, type ImportEntry,
 } from "./imports";
 import type { W3Api } from "../extensions/api";
@@ -152,4 +153,29 @@ test("3.0 versions: _DE.w3mod\\ path, flags, a row of three, the files of the mo
   assert.equal(importedPathFor(w3([files[0]]), H, "de"), files[0].path);
   assert.equal(importedPathFor(w3([files[2]]), H, "hd"), undefined);
   assert.equal(importedPathFor(w3([files[2]]), H, "sd"), undefined);
+});
+
+// The World Editor's Asset Manager, Mode changed in the list and the map saved (we-drive, 2026-11-26; each comment: the
+// entry before).
+test("changing a version's graphics mode gives the World Editor's path and flags", () => {
+  const row = (...entries: ImportEntry[]) => importRows(entries)[0];
+  const moved = (r: ImportRow, side: Side, to: Side) => { const m = modeMove(r, side, to); return m && [m.to, m.flags]; };
+  // 13 _HD.w3mod\war3mapImported\hdonly.mdx -> SD
+  assert.deepEqual(moved(row({ flags: 13, path: "_HD.w3mod\\war3mapImported\\hdonly.mdx" }), "reforged", "classic"), ["war3mapImported\\hdonly.mdx", 29]);
+  // 13 _DE.w3mod\war3mapImported\deonly.mdx -> HD
+  assert.deepEqual(moved(row({ flags: 13, path: "_DE.w3mod\\war3mapImported\\deonly.mdx" }), "de", "reforged"), ["_HD.w3mod\\war3mapImported\\deonly.mdx", 29]);
+  // 13 _HD.w3mod\war3mapImported\both.mdx, with a plain twin -> DE
+  const both = row({ flags: 21, path: "war3mapImported\\both.mdx" }, { flags: 13, path: "_HD.w3mod\\war3mapImported\\both.mdx" });
+  assert.deepEqual(moved(both, "reforged", "de"), ["_DE.w3mod\\war3mapImported\\both.mdx", 29]);
+  // 21 Units\Human\Rifleman\Rifleman.mdx, with an _HD twin -> DE
+  const rifle = row({ flags: 21, path: "Units\\Human\\Rifleman\\Rifleman.mdx" }, { flags: 13, path: "_HD.w3mod\\Units\\Human\\Rifleman\\Rifleman.mdx" });
+  assert.deepEqual(moved(rifle, "classic", "de"), ["_DE.w3mod\\Units\\Human\\Rifleman\\Rifleman.mdx", 21]);
+  // Refused: onto a mode the row has, onto itself, a version it hasn't.
+  assert.equal(modeMove(both, "reforged", "classic"), null);
+  assert.equal(modeMove(both, "reforged", "reforged"), null);
+  assert.equal(modeMove(both, "de", "reforged"), null);
+  // A standard-path entry (the name inside the import folder) gets the whole path, as a custom one.
+  const standard: ImportEntry = { flags: 5, path: "old.blp" };
+  const pathOf = () => "war3mapImported\\old.blp";
+  assert.deepEqual(modeMove(importRows([standard], pathOf)[0], "classic", "de", pathOf), { entry: standard, from: "war3mapImported\\old.blp", to: "_DE.w3mod\\war3mapImported\\old.blp", flags: 29 });
 });
