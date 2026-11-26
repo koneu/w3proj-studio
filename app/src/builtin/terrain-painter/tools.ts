@@ -233,8 +233,8 @@ export const RAISE_PER_SIZE = 25.6;
  *  (2026-11-15, branch raise-brush-we): centres 25, 51, 76, 128, 204 at sizes 1, 2, 3, 5, 8; size 5 at d = 1, √2, 2, √5,
  *  √8, 3, √10, √13: 118, 108, 90, 81, 56, 48, 41, 19; size 3 Lower −77, −55, −35; a second click adds as much again;
  *  a pointer held still adds nothing more. */
-function raiseLower(t: Terrain, b: Brush, up: boolean, stroke: Stroke): boolean {
-  const R = b.radius, amount = RAISE_PER_SIZE * (R + 1);
+function raiseLower(t: Terrain, b: Brush, up: boolean, stroke: Stroke, strength: number): boolean {
+  const R = b.radius, amount = RAISE_PER_SIZE * (R + 1) * strength;
   const cx = Math.round((b.x - t.offsetX) / 128), cy = Math.round((b.y - t.offsetY) / 128);
   const reach = Math.max(0, Math.ceil(R) - 1);
   let changed = false;
@@ -277,11 +277,11 @@ export const NOISE_STEPS = 10;
  *  the size, with no falloff towards the rim. A press makes one stamp and a drag one per step of the pointer; a button
  *  held still adds nothing (we-compare height-noise, flat.w3x, 2026-11-17: 47, 13 and 140 corners of 49, 13, 149
  *  changed by sizes 5, 3 and 8; a held button 45 of 49; a drag of 100 px 74 corners up to ±1400). */
-function noise(t: Terrain, b: Brush, stroke: Stroke, random: () => number): boolean {
+function noise(t: Terrain, b: Brush, stroke: Stroke, random: () => number, strength: number): boolean {
   let changed = false;
   for (const i of discCorners(t, b)) {
     const step = Math.floor(random() * (2 * NOISE_STEPS + 1)) - NOISE_STEPS;
-    changed = setRaw(t, i, Math.floor(t.corners[i].rawHeight + step * RAISE_PER_SIZE), stroke) || changed;
+    changed = setRaw(t, i, Math.floor(t.corners[i].rawHeight + step * RAISE_PER_SIZE * strength), stroke) || changed;
   }
   return changed;
 }
@@ -297,12 +297,20 @@ function setRaw(t: Terrain, i: number, raw: number, stroke: Stroke): boolean {
   return true;
 }
 
+/** `strength` of the way from a stored word to another (all of it from 1 on), at least one step while they differ, so
+ *  that stamps at a low strength still arrive. */
+function towards(from: number, to: number, strength: number): number {
+  if (strength >= 1 || from === to) return to;
+  const step = Math.round((to - from) * strength);
+  return from + (step || Math.sign(to - from));
+}
+
 /** One Plateau stamp, as the World Editor's: every corner of the disc (discCorners) takes the stored ground word
  *  `target` (the corner the stroke started on). we-drive, 2026-11-15: size 3 one tile beside a size-5 Raise set the 13
  *  corners within two tiles to the clicked corner's 118, nothing between. */
-function plateau(t: Terrain, b: Brush, target: number, stroke: Stroke): boolean {
+function plateau(t: Terrain, b: Brush, target: number, stroke: Stroke, strength: number): boolean {
   let changed = false;
-  for (const i of discCorners(t, b)) changed = setRaw(t, i, target, stroke) || changed;
+  for (const i of discCorners(t, b)) changed = setRaw(t, i, towards(t.corners[i].rawHeight, target, strength), stroke) || changed;
   return changed;
 }
 
@@ -311,7 +319,7 @@ function plateau(t: Terrain, b: Brush, target: number, stroke: Stroke): boolean 
  *  weights there are left out). we-drive, 2026-11-15: a 255 spike smoothed by size 3 went to 204, its four
  *  neighbours to 8, its diagonals to 4, and a second click to 164, 13, 7; a size-5 Raise smoothed by size 3: 125, 115,
  *  105, 87 for 128, 118, 108, 90, the rim's 90 included, the corners past it untouched. */
-function smooth(t: Terrain, b: Brush, stroke: Stroke): boolean {
+function smooth(t: Terrain, b: Brush, stroke: Stroke, strength: number): boolean {
   const ids = discCorners(t, b);
   const next = ids.map((i) => {
     const x = i % t.width, y = Math.floor(i / t.width);
@@ -326,17 +334,19 @@ function smooth(t: Terrain, b: Brush, stroke: Stroke): boolean {
     return Math.floor(sum / weight);
   });
   let changed = false;
-  ids.forEach((i, k) => { changed = setRaw(t, i, next[k], stroke) || changed; });
+  ids.forEach((i, k) => { changed = setRaw(t, i, towards(t.corners[i].rawHeight, next[k], strength), stroke) || changed; });
   return changed;
 }
 
 /** One application of a height brush. `amount` is the stored ground word to level to (plateau), or ignored (raise and
- *  lower: raiseLower; smooth; noise, which takes its steps from `random`). Returns whether anything changed. */
-export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: number, stroke: Stroke, random: () => number = Math.random): boolean {
-  if (tool === "raise" || tool === "lower") return raiseLower(t, b, tool === "raise", stroke);
-  if (tool === "plateau") return plateau(t, b, amount, stroke);
-  if (tool === "smooth") return smooth(t, b, stroke);
-  return noise(t, b, stroke, random);
+ *  lower: raiseLower; smooth; noise, which takes its steps from `random`). `strength`: Studio's slider, 1 the World
+ *  Editor's stamp: Raise, Lower and Noise move that many times as far; Plateau and Smooth go that part of the way to
+ *  their result (1 and more: all of it). Returns whether anything changed. */
+export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: number, stroke: Stroke, random: () => number = Math.random, strength = 1): boolean {
+  if (tool === "raise" || tool === "lower") return raiseLower(t, b, tool === "raise", stroke, strength);
+  if (tool === "plateau") return plateau(t, b, amount, stroke, strength);
+  if (tool === "smooth") return smooth(t, b, stroke, strength);
+  return noise(t, b, stroke, random, strength);
 }
 
 /** One application of a cliff or water brush: corners under the brush move

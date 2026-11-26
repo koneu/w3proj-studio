@@ -8781,9 +8781,9 @@ async function byHand(page, found) {
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
 
   // Noise: a drag roughens the ground (a stamp at the press and one per step of the pointer, as the World Editor's), and the
-  // whole stroke is one undo step. It has no Strength slider: a stamp's size is the editor's fixed one.
+  // whole stroke is one undo step. Studio's Strength slider is at 100% until set: a stamp's size is the editor's.
   await page.evaluate(`document.querySelector('button.tool-button[title^="Noise:"]').click()`);
-  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].some((l) => l.textContent.startsWith("Strength"))`)) fail("Noise still has a Strength slider");
+  if ((await page.evaluate(`document.querySelector(".painter-strength:not([hidden]) input")?.value ?? null`)) !== "100") fail("Noise's Strength slider isn't at 100%");
   await hands.drag({ x: canvas.x - 40, y: canvas.y + 20 }, { x: canvas.x + 40, y: canvas.y + 20 });
   await save();
   const noisy = hash(ground);
@@ -8875,6 +8875,32 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }
     }
   }
+  // The Strength slider: at 200% one Raise stamp of size 3 moves the middle corner 153 stored units (76 at the World
+  // Editor's 100%, checked above); the cliff tools have none. Back to 100% for what follows.
+  const strength = (v) => page.evaluate(`(() => { const i = document.querySelector(".painter-strength input"); if (!i || i.closest("[hidden]")) return false; i.value = "${v}"; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Raise:"]').click()`);
+  await setSize(3);
+  if (!(await strength(200))) fail("the Raise tool has no Strength slider");
+  await hands.mouse("mouseMoved", canvas.x + 7, canvas.y - 5);
+  await hands.mouse("mousePressed", canvas.x + 7, canvas.y - 5, 1);
+  await hands.mouse("mouseReleased", canvas.x + 7, canvas.y - 5);
+  await save();
+  {
+    const values = readFileSync(ground, "utf8").split("\n[height]\n")[1].split("\n[")[0].trim().split(/\s+/)
+      .flatMap((v) => { const [x, k] = v.split("*"); return Array(Number(k ?? 1)).fill(Number(x)); });
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+    const top = Math.max(...values) - [...counts].sort((x, y) => y[1] - x[1])[0][0];
+    if (top !== 153) fail(`a Raise click of size 3 at 200% raised the middle corner by ${top} stored units, not 153`);
+  }
+  if ((await page.evaluate(`document.querySelector(".painter-strength-value")?.textContent`)) !== "200%") fail("the slider doesn't show its value");
+  await strength(100);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("undo didn't take the strong Raise back"); return; }
+  await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
+  if (!(await page.evaluate(`document.querySelector(".painter-strength").hidden`))) fail("a cliff tool shows the Strength slider");
+
   // A cliff tool with "Paint texture too" (the World Editor's Apply Texture and Apply Cliff): one click changes the
   // levels and the ground, and one undo takes both back. The box is off before, and the paint tool has none.
   await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
