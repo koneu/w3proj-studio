@@ -1022,6 +1022,10 @@ fn change(map_dir: &Path, kind: Kind, edit: impl FnOnce(&mut KindData, Prefix) -
     let i = KINDS.iter().position(|k| *k == kind).expect("one of KINDS");
     let old_files = read_kind_disk(map_dir, kind)?;
     let mut data = parse_kind(kind, prefix, root[i], &old_files, &mut Vec::new())?;
+    // What each file held, in the writer's form: a file whose object (or order) the edit leaves as it was stays as it
+    // is on disk, also when written by hand in another form.
+    let mut before = Files::new();
+    kind_files(kind, &data, &mut before);
     edit(&mut data, prefix)?;
     for (t, objs) in data.tables.iter_mut().enumerate() {
         objs.retain(|o| o.halves.iter().any(Option::is_some));
@@ -1031,10 +1035,12 @@ fn change(map_dir: &Path, kind: Kind, edit: impl FnOnce(&mut KindData, Prefix) -
     root[i] = data.versions;
     let mut files = Files::new();
     kind_files(kind, &data, &mut files);
+    let unchanged: HashSet<String> = files.iter().filter(|(p, b)| before.get(*p) == Some(*b) && old_files.contains_key(*p)).map(|(p, _)| p.clone()).collect();
     if old_root != Some(root) {
         files.insert(ROOT_FILE.to_string(), root_text(&root));
     }
-    let written = folder_codec::write_changed(map_dir, &files)?;
+    let to_write: Files = files.iter().filter(|(p, _)| !unchanged.contains(*p)).map(|(p, b)| (p.clone(), b.clone())).collect();
+    let written = folder_codec::write_changed(map_dir, &to_write)?;
     let mut removed = Vec::new();
     for p in old_files.keys().filter(|p| !files.contains_key(*p)) {
         folder_codec::remove_if_there(&crate::paths::join_rel(map_dir, p))?;

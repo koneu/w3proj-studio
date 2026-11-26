@@ -482,6 +482,15 @@ fn the_flat_files_read_and_write_through_the_folder() {
     let w = write_flat(&map, UNITS, 0, &objdata::to_json(&fewer, false).unwrap()).unwrap();
     assert_eq!(w.written, ["objects/units/custom/h000.json"]);
     assert_eq!(w.removed, ["objects/units/custom/h003.json"]);
+    // A file written by hand in another form stays as it is when a write leaves its object as it was.
+    let by_hand = b"{\"base\":\"hfoo\",\"id\":\"h001\",\"data\":{}}".to_vec();
+    std::fs::write(map.join("objects/units/custom/h001.json"), &by_hand).unwrap();
+    let other = packed(3, &[], &[e(b"hfoo", b"h001", vec![]), e(b"hfoo", b"h004", vec![])]);
+    let w = write_flat(&map, UNITS, 0, &objdata::to_json(&other, false).unwrap()).unwrap();
+    assert_eq!(w.written, ["objects/units/custom/h004.json"]);
+    assert_eq!(std::fs::read(map.join("objects/units/custom/h001.json")).unwrap(), by_hand);
+    let w = write_flat(&map, UNITS, 0, &objdata::to_json(&fewer, false).unwrap()).unwrap();
+    assert_eq!(w.removed, ["objects/units/custom/h004.json"]);
     // A new kind: listed in objects.json.
     let items = packed(2, &[], &[e(b"ratc", b"I000", vec![])]);
     let w = write_flat(&map, KINDS[1], 0, &objdata::to_json(&items, false).unwrap()).unwrap();
