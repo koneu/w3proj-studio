@@ -42,5 +42,16 @@
       { "file": "war3map.j", "as": "text", "lines": "^    (set gg_snd_\\w+ = |call SetSoundDuration)" }
     ],
     "limit": 20
+  },
+  {
+    "name": "script-items-4",
+    "description": "How the editor writes a sound's dialogue and speaker name keys below 100 (script-items-4.w3x, make-script-items.mjs: sounds with facial animation, without which this editor writes no dialogue lines; keys 7, 30, 47, 99, and 100, 101, 1000, 1001), opened and saved by the editor; Studio writes the script from the same map. The sounds' dialogue lines",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/script-items-4.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.j", "as": "text", "lines": "^    call SetDialogue\\w+" }
+    ],
+    "limit": 20
   }
 ]

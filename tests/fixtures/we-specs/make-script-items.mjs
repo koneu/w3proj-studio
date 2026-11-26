@@ -143,7 +143,16 @@ const UNITS_3 = [
     place("iDNR", -1024 + 256 * k, 512, { ...neutral, angle: 0, randomLevel, randomClass: 1 })),
 ];
 
+// script-items-4.w3x: how the editor writes a dialogue key below 100 ("TRIGSTR_7" or "TRIGSTR_007"), with keys of
+// three and four digits beside them.
+const SOUNDS_4 = [
+  ["KeysSeven", `${HEAL}.ogg`, 0, "Hjai", 30, 7, "all"], ["KeysTwoDigits", `${HEAL}.ogg`, 0, "Hjai", 99, 47, "all"],
+  ["KeysThree", `${HEAL}.ogg`, 0, "Hjai", 101, 100, "all"], ["KeysFour", `${HEAL}.ogg`, 0, "Hjai", 1001, 1000, "all"],
+].map(sound);
+const KEYS_4 = [7, 30, 47, 99, 100, 101, 1000, 1001];
+
 const MAPS = {
+  "script-items-4.w3x": { units: [UNITS[0]], sounds: SOUNDS_4, strings: KEYS_4.map((key) => [key, `Dialogue ${key}`]) },
   "script-items.w3x": { units: UNITS, w3u: W3U, w3a: W3A, w3t: W3T, sounds: SOUNDS, header: "   " },
   "script-items-2.w3x": { units: UNITS_2, w3u: W3U_2, w3a: W3A_2, sounds: SOUNDS_2 },
   "script-items-3.w3x": { units: UNITS_3 },
@@ -162,8 +171,8 @@ for (const [out, m] of Object.entries(MAPS)) {
     for (const kind of ["w3u", "w3a", "w3t"]) if (m[kind]) writeFileSync(join(map, `war3map.${kind}.json`), JSON.stringify(m[kind], null, 1));
     if (m.sounds?.length) writeFileSync(join(map, "war3map.w3s.json"), JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: m.sounds }, null, 1));
     const wtsFile = join(map, "war3map.wts");
-    const strings = ["Subtitle 900", "Speaker 901", "Speaker 902", "Subtitle 903", "Speaker 904", "Speaker 905"]
-      .map((t, k) => `STRING ${900 + k}\r\n{\r\n${t}\r\n}\r\n\r\n`).join("");
+    const strings = (m.strings ?? ["Subtitle 900", "Speaker 901", "Speaker 902", "Subtitle 903", "Speaker 904", "Speaker 905"].map((t, k) => [900 + k, t]))
+      .map(([key, text]) => `STRING ${key}\r\n{\r\n${text}\r\n}\r\n\r\n`).join("");
     writeFileSync(wtsFile, readFileSync(wtsFile, "utf8") + strings);
     if (existsSync(join(map, "triggers", "header.j"))) throw new Error("flat.w3x has a custom script header");
     if (m.header) setHeader(dir, m.header);
