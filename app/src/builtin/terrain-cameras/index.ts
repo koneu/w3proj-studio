@@ -427,15 +427,20 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     commit(doc.cameras, moved, [selected]);
     return null;
   };
+  /** Free view: off again when the tab goes, with the view as it was. */
+  const freeViewBox = h("input", { type: "checkbox", onchange: () => { ed.setFreeView(freeViewBox.checked); ed.focus(); } });
+  const freeView = h("label.terrain-camera-freeview", {
+    title: "Look around from where the view is, also upward, to stand close over the ground: dragging to turn turns in place, the wheel moves forward and back where you look. Off again, the view is as it was.",
+  }, freeViewBox, " Free view");
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "New camera from the current view", onclick: () => { if (ed.editable) void create(); } }, "Create from view"),
     h("button", { title: "New free camera where the view is, looking the same way (the World Editor's Create Free Camera)", onclick: () => { if (ed.editable) void create(true); } }, "Create free camera"),
-    jump, count, hover, panel);
+    freeView, jump, count, hover, panel);
 
   return {
     toolbar,
     activate() { active = true; previewing = false; learnBounds(); void load.then(() => { renderPanel(); render(); }); },
-    deactivate() { endTypedPreview(); active = false; drag = null; clear(); ed.host.style.cursor = ""; },
+    deactivate() { endTypedPreview(); freeViewBox.checked = false; ed.setFreeView(false); active = false; drag = null; clear(); ed.host.style.cursor = ""; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       learnBounds();

@@ -5011,6 +5011,35 @@ async function cameraEditing(page, found) {
     const set = cameras().find((c) => c.name === free.name);
     if (set.trailer !== 1 || set.distance !== 1 || Math.abs(set.targetX - free.targetX) < 100) fail(`Set from view on a free camera gave ${lit([set.trailer, set.distance, set.targetX])}, not a free camera moved with the view`);
   }
+
+  // Free view: the wheel goes down to the floor, a turn drag looks up from there, Set from view takes that, and with
+  // it off the view is as before.
+  await k.look(0, 0);
+  const start = await view();
+  const eyeNow = async () => { const v = await view(); return { v, eye: v.target[2] + v.distance * Math.sin(v.pitch) }; };
+  const freeBox = `document.querySelector(".terrain-camera-freeview input")`;
+  if (!(await page.evaluate(`!!${freeBox}`))) return fail("no Free view checkbox");
+  await page.evaluate(`${freeBox}.click()`);
+  // The new map is flat: the ground everywhere is where the view looked.
+  const floor = start.target[2];
+  const canvas = await k.hands.where(".model-stage canvas");
+  for (let i = 0; i < 40; i++) await page.evaluate(`document.querySelector(".model-stage canvas").dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true, clientX: ${canvas.x}, clientY: ${canvas.y} }))`);
+  await settled(page);
+  const low = await eyeNow();
+  if (!(low.eye - floor < 40 && low.eye - floor > 10)) fail(`40 wheel notches in Free view left the eye ${Math.round(low.eye - floor)} over the ground`);
+  // A turn drag (the right button, the view's default) upward.
+  const turn = (type, y, buttons) => page.evaluate(`(${type === "mousedown" ? 'document.querySelector(".model-stage canvas")' : "window"}).dispatchEvent(new MouseEvent(${lit(type)}, { button: 2, buttons: ${buttons}, bubbles: true, cancelable: true, clientX: ${canvas.x}, clientY: ${y} }))`);
+  await turn("mousedown", canvas.y, 2);
+  await turn("mousemove", canvas.y - 400, 2);
+  await turn("mouseup", canvas.y - 400, 0);
+  await settled(page);
+  const up = await eyeNow();
+  if (!(up.v.pitch < -0.2)) fail(`a turn drag upward in Free view gave the pitch ${up.v.pitch}, not looking up`);
+  if (Math.abs(up.eye - low.eye) > 1) fail(`turning in Free view moved the eye from ${low.eye} to ${up.eye}`);
+  await page.evaluate(`${freeBox}.click()`);
+  await settled(page);
+  const after = await view();
+  if (Math.abs(after.pitch - start.pitch) > 1e-6 || Math.abs(after.distance - start.distance) > 1e-3) fail(`Free view off left the view at ${lit([after.pitch, after.distance])}, not as before ${lit([start.pitch, start.distance])}`);
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
     await restoreWindow(page);

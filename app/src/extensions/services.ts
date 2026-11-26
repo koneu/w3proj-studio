@@ -220,6 +220,9 @@ export interface TerrainEditorHandle {
   aspect(): number;
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
+  /** Free view (the Cameras tab's): turning the view turns it round its eye, also upward, and zooming moves the eye
+   *  along where it looks, never under the ground. Off again, the view is as it was when it was turned on. */
+  setFreeView(on: boolean): void;
   /** The view's far and near clipping (lib/terrain/cameras.ts ViewClipping): the World Editor's own when the map
    *  opens, a looked-through camera's after lookThroughClip, the far one stepped by Ctrl and the wheel. The view
    *  draws with the far one; a camera made or set from the view takes both. */

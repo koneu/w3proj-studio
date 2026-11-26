@@ -23,6 +23,7 @@ import { givenNumber, placedValueProblem } from "./values";
 import { doodadGround, dropToGround, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitGround, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
+import { flyStep, lookAround, panReach } from "./freelook";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, SUBTERRAIN_RGB, subterrainOutline, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject, ViewClipping } from "../../lib/terrain/cameras";
@@ -5211,6 +5212,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleRandomGroups,
           lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
           view: () => ({ target: [...renderer.target], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov }),
+          setFreeView: (on) => {
+            if (on === !!freeView) return;
+            if (on) { freeView = { before: { target: [...renderer.target] as [number, number, number], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov } }; return; }
+            Object.assign(renderer, freeView!.before);
+            freeView = null;
+            redraw();
+          },
           aspect: () => (canvas.clientWidth > 0 && canvas.clientHeight > 0 ? canvas.clientWidth / canvas.clientHeight : 4 / 3),
           setView: (v) => {
             if (v.target) renderer.target = [...v.target];
@@ -5535,7 +5543,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const maxDistance = () => terrain.width * 300;
         /** One step of the World Editor's zoom (a wheel notch, Ctrl+Up or Ctrl+Down): about its camera target, the point
          *  at wheelzoom.ts zoomPivotRow, wherever the pointer is. */
+        /** The Cameras tab's Free view (freelook.ts), while it is on: the view as it was before, which comes back with it off. */
+        let freeView: { before: { target: [number, number, number]; yaw: number; pitch: number; distance: number; fov: number } } | null = null;
+        const groundUnder = (x: number, y: number) => heightAt(terrain, x, y);
         const zoomView = (out: boolean) => {
+          if (freeView) { renderer.target = flyStep(renderer, !out, groundUnder); redraw(); return; }
           const next = zoomStep({ width: canvas.clientWidth, height: canvas.clientHeight, target: renderer.target, distance: renderer.distance, ray: (x, y) => renderer.ray(x, y) }, out, 200, maxDistance());
           renderer.target = next.target;
           renderer.distance = next.distance;
@@ -6074,13 +6086,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  edges as the World Editor's does (wheelzoom.ts heldPan), whatever Enforce Camera Bounds says: keys, the
          *  mouse and the screen's edge all pan through here. */
         const pan = (dx: number, dy: number) => {
-          const s = renderer.distance / Math.max(1, canvas.clientHeight) * 0.9;
+          const s = (freeView ? panReach(renderer, groundUnder) : renderer.distance) / Math.max(1, canvas.clientHeight) * 0.9;
           const cy = Math.cos(renderer.yaw), sy = Math.sin(renderer.yaw);
           // The ground follows the pointer: right = (-sin, cos), forward = (-cos, -sin).
           renderer.target[0] += (sy * dx - cy * dy) * s;
           renderer.target[1] += (-cy * dx - sy * dy) * s;
-          const pivot = wheelPivot(renderer.ray(canvas.clientWidth / 2, zoomPivotRow(canvas.clientHeight)), renderer.target, renderer.distance * 20);
-          renderer.target = heldPan(renderer.target, pivot, wholeMap(handle));
+          // Free view looks anywhere, also at the sky: nothing to hold to the map.
+          if (!freeView) {
+            const pivot = wheelPivot(renderer.ray(canvas.clientWidth / 2, zoomPivotRow(canvas.clientHeight)), renderer.target, renderer.distance * 20);
+            renderer.target = heldPan(renderer.target, pivot, wholeMap(handle));
+          }
           redraw();
         };
         /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */
@@ -6292,6 +6307,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
           else if ("zoom" in move) zoomView(move.zoom > 1);
           else if ("clip" in move) { viewClipping.stepFar(move.clip.farther); clipChanged(); }
+          else if (freeView) { Object.assign(renderer, lookAround(renderer, move.turn, 0)); redraw(); }
           else { renderer.yaw += move.turn; redraw(); }
           return true;
         };
@@ -6324,6 +6340,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           drag.x = e.clientX; drag.y = e.clientY;
           if (drag.mode === "translate") {
             pan(dx, dy);
+          } else if (freeView) {
+            Object.assign(renderer, lookAround(renderer, -dx * 0.005, dy * 0.005));
           } else {
             renderer.yaw -= dx * 0.01;
             renderer.pitch = Math.max(0.15, Math.min(MAX_PITCH, renderer.pitch + dy * 0.01));
