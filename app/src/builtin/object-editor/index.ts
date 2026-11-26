@@ -27,10 +27,11 @@ import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, p
 import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, clampsToZero, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, clampsToZero, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { editorSuffix, labelWithSuffix, type MapObject } from "./objectinfo";
+import { standardGroups } from "./standard";
 import { isCampaignFiles, registerObjectTools } from "./tools";
 import { isSkinField, listedPath, skinChanged, skinPathOf, skinWatches, skinWritable, splitSkin, withLists } from "./skin";
 
@@ -356,11 +357,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           names: new Map(file.custom.flatMap((o): [string, string][] => { const n = o.id ? nameOf(o) : ""; return n ? [[o.id!, n]] : []; })),
         });
 
+        /** Standard objects the map doesn't change, as the list shows them, by id. They aren't part of the file: the
+         *  first change to one puts it there (adoptStandard), so looking at one changes nothing. */
+        const untouched = new Map<string, Obj>();
+        const standardOf = (base: string): Obj => {
+          let o = untouched.get(base);
+          if (!o) untouched.set(base, (o = file.version >= 3 ? { base, mods: [] } : { base, end: base, mods: [] }));
+          return o;
+        };
+        const isUntouched = (o: Obj) => untouched.get(o.base) === o;
+
         /** The object the tab had selected when it was last open (its viewState), if the file still has it. */
         const remembered = ((): Obj | undefined => {
           const v = doc.viewState as { custom?: unknown; original?: unknown } | null | undefined;
           if (typeof v?.custom === "string") return file.custom.find((c) => c.id === v.custom);
-          if (typeof v?.original === "string") return file.original.find((c) => c.base === v.original);
+          if (typeof v?.original === "string") return file.original.find((c) => c.base === v.original) ?? standardOf(v.original);
           return undefined;
         })();
         /** The anchor (single selection, Shift+click range start). */
@@ -394,7 +405,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const record = () => { if (history.commit()) told(); };
         /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
         const isDirty = () => isDirtyNow(serialize(), saved, hasWts && wts.dirty);
-        const markDirty = () => { record(); doc.setDirty(isDirty()); };
+        /** Moves standard objects that were just changed into the file. */
+        const adoptStandard = () => {
+          for (const [base, o] of untouched) {
+            if (!hasMods(o)) continue;
+            untouched.delete(base);
+            if (!file.original.some((x) => x.base === base)) file.original.push(o);
+          }
+        };
+        const markDirty = () => { adoptStandard(); record(); doc.setDirty(isDirty()); };
+        /** The file's own entry of a standard object replaces the one only shown (a paste or an import brought it). */
+        const dropStale = () => {
+          for (const o of [...selection]) {
+            if (!isUntouched(o)) continue;
+            const mine = file.original.find((x) => x.base === o.base);
+            if (!mine) continue;
+            untouched.delete(o.base);
+            selection.delete(o);
+            selection.add(mine);
+            if (selected === o) selected = mine;
+          }
+        };
         const objectKey = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
         const restore = (s: string) => {
           const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
@@ -403,6 +434,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           file.original = d.original;
           if (hasWts) wts.restore(d.wts);
           const all = [...file.custom, ...file.original];
+          // A standard object whose change is undone is a standard one again.
+          for (const key of keys) {
+            const base = key.startsWith("o:") ? key.slice(2) : null;
+            if (base && !file.original.some((o) => o.base === base)) all.push(standardOf(base));
+          }
           selection = new Set(all.filter((o) => keys.has(objectKey(o))));
           selected = all.find((o) => objectKey(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
           if (selected) selection.add(selected);
@@ -477,10 +513,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The list's group headings, kept: their text and what stands beside it are set on each redraw. */
         const heads = new Map<string, HTMLElement>();
-        const head = (key: string, text: string, opts: { title?: string; action?: HTMLElement; cls?: string } = {}) => {
+        const head = (key: string, text: string, opts: { title?: string; action?: HTMLElement; cls?: string; open?: boolean; toggle?: () => void } = {}) => {
           let el = heads.get(key);
           if (!el) heads.set(key, (el = h(`div.obj-group${opts.cls ?? ""}`)));
           el.title = opts.title ?? "";
+          el.classList.toggle("obj-fold", !!opts.toggle);
+          el.classList.toggle("open", !!opts.open);
+          el.onclick = opts.toggle ?? null;
           el.replaceChildren(h("span", {}, text), ...(opts.action ? [opts.action] : []));
           return el;
         };
@@ -524,7 +563,49 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...items.map((o) => rowOf(o, theirs(o), true, campaignShown === o)));
           }
           out.push(head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o))));
+          out.push(...standardRows(visible));
           putRows(out);
+        };
+        /** Which of the standard objects' headings are open: "" for the whole list, else a group's label. */
+        const openStandard = new Set<string>();
+        /** The standard objects the map doesn't change (nor its campaign, which lists its own). With a filter, the
+         *  headings holding a match are open. Rows shown are added to `shown`. */
+        const standardRows = (shown: Obj[]): HTMLElement[] => {
+          if (!kd) return [];
+          const elsewhere = new Set([...file.original, ...((campaign?.original ?? []) as Obj[])].map((o) => o.base));
+          const groups = standardGroups(kd, elsewhere).map((g) => {
+            // Names are only looked up where they're needed: with a filter, or in an open group.
+            const entry = (base: string) => {
+              const o = standardOf(base);
+              const name = nameOf(o);
+              return { o, name, label: labelOf(o, name, resolveStr) };
+            };
+            const matching = filter
+              ? g.ids.map(entry).filter((e) => `${e.o.base} ${e.label} ${kd!.searchText(e.o.base)}`.toLowerCase().includes(filter))
+              : null;
+            return { label: g.label, count: matching?.length ?? g.ids.length, entries: () => matching ?? g.ids.map(entry) };
+          }).filter((g) => g.count);
+          const total = groups.reduce((n, g) => n + g.count, 0);
+          const fold = (key: string) => (filter ? undefined : () => { if (!openStandard.delete(key)) openStandard.add(key); renderList(); });
+          const all = !!filter || openStandard.has("");
+          const out = [head("game", `Standard (${total})`, { title: "The game's objects this map doesn't change. Changing a field adds the object to the map.", open: all, toggle: fold("") })];
+          if (!all) return out;
+          for (const g of groups) {
+            const open = !!filter || openStandard.has(g.label);
+            out.push(head(`game:${g.label}`, `${g.label} (${g.count})`, { cls: ".obj-subgroup", open, toggle: fold(g.label) }));
+            if (!open) continue;
+            for (const e of g.entries().sort((a, b) => a.label.localeCompare(b.label) || a.o.base.localeCompare(b.o.base))) {
+              shown.push(e.o);
+              out.push(rowOf(e.o, e.label, false, selection.has(e.o)));
+            }
+          }
+          return out;
+        };
+        /** Opens the headings a standard object is under. */
+        const reveal = (base: string) => {
+          if (!kd) return;
+          const group = standardGroups(kd, new Set()).find((g) => g.ids.includes(base));
+          if (group) { openStandard.add(""); openStandard.add(group.label); }
         };
 
         const clickItem = (o: Obj, e: MouseEvent) => {
@@ -556,7 +637,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             { label: many ? `Copy ${selection.size} objects` : "Copy", shortcut: "Ctrl+C", run: copySelection },
             { label: many ? `Export ${selection.size} objects…` : "Export Object…", run: () => void exportSelection().catch(failed) },
             "-",
-            { label: many ? `Remove ${selection.size} objects` : o.id ? "Delete" : "Remove changes", shortcut: "Del", run: () => void removeSelection() },
+            { label: many ? `Remove ${selection.size} objects` : o.id ? "Delete" : "Remove changes", shortcut: "Del", disabled: [...selection].every(isUntouched), run: () => void removeSelection() },
           ]);
         };
         /** What the list offers anywhere: new objects. */
@@ -632,7 +713,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Removes every selected object after one confirmation. */
         const removeSelection = async () => {
-          const objs = [...selection];
+          const objs = [...selection].filter((o) => !isUntouched(o));
           if (!objs.length) return;
           const what = objs.length === 1 ? (objs[0].id || objs[0].base) : `${objs.length} objects`;
           if (!(await w3.window.askDelete(`Remove ${what} and all their modifications?`, "Remove"))) return;
@@ -648,7 +729,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         listEl.addEventListener("keydown", (e) => {
           const key = keyOf(e);
           if (key === "Delete") { e.preventDefault(); removeSelection(); }
-          else if (key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selection = new Set(visible); renderDetail(); }
+          else if (key === "a" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            // The map's own objects, not the game's hundreds; among standard ones only, those shown.
+            const own = visible.filter((o) => !isUntouched(o));
+            selection = new Set(selected && isUntouched(selected) ? visible.filter(isUntouched) : own);
+            if (!selected || !selection.has(selected)) selected = [...selection][0] ?? null;
+            renderDetail();
+          }
           else if (key === "c" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelection(); }
           else if (key === "v" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void paste(); }
         });
@@ -659,7 +747,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const keep = file.original.filter((o) => hasMods(o) || !which(o));
           if (keep.length === file.original.length) return;
           file.original = keep;
-          for (const o of [...selection]) if (!file.custom.includes(o) && !keep.includes(o)) selection.delete(o);
+          for (const o of [...selection]) if (!file.custom.includes(o) && !keep.includes(o) && !isUntouched(o)) selection.delete(o);
           if (!selected || !selection.has(selected)) select([...selection][0] ?? file.custom[0] ?? keep[0] ?? null);
           markDirty(); renderDetail();
         };
@@ -1129,6 +1217,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Edits can change names and the clean-up count in the list too.
           // Choosing one of the map's objects (also Ctrl+click, an undo) leaves the campaign's.
           if (selection.size) campaignShown = null;
+          dropStale();
           renderList();
           const scroll = detailEl.scrollTop;
           if (campaignShown) {
@@ -1189,7 +1278,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.obj-detail-header", {},
               h("h2", {}, nameOf(o) || "(unnamed)"),
               h("code", {}, o.id ? `${o.id} (based on ${o.base}${baseName(o) ? ` · ${stripColors(baseName(o))}` : ""})` : o.base),
-              h("button", { title: "Delete key also removes the selection", onclick: removeSelection }, "Remove object"),
+              isUntouched(o)
+                ? h("span.muted.obj-standard-note", {}, "Standard object: changing a field adds it to this map.")
+                : h("button", { title: "Delete key also removes the selection", onclick: removeSelection }, "Remove object"),
             ),
             kd ? h("div.obj-detail-toolbar", {},
               fieldSearch,
@@ -1491,9 +1582,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 : `${id} isn't in this map's object data, its campaign's or the game's.`;
               return;
             }
-            // Another focus (the same object asked for twice) may have added it while the game data loaded.
-            const std = objectToEdit(file as unknown as EditFile, id, true) as Obj;
-            select(std);
+            // The file may have got it while the game data loaded.
+            kd ??= k;
+            reveal(id);
+            select(file.original.find((c) => c.base === id) ?? standardOf(id));
             status.textContent = `${k.names.get(id)} (${id}): game object, unchanged in this map — edits change it for this map.`;
             renderList();
             renderDetail();

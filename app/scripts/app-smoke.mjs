@@ -13793,6 +13793,56 @@ async function objectListKept(page, found, root) {
   }
 }
 
+/** The list holds the game's objects the map doesn't change too: looking at one changes nothing, a changed field
+ *  moves it to "Modified standard", and undo moves it back. */
+async function objectStandardList(page, found, root) {
+  const fail = (what) => found.push(`object standard list: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
+  try {
+    const ed = `[...document.querySelectorAll(".object-editor")].find((d) => d.offsetParent !== null)`;
+    await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u")`);
+    await until("the Standard heading", () => page.evaluate(`!!${ed}?.querySelector(".obj-fold")`), 30000);
+    const view = () => page.evaluate(`(() => { const e = ${ed}; return {
+      heads: [...e.querySelectorAll(".obj-group > span:first-child")].map((x) => x.textContent),
+      selected: [...e.querySelectorAll(".obj-item.selected code")].map((x) => x.textContent),
+      unsaved: w3.editors.unsavedPaths().filter((p) => /w3u/i.test(p)),
+    }; })()`);
+    const count = (heads, name) => Number(heads.map((t) => new RegExp(`^${name} \\((\\d+)\\)$`).exec(t)?.[1]).find(Boolean) ?? NaN);
+    const before = await view();
+    const standard = count(before.heads, "Standard"), changed = count(before.heads, "Modified standard");
+    if (!(standard > 100)) { fail(`the Standard heading counts ${standard} units`); return; }
+    if (await page.evaluate(`!!${ed}.querySelector(".obj-subgroup")`)) fail("the standard objects' groups show before Standard is opened");
+    const fold = (re) => page.evaluate(`[...${ed}.querySelectorAll(".obj-fold")].find((x) => ${re}.test(x.textContent)).click()`);
+    await fold("/^Standard/");
+    await fold("/^Human/");
+    // A standard unit the map doesn't change (the project may change some): any row under the open group with a gold cost.
+    const id = await page.evaluate(`(() => { const all = [...${ed}.querySelector(".obj-list").children];
+      const from = all.findIndex((x) => x.classList.contains("obj-subgroup") && x.classList.contains("open"));
+      const rows = all.slice(from + 1);
+      const row = rows.find((x) => x.querySelector("code")?.textContent === "hfoo") ?? rows.find((x) => x.matches(".obj-item"));
+      row?.click(); return row?.querySelector("code").textContent ?? null; })()`);
+    if (!id) { fail("opening Standard and Human lists no unit"); return; }
+    const gold = `[...${ed}.querySelectorAll(".obj-table tbody tr")].find((r) => r.querySelector("code")?.textContent === "ugol")?.querySelector("input")`;
+    await until(`the fields of ${id}`, () => page.evaluate(`!!${gold}`), 30000);
+    const looked = await view();
+    if (looked.unsaved.length) fail(`looking at ${id} left ${looked.unsaved.join()} unsaved`);
+    if (count(looked.heads, "Standard") !== standard) fail("looking at a standard unit changed the counts");
+    await page.evaluate(`(() => { const i = ${gold}; i.value = String((Number(i.value) || 0) + 5); i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    const edited = await view();
+    if (count(edited.heads, "Modified standard") !== changed + 1 || count(edited.heads, "Standard") !== standard - 1) fail(`after a changed field the headings are ${edited.heads.slice(0, 3).join(", ")}`);
+    if (!edited.unsaved.length) fail("a changed field of a standard unit leaves nothing unsaved");
+    if (edited.selected.join() !== id) fail(`after the change ${edited.selected.join() || "nothing"} is selected, wanted ${id}`);
+    await page.evaluate(`${ed}.querySelector(".obj-detail").dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }))`);
+    const undone = await view();
+    if (count(undone.heads, "Modified standard") !== changed || count(undone.heads, "Standard") !== standard) fail(`after undo the headings are ${undone.heads.slice(0, 3).join(", ")}`);
+    if (undone.unsaved.length) fail("after undo the unit data is still unsaved");
+    if (undone.selected.join() !== id) fail(`after undo ${undone.selected.join() || "nothing"} is selected, wanted ${id}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
  *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
  *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
@@ -14906,7 +14956,7 @@ async function chapterObjects(page, found) {
     }))()`);
     // After the standard objects and before the map's own, as the World Editor's "Campaign Units" after the standard
     // races and before "Custom Units".
-    if (view.groups.join(", ") !== "Modified standard, Campaign, Custom") fail(`the chapter's Object Editor lists its groups as ${lit(view.groups)}`);
+    if (view.groups.join(", ") !== "Modified standard, Campaign, Custom, Standard") fail(`the chapter's Object Editor lists its groups as ${lit(view.groups)}`);
     if (!view.listed.some((t) => t.includes("c001") && t.includes("Campaign Grunt"))) fail(`the campaign group lists ${lit(view.listed)}`);
     if (view.heading !== "Campaign Grunt") fail(`the campaign object is headed ${lit(view.heading)}`);
     if (view.inputs) fail(`the campaign object has ${view.inputs} fields to edit in the chapter`);
@@ -18355,6 +18405,7 @@ async function run() {
         objectManagerSkin,
         objectPickerSuffix,
         objectPreview: (p, f) => objectPreview(p, f, project),
+        objectStandardList: (p, f) => objectStandardList(p, f, project),
         objectsWhileOpening,
         objectValueRange,
         paletteMouse,
@@ -18836,6 +18887,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectLayout", found);
   await objectListKept(page, found, project).catch((e) => found.push(`object list kept: ${e.message}`));
   await leftOpen(page, "objectListKept", found);
+  await objectStandardList(page, found, project).catch((e) => found.push(`object standard list: ${e.message}`));
+  await leftOpen(page, "objectStandardList", found);
   await objectPreview(page, found, project).catch((e) => found.push(`object preview: ${e.message}`));
   await leftOpen(page, "objectPreview", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));

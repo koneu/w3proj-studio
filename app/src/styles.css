@@ -301,6 +301,10 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-autofill .terrain-sel-row > .muted:first-child { flex: 0 0 170px; }
 .obj-group { display: flex; justify-content: space-between; align-items: baseline; }
 .obj-group .link-inline { font-size: 11px; text-transform: none; letter-spacing: 0; }
+.obj-fold { cursor: pointer; user-select: none; justify-content: flex-start; }
+.obj-fold::before { content: "▸"; width: 1.2em; flex: none; }
+.obj-fold.open::before { content: "▾"; }
+.obj-subgroup { padding-left: 20px; }
 .obj-kind { height: 28px; }
 
 /* Base object picker */
