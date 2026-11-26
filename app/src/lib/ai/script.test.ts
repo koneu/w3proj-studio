@@ -195,11 +195,11 @@ test("melee, player name and injuries follow their bits", () => {
   ai.name = 'Say "hi"\\';
   ai.options = 0;
   assert.ok(body(ai, "InitOptions").includes("    call SetCampaignAI(  )"));
-  assert.ok(!body(ai, "InitOptions").some((l) => l.includes("SetPlayerName")));
+  assert.ok(!script(ai).includes("SetPlayerName"));
   assert.ok(!body(ai, "AttackAssignment").some((l) => l.includes("RemoveInjuries")));
   ai.options = 0x1 | 0x2000 | 0x1000;
   assert.ok(body(ai, "InitOptions").includes("    call SetMeleeAI(  )"));
-  assert.ok(body(ai, "InitOptions").includes('    call SetPlayerName( ai_player, "Say \\"hi\\"\\\\" )'));
+  assert.deepEqual(body(ai, "main").slice(0, 3), ["    call InitAI(  )", '    call SetPlayerName( ai_player, "Say \\"hi\\"\\\\" )', "    call InitOptions(  )"]);
   assert.ok(body(ai, "AttackAssignment").includes("        call RemoveInjuries(  )"));
   assert.deepEqual(errors(script(ai)), [], "a name with a quote and a final backslash still reads");
 });
@@ -210,7 +210,7 @@ test("condition names become identifiers", () => {
 });
 
 test("conditions turn into expressions", () => {
-  assert.equal(conditionJass(threeTowns.call!, data), "( GetHeroLevelAI() > 3 )");
+  assert.equal(conditionJass(threeTowns.call!, data), "( GetHeroLevelAI(  ) > 3 )");
   const compare = (name: string, a: string, b: string) => conditionJass({
     name, params: [{ type: 3, value: a }, { type: 3, value: b }],
   }, data, CALL);
@@ -220,7 +220,7 @@ test("conditions turn into expressions", () => {
   // Script names replace the data's, and unit codes are quoted.
   assert.equal(conditionJass({ name: "GetUnitCountDoneAI", params: [{ type: 3, value: "hfoo" }] }, data, CALL), "GetUnitCountDone( 'hfoo' )");
   assert.equal(conditionJass({ name: "GetUnitCountDoneAI", params: [{ type: 3, value: "1HIA" }] }, data, CALL), "GetUnitCountDone( hero_id )");
-  assert.equal(conditionJass({ name: "NoSuch", params: [] }, data, CONDITION), "NoSuch()", "an unknown function keeps its name");
+  assert.equal(conditionJass({ name: "NoSuch", params: [] }, data, CONDITION), "NoSuch(  )", "an unknown function keeps its name");
   // Strings are escaped.
   assert.equal(conditionJass({ name: "SayIt", params: [{ type: 3, value: 'a"b\\' }] }, data, CALL), 'SayIt( "a\\"b\\\\" )');
   // A variable or a preset goes as it is, a preset by its script.
@@ -232,7 +232,7 @@ test("each named condition is a global, updated in one place", () => {
   const ai = full();
   const s = script(ai);
   assert.ok(/boolean +gCond_Three_towns += false/.test(s));
-  assert.deepEqual(body(ai, "UpdateConditions"), ["    set gCond_Three_towns = ( GetHeroLevelAI() > 3 )", "    set gCond_Not_set = false"]);
+  assert.deepEqual(body(ai, "UpdateConditions"), ["    set gCond_Three_towns = ( GetHeroLevelAI(  ) > 3 )", "    set gCond_Not_set = false"]);
 });
 
 test("building counts per type, and conditions share a block", () => {
@@ -247,7 +247,7 @@ test("building counts per type, and conditions share a block", () => {
     "        call SetBuildAll( BUILD_UNIT, 1, 'hkni', 0 )",
     "    endif",
     "    call SetBuildAll( BUILD_UNIT, 3, 'hfoo', 0 )", // a condition that isn't there guards nothing
-    "    if (( GetHeroLevelAI() > 3 )) then",
+    "    if (( GetHeroLevelAI(  ) > 3 )) then",
     "        call SetBuildAll( BUILD_UPGRADE, 1, 'Rhme', 0 )",
     "    endif",
   ]);
@@ -269,6 +269,26 @@ test("towns read as the Editor's choices", () => {
   assert.deepEqual(towns, ["2", "-1", "mine", "mine + 2", "-2"]);
 });
 
+test("building counts for each town on its own", () => {
+  const ai = newWai();
+  const entry = (town: number) => ({ type: 0, kind: 0, id: "hfoo", town, condIndex: -1, cond: none });
+  ai.build = [entry(0xffffffff), entry(0xfffffffc), entry(0xffffffff), entry(0xfffffffc), entry(0xfffffffb)];
+  assert.deepEqual(body(ai, "BuildPriorities").slice(1).map((l) => l.trim()), [
+    "call SetBuildAll( BUILD_UNIT, 1, 'hfoo', -1 )", "call SetBuildAll( BUILD_UNIT, 1, 'hfoo', mine + 1 )", "call SetBuildAll( BUILD_UNIT, 2, 'hfoo', -1 )",
+    "call SetBuildAll( BUILD_UNIT, 2, 'hfoo', mine + 1 )", "call SetBuildAll( BUILD_UNIT, 1, 'hfoo', mine + 2 )",
+  ]);
+});
+
+test("harvest towns are the AI's mines, \"Any\" the current one", () => {
+  // With -1 in the call the workers gathered no wood in the game; the World Editor writes mine.
+  const ai = newWai();
+  const entry = (resource: number, town: number) => ({ type: 0, resource, town, workers: 5, condIndex: -1, cond: none });
+  ai.harvest = [entry(0, 0xfffffffd), entry(1, 0xffffffff), entry(0, 0xfffffffc), entry(1, 0)];
+  assert.deepEqual(body(ai, "HarvestPriorities").filter((l) => l.includes("call")).map((l) => l.trim()), [
+    "call HarvestGold( mine + 0, numWorkers )", "call HarvestWood( mine, numWorkers )", "call HarvestGold( mine + 1, numWorkers )", "call HarvestWood( 0, numWorkers )",
+  ]);
+});
+
 test("harvesting counts all, the ones at home, or a number", () => {
   const ai = newWai();
   const entry = (resource: number, workers: number) => ({ type: 0, resource, town: 0, workers, condIndex: -1, cond: none });
@@ -277,6 +297,8 @@ test("harvesting counts all, the ones at home, or a number", () => {
   assert.deepEqual(lines.filter((l) => l.includes("set numWorkers")), [
     "    set numWorkers = allGold", "    set numWorkers = allWood", "    set numWorkers = allGold - awGold", "    set numWorkers = allWood - awWood", "    set numWorkers = 3",
   ]);
+  assert.equal(lines.filter((l) => l === "    if (numWorkers > 0) then").length, 4, "a counted number can be none");
+  assert.deepEqual(lines.slice(-2), ["    set numWorkers = 3", "    call HarvestWood( 0, numWorkers )"]);
   assert.deepEqual(lines.filter((l) => l.includes("call")).map((l) => l.trim().split("(")[0]), [
     "call HarvestGold", "call HarvestWood", "call HarvestGold", "call HarvestWood", "call HarvestWood",
   ]);
@@ -291,8 +313,8 @@ test("heroes get their skills by the order they're trained in", () => {
   ai.skills[3][0] = "Xxxx"; // the hero that isn't set
   const lines = body(ai, "SetHero");
   assert.deepEqual(lines.slice(0, 3), ["    if (order == 1) then", "        set hero_id = heroid", "        if (heroid == 'Hamg') then"]);
-  assert.ok(lines.includes("            set skills1[1] = 'A1st'"));
-  assert.ok(lines.includes("            set skills3[5] = 'A3rd'"));
+  assert.ok(lines.includes("            set skills1[ 1] = 'A1st'"));
+  assert.ok(lines.includes("            set skills3[ 5] = 'A3rd'"));
   assert.ok(lines.includes("            set skills2[10] = 'M2nd'"));
   assert.ok(!lines.some((l) => l.includes("Xxxx")));
   assert.equal(lines.at(-1), "    endif");
@@ -315,6 +337,14 @@ test("hero chances add up, and each order trains its three heroes", () => {
     "        call SetHero( 3, 'Hamg' )",
     "    endif",
   ]);
+});
+
+test("one hero has one training order, and one chance needs no roll", () => {
+  const ai = newWai();
+  ai.heroes = ["Obla", NO_ID, NO_ID];
+  ai.heroChances = [100, 0, 0, 0, 0, 0];
+  assert.deepEqual(body(ai, "SetHero").filter((l) => l.includes("order ==")), ["    if (order == 1) then"]);
+  assert.deepEqual(body(ai, "SelectHeroes"), ["    local integer roll = GetRandomInt(1,100)", "    call SetHero( 1, 'Obla' )"]);
 });
 
 test("no heroes, no hero code", () => {
@@ -341,11 +371,14 @@ test("attack groups go by name, and waves find them there", () => {
 test("a group's units are a number, a range or all there are", () => {
   const ai = newWai();
   const unit = (id: string, quantity: number, max: number) => ({ id, quantity, max, condIndex: -1, cond: none });
-  ai.groups = [{ index: 0, name: "G", units: [unit("hfoo", 2, 5), unit("hkni", 3, 0xffffffff), unit("hmil", 0xffffffff, 0)] }];
+  ai.groups = [{ index: 0, name: "G", units: [unit("hfoo", 2, 5), unit("hkni", 3, 0xffffffff), unit("hmil", 0xffffffff, 0xffffffff), unit("ugho", 0xffffffff, 7)] }];
   assert.deepEqual(body(ai, "PrepareAttackGroup").filter((l) => l.startsWith("        ") && !l.includes("//")), [
-    "        call AddAttackUnit( 2, 5, 'hfoo' )",
-    "        set all = GetUnitCountDone( 'hkni' )", "        call AddAttackUnit( 3, all, 'hkni' )",
+    "        call AddAttackUnit( 2,   5,   'hfoo' )",
+    "        set all = GetUnitCountDone( 'hkni' )", "        call AddAttackUnit( 3,   all, 'hkni' )",
     "        set all = GetUnitCountDone( 'hmil' )", "        call AddAttackUnit( all, all, 'hmil' )",
+    // All but seven.
+    "        set all = GetUnitCountDone( 'ugho' )", "        set all = all - 7", "        if (all < 0) then", "            set all = 0", "        endif",
+    "        call AddAttackUnit( all, all, 'ugho' )",
   ]);
 });
 
@@ -365,7 +398,7 @@ test("the minimum force decides when to attack", () => {
 
   ai.groups[0].units = [unit("hfoo", 3), unit("hkni", 0xffffffff)];
   const fixed = body(ai, "HaveMinimumAttackers");
-  assert.ok(fixed.includes("    if (GetUnitCountDone('hfoo') < 3) then"));
+  assert.ok(fixed.includes("    set count = GetUnitCountDone( 'hfoo' )") && fixed.includes("    if (count < 3) then"));
   assert.ok(!fixed.some((l) => l.includes("hkni")), "an \"all\" unit sets no minimum");
 
   ai.minForces = 99;
@@ -404,7 +437,6 @@ test("each target has its own search, in priority order", () => {
   ];
   const lines = body(ai, "LaunchAttack");
   assert.ok(lines.includes("        set target = GetCreepCamp( 2, 30, true )"));
-  assert.ok(lines.includes("    if (target == null and gCond_C) then"));
   const wanted = ["GetCreepCamp", "GetAllianceTarget", "GetExpansionFoe", "GetMegaTarget", "GetEnemyExpansion", "StartGetEnemyBase", "PurchaseZeppelin"];
   const at = wanted.map((w) => lines.findIndex((l) => l.includes(w)));
   // Target 4 tries the enemy's expansion first, so its own line comes later than 3's.
@@ -412,4 +444,33 @@ test("each target has its own search, in priority order", () => {
   assert.ok(at.every((i) => i >= 0));
   ai.targets = [target(5)];
   assert.ok(body(ai, "LaunchAttack").includes("        set target = GetCreepCamp( 0, 100, false )"), "the defaults");
+});
+
+test("targets that share a condition share its block, the next one's comment still inside", () => {
+  const ai = newWai();
+  ai.conditions = [{ index: 1, name: "C", call: threeTowns.call }];
+  const target = (t: number, condIndex: number) => ({ type: 0, target: t, condIndex, cond: none });
+  ai.targets = [target(2, 1), target(3, 1), target(6, -1)];
+  const lines = body(ai, "LaunchAttack");
+  assert.deepEqual(lines.slice(lines.indexOf("    // Target Priority #1"), lines.indexOf("    // Attack the target and increment attack wave")), [
+    "    // Target Priority #1",
+    "    if (gCond_C) then",
+    "        if (target == null) then",
+    "            set target = GetMegaTarget()",
+    "        endif",
+    "",
+    "        // Target Priority #2",
+    "        if (target == null) then",
+    "            set target = GetEnemyExpansion()",
+    "        endif",
+    "",
+    "        // Target Priority #3",
+    "    endif",
+    "    if (target == null) then",
+    "        call PurchaseZeppelin(  )",
+    "    endif",
+    "",
+  ]);
+  ai.targets = [target(2, 1)];
+  assert.deepEqual(errors(script({ ...ai, conditions: ai.conditions })), [], "a block still open after the last target is closed");
 });

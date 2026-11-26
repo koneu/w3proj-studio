@@ -1,10 +1,11 @@
 // The AI script (.ai) the World Editor's AI Editor exports for an AI file:
 // a JASS script on top of common.ai with options, preset conditions, heroes and
 // their skills, build/harvest priorities, attack groups, waves and targets.
-// The layout follows the game's four exported scripts (Scripts/reforged_u05_navy.ai,
-// reforged_u08_*.ai, next to their .wai), which were edited by hand afterwards
-// ("Reforged revision"); parts they don't show (heroes, unit quantities other than
-// "all", custom targets) are written the same way but aren't confirmed.
+// The layout and rules are the World Editor's own export of the game's seven .wai
+// files (we-drive, Export Script, 2026-11-26), compared line by line without
+// blanks. Not in any of them, so unconfirmed: more than one hero order with a
+// chance, a minimum-forces group of "all" units only, a group's "N - all", the
+// town -3 - k in a build line, and "Any" or "all" workers for gold.
 
 import { CONDITION, type TriggerData } from "../triggers/triggerdata";
 import type { Param } from "../triggers/wtg";
@@ -36,7 +37,7 @@ export function conditionJass(call: AiCall | { name: string; params: Param[] }, 
     case "GetBooleanOr": return `( ${args[0]} or ${args[1]} )`;
   }
   const name = f?.scriptName ?? call.name;
-  return args.length ? `${name}( ${args.join(", ")} )` : `${name}()`;
+  return args.length ? `${name}( ${args.join(", ")} )` : `${name}(  )`;
 }
 
 function paramJass(p: Param, type: string, data: TriggerData): string {
@@ -138,7 +139,6 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
     `    call SetSlowChopping( ${on(0x200)} )`,
     `    call SetCaptainChanges( ${on(0x400)} )`,
     `    call SetSmartArtillery( ${on(0x800)} )`,
-    ...((ai.options & 0x2000) ? [`    call SetPlayerName( ai_player, "${jassString(ai.name)}" )`] : []),
   ]);
 
   // ---- conditions --------------------------------------------------------------------
@@ -150,12 +150,15 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
   section("Heroes");
   const heroes = ai.heroes.map((h, i) => ({ id: h, i })).filter((h) => h.id !== NO_ID);
   const setHero: string[] = [];
+  const chosen = ORDERS.map((order, k) => ({ order, chance: ai.heroChances[k] ?? 0 })).filter((o) => o.chance > 0);
+  // Training orders: up to the last hero slot that is set, and any later one a chosen order puts a hero in.
+  const orders = Math.max(0, ...heroes.map((h) => h.i + 1), ...chosen.flatMap((o) => o.order.map((h, pos) => (ai.heroes[h] !== NO_ID ? pos + 1 : 0))));
   for (const [pos, slot] of [[0, ""], [1, "2"], [2, "3"]] as const) {
-    if (!heroes.length) break;
+    if (pos >= orders) break;
     setHero.push(`    ${pos ? "elseif" : "if"} (order == ${pos + 1}) then`, `        set hero_id${slot} = heroid`);
     heroes.forEach((h, k) => {
       setHero.push(`        ${k ? "elseif" : "if"} (heroid == '${h.id}') then`);
-      ai.skills[h.i * 3 + pos].forEach((s, level) => { if (s !== NO_ID) setHero.push(`            set skills${pos + 1}[${level + 1}] = '${s}'`); });
+      ai.skills[h.i * 3 + pos].forEach((s, level) => { if (s !== NO_ID) setHero.push(`            set skills${pos + 1}[${String(level + 1).padStart(2)}] = '${s}'`); });
     });
     setHero.push("        endif");
   }
@@ -163,16 +166,15 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
   fn("Stores hero ID and skills", "function SetHero takes integer order, integer heroid returns nothing", setHero);
   const select: string[] = ["    local integer roll = GetRandomInt(1,100)"];
   if (heroes.length) {
-    let total = 0, first = true;
-    ORDERS.forEach((order, k) => {
-      const chance = ai.heroChances[k] ?? 0;
-      if (chance <= 0) return;
+    // With one order there is nothing to roll for.
+    const indent = chosen.length > 1 ? "        " : "    ";
+    let total = 0;
+    chosen.forEach(({ order, chance }, k) => {
       total += chance;
-      select.push(`    ${first ? "if" : "elseif"} (roll <= ${total}) then`);
-      first = false;
-      order.forEach((h, pos) => { if (ai.heroes[h] !== NO_ID) select.push(`        call SetHero( ${pos + 1}, '${ai.heroes[h]}' )`); });
+      if (chosen.length > 1) select.push(`    ${k ? "elseif" : "if"} (roll <= ${total}) then`);
+      order.forEach((h, pos) => { if (ai.heroes[h] !== NO_ID) select.push(`${indent}call SetHero( ${pos + 1}, '${ai.heroes[h]}' )`); });
     });
-    if (!first) select.push("    endif");
+    if (chosen.length > 1) select.push("    endif");
   }
   fn("Selects hero IDs for three possible heroes", "function SelectHeroes takes nothing returns nothing", select);
   fn("Returns the hero skill for the given hero and level", "function ChooseHeroSkill takes nothing returns integer", [
@@ -190,7 +192,7 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
     let line: string;
     if (b.kind === 2) line = `call BuildExpansion( ${quote(hall)}, ${quote(mineBuilding)} )`;
     else {
-      const key = `${b.kind}:${b.id}`;
+      const key = `${b.kind}:${b.id}:${signed(b.town)}`; // counted for each town on its own
       const n = (totals.get(key) ?? 0) + 1;
       totals.set(key, n);
       line = `call SetBuildAll( ${b.kind === 1 ? "BUILD_UPGRADE" : "BUILD_UNIT"}, ${n}, ${quote(b.id)}, ${town(b.town)} )`;
@@ -206,8 +208,11 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
     const all = b.resource ? "allWood" : "allGold", attacking = b.resource ? "awWood" : "awGold";
     const w = signed(b.workers);
     const count = w === -1 ? all : w === -2 ? `${all} - ${attacking}` : String(b.workers);
+    // "Any" is the AI's current town (a -1 in the call gathers nothing: no wood in the game, 2026-11-26).
+    const t = signed(b.town), at = t === -1 ? "mine" : t === -3 ? "mine + 0" : town(b.town);
+    const call = `call ${b.resource ? "HarvestWood" : "HarvestGold"}( ${at}, numWorkers )`;
     harvestItems.push({ c: cond(b.condIndex, b.cond),
-      lines: [`    set numWorkers = ${count}`, `    call ${b.resource ? "HarvestWood" : "HarvestGold"}( ${town(b.town)}, numWorkers )`] });
+      lines: [`    set numWorkers = ${count}`, ...(w < 0 ? ["    if (numWorkers > 0) then", `        ${call}`, "    endif"] : [`    ${call}`])] });
   }
   harvest.push(...guardedRuns(harvestItems));
   fn("Specifies harvesting priorities for workers", "function HarvestPriorities takes nothing returns nothing", harvest);
@@ -221,6 +226,8 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
   const groups = [...ai.groups].sort((a, b) => a.name.localeCompare(b.name));
   const groupNo = (index: number) => groups.findIndex((g) => g.index === index) + 1;
   const isAll = (n: number) => signed(n) === -1;
+  /** AddAttackUnit's two amounts, each in a column the Editor makes five wide. */
+  const amounts = (...n: (number | string)[]) => n.map((v) => `${v},`.padEnd(4)).join(" ");
   const min = ai.groups.find((g) => g.index === ai.minForces);
   const minimum: string[] = ["    local integer count", "", "    // Check for attack wave limit", `    if (attackWave > ${ai.waves.length}) then`, "        return false", "    endif", ""];
   let never = false;
@@ -237,7 +244,7 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
         ...min.units.map((u) => `    set count = count + GetUnitCountDone(${quote(u.id)})`), "    if (count < 1) then", "        return false", "    endif");
     } else {
       minimum.push(...guardedRuns(fixed.map((u) => ({ c: cond(u.condIndex, u.cond),
-        lines: [`    if (GetUnitCountDone(${quote(u.id)}) < ${u.quantity}) then`, "        return false", "    endif"] }))));
+        lines: [`    set count = GetUnitCountDone( ${quote(u.id)} )`, `    if (count < ${u.quantity}) then`, "        return false", "    endif"] }))));
     }
   }
   if (!never) minimum.push("    return true");
@@ -249,11 +256,13 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
     const unitItems: { c: string | null; lines: string[] }[] = [];
     for (const u of g.units) {
       const id = quote(u.id);
+      // All, or all but `max` of them.
+      const kept = isAll(u.quantity) && signed(u.max) > 0 ? [`set all = all - ${u.max}`, "if (all < 0) then", "    set all = 0", "endif"] : [];
       const lines = isAll(u.quantity)
-        ? [`set all = GetUnitCountDone( ${id} )`, `call AddAttackUnit( all, all, ${id} )`]
+        ? [`set all = GetUnitCountDone( ${id} )`, ...kept, `call AddAttackUnit( ${amounts("all", "all")} ${id} )`]
         : isAll(u.max)
-          ? [`set all = GetUnitCountDone( ${id} )`, `call AddAttackUnit( ${u.quantity}, all, ${id} )`]
-          : [`call AddAttackUnit( ${u.quantity}, ${u.max}, ${id} )`];
+          ? [`set all = GetUnitCountDone( ${id} )`, `call AddAttackUnit( ${amounts(u.quantity, "all")} ${id} )`]
+          : [`call AddAttackUnit( ${amounts(u.quantity, u.max)} ${id} )`];
       unitItems.push({ c: cond(u.condIndex, u.cond), lines: lines.map((l) => `        ${l}`) });
     }
     prepare.push(...guardedRuns(unitItems, "        "));
@@ -285,9 +294,18 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
     "    call FormGroup( 3, true )", "    call AttackMoveKillA( target )", "    if (not addAlliance) then", "        call SetAllianceTarget( null )", "    endif"]);
   const launch = ["    local unit target = null", "    local boolean setAlly = true", "", "    // Don't launch any attack while town is threatened",
     "    if (TownThreatened()) then", "        call Sleep( 2 )", "        return", "    endif", ""];
+  // Neighbours with the same condition share one `if` block; the next target's comment is still inside it.
+  let open: string | null = null;
   ai.targets.forEach((t, k) => {
     const c = cond(t.condIndex, t.cond);
-    launch.push(`    // Target Priority #${k + 1}`, `    if (target == null${c ? ` and ${c}` : ""}) then`);
+    launch.push(`${open ? "        " : "    "}// Target Priority #${k + 1}`);
+    if (c !== open) {
+      if (open) launch.push("    endif");
+      if (c) launch.push(`    if (${c}) then`);
+      open = c;
+    }
+    const from = launch.length;
+    launch.push("    if (target == null) then");
     switch (t.target) {
       case 0: launch.push("        set target = GetAllianceTarget()", "        if (target != null) then", "            set setAlly = false", "        endif"); break;
       case 1: launch.push("        set target = GetExpansionFoe()", "        if (target != null) then", "            set take_exp = false", "        endif"); break;
@@ -298,8 +316,11 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
       case 5: launch.push(`        set target = GetCreepCamp( ${t.creep?.min ?? 0}, ${t.creep?.max ?? 100}, ${t.creep?.allowFlyers ? "true" : "false"} )`); break;
       case 6: launch.push("        call PurchaseZeppelin(  )"); break;
     }
-    launch.push("    endif", "");
+    launch.push("    endif");
+    if (open) for (let i = from; i < launch.length; i++) launch[i] = `    ${launch[i]}`;
+    launch.push("");
   });
+  if (open) launch.push("    endif");
   launch.push("    // Attack the target and increment attack wave", "    if (target != null) then", "        call AttackTarget( target, setAlly )", "        call AttackWaveUpdate(  )",
     "    else", "        // If no target was found, sleep a bit before trying again", "        call Sleep( 20 )", "    endif");
   fn("Initiates an attack based on target priorities", "function LaunchAttack takes nothing returns nothing", launch);
@@ -312,7 +333,7 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
   // ---- main --------------------------------------------------------------------------
   section("Main Entry Point");
   fn(null, "function main takes nothing returns nothing", [
-    "    call InitAI(  )", "    call InitOptions(  )", "    call SelectHeroes(  )", "    call CreateCaptains(  )", "    call SetHeroLevels( function ChooseHeroSkill )", "",
+    "    call InitAI(  )", ...((ai.options & 0x2000) ? [`    call SetPlayerName( ai_player, "${jassString(ai.name)}" )`] : []), "    call InitOptions(  )", "    call SelectHeroes(  )", "    call CreateCaptains(  )", "    call SetHeroLevels( function ChooseHeroSkill )", "",
     "    call Sleep( 0.1 )", "    call StartThread( function WorkerAssignment )", "    call StartThread( function AttackAssignment )", "    call PlayGame(  )"]);
   // The file ends with an empty line.
   return [...out, ""].join("\r\n");

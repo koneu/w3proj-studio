@@ -43,9 +43,9 @@ export function workersText(n: number): string {
   return v === -1 ? "All" : v === -2 ? "All NA" : String(v);
 }
 
-/** Attack group quantities: minimum and maximum, -1 = all. */
+/** Attack group quantities: minimum and maximum, -1 = all. All with a maximum of N: all but N of them. */
 export function quantityText(min: number, max: number): string {
-  if (signed(min) === -1) return "All";
+  if (signed(min) === -1) return signed(max) > 0 ? `All but ${max}` : "All";
   if (signed(max) === -1) return `${min} - All`;
   return min === max ? String(min) : `${min} - ${max}`;
 }
