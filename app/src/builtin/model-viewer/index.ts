@@ -79,6 +79,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const i of old.hidden) next.hidden.add(i);
           Object.assign(next, { wireframe: old.wireframe, showGrid: old.showGrid, showParticles: old.showParticles, yaw: old.yaw, pitch: old.pitch, distance: old.distance, target: [...old.target] });
           textureImages.forEach((img, i) => { if (img) next.setTexture(i, img); });
+          for (const i of missingImages) next.textureUnavailable(i);
           if (effectModel) {
             next.setEffectModel(effectModel);
             effectImages.forEach((img, i) => { if (img) next.setEffectTexture(i, img); });
@@ -110,6 +111,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** What was handed to the renderer, kept to hand it to a new one when the context comes back. */
         let effectModel: Model | null = null;
         const textureImages: (DecodedImage | undefined)[] = [], effectImages: (DecodedImage | undefined)[] = [];
+        const missingImages = new Set<number>();
         const gamePath = doc.path.startsWith("game:") ? doc.path.slice(5) : null;
         if (gamePath && /:_(hd|de)\.w3mod:/i.test(gamePath) && !model.particleEmitters2.length && !model.ribbons.length && model.skipped.includes("CORN")) {
           try {
@@ -173,6 +175,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (!glDead) renderer.setTexture(i, textureImages[i]!);
                 row.firstElementChild!.className = "model-dot ok";
               }).catch((e) => {
+                missingImages.add(i);
+                if (!glDead) renderer.textureUnavailable(i);
                 row.firstElementChild!.className = "model-dot missing";
                 row.title = `${label}: ${(e as Error).message ?? e}`;
               });

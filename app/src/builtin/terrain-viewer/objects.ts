@@ -678,7 +678,7 @@ export class ObjectLoader {
           let users = this.textureUsers.get(tex.toLowerCase());
           if (!users) this.textureUsers.set(tex.toLowerCase(), (users = new Set()));
           users.add(req.path.toLowerCase());
-          this.texture(tex, model.textures[i].flags).then((t) => { gpu.textures[i] = t; });
+          this.texture(tex, model.textures[i].flags).then((t) => { gpu.textures[i] = t; if (!t) gpu.unavailable.add(i); });
         });
         return gpu;
       })());

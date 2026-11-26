@@ -214,7 +214,7 @@ export class ModelPreview {
         if (this.kept.get(this.keyOf(kept)) !== kept || kept.round !== round) return;
         kept.bytes += buf.byteLength;
         r.setTexture(i, decodeImage(buf, p));
-      }, () => {});
+      }).catch(() => { if (this.kept.get(this.keyOf(kept)) === kept && kept.round === round) r.textureUnavailable(i); });
     });
   }
   private keyOf(kept: Kept): string {

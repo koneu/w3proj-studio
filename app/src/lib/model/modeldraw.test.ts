@@ -190,3 +190,20 @@ test("a paint multiplies the layers' colour and leaves the opacity and the blend
   assert.deepEqual(colours({ paint: [1, 40 / 255, 40 / 255] }), [[1, 0.157, 0.157, 1]]);
   assert.deepEqual(colours({}), [[1, 1, 1, 1]], "without one: as before (control)");
 });
+
+test("an HD layer whose ORM texture can't be loaded is all player colour, as in the World Editor; one still loading isn't", () => {
+  const m = model(0);
+  m.textures.push({ replaceableId: 0, path: "n.dds", flags: 0 }, { replaceableId: 0, path: "orm.dds", flags: 0 });
+  m.materials[0].layers[0].textureIds = [0, 1, 2];
+  const { gl, floats } = recordingGl();
+  const gpu = new ModelGpu(gl, m);
+  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+  const hd = () => {
+    floats.length = 0;
+    gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, {});
+    return floats.filter(([n]) => n === "uHd").map(([, v]) => v);
+  };
+  assert.deepEqual(hd(), [0], "still loading");
+  gpu.unavailable.add(2);
+  assert.deepEqual(hd(), [1]);
+});

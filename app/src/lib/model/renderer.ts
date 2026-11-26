@@ -725,6 +725,9 @@ export class VersionedSet<T> extends Set<T> {
 export class ModelGpu {
   /** GPU texture per model texture; null until loaded. */
   readonly textures: (WebGLTexture | null)[];
+  /** Model textures that can't be loaded (not those still loading). A missing ORM texture masks nothing out: the
+   *  World Editor draws the whole model in the player colour (the 3.0 art's AbominationCIN names HD textures). */
+  readonly unavailable = new Set<number>();
   /** Hidden geosets (by index); HD lower-detail copies start hidden. */
   readonly hidden = new VersionedSet<number>();
   readonly stats: Stats;
@@ -1025,7 +1028,7 @@ export class ModelGpu {
       const teamTexture = shadow ? null : tex?.replaceableId === 1 ? sh.team : tex?.replaceableId === 2 ? sh.glow : null;
       if (!teamTexture) gl.bindTexture(gl.TEXTURE_2D, (tex?.replaceableId === 1 && shadow ? null : this.textures[texIndex]) ?? sh.white);
       // HD layers list [diffuse, normal, ORM, emissive, team colour, environment]; the ORM's alpha masks the player colour.
-      const orm = !shadow && layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
+      const orm = !shadow && layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] ?? (this.unavailable.has(layer.textureIds[2]) ? sh.white : null) : null;
       gl.uniform1f(u.uHd, orm ? 1 : 0);
       if (orm) {
         gl.activeTexture(gl.TEXTURE2);
@@ -1146,6 +1149,11 @@ export class ModelRenderer {
   /** Paths to load for the model's textures (replaceables resolved). */
   texturePaths(replaceable: Record<number, string> = {}): (string | null)[] {
     return this.gpu.texturePaths(replaceable);
+  }
+
+  /** Texture `i` can't be loaded (see ModelGpu.unavailable). */
+  textureUnavailable(i: number) {
+    this.gpu.unavailable.add(i);
   }
 
   setTexture(i: number, img: DecodedImage) {
