@@ -130,6 +130,9 @@ export async function mergeHook(w3: W3Api, arg?: { remove?: boolean; quiet?: boo
 /** What Check Terrain IDs found (terrain_ids.rs Report, backend flatview.rs check). */
 export interface IdCheck {
   duplicates: { kind: string; number: number; files: string[]; members: FixMember[] }[];
+  /** Information only: numbers found twice that terrain.json lists as kept from the imported map
+   *  (`objects.<kind>.importedTwice`); they pack as they came. */
+  kept: { kind: string; number: number; files: string[]; members: FixMember[] }[];
   overlaps: { a: string; aRange: [number, number]; b: string; bRange: [number, number] }[];
   /** Information only: moved objects and imported maps have numbers outside their subterrain's ranges. */
   outside: { subterrain: string; kind: string; count: number; examples: number[] }[];
@@ -161,7 +164,9 @@ export async function checkTerrainIds(w3: W3Api, arg?: { quiet?: boolean }): Pro
     out.show();
     void w3.window.showError(`Check Terrain IDs: ${[twice ? `${twice} creation number${twice === 1 ? "" : "s"} found twice` : "", overlaps ? `${overlaps} overlapping id range${overlaps === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")}. The Subterrains output lists them${twice ? "; Fix Duplicate Creation Numbers… renumbers them or deletes exact copies" : ""}.`);
   } else {
-    void w3.window.showInfo(`Check Terrain IDs: ${report.numbers} creation numbers, none twice, no overlapping ranges.`);
+    const kept = report.kept?.length ?? 0;
+    const twiceText = kept ? `${kept} kept twice as the imported map has ${kept === 1 ? "it" : "them"} (the Subterrains output lists them)` : "none twice";
+    void w3.window.showInfo(`Check Terrain IDs: ${report.numbers} creation numbers, ${twiceText}, no overlapping ranges.`);
   }
   return report;
 }

@@ -273,15 +273,18 @@ function expectations(read: ReadSource = readSource): Expect[] {
   out.push({ schema: "terrain", node: ["properties", "dooHeader"], keys: doo, required: doo, closed: true });
   const sub = strings(tl, /const SUB: &\[&str\] = &\[([^\]]*)\]/);
   out.push({ schema: "terrain", node: ["properties", "subterrains", "items"], keys: sub, required: sub, closed: true });
-  const heads = part(to, "pub(crate) fn parse(v: &Value, header: Option<&DooHeader>)", "Ok(Heads { doodads, units, regions })");
+  const heads = part(to, "pub(crate) fn parse(v: &Value, header: Option<&DooHeader>)", "Ok(Heads { doodads, units, regions, twice })");
+  // The list of numbers kept twice (TWICE_KEY) is optional in each kind.
+  assert.match(to, /pub const TWICE_KEY: &str = "importedTwice";/);
   out.push({ schema: "terrain", node: ["properties", "objects"], keys: strings(heads, /tl::object\(v, "objects", &\[\], &\[([^\]]*)\]\)/), required: [], closed: true });
   const need = strings(heads, /let mut need = vec!\[([^\]]*)\]/), skin = strings(heads, /tl::object\(v, &what, &need, &\[([^\]]*)\]\)/);
   const special = strings(heads, /doo\("doodads", &\[([^\]]*)\]\)/);
   out.push({ schema: "terrain", node: ["properties", "objects", "properties", "doodads"], keys: [...need, ...special, ...skin], required: [...need, ...special], closed: true });
   assert.match(heads, /doo\("units", &\[\]\)/);
   out.push({ schema: "terrain", node: ["properties", "objects", "properties", "units"], keys: [...need, ...skin], required: need, closed: true });
-  const regions = strings(heads, /tl::object\(v, "objects.regions", &\[([^\]]*)\], &\[\]\)/);
-  out.push({ schema: "terrain", node: ["properties", "objects", "properties", "regions"], keys: regions, required: regions, closed: true });
+  const regions = strings(heads, /tl::object\(v, "objects.regions", &\[([^\]]*)\], &\[[^\]]*\]\)/);
+  const regionsOptional = strings(heads, /tl::object\(v, "objects.regions", &\[[^\]]*\], &\[([^\]]*)\]\)/);
+  out.push({ schema: "terrain", node: ["properties", "objects", "properties", "regions"], keys: [...regions, ...regionsOptional], required: regions, closed: true });
   // A subterrain's files: its lists, each needed, nothing else (terrain_objects.rs read_sub, Kind::keys of the flat
   // file and lists()).
   assert.match(to, /Kind::Doodads => &\[List::Main, List::Specials\]/);
@@ -675,10 +678,16 @@ test("every file unpack and a terrain split write for the corpus maps passes its
         rmSync(project, { recursive: true, force: true });
         const r = await run(found.bin, ["unpack", "--game", game ?? "none", "--allow-incomplete", maps[i], project]);
         if (r.code !== 0) { failures.push(`${maps[i]}: unpack exit ${r.code}: ${r.err.trim()}`); continue; }
-        // The flat files, then the same map split into one subterrain (a campaign has no terrain of its own; a map
-        // whose placed objects stayed raw can't be split, and that is no schema's business).
+        // The files as unpacked (the split layout), then the flat object files merged from them and the derived files
+        // the merge puts back into map/ (the minimap's icons: a split project keeps them in .w3proj/derived/); a map unpacked flat
+        // (a campaign has no terrain of its own; a terrain kept raw or placed objects that stayed raw can't be split,
+        // and that is no schema's business) split into one subterrain.
         for (const f of checkFiles(project, counts)) failures.push(`${maps[i]}: ${f}`);
-        if (existsSync(join(project, "map", "war3map.w3e.txt"))) {
+        if (existsSync(join(project, "map", "terrain", "terrain.json"))) {
+          const merged = await run(found.bin, ["terrain", "merge", project]);
+          if (merged.code !== 0) failures.push(`${maps[i]}: terrain merge exit ${merged.code}: ${merged.err.trim()}`);
+          else for (const f of checkFiles(project, counts, (rel) => /^map\/[^/]+\.(doo|w3r|mmp)\.json$/i.test(rel))) failures.push(`${maps[i]} (merged): ${f}`);
+        } else if (existsSync(join(project, "map", "war3map.w3e.txt"))) {
           const split = await run(found.bin, ["terrain", "split", project]);
           if (split.code === 0) for (const f of checkFiles(project, counts, (rel) => rel.startsWith("map/terrain/"))) failures.push(`${maps[i]} (split): ${f}`);
           else unsplit.push(`${basename(maps[i])}: ${(split.err.trim().split("\n").pop() ?? "").replace(/^.*?: map\//, "map/").slice(0, 160)}`);

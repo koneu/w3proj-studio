@@ -54,7 +54,7 @@ fn unpack(map: &Path, project: &Path) -> String {
 /// became the only one an unpack writes (war3map.w3e.txt and the flat object files, the derived files in map/).
 fn unpack_flat(map: &Path, project: &Path) {
     unpack(map, project);
-    // A map whose terrain can't be split (a creation number found twice) is unpacked flat as it is.
+    // A map whose terrain can't be split (kept raw, or none) is unpacked flat as it is.
     if project.join("map/terrain/terrain.json").is_file() {
         ok(&["terrain", "merge", s(project)]);
     }
@@ -1278,7 +1278,8 @@ fn terrain_relayout_packs_the_same_map() {
 
 /// `w3proj terrain check`: a split project's creation numbers. Numbers outside a subterrain's range are information
 /// (exit 0); a number in two subterrains' files is an error naming both (exit 1), and the same duplicate stops a pack,
-/// naming both files. A flat project without numbers twice passes.
+/// naming both files; listed in terrain.json as kept from the import, it is information and packs. A flat project
+/// without numbers twice passes.
 #[test]
 fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     let dir = workdir("terrain_check");
@@ -1308,14 +1309,31 @@ fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
     assert!(text(&o).contains("error: creation number 2 (units) is in map/terrain/sw/units.json and map/terrain/ne/units.json"), "{}", text(&o));
     let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("twice.w3x")), "--force-stale", "--allow-terrain-only-derived"]);
     assert!(!o.status.success() && text(&o).contains("creation number 2 is in map/terrain/sw/units.json and in map/terrain/ne/units.json"), "{}", text(&o));
+    // The same number listed as kept from the import (terrain.json's objects.units.importedTwice): information (exit 0),
+    // and a pack goes through.
+    let layout_path = project.join("map/terrain/terrain.json");
+    let layout = fs::read_to_string(&layout_path).unwrap();
+    let listed = layout.replacen("\"units\": { \"magic\": \"W3do\"", "\"units\": { \"magic\": \"W3do\", \"importedTwice\": [2]", 1);
+    assert_ne!(listed, layout);
+    fs::write(&layout_path, &listed).unwrap();
+    let said = ok(&["terrain", "check", s(&project)]);
+    assert!(said.contains("info: creation number 2 (units) is in map/terrain/sw/units.json and map/terrain/ne/units.json") && said.contains("0 found twice, 1 kept twice"), "{said}");
+    let json: serde_json::Value = serde_json::from_str(&ok(&["terrain", "check", s(&project), "--json"])).unwrap();
+    assert_eq!((json["duplicates"].as_array().unwrap().len(), json["kept"][0]["number"].as_u64()), (0, Some(2)));
+    ok(&["pack", s(&project), "-o", s(&dir.join("kept.w3x")), "--force-stale", "--allow-terrain-only-derived"]);
+    // Another number listed instead: 2 found twice is an error again.
+    fs::write(&layout_path, listed.replace("\"importedTwice\": [2]", "\"importedTwice\": [7]")).unwrap();
+    assert_eq!(w3proj(&["terrain", "check", s(&project)]).status.code(), Some(1));
+    assert!(!w3proj(&["pack", s(&project), "-o", s(&dir.join("twice.w3x")), "--force-stale", "--allow-terrain-only-derived"]).status.success());
 }
 
 
-/// `w3proj terrain fix-ids` on the pattern of a real map that couldn't be split (wowr4.6: creation number 581 on three
-/// stacked doodads, the last an exact copy of the one before): `terrain check` lists all three in the flat project, the
-/// split names all three and points at the fix, fix-ids without --apply only prints the plan; --renumber --apply changes
-/// the two numbers and nothing else (the packed war3map.doo differs in their eight bytes only), and the map then splits,
-/// merges back and packs the same. --delete-copies takes only the copy.
+/// `w3proj terrain fix-ids` on the pattern of a real map (wowr4.6: creation number 581 on three stacked doodads, the last
+/// an exact copy of the one before): `terrain check` lists all three in the flat project as errors; unpacked anew, the
+/// map splits as it is (terrain.json keeps 581, the check says so and passes) and packs the same; fix-ids without
+/// --apply only prints the plan; --renumber --apply changes the two numbers and nothing else (the packed war3map.doo
+/// differs in their eight bytes only), and the map then splits, merges back and packs the same. --delete-copies takes
+/// only the copy.
 #[test]
 fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
     let dir = workdir("fix_ids");
@@ -1342,8 +1360,18 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
     for m in ["map/war3map.doo.json [2]", "map/war3map.doo.json [3]", "map/war3map.doo.json [4]", "an exact copy of [3]", "fix-ids"] {
         assert!(text(&o).contains(m), "{m}: {}", text(&o));
     }
-    let o = w3proj(&["terrain", "split", s(&project)]);
-    assert!(!o.status.success() && text(&o).contains("doodads[2], doodads[3] and doodads[4] have the same creation number 581") && text(&o).contains("fix-ids"), "{}", text(&o));
+    // Unpacked into a new project, the map splits as it is: terrain.json keeps 581, the check tells it as information
+    // (exit 0), and the pack gives the same bytes.
+    let kept = dir.join("kept");
+    unpack(&twice, &kept);
+    assert!(!kept.join("map/war3map.w3e.txt").exists() && !kept.join("map/war3map.doo.json").exists());
+    let layout = fs::read_to_string(kept.join("map/terrain/terrain.json")).unwrap();
+    assert!(layout.contains("\"importedTwice\": [581]"), "{layout}");
+    let said = ok(&["terrain", "check", s(&kept)]);
+    assert!(said.contains("info: creation number 581 (doodads) is 3 times in map/terrain/main/doodads.json") && said.contains("0 found twice, 1 kept twice"), "{said}");
+    let repacked = dir.join("kept.w3x");
+    ok(&["pack", s(&kept), "-o", s(&repacked)]);
+    assert!(fs::read(&repacked).unwrap() == fs::read(&twice).unwrap(), "unpacked and packed, another map");
     let before = files(&project);
     let plan = ok(&["terrain", "fix-ids", s(&project), "--renumber"]);
     assert!(plan.contains("[3] ") && plan.contains("gets 582") && plan.contains("gets 583") && plan.contains("--apply"), "{plan}");
@@ -1375,7 +1403,10 @@ fn fix_ids_renumbers_numbers_found_twice_and_nothing_else() {
     assert!(said.contains("deleted") && said.contains("stays (not an exact copy)") && said.contains("1 deleted, 2 still sharing a number"), "{said}");
     let doo: serde_json::Value = serde_json::from_slice(&fs::read(project.join("map/war3map.doo.json")).unwrap()).unwrap();
     assert_eq!(doo["doodads"].as_array().unwrap().len(), 4);
-    assert!(!w3proj(&["terrain", "split", s(&project)]).status.success(), "two that differ still share 581");
+    // Two that differ still share 581: a split keeps it listed.
+    ok(&["terrain", "split", s(&project)]);
+    assert!(fs::read_to_string(project.join("map/terrain/terrain.json")).unwrap().contains("\"importedTwice\": [581]"));
+    ok(&["terrain", "check", s(&project)]);
 }
 
 /// `w3proj terrain merge-hook`: installed into a real repository whose project lies in a folder with a space, the

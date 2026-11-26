@@ -536,14 +536,22 @@ fn assemble_terrain(layout: &Layout, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -
 /// files `flats` (kind → bytes): `terrain.json` with `t`'s header, the given subterrains and default
 /// corner and the objects' headers (`doo_header` is kept when there are no doodads and units), each
 /// subterrain's ground and object files. A corner outside every subterrain that isn't
-/// `default_corner` can't be stored: an error. The result is read again and compared with `t` and
-/// `flats` before it is returned.
-fn slice_terrain(t: &Terrain, subterrains: Vec<Subterrain>, default_corner: Corner, doo_header: Option<DooHeader>, flats: &Flats) -> Result<BTreeMap<String, Vec<u8>>> {
+/// `default_corner` can't be stored: an error. Creation numbers found twice: `kept` as for
+/// `terrain_objects::slice` (None for an import, the project's list for a write over its files). The result is read
+/// again and compared with `t` and `flats` before it is returned.
+fn slice_terrain(
+    t: &Terrain,
+    subterrains: Vec<Subterrain>,
+    default_corner: Corner,
+    doo_header: Option<DooHeader>,
+    flats: &Flats,
+    kept: Option<&objects::Twice>,
+) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut head = t.clone();
     head.corners = Vec::new();
     let mut layout = Layout { head, default_corner, doo_header, objects: Heads::default(), subterrains };
     layout.check()?;
-    let (heads, object_files) = objects::slice(flats, &layout.subterrains, t.offset)?;
+    let (heads, object_files) = objects::slice(flats, &layout.subterrains, t.offset, kept)?;
     layout.doo_header = heads.doo_header().or(layout.doo_header);
     layout.objects = heads;
     let mut covered = vec![false; t.width * t.height];
@@ -643,7 +651,7 @@ fn split_terrain(t: &Terrain, rects: &[Rect], flats: &Flats) -> Result<BTreeMap<
         Some(first) => *first,
         None => most_common(&t.corners),
     };
-    slice_terrain(t, subterrains, default_corner, None, flats)
+    slice_terrain(t, subterrains, default_corner, None, flats, None)
 }
 
 /// A 2×2 grid over the canvas (`sw`, `se`, `nw`, `ne`); a canvas narrower or lower than 2 corners
@@ -842,7 +850,7 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
     };
     let t = w3e::terrain_from_text(&files[&flat])?;
     let (flats, names) = flat_object_files(files)?;
-    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats).map_err(|e| {
+    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats, None).map_err(|e| {
         Error::Project(format!("the map's terrain and objects don't fit the project's subterrains ({e}): merge the terrain first (`w3proj terrain merge`), then split it again"))
     })?;
     files.remove(&flat);
@@ -1121,7 +1129,7 @@ pub fn relayout(files: &mut BTreeMap<String, Vec<u8>>, plan: &[Planned]) -> Resu
     let pathing = crate::terrain_pathing::assemble(&old, &|p| files.get(p).cloned())?;
     let t = w3e::terrain_from_text(&flat[FLAT_FILE])?;
     let (flats, _) = flat_object_files(&flat)?;
-    let mut new = slice_terrain(&t, subs, old.default_corner, old.doo_header.clone(), &flats)?;
+    let mut new = slice_terrain(&t, subs, old.default_corner, old.doo_header.clone(), &flats, Some(&old.objects.twice))?;
     if let Some(json) = pathing {
         let layout = Layout::parse(&new[LAYOUT_FILE])?;
         new.extend(crate::terrain_pathing::slice(&json, &layout).map_err(|e| Error::Project(format!("the pathing overrides don't fit the new subterrains: {e}")))?);
@@ -1552,7 +1560,7 @@ pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String
     let t = w3e::terrain_from_text(&files[FLAT_FILE])?;
     let flats: Flats = KINDS.into_iter().filter(|k| layout.objects.has(*k)).map(|k| (k, files[k.flat()].clone())).collect();
     if [t.width, t.height] == layout.corners() && t.offset == layout.head.offset {
-        let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats)?;
+        let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats, Some(&layout.objects.twice))?;
         return write_changed(map_dir, &sliced);
     }
     // Map Size: the canvas grows or shrinks; what no subterrain holds any more goes. The layout's files as on disk
@@ -1613,7 +1621,7 @@ fn resized_files(files: &BTreeMap<String, Vec<u8>>, layout: &Layout, t: &Terrain
         )));
     }
     let pathing = crate::terrain_pathing::assemble(layout, &|p| files.get(p).cloned())?;
-    let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats)?;
+    let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats, Some(&layout.objects.twice))?;
     if let Some(json) = pathing {
         let cells = crate::terrain_pathing::parse_json(&json, layout.corners())?;
         let [w, h] = crate::terrain_pathing::map_size([t.width, t.height]);

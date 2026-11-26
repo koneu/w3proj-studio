@@ -27,12 +27,17 @@
 //! that sorted order keeps the index as `"order"`. Merging puts every entry with an `order` at that
 //! index and fills the other places with the rest in sorted order, so a map split and merged without
 //! edits gives back the same flat file. A creation number twice is an error naming both files; it is
-//! never renumbered (scripts refer to it). For doodads and units 0 and 4294967295 aren't assignments
+//! never renumbered (scripts refer to it). The exception is a number the imported map already held more
+//! than once: a split of a flat file (an unpack, `w3proj terrain split`) lists those per kind in
+//! `terrain.json` (`objects.<kind>.importedTwice`, `Heads::twice`), and merging lets exactly those
+//! through, so such a map repacks as it came, while a number found twice that isn't listed (a Git
+//! merge's) is still refused. A later write keeps a listed number only while the content still holds
+//! it more than once, and never lists a new one. For doodads and units 0 and 4294967295 aren't assignments
 //! (old maps give every doodad editorId 0): they may be there any number of times, and entries with
 //! equal numbers are sorted by subterrain, then by their flat order (`order` where that isn't their
 //! flat place). A region's index is always an assignment (the first region of a map has index 0).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Map, Value};
 
@@ -46,6 +51,11 @@ const TILE: f64 = 128.0;
 type Entry = Map<String, Value>;
 /// Flat object files: kind → bytes.
 pub type Flats = BTreeMap<Kind, Vec<u8>>;
+/// Per kind, the creation numbers its flat file holds more than once and keeps so (`Heads::twice`).
+pub type Twice = BTreeMap<Kind, BTreeSet<u32>>;
+
+/// `terrain.json`'s key, in `objects.<kind>`, for the creation numbers kept twice (`Heads::twice`).
+pub const TWICE_KEY: &str = "importedTwice";
 
 /// An entry on its way into a subterrain's file: sort key, index in the flat file, order, entry.
 type Placed = (SortKey, usize, Option<u64>, Entry);
@@ -128,6 +138,10 @@ pub struct Heads {
     pub units: Option<DooFile>,
     /// The regions' `version`.
     pub regions: Option<u32>,
+    /// `objects.<kind>.importedTwice`: the creation numbers a kind's flat file holds more than once, kept as the
+    /// imported map had them (merging lets these through and refuses any other number found twice). A kind without
+    /// any has no entry.
+    pub twice: Twice,
 }
 
 impl Heads {
@@ -178,15 +192,19 @@ impl Heads {
                 None => String::new(),
             }
         };
+        let twice = |kind: Kind| match self.twice.get(&kind) {
+            Some(ns) if !ns.is_empty() => format!(", \"{TWICE_KEY}\": [{}]", ns.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")),
+            _ => String::new(),
+        };
         let mut parts = Vec::new();
         if let Some((f, special)) = &self.doodads {
-            parts.push(format!("    \"doodads\": {{ \"magic\": {}, \"specialVersion\": {special}{} }}", q(&f.magic), skin(f)));
+            parts.push(format!("    \"doodads\": {{ \"magic\": {}, \"specialVersion\": {special}{}{} }}", q(&f.magic), skin(f), twice(Kind::Doodads)));
         }
         if let Some(f) = &self.units {
-            parts.push(format!("    \"units\": {{ \"magic\": {}{} }}", q(&f.magic), skin(f)));
+            parts.push(format!("    \"units\": {{ \"magic\": {}{}{} }}", q(&f.magic), skin(f), twice(Kind::Units)));
         }
         if let Some(v) = self.regions {
-            parts.push(format!("    \"regions\": {{ \"version\": {v} }}"));
+            parts.push(format!("    \"regions\": {{ \"version\": {v}{} }}", twice(Kind::Regions)));
         }
         format!("  \"objects\": {{\n{}\n  }},\n", parts.join(",\n"))
     }
@@ -199,7 +217,8 @@ impl Heads {
             let what = format!("objects.{key}");
             let mut need = vec!["magic"];
             need.extend_from_slice(extra);
-            let f = tl::object(v, &what, &need, &["skinIds"])?;
+            // The optional keys written out: app/src/lib/formats/schemas.test.ts reads them from here (TWICE_KEY).
+            let f = tl::object(v, &what, &need, &["skinIds", "importedTwice"])?;
             let h = header.ok_or_else(|| tl::bad(format!("{what} is there, dooHeader isn't")))?;
             let (version, subversion) = if key == "doodads" { (h.doodads_version, h.doodads_subversion) } else { (h.units_version, h.units_subversion) };
             let skin_ids = match f.get("skinIds") {
@@ -217,11 +236,27 @@ impl Heads {
         let regions = match o.get("regions") {
             None => None,
             Some(v) => {
-                let r = tl::object(v, "objects.regions", &["version"], &[])?;
+                let r = tl::object(v, "objects.regions", &["version"], &["importedTwice"])?;
                 Some(tl::uint(&r["version"], "objects.regions.version", u32::MAX as u64)? as u32)
             }
         };
-        Ok(Heads { doodads, units, regions })
+        let mut twice = Twice::new();
+        for kind in KINDS {
+            let Some(list) = o.get(kind.name()).and_then(|v| v.get(TWICE_KEY)) else { continue };
+            let what = format!("objects.{}.{TWICE_KEY}", kind.name());
+            let items = list.as_array().ok_or_else(|| tl::bad(format!("{what} isn't a list")))?;
+            let mut ns = BTreeSet::new();
+            for (i, n) in items.iter().enumerate() {
+                let n = tl::uint(n, &format!("{what}[{i}]"), u32::MAX as u64)? as u32;
+                if !ns.insert(n) {
+                    return Err(tl::bad(format!("{what} lists {n} twice")));
+                }
+            }
+            if !ns.is_empty() {
+                twice.insert(kind, ns);
+            }
+        }
+        Ok(Heads { doodads, units, regions, twice })
     }
 }
 
@@ -500,8 +535,10 @@ fn doodads_version(heads: &Heads) -> u32 {
 
 /// The flat object files (kind → bytes) cut into the subterrains `subs` of a canvas at `offset`:
 /// the headers for `terrain.json`, and each subterrain's file (path relative to `map/` → bytes) for
-/// every kind there is.
-pub(crate) fn slice(flats: &Flats, subs: &[Subterrain], offset: [f32; 2]) -> Result<(Heads, BTreeMap<String, Vec<u8>>)> {
+/// every kind there is. The creation numbers a flat file holds more than once go into the headers (`Heads::twice`):
+/// `kept` None (an import: the map as it came) takes them all; `kept` Some (a write over a split project's files: its
+/// `terrain.json`'s list) takes only those it lists, and a number found twice it doesn't list is an error.
+pub(crate) fn slice(flats: &Flats, subs: &[Subterrain], offset: [f32; 2], kept: Option<&Twice>) -> Result<(Heads, BTreeMap<String, Vec<u8>>)> {
     let mut heads = Heads::default();
     let mut files = BTreeMap::new();
     for (&kind, bytes) in flats {
@@ -530,8 +567,16 @@ pub(crate) fn slice(flats: &Flats, subs: &[Subterrain], offset: [f32; 2]) -> Res
                 let (x, y) = position(kind, list, e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 owners.push(owner(subs, offset, x, y));
             }
-            if let Some(e) = twice_err(kind, key, &seen) {
-                return Err(e);
+            seen.retain(|_, v| v.len() > 1);
+            if let Some(kept) = kept {
+                let listed = kept.get(&kind);
+                let new: BTreeMap<u32, Vec<usize>> = seen.iter().filter(|(n, _)| !listed.is_some_and(|l| l.contains(n))).map(|(n, v)| (*n, v.clone())).collect();
+                if let Some(e) = twice_err(kind, key, &new) {
+                    return Err(e);
+                }
+            }
+            if !seen.is_empty() {
+                heads.twice.entry(kind).or_default().extend(seen.keys());
             }
             // The sorted order merging gives the entries without `order`: by key, entries with equal keys (unassigned
             // numbers) in subterrain order, then in their file's order (the flat order).
@@ -626,7 +671,7 @@ fn read_sub(kind: Kind, path: &str, bytes: &[u8], version: u32) -> Result<Vec<Ve
 
 /// The flat object files (kind → bytes, as unpack writes them) of the kinds `heads` has, merged from
 /// the subterrains' files (`get`: path relative to `map/` → bytes). A subterrain without its file,
-/// a file that can't be read and a creation number found twice are errors.
+/// a file that can't be read and a creation number found twice that `heads` doesn't list (`Heads::twice`) are errors.
 pub(crate) fn assemble(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Flats> {
     assemble_with(heads, subs, [0.0, 0.0], &|_| Some(true), &|_| true, get)
 }
@@ -675,6 +720,7 @@ fn assemble_inner(
     for kind in KINDS.into_iter().filter(|k| heads.has(*k)) {
         let mut per_list: Vec<Vec<Item>> = lists(kind).iter().map(|_| Vec::new()).collect();
         let mut seen: HashMap<u32, String> = HashMap::new();
+        let listed = heads.twice.get(&kind);
         for (si, s) in subs.iter().enumerate() {
             let Some(whole) = take(si) else { continue };
             let path = s.object_path(kind);
@@ -686,7 +732,7 @@ fn assemble_inner(
                 }
                 for item in &items {
                     if let SortKey::Number(n) = item.key {
-                        if !assigned(kind, n) || twice_ok {
+                        if !assigned(kind, n) || twice_ok || listed.is_some_and(|l| l.contains(&n)) {
                             continue;
                         }
                         if let Some(other) = seen.insert(n, path.clone()) {
@@ -841,9 +887,10 @@ pub(crate) fn write_partial(
             }
         }
         let mut seen: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+        let listed = heads.twice.get(&kind);
         for (i, e) in entries.iter().enumerate() {
             if let Ok(SortKey::Number(n)) = sort_key(kind, list, version, e) {
-                if assigned(kind, n) {
+                if assigned(kind, n) && !listed.is_some_and(|l| l.contains(&n)) {
                     seen.entry(n).or_default().push(i);
                 }
             }
@@ -1107,7 +1154,7 @@ mod tests {
     }
 
     fn round_trip(flats: &BTreeMap<Kind, Vec<u8>>, s: &[Subterrain]) -> (Heads, BTreeMap<String, Vec<u8>>) {
-        let (heads, files) = slice(flats, s, OFF).unwrap();
+        let (heads, files) = slice(flats, s, OFF, None).unwrap();
         let back = assemble(&heads, s, &|p| files.get(p).cloned()).unwrap();
         assert_eq!(&back, flats, "split and merged, the flat files come back byte for byte");
         (heads, files)
@@ -1166,7 +1213,7 @@ mod tests {
                 (k.clone(), pretty(&doc))
             })
             .collect();
-        let heads = slice(&flats, &subs(), OFF).unwrap().0;
+        let heads = slice(&flats, &subs(), OFF, None).unwrap().0;
         let merged = assemble(&heads, &subs(), &|p| stripped.get(p).cloned()).unwrap();
         assert_ne!(merged[&Kind::Doodads], flats[&Kind::Doodads]);
         let doc: Value = serde_json::from_slice(&merged[&Kind::Doodads]).unwrap();
@@ -1197,7 +1244,8 @@ mod tests {
     }
 
     /// A region's index 0 is a real number (the first region of a map has it), unlike a doodad's or unit's 0: a map
-    /// whose single region is 0 round-trips, and a region 0 twice is an error, in a flat file and across subterrains.
+    /// whose single region is 0 round-trips, and a region 0 twice counts as found twice: kept as listed when imported
+    /// that way, an error in a write that didn't list it and across subterrains when a merge makes it.
     #[test]
     fn region_zero_is_a_creation_number() {
         let region = |index: u32, left: f64| serde_json::json!({"left": left, "bottom": -100.0, "right": left + 10.0, "top": -90.0, "name": format!("r{index}"), "index": index, "weather": "0x00000000", "sound": "", "color": {"blue": 1, "green": 2, "red": 3, "alpha": 255}});
@@ -1205,19 +1253,22 @@ mod tests {
         let one = BTreeMap::from([(Kind::Regions, flat(vec![region(0, 10.0)]))]);
         let (heads, files) = round_trip(&one, &subs());
         assert_eq!(entries(&files, "terrain/b/regions.json", "regions")[0]["index"], 0);
+        assert!(heads.twice.is_empty());
         let twice = BTreeMap::from([(Kind::Regions, flat(vec![region(0, 10.0), region(0, -500.0)]))]);
-        let e = slice(&twice, &subs(), OFF).unwrap_err().to_string();
+        let (kept, _) = round_trip(&twice, &subs());
+        assert_eq!(kept.twice, Twice::from([(Kind::Regions, BTreeSet::from([0]))]));
+        let e = slice(&twice, &subs(), OFF, Some(&Twice::new())).unwrap_err().to_string();
         assert!(e.contains("regions[0] and regions[1] have the same creation number 0"), "{e}");
         // Across subterrains: a's region renumbered to b's 0 by hand.
         let two = BTreeMap::from([(Kind::Regions, flat(vec![region(0, 10.0), region(1, -500.0)]))]);
-        let (heads2, mut f) = slice(&two, &subs(), OFF).unwrap();
+        let (heads2, mut f) = slice(&two, &subs(), OFF, None).unwrap();
         let a = String::from_utf8(f["terrain/a/regions.json"].clone()).unwrap().replace("\"index\": 1", "\"index\": 0");
         f.insert("terrain/a/regions.json".into(), a.into_bytes());
         let e = assemble(&heads2, &subs(), &|p| f.get(p).cloned()).unwrap_err().to_string();
         assert!(e.contains("creation number 0 is in map/terrain/"), "{e}");
-        // The control: doodads 0 twice are no duplicates.
-        assert!(slice(&BTreeMap::from([(Kind::Doodads, doo_flat(&[(0, 10.0, -50.0), (0, -500.0, -50.0)], &[]))]), &subs(), OFF).is_ok());
-        let _ = heads;
+        // The control: doodads 0 twice are no duplicates, and aren't listed.
+        let zeros = slice(&BTreeMap::from([(Kind::Doodads, doo_flat(&[(0, 10.0, -50.0), (0, -500.0, -50.0)], &[]))]), &subs(), OFF, Some(&Twice::new())).unwrap();
+        assert!(zeros.0.twice.is_empty());
     }
 
     #[test]
@@ -1243,7 +1294,7 @@ mod tests {
     #[test]
     fn creation_numbers_twice_are_errors() {
         let flats = BTreeMap::from([(Kind::Doodads, doo_flat(&[(1, 100.0, -50.0), (2, -500.0, -250.0)], &[]))]);
-        let (heads, files) = slice(&flats, &subs(), OFF).unwrap();
+        let (heads, files) = slice(&flats, &subs(), OFF, None).unwrap();
         // b's doodad renumbered to a's by hand: an error naming both files, nothing renumbered.
         let mut f = files.clone();
         let b = String::from_utf8(f["terrain/b/doodads.json"].clone()).unwrap().replace("\"editorId\": 1", "\"editorId\": 2");
@@ -1256,10 +1307,53 @@ mod tests {
         f.insert("terrain/b/doodads.json".into(), pretty(&serde_json::json!({"doodads": [one.clone(), one], "specials": []})));
         let e = assemble(&heads, &subs(), &|p| f.get(p).cloned()).unwrap_err().to_string();
         assert!(e.contains("map/terrain/b/doodads.json holds creation number 1 twice"), "{e}");
-        // A flat file with a number twice can't be split.
+        // A flat file with a number twice can't be written over files that don't list it (a write: `kept` given).
         let twice = BTreeMap::from([(Kind::Doodads, doo_flat(&[(4, 100.0, -50.0), (4, -500.0, -250.0)], &[]))]);
-        let e = slice(&twice, &subs(), OFF).unwrap_err().to_string();
-        assert!(e.contains("doodads[0] and doodads[1] have the same creation number 4"), "{e}");
+        let e = slice(&twice, &subs(), OFF, Some(&Twice::new())).unwrap_err().to_string();
+        assert!(e.contains("doodads[0] and doodads[1] have the same creation number 4") && e.contains("fix-ids"), "{e}");
+    }
+
+    /// Creation numbers an imported flat file holds twice: an import (`kept` None) lists them and the files merge back
+    /// byte for byte; a write keeps a listed one while it is still twice and drops it once it isn't, and refuses a new
+    /// one; in the files, a number twice that isn't listed is refused (a merge's, in one file or across two
+    /// subterrains), even when another number is listed.
+    #[test]
+    fn numbers_found_twice_in_an_import_are_kept() {
+        // 4 twice across the seam (a and b), 6 three times in b, 1 once.
+        let flat = doo_flat(&[(4, 100.0, -50.0), (6, 10.0, -10.0), (1, -400.0, -10.0), (6, 20.0, -10.0), (4, -500.0, -250.0), (6, 10.0, -10.0)], &[]);
+        let flats = BTreeMap::from([(Kind::Doodads, flat.clone())]);
+        let (heads, files) = round_trip(&flats, &subs());
+        assert_eq!(heads.twice, Twice::from([(Kind::Doodads, BTreeSet::from([4, 6]))]));
+        // A write over those files, the list given: kept.
+        let (again, files2) = slice(&flats, &subs(), OFF, Some(&heads.twice)).unwrap();
+        assert_eq!((again.twice.clone(), files2), (heads.twice.clone(), files.clone()));
+        // The control: without the list, the same files are refused (both numbers named).
+        let e = assemble(&Heads { twice: Twice::new(), ..heads.clone() }, &subs(), &|p| files.get(p).cloned()).unwrap_err().to_string();
+        assert!(e.contains("creation number") && e.contains("fix-ids"), "{e}");
+        // A write where 4 is no longer twice: the list drops it; one that adds 1 twice: refused.
+        let fixed = BTreeMap::from([(Kind::Doodads, doo_flat(&[(4, 100.0, -50.0), (6, 10.0, -10.0), (1, -400.0, -10.0), (6, 20.0, -10.0), (5, -500.0, -250.0), (6, 10.0, -10.0)], &[]))]);
+        assert_eq!(slice(&fixed, &subs(), OFF, Some(&heads.twice)).unwrap().0.twice, Twice::from([(Kind::Doodads, BTreeSet::from([6]))]));
+        let more = BTreeMap::from([(Kind::Doodads, doo_flat(&[(4, 100.0, -50.0), (6, 10.0, -10.0), (1, -400.0, -10.0), (6, 20.0, -10.0), (4, -500.0, -250.0), (1, 10.0, -10.0)], &[]))]);
+        let e = slice(&more, &subs(), OFF, Some(&heads.twice)).unwrap_err().to_string();
+        assert!(e.contains("doodads[2] and doodads[5] have the same creation number 1") && !e.contains("number 4") && !e.contains("number 6"), "{e}");
+        // In the files: 1 (in a) copied into b by a merge, 4 and 6 listed: refused, naming both files.
+        let mut f = files.clone();
+        let mut b: Value = serde_json::from_slice(&f["terrain/b/doodads.json"]).unwrap();
+        let mut copy = entries(&files, "terrain/a/doodads.json", "doodads").into_iter().find(|e| e["editorId"] == 1).unwrap();
+        copy.as_object_mut().unwrap().shift_remove("order");
+        copy["position"] = serde_json::json!([30.0, -10.0, 1.5]);
+        b["doodads"].as_array_mut().unwrap().push(copy);
+        f.insert("terrain/b/doodads.json".into(), pretty(&b));
+        let e = assemble(&heads, &subs(), &|p| f.get(p).cloned()).unwrap_err().to_string();
+        assert!(e.contains("creation number 1 is in map/terrain/a/doodads.json and in map/terrain/b/doodads.json") && e.contains("fix-ids"), "{e}");
+        // Twice in one file, unlisted: refused too.
+        let mut f = files.clone();
+        let mut a: Value = serde_json::from_slice(&f["terrain/a/doodads.json"]).unwrap();
+        let one = a["doodads"].as_array().unwrap().iter().find(|e| e["editorId"] == 1).unwrap().clone();
+        a["doodads"].as_array_mut().unwrap().push(one);
+        f.insert("terrain/a/doodads.json".into(), pretty(&a));
+        let e = assemble(&heads, &subs(), &|p| f.get(p).cloned()).unwrap_err().to_string();
+        assert!(e.contains("map/terrain/a/doodads.json holds creation number 1 twice"), "{e}");
     }
 
     /// 0 and 4294967295 aren't assigned creation numbers (old maps give every doodad editorId 0): not duplicates, kept
@@ -1292,7 +1386,8 @@ mod tests {
         assert_eq!(n(&back[&Kind::Doodads]), mixed.len());
         // The control: an assigned number twice is still refused.
         let twice = BTreeMap::from([(Kind::Doodads, doo_flat(&[(0, 100.0, -50.0), (0, 1.0, -1.0), (5, 100.0, -50.0), (5, -500.0, -250.0)], &[]))]);
-        assert!(slice(&twice, &subs(), OFF).unwrap_err().to_string().contains("same creation number 5"));
+        assert!(slice(&twice, &subs(), OFF, Some(&Twice::new())).unwrap_err().to_string().contains("same creation number 5"));
+        assert_eq!(slice(&twice, &subs(), OFF, None).unwrap().0.twice, Twice::from([(Kind::Doodads, BTreeSet::from([5]))]), "0 isn't listed");
     }
 
     #[test]
@@ -1308,7 +1403,7 @@ mod tests {
             ("\"magic\": \"W3do\"", "\"magic\": 5", "magic"),
         ] {
             let flats = BTreeMap::from([(Kind::Doodads, text.replacen(from, to, 1).into_bytes())]);
-            let e = slice(&flats, &subs(), OFF).err().unwrap_or_else(|| panic!("accepted {to}")).to_string();
+            let e = slice(&flats, &subs(), OFF, None).err().unwrap_or_else(|| panic!("accepted {to}")).to_string();
             assert!(e.contains(why) && e.contains("map/war3map.doo.json"), "{e} (expected {why})");
         }
     }
@@ -1316,7 +1411,7 @@ mod tests {
     #[test]
     fn subterrain_files_are_checked() {
         let flats = BTreeMap::from([(Kind::Doodads, doo_flat(&[(1, 100.0, -50.0)], &[]))]);
-        let (heads, files) = slice(&flats, &subs(), OFF).unwrap();
+        let (heads, files) = slice(&flats, &subs(), OFF, None).unwrap();
         for (bad, why) in [
             ("{\"doodads\": []}", "lacks \"specials\""),
             ("{\"doodads\": [], \"specials\": [], \"units\": []}", "unknown key"),
@@ -1365,13 +1460,16 @@ mod tests {
     #[test]
     fn heads_in_terrain_json() {
         let file = |version: u32, skin_ids: Option<bool>| DooFile { magic: "W3do".into(), version, subversion: 11, skin_ids };
+        let none = Twice::new;
+        let kept = Twice::from([(Kind::Doodads, BTreeSet::from([5, 581])), (Kind::Units, BTreeSet::from([2])), (Kind::Regions, BTreeSet::from([0]))]);
         for heads in [
-            Heads { doodads: Some((file(8, Some(true)), 0)), units: Some(file(8, Some(true))), regions: Some(5) },
-            Heads { doodads: Some((file(8, Some(false)), 3)), units: Some(file(8, Some(true))), regions: None },
-            Heads { doodads: None, units: Some(file(13, None)), regions: Some(7) },
-            Heads { doodads: Some((file(7, None), 0)), units: None, regions: None },
-            Heads { doodads: Some((file(12, Some(true)), 0)), units: None, regions: None },
-            Heads { doodads: None, units: None, regions: Some(5) },
+            Heads { doodads: Some((file(8, Some(true)), 0)), units: Some(file(8, Some(true))), regions: Some(5), twice: none() },
+            Heads { doodads: Some((file(8, Some(false)), 3)), units: Some(file(8, Some(true))), regions: None, twice: none() },
+            Heads { doodads: None, units: Some(file(13, None)), regions: Some(7), twice: none() },
+            Heads { doodads: Some((file(7, None), 0)), units: None, regions: None, twice: none() },
+            Heads { doodads: Some((file(12, Some(true)), 0)), units: None, regions: None, twice: none() },
+            Heads { doodads: None, units: None, regions: Some(5), twice: none() },
+            Heads { doodads: Some((file(8, Some(true)), 0)), units: Some(file(8, Some(false))), regions: Some(5), twice: kept },
         ] {
             let header = heads.doo_header();
             let json = format!("{{\n{}\"x\": 0}}", heads.to_json(header.as_ref()));
@@ -1382,5 +1480,17 @@ mod tests {
         assert!(Heads::parse(&v, None).unwrap_err().to_string().contains("dooHeader"));
         let v = serde_json::json!({"units": {"magic": "W3do", "extra": 1}});
         assert!(Heads::parse(&v, Heads::default().doo_header().as_ref()).is_err());
+        // The list kept twice: sorted on writing, an empty one left out, a number twice in it or one that isn't a
+        // number refused.
+        let header = Heads { units: Some(file(8, Some(true))), ..Heads::default() }.doo_header();
+        let read = |v: Value| Heads::parse(&v, header.as_ref());
+        let h = read(serde_json::json!({"units": {"magic": "W3do", "importedTwice": [9, 2]}})).unwrap();
+        assert_eq!(h.twice, Twice::from([(Kind::Units, BTreeSet::from([2, 9]))]));
+        assert!(h.to_json(header.as_ref()).contains("\"units\": { \"magic\": \"W3do\", \"importedTwice\": [2, 9] }"), "{}", h.to_json(header.as_ref()));
+        let h = read(serde_json::json!({"units": {"magic": "W3do", "importedTwice": []}})).unwrap();
+        assert!(h.twice.is_empty() && !h.to_json(header.as_ref()).contains("importedTwice"));
+        assert!(read(serde_json::json!({"units": {"magic": "W3do", "importedTwice": [2, 2]}})).unwrap_err().to_string().contains("lists 2 twice"));
+        assert!(read(serde_json::json!({"units": {"magic": "W3do", "importedTwice": [-1]}})).is_err());
+        assert!(read(serde_json::json!({"units": {"magic": "W3do", "importedTwice": 3}})).is_err());
     }
 }
