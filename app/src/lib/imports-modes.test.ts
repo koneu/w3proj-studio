@@ -7,7 +7,7 @@ import { test } from "node:test";
 import {
   classicPathOf, dePathOf, importedPathFor, isDePath, importRows, isReforgedPath, modeMove, modeNames, newEntryFlags, ownNames, pathForUse, previewMode, readImportedFor,
   type ImportEntry, type ImportRow, type Side,
-  reforgedPathOf, rowEntries, rowMoves, takenWithVersions, type ImportEntry,
+  reforgedPathOf, rowEntries, rowMoves, takenWithVersions,
 } from "./imports";
 import type { W3Api } from "../extensions/api";
 
