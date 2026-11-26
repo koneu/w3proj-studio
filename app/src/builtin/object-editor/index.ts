@@ -32,6 +32,7 @@ import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { editorSuffix, labelWithSuffix, type MapObject } from "./objectinfo";
 import { standardGroups } from "./standard";
+import { listWindow, WINDOW_ABOVE } from "./listwindow";
 import { isCampaignFiles, registerObjectTools } from "./tools";
 import { isSkinField, listedPath, skinChanged, skinPathOf, skinWatches, skinWritable, splitSkin, withLists } from "./skin";
 
@@ -523,6 +524,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.replaceChildren(h("span", {}, text), ...(opts.action ? [opts.action] : []));
           return el;
         };
+        /** An entry of the list: a heading, or a row that is made when it comes into view. */
+        type Entry = HTMLElement | (() => HTMLElement);
+        let entries: Entry[] = [];
+        /** What a row and a heading measure, taken from the first ones laid out. */
+        let rowHeight = 26, headHeight = 28;
+        const spacers = [h("div.obj-space"), h("div.obj-space")];
+        /** Puts the entries in the list: all of a short one, else those in and near the view. */
+        const showEntries = () => {
+          const make = (e: Entry) => (typeof e === "function" ? e() : e);
+          if (entries.length <= WINDOW_ABOVE) { putRows(entries.map(make)); return; }
+          // Not laid out yet (the editor isn't shown): a screen's worth.
+          const w = listWindow(entries.map((e) => (typeof e === "function" ? rowHeight : headHeight)), listEl.scrollTop, listEl.clientHeight || 1000, 400);
+          const shown = entries.slice(w.from, w.to).map(make);
+          spacers[0].style.height = `${w.before}px`;
+          spacers[1].style.height = `${w.after}px`;
+          putRows([spacers[0], ...shown, spacers[1]]);
+          const row = shown.find((el) => el.classList.contains("obj-item"))?.offsetHeight, heading = shown.find((el) => el.classList.contains("obj-group"))?.offsetHeight;
+          if ((row && row !== rowHeight) || (heading && heading !== headHeight)) {
+            rowHeight = row || rowHeight;
+            headHeight = heading || headHeight;
+            showEntries();
+          }
+        };
+        let scrollFrame = 0;
+        const showSoon = () => { if (entries.length > WINDOW_ABOVE && !scrollFrame) scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; if (!closed) showEntries(); }); };
+        listEl.addEventListener("scroll", showSoon, { passive: true });
+        // A taller list (the window, or the editor coming into view) holds more rows.
+        const listSize = new ResizeObserver(showSoon);
+        listSize.observe(listEl);
         /** Puts the rows in the list, touching only what differs from what is there. */
         const putRows = (next: HTMLElement[]) => {
           const now = listEl.children;
@@ -552,7 +582,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }, `Clean up (${unchanged.length})`)
             : undefined;
           visible = [...standard, ...custom];
-          const out: HTMLElement[] = [head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => rowOf(o, own(o), false, selection.has(o)))];
+          const out: Entry[] = [head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => () => rowOf(o, own(o), false, selection.has(o)))];
           // A chapter map's campaign's objects: shown to look at, edited in the campaign (or as a copy in this map).
           // After the standard ones and before the map's own custom ones, as the World Editor's chapter Object Editor
           // puts its "Campaign Units" after the standard races and before "Custom Units".
@@ -560,17 +590,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else if (campaign) {
             const theirs = named((o) => labelOf(o, campaignName(o), campaignStr)), items = listed(campaignListed(), theirs, named(campaignName));
             out.push(head("campaign", `Campaign (${items.length})`, { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` }),
-              ...items.map((o) => rowOf(o, theirs(o), true, campaignShown === o)));
+              ...items.map((o) => () => rowOf(o, theirs(o), true, campaignShown === o)));
           }
-          out.push(head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o))));
+          out.push(head("custom", `Custom (${custom.length})`), ...custom.map((o) => () => rowOf(o, own(o), false, selection.has(o))));
           out.push(...standardRows(visible));
-          putRows(out);
+          entries = out;
+          showEntries();
         };
         /** Which of the standard objects' headings are open: "" for the whole list, else a group's label. */
         const openStandard = new Set<string>();
         /** The standard objects the map doesn't change (nor its campaign, which lists its own). With a filter, the
          *  headings holding a match are open. Rows shown are added to `shown`. */
-        const standardRows = (shown: Obj[]): HTMLElement[] => {
+        const standardRows = (shown: Obj[]): Entry[] => {
           if (!kd) return [];
           const elsewhere = new Set([...file.original, ...((campaign?.original ?? []) as Obj[])].map((o) => o.base));
           const groups = standardGroups(kd, elsewhere).map((g) => {
@@ -588,7 +619,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const total = groups.reduce((n, g) => n + g.count, 0);
           const fold = (key: string) => (filter ? undefined : () => { if (!openStandard.delete(key)) openStandard.add(key); renderList(); });
           const all = !!filter || openStandard.has("");
-          const out = [head("game", `Standard (${total})`, { title: "The game's objects this map doesn't change. Changing a field adds the object to the map.", open: all, toggle: fold("") })];
+          const out: Entry[] = [head("game", `Standard (${total})`, { title: "The game's objects this map doesn't change. Changing a field adds the object to the map.", open: all, toggle: fold("") })];
           if (!all) return out;
           for (const g of groups) {
             const open = !!filter || openStandard.has(g.label);
@@ -596,7 +627,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!open) continue;
             for (const e of g.entries().sort((a, b) => a.label.localeCompare(b.label) || a.o.base.localeCompare(b.o.base))) {
               shown.push(e.o);
-              out.push(rowOf(e.o, e.label, false, selection.has(e.o)));
+              out.push(() => rowOf(e.o, e.label, false, selection.has(e.o)));
             }
           }
           return out;
@@ -1763,7 +1794,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The selected object, kept with the project's open tabs.
           viewState: () => (selected ? (file.custom.includes(selected) ? { custom: selected.id } : { original: selected.base }) : null),
           dispose: () => {
-            closed = true; focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose();
+            closed = true; listSize.disconnect(); focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose();
             // Closed: the saved file is what there is again.
             if (liveData.get(doc.path)?.data === liveNow) { liveData.delete(doc.path); edits.fire(kind); }
           },

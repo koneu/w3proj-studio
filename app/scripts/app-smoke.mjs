@@ -13838,6 +13838,25 @@ async function objectStandardList(page, found, root) {
     if (count(undone.heads, "Modified standard") !== changed || count(undone.heads, "Standard") !== standard) fail(`after undo the headings are ${undone.heads.slice(0, 3).join(", ")}`);
     if (undone.unsaved.length) fail("after undo the unit data is still unsaved");
     if (undone.selected.join() !== id) fail(`after undo ${undone.selected.join() || "nothing"} is selected, wanted ${id}`);
+    // A long list (a search that matches most units) makes only the rows near the view, also after scrolling.
+    await page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = "a"; s.dispatchEvent(new Event("input")); })()`);
+    const long = () => page.evaluate(`(async () => {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const list = ${ed}.querySelector(".obj-list"), box = list.getBoundingClientRect(), rows = list.querySelectorAll(".obj-item");
+      const at = document.elementFromPoint(box.left + 60, box.top + box.height / 2);
+      return { matches: Number(/\\((\\d+)\\)/.exec([...list.querySelectorAll(".obj-fold, .obj-group")].map((x) => x.textContent).find((t) => /^Standard/.test(t)) ?? "")?.[1] ?? 0),
+        made: rows.length, middle: !!at?.closest(".obj-item, .obj-group"), height: list.scrollHeight, view: list.clientHeight, last: rows[rows.length - 1]?.querySelector("code").textContent };
+    })()`);
+    // The Standard heading may be above the view once scrolled: its count is read at the top.
+    const top = await long();
+    if (!(top.matches > 300)) { fail(`the search "a" matches ${top.matches} standard units, wanted a long list (control)`); return; }
+    if (!(top.made > 0 && top.made < 150)) fail(`a list of ${top.matches} units made ${top.made} rows`);
+    if (!(top.height > top.matches * 20)) fail(`the list scrolls over ${top.height} px for ${top.matches} units`);
+    for (const where of [0.5, 1]) {
+      await page.evaluate(`(() => { const l = ${ed}.querySelector(".obj-list"); l.scrollTop = l.scrollHeight * ${where}; })()`);
+      await until(`rows at ${where} of the long list`, async () => { const now = await long(); return now.middle && now.made < 150 && now.last !== top.last; }, 10000)
+        .catch(async (e) => fail(`${e.message}: ${lit(await long())}`));
+    }
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }

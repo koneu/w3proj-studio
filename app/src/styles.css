@@ -305,6 +305,9 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-fold::before { content: "▸"; width: 1.2em; flex: none; }
 .obj-fold.open::before { content: "▾"; }
 .obj-subgroup { padding-left: 20px; }
+/* The room of the rows a long list hasn't made (listwindow.ts). The list keeps its own scroll position. */
+.obj-space { flex: none; }
+.obj-list { overflow-anchor: none; }
 .obj-kind { height: 28px; }
 
 /* Base object picker */
