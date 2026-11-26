@@ -90,7 +90,11 @@ async function prepare() {
     for (let m = queue.shift(); m; m = queue.shift()) {
       const file = join(work, "maps", `${m.name}.w3x`);
       extract(m.path, file);
-      if (await waitFor(["unpack", file, join(work, "ws", m.name), "--game", "none", "--allow-incomplete"])) failed++;
+      const project = join(work, "ws", m.name);
+      if (await waitFor(["unpack", file, project, "--game", "none", "--allow-incomplete"])) failed++;
+      // The checks read the terrain and the placed objects as single files (war3map.w3e.txt, war3mapUnits.doo.json, …);
+      // an unpack writes them split into map/terrain/. Left split, the checks found no units, doodads or regions.
+      else if (existsSync(join(project, "map", "terrain", "terrain.json")) && (await waitFor(["terrain", "merge", project]))) failed++;
       rmSync(file);
     }
   };
