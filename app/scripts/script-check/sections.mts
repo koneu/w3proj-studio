@@ -72,13 +72,27 @@ for (const m of maps) {
   for (const x of p) luaBroken.push(`${m} lua: ${x.message} (line ${src.slice(0, x.from).split("\n").length})`);
 }
 let shown = 0;
-const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
+// A file the map doesn't have reads as null (a map without regions has no war3map.w3r). One that is there in a form
+// these checks don't read is an error, never "the map has none": the scripts would be made without it and compared.
+const json = (d: string, n: string) => {
+  if (existsSync(`${d}/${n}.json`)) return JSON.parse(read(`${d}/${n}.json`));
+  if (existsSync(`${d}/${n}`)) throw new Error(`${d}/${n} is there but not as ${n}.json (the unpack kept it raw): the check can't read it`);
+  return null;
+};
+/** The folder layouts an unpack writes in place of single files; run.mjs has to turn them back first. */
+const FOLDER_LAYOUTS = [["terrain/terrain.json", "the terrain and the placed units, doodads and regions"], ["objects/objects.json", "the object data"]];
+const unreadLayouts = (d: string) => {
+  for (const [file, what] of FOLDER_LAYOUTS) {
+    if (existsSync(`${d}/${file}`)) throw new Error(`${d}/${file}: ${what} are in a folder layout these checks don't read (run.mjs merges an unpack back into single files first)`);
+  }
+};
 const norm = (x: string) => x.replace(/\s+$/g, "");
 
 for (const m of maps) {
   const d = `ws/${m}/map`;
   const scriptFile = existsSync(`${d}/war3map.j`) ? `${d}/war3map.j` : `${d}/war3map.lua`;
   if (!existsSync(scriptFile) || !existsSync(`${d}/war3map.wtg`)) continue;
+  unreadLayouts(d);
   const info = json(d, "war3map.w3i");
   if (!info) continue;
   let triggers, custom;
@@ -96,6 +110,7 @@ for (const m of maps) {
   }
   const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(readMapText(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e.txt`) ? T.parseW3e(w3eFromText(read(`${d}/war3map.w3e.txt`))) : existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
+  if (!terrain) throw new Error(`${d}: no terrain (war3map.w3e.txt or war3map.w3e): every map has one, so the unpack is incomplete`);
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg); as the app reads them.
   const unitFiles = [json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")];
   const colors = O.teamColors(unitFiles, gameColors), special = O.specialUnits(unitFiles);
