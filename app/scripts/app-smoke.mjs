@@ -74,6 +74,33 @@ let cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exe
 // rebuild the gate's app for another identifier, and two worktrees don't share a settings folder).
 const IDENTIFIER = smokeId(repo);
 const FIXTURE = join(repo, "tests", "fixtures", "mini-map");
+
+/** Whether `path` is a file directly under a project's map/ folder: (the project, the file's name), else null. */
+function projectMapFile(path) {
+  const dir = dirname(path);
+  if (basename(dir).toLowerCase() !== "map" || !existsSync(join(dirname(dir), "w3proj.toml"))) return null;
+  return { project: dirname(dir), name: basename(path) };
+}
+
+/** A file under a project's map/ as the app reads it (`w3proj cat <project> <file>`, the app's backend): every project
+ *  has the split terrain layout, so war3map.w3e.txt, the placed objects and the regions are assembled from map/terrain/,
+ *  and pathing, shadows and the minimap come from .w3proj/derived/. A file on disk by that name (any other file, a
+ *  project that stayed flat) is read as it is; one that is neither throws, as readFileSync does. */
+function readMapFile(path, encoding) {
+  const at = existsSync(path) ? null : projectMapFile(path);
+  if (!at) return readFileSync(path, encoding);
+  const r = spawnSync(cli, ["cat", at.project, at.name], { maxBuffer: 1 << 28 });
+  if (r.status !== 0) throw new Error(`${path}: ${String(r.stderr).trim() || "can't be read"}`);
+  return encoding ? r.stdout.toString(encoding) : r.stdout;
+}
+
+/** Whether a file under a project's map/ is there as the app sees it (readMapFile). */
+function mapFileExists(path) {
+  if (existsSync(path)) return true;
+  const at = projectMapFile(path);
+  return !!at && spawnSync(cli, ["cat", at.project, at.name], { maxBuffer: 1 << 28 }).status === 0;
+}
+
 // The time limit of a page call (page.evaluate, an MCP tool) that gives none of its own: one that hangs fails naming
 // itself. A known-long one passes `{ timeout }`; W3_SMOKE_CALL_TIMEOUT (ms) changes it for a slow machine.
 const PAGE_CALL_TIMEOUT = Number(process.env.W3_SMOKE_CALL_TIMEOUT) || 60000;
@@ -218,8 +245,12 @@ function triggersOnDisk(root) {
 }
 
 /** What World Editor 3.0.1 writes for a new map, by project file. */
-const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.w3c.json", "triggers/triggers.json",
-  "war3map.wts", "war3map.mmp.json", "war3map.w3l.json", "war3map.w3grp", "conversation.json", "war3map.w3e.txt", "war3map.shd", "war3map.wpm", "war3mapMap.blp"];
+// A new map's files under map/: its terrain, placed objects and regions in the split layout (one subterrain main), no
+// flat file of them; its derived files in .w3proj/derived/ (NEW_MAP_DERIVED), none in map/.
+const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.w3c.json", "triggers/triggers.json", "war3map.wts", "war3map.w3l.json", "war3map.w3grp", "conversation.json",
+  "terrain/terrain.json", "terrain/main/terrain.txt", "terrain/main/doodads.json", "terrain/main/units.json", "terrain/main/regions.json"];
+const NEW_MAP_FLAT = ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"];
+const NEW_MAP_DERIVED = ["war3map.shd", "war3map.wpm", "war3mapMap.blp", "war3map.mmp.json"];
 
 const NEW_MAPS = [
   { args: { name: "Smoke Default" }, size: [96, 96] },
@@ -276,22 +307,27 @@ async function newMaps(page, found) {
       const names = new Set(walk(join(root, "map")).map((p) => relative(join(root, "map"), p).replaceAll("\\", "/")));
       const scriptFile = args.script === "lua" ? "war3map.lua" : "war3map.j";
       for (const n of NEW_MAP_FILES) if (!names.has(n)) fail(`no ${n}`);
+      for (const n of NEW_MAP_FLAT) if (names.has(n)) fail(`map/${n} is on disk: a new map's terrain is in map/terrain/ only`);
+      for (const n of NEW_MAP_DERIVED) if (names.has(n) || !existsSync(join(root, ".w3proj", "derived", n))) fail(`its ${n} isn't in .w3proj/derived/ alone (in map/: ${names.has(n)})`);
       // A new map's script is generated (trigger-folders spec, section 5): in .w3proj/derived/, out of git, recorded.
       const mode = JSON.parse(readFileSync(join(root, "map", "triggers", "triggers.json"), "utf8")).script;
       if (mode !== "generated") fail(`map/triggers/triggers.json says "script": ${lit(mode)}, not "generated"`);
       if (names.has(scriptFile) || !existsSync(join(root, ".w3proj", "derived", scriptFile))) fail(`its ${scriptFile} isn't in .w3proj/derived/ alone (in map/: ${names.has(scriptFile)})`);
       if (!/^\/\.w3proj\/derived\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/derived/");
-      // The agent file (w3proj::agent_file): in the root, for a flat map project, never in map/.
+      // The agent file (w3proj::agent_file): in the root, for a map project with the split terrain layout, never in map/.
       const agents = existsSync(join(root, "AGENTS.md")) ? readFileSync(join(root, "AGENTS.md"), "utf8") : "";
-      if (!agents.includes("war3map.w3e.txt") || !agents.includes("w3proj rebuild")) fail(`no AGENTS.md in the project root (${agents.length} bytes)`);
+      if (!agents.includes("terrain/terrain.json") || !agents.includes("w3proj rebuild")) fail(`no AGENTS.md for the split layout in the project root (${agents.length} bytes)`);
       if (names.has("AGENTS.md")) fail("AGENTS.md is in map/");
       await page.evaluate(`w3.commands.execute("w3.script.settle")`);
       const state = await page.evaluate(`w3.backend.invoke("script_state", { root: ${lit(root)} })`);
       if (state?.freshness !== "fresh") fail(`the generated script doesn't follow its sources after New Map: ${lit(state)}`);
+      // The derived files' record follows the map as made: `w3proj pack` takes the new map without a flag.
+      const asMade = spawnSync(cli, ["pack", root, "-o", join(folder, `as-made-${scripts.length}.w3x`)], { encoding: "utf8" });
+      if (asMade.status !== 0) fail(`\`w3proj pack\` refused the new map as made: ${(asMade.stdout + asMade.stderr).trim().slice(-300)}`);
       const active = await page.evaluate(`w3.editors.activePath()`);
       if (active !== "map/war3map.w3e.txt") fail(`the terrain editor didn't open (active: ${active})`);
       // The World Editor's "Initial Tile: <tileset> - Dirt": the tileset's first ground tile, unless one is chosen.
-      const ground = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8");
+      const ground = readMapFile(join(root, "map", "war3map.w3e.txt"), "utf8");
       const base = args.baseTile ? (/^ground (.*)$/m.exec(ground)?.[1].split(" ") ?? []).indexOf(args.baseTile).toString(36) : "0";
       if (!new RegExp(`^\\[texture\\] all ${base}$`, "m").test(ground)) fail(`the ground isn't all tile ${base}: ${/^ground .*$/m.exec(ground)?.[0]}, ${/^\[texture\].*$/m.exec(ground)?.[0]}`);
 
@@ -327,14 +363,14 @@ async function newMaps(page, found) {
       // The script knows the unit, and the map the doodad.
       if (!script.stdout.includes(args.script === "lua" ? 'FourCC("hfoo")' : "'hfoo'")) fail("the unit isn't in the script");
       // What the World Editor's files have: see lib/terrain/owner and terrain-viewer/placement.
-      const onDisk = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+      const onDisk = (name) => JSON.parse(readMapFile(join(root, "map", name), "utf8"));
       if (onDisk("war3map.w3i.json").flags & 4) fail("a map with a player's unit is still a melee map");
       if (!script.stdout.includes("MAP_PLACEMENT_USE_MAP_SETTINGS")) fail("the script isn't using the map's settings for placement");
       const lifeOf = (id) => onDisk("war3map.doo.json").doodads.find((d) => d.id === id)?.life;
       if (lifeOf("CPct") !== 255 || lifeOf("LTlt") !== 100) fail(`doodad life: CPct ${lifeOf("CPct")}, LTlt ${lifeOf("LTlt")}`);
       const item = onDisk("war3mapUnits.doo.json").units.find((u) => u.id === "ratf");
       if (item?.player !== 27) fail(`the item belongs to ${item?.player}`);
-      const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+      const doo = JSON.parse(readMapFile(join(root, "map", "war3map.doo.json"), "utf8"));
       if (doo.doodads.length !== 2 || doo.doodads[0].id !== "LTlt") fail(`${doo.doodads.length} doodads`);
       // Pathing covers the map: four cells per tile.
       const wpm = cat("war3map.wpm").stdout;
@@ -578,7 +614,7 @@ async function placeObjects(page, found) {
     // A tavern (version 1) sets flag 0x4000 in the placing's edit, and the units file takes the layout the terrain
     // view's save gives it under that flag (tftflag.ts savedUnitsLayout): subversion 11, also after a save. Without
     // the flag (the barracks above) it stayed 9.
-    const units = () => JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
+    const units = () => JSON.parse(readMapFile(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
     if (units().subversion !== 9 || flags() & 0x4000) fail(`a new map's units aren't subversion 9 without flag 0x4000 (control): ${units().subversion}, flags ${flags()}`);
     await tool("place_objects", { objects: [{ id: "ntav", x: -1024, y: -1024, player: 28 }], ignoreRoom: true });
     if (!(flags() & 0x4000)) fail(`placing a tavern didn't set flag 0x4000 (control): flags ${flags()}`);
@@ -806,7 +842,7 @@ async function mcpStartMove(page, found) {
   await tool("new_map", { name: "StartMove", width: 64, height: 64, folder });
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   const root = await page.evaluate(`w3.workspace.project()?.root`);
-  const read = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+  const read = (name) => JSON.parse(readMapFile(join(root, "map", name), "utf8"));
   const sloc = () => { const units = read("war3mapUnits.doo.json").units; const i = units.findIndex((u) => u.id === "sloc" && u.player === 0); return { i, at: units[i]?.position.slice(0, 2) }; };
   const start = () => read("war3map.w3i.json").players.find((p) => p.id === 0)?.start;
   await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
@@ -843,7 +879,7 @@ async function atmosphereTools(page, found) {
   await tool("new_map", { name: "Atmosphere", width: 64, height: 64, folder });
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   const root = await page.evaluate(`w3.workspace.project()?.root`);
-  const read = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+  const read = (name) => JSON.parse(readMapFile(join(root, "map", name), "utf8"));
   await tool("save_project");
   const w3i0 = read("war3map.w3i.json"), edits = () => tool("list_edits").then((t) => JSON.parse(t).length);
   const n0 = await edits();
@@ -896,7 +932,7 @@ async function atmosphereTools(page, found) {
   if (await tool("set_weather", { region: "Nowhere", effect: "RAlr" }).then(() => true, (e) => !/no region/i.test(e.message))) fail("an unknown region wasn't refused");
   if (await tool("set_weather", { effect: "Snowstorm of doom" }).then(() => true, (e) => !/Choices: /.test(e.message))) fail("an unknown weather wasn't refused with the choices");
   // A region edge war3map.w3r's float can't hold is refused with why, and is no edit (lib/terrain/regions.ts).
-  const regionsBefore = readFileSync(join(root, "map", "war3map.w3r.json"), "utf8"), editsBefore = await edits();
+  const regionsBefore = readMapFile(join(root, "map", "war3map.w3r.json"), "utf8"), editsBefore = await edits();
   const past = await tool("add_region", { name: "Huge", left: 0, bottom: 0, right: 1e39, top: 512 }).then(() => "added", (e) => e.message);
   if (!/32-bit float/.test(past)) fail(`add_region with right 1e39 wasn't refused with why: ${past}`);
   if (await edits() !== editsBefore) fail("the refused add_region made an edit");
@@ -907,7 +943,7 @@ async function atmosphereTools(page, found) {
   }
   if (await edits() !== editsBefore) fail("the add_region outside the map made an edit");
   await tool("save_project");
-  if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused add_region changed war3map.w3r.json");
+  if (readMapFile(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused add_region changed war3map.w3r.json");
   // The same on the Regions tab: Storm's Right edge typed as 1e39 is refused with why, the field marked, no edit.
   await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Regions").click()`);
   await until("the Regions tab", () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === "Regions"`), 5000);
@@ -925,7 +961,7 @@ async function atmosphereTools(page, found) {
   if (outside !== "marked" || !/Not changed: Right: a region must lie inside the map/.test(saidOut)) fail(`Right typed past the map on the Regions tab: ${outside}, said "${saidOut}"`);
   if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused Right edge left unsaved changes");
   await tool("save_project");
-  if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
+  if (readMapFile(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
   for (let i = 0; i < 4; i++) await tool("undo_last_edit");
   await tool("save_project");
   if (read("war3map.w3i.json").weather !== "0x00000000" || (existsSync(join(root, "map", "war3map.w3r.json")) ? read("war3map.w3r.json").regions.length > 0 : true)) fail("the undos didn't bring back the map as it was");
@@ -1095,7 +1131,7 @@ async function tileTemplate(page, found) {
   await tool("new_map", { name: "Template", width: 64, height: 64, folder });
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   const root = await page.evaluate(`w3.workspace.project()?.root`);
-  const header = (key) => new RegExp(`^${key} (\\S+)`, "m").exec(readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"))?.[1];
+  const header = (key) => new RegExp(`^${key} (\\S+)`, "m").exec(readMapFile(join(root, "map", "war3map.w3e.txt"), "utf8"))?.[1];
   const own = header("tileset");
   if (header("custom-tilesets") !== "0") fail(`a new map's tile list is custom (control): ${header("custom-tilesets")}`);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
@@ -1118,7 +1154,7 @@ async function tileTemplate(page, found) {
     await settled(page);
   };
   const other = own === "A" ? "B" : "A";
-  const ground = () => /^ground (.*)$/m.exec(readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"))?.[1].trim().split(" ") ?? [];
+  const ground = () => /^ground (.*)$/m.exec(readMapFile(join(root, "map", "war3map.w3e.txt"), "utf8"))?.[1].trim().split(" ") ?? [];
   const ownTiles = ground();
   await use(other);
   if (header("custom-tilesets") !== "1") fail(`another tileset's tiles didn't make the list custom (control): ${header("custom-tilesets")}`);
@@ -1344,7 +1380,7 @@ async function heightKit(page, name) {
     run: (id, ...args) => page.evaluate(`w3.commands.execute(${lit(id)}, ...${lit(args)}).then(() => null, (e) => String(e))`),
     /** The app at rest first (an edit by a click or key may still be landing), then saved, then at rest again. */
     save: async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); },
-    read: (file) => JSON.parse(readFileSync(join(root, "map", file), "utf8")),
+    read: (file) => JSON.parse(readMapFile(join(root, "map", file), "utf8")),
     /** The trigger folders as the app reads them (`w3proj triggers`: { file, custom, files, … }), from the disk. */
     triggers: () => cliTriggers(root),
     doodads: () => kit.read("war3map.doo.json").doodads,
@@ -4773,7 +4809,7 @@ async function importedBlightWaterReload(page, found) {
   const fail = (what) => found.push(`imported blight and water reload: ${what}`);
   const k = await heightKit(page, "BlightWaterReload");
   try {
-    const w3e = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+    const w3e = readMapFile(join(k.root, "map", "war3map.w3e.txt"), "utf8");
     const tileset = (/tileset\W+([A-Za-z])/i.exec(w3e) ?? [])[1];
     if (!tileset) return fail(`no tileset in the terrain file: ${w3e.slice(0, 120)}`);
     const ini = await page.evaluate(`w3.game.readText(${lit("UI\\WorldEditData.txt")})`);
@@ -5315,7 +5351,7 @@ async function destructableFlags(page, found) {
   const err = await k.run("w3.terrain.adjustCliffLevels", 1);
   if (err) return fail(`Adjust Cliff Levels: ${err}`);
   await k.save();
-  const levels = () => /^\[layer\][^\n]*/m.exec(readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8"))?.[0];
+  const levels = () => /^\[layer\][^\n]*/m.exec(readMapFile(join(k.root, "map", "war3map.w3e.txt"), "utf8"))?.[0];
   const raised = levels();
 
   await k.tool("create_script_trigger", { name: "Names Tree", script: `function InitTrig_Names_Tree takes nothing returns nothing\n    call KillDestructable( ${global} )\nendfunction\n` });
@@ -5409,7 +5445,7 @@ async function wholeMapGround(page, found) {
   await k.save();
   if (k.doodads().find((d) => d.position[0] === 512)?.position[2] !== 700) return fail(`the fixed tree (control): ${lit(k.doodads().map((d) => d.position))}`);
   const files = ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json"];
-  const contents = () => files.map((f) => readFileSync(join(k.root, "map", f), "utf8"));
+  const contents = () => files.map((f) => readMapFile(join(k.root, "map", f), "utf8"));
   const kept = contents();
   /** The files that aren't as they were at the start, and where they first differ. */
   const changedFiles = () => contents().flatMap((c, i) => {
@@ -5420,7 +5456,7 @@ async function wholeMapGround(page, found) {
   });
   const hashes = () => changedFiles().join(" | ");
   const original = "";
-  const text = () => readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+  const text = () => readMapFile(join(k.root, "map", "war3map.w3e.txt"), "utf8");
   const section = (name) => { const m = new RegExp(`^\\[${name}\\][^\\n]*\\n([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`, "m").exec(text()); return m ? m[0] : ""; };
   // A grid of one value is written "[layer] all 2".
   const levels = () => { const s = section("layer"), all = /^\[layer\] all (\S)/.exec(s); return all ? [all[1]] : [...s.replace(/^\[layer\][^\n]*\n?/, "").replace(/\s/g, "")]; };
@@ -5544,7 +5580,7 @@ async function heightsLimits(page, found) {
   if (nearEdge()?.position[0] !== br + 88) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 88}`);
 
   // A unit nudged at the playable part's edge stops at the last step that keeps its collision size inside it (a footman, 31), the switch on.
-  const w3eHead = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+  const w3eHead = readMapFile(join(k.root, "map", "war3map.w3e.txt"), "utf8");
   const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
   const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
   if (!Number.isFinite(pr)) return fail(`no playable edge from the terrain's head and the w3i (${pr})`);
@@ -6151,7 +6187,7 @@ async function resizeUndoChecks(page, found) {
     return new Map([...files, ...(existsSync(pathing) ? [[".w3proj/pathing.json", hash(pathing)]] : [])]);
   };
   const differ = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((k) => a.get(k) !== b.get(k));
-  const size = () => { const w3e = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"); return w3e.length; };
+  const size = () => { const w3e = readMapFile(join(root, "map", "war3map.w3e.txt"), "utf8"); return w3e.length; };
   /** The editor on the file is open again and drawn. The one seen last is marked: a stage without the mark is the
    *  editor opened since (each resize, undo and redo closes the editor and opens it again). */
   const markEditor = () => page.evaluate(`(() => { const s = document.querySelector(".model-stage"); if (s) s.dataset.smokeSeen = "1"; })()`);
@@ -6174,7 +6210,7 @@ async function resizeUndoChecks(page, found) {
     await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
     await hands.key(key, code, vk, 2 | (shift ? 8 : 0));
   };
-  const doodadIds = () => JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads.map((d) => d.id);
+  const doodadIds = () => JSON.parse(readMapFile(join(root, "map", "war3map.doo.json"), "utf8")).doodads.map((d) => d.id);
 
   // Something in the strip that a shrink from the left will cut off: outside the camera bounds, so with Enforce Camera Bounds off.
   await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
@@ -6280,10 +6316,10 @@ async function resizeUndoChecks(page, found) {
   const late = differ(undone, state());
   if (late.length) fail(`files changed after the undo, by a rebuild still due from before: ${late.join(", ")}`);
   const grid = () => {
-    const w3e = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8");
+    const w3e = readMapFile(join(root, "map", "war3map.w3e.txt"), "utf8");
     const [, w, h] = /corners ([0-9]+) ([0-9]+)/.exec(w3e) ?? [];
-    const wpm = readFileSync(join(root, "map", "war3map.wpm"));
-    const shd = readFileSync(join(root, "map", "war3map.shd"));
+    const wpm = readMapFile(join(root, "map", "war3map.wpm"));
+    const shd = readMapFile(join(root, "map", "war3map.shd"));
     return { tiles: [Number(w) - 1, Number(h) - 1], wpm: [wpm.readUInt32LE(8), wpm.readUInt32LE(12)], shd: shd.length };
   };
   const g = grid();
@@ -6335,7 +6371,7 @@ async function resizeDooV13(page, found) {
     await until("the editor on the version-8 file", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)} && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
     await settled(page);
     if (!readFileSync(file).equals(v8)) { fail("opening the editor changed war3map.doo.json (control)"); return; }
-    const read = () => JSON.parse(readFileSync(file, "utf8"));
+    const read = () => JSON.parse(readMapFile(file, "utf8"));
 
     await tool("resize_map", { right: 32 });
     await until("the resized doodads file", () => !readFileSync(file).equals(v8), 30000).catch(() => {});
@@ -6384,7 +6420,7 @@ async function resizeLimits(page, found) {
     await until("the editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
     await settled(page);
   };
-  const read = (f) => readFileSync(join(root, "map", f));
+  const read = (f) => readMapFile(join(root, "map", f));
   /** The files of the map say `size` tiles each way, with the border `border` (left, right, bottom, top). */
   const sizes = (size, border, label) => {
     const [, w, h] = /corners ([0-9]+) ([0-9]+)/.exec(read("war3map.w3e.txt").toString("utf8")) ?? [];
@@ -6475,7 +6511,7 @@ async function resizeRefusedShadows(page, found) {
     await tool("new_map", { name: "ResizeRefusedShadows", width: 64, height: 64, folder });
     await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
     const root = await page.evaluate(`w3.workspace.project()?.root`);
-    const read = (f) => readFileSync(join(root, "map", f));
+    const read = (f) => readMapFile(join(root, "map", f));
     const editorUp = async () => {
       await until("the editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
       await settled(page);
@@ -6670,11 +6706,76 @@ async function resizeUnreadable(page, found) {
   }
 }
 
-/** A project whose terrain is split into subterrains (map/terrain/, Split Terrain into Subterrains…) opens, edits,
- *  saves and reloads as a flat one: the terrain editor works on map/war3map.w3e.txt, which the backend assembles from
- *  the subterrains and slices back into them (crates/backend flatview.rs); a paint in the north-east writes only that
- *  subterrain's terrain.txt. The split command refuses a split it can't keep and says why (nothing written); Merge
- *  Subterrains puts the flat files back as the subterrains held them. */
+/** Opening a project still in the flat terrain layout (map/war3map.w3e.txt and the flat object files) converts it into
+ *  map/terrain/ (one subterrain main), its derived files into .w3proj/derived/, and says so once (layoutconvert.ts,
+ *  crates/backend flatview.rs convert_on_open); opened again it says nothing. A terrain kept raw can't be converted:
+ *  the project opens as it is, with one warning saying why. A campaign's flat chapter map is converted with it. */
+async function flatProjectOpens(page, found) {
+  const fail = (what) => found.push(`flatProjectOpens: ${what}`);
+  const folder = join(work, "flat-open");
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  const clear = () => page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+  const open = async (dir) => {
+    await clear();
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(dir)}); })()`);
+    await settled(page);
+  };
+  const FLAT = ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"];
+  try {
+    // A flat project: converted, the map read back through the flat names as it was, told once.
+    const flat = join(folder, "flat");
+    cpSync(FIXTURE, flat, { recursive: true });
+    const before = Object.fromEntries(FLAT.map((f) => [f, readFileSync(join(flat, "map", f), "utf8")]));
+    await open(flat);
+    if (!existsSync(join(flat, "map", "terrain", "terrain.json")) || !existsSync(join(flat, "map", "terrain", "main", "terrain.txt"))) fail("opening the flat project wrote no map/terrain/ with main");
+    for (const f of FLAT) {
+      if (existsSync(join(flat, "map", f))) fail(`map/${f} is still on disk after the open`);
+      const now = await page.evaluate(`w3.workspace.readText(${lit(`map/${f}`)})`).catch((e) => `unreadable: ${e}`);
+      if (now !== before[f]) fail(`map/${f} reads otherwise after the conversion`);
+    }
+    if (existsSync(join(flat, "map", "war3map.wpm")) || !existsSync(join(flat, ".w3proj", "derived", "war3map.wpm"))) fail("war3map.wpm didn't move into .w3proj/derived/");
+    const told = await until("the message about the conversion", async () => { const t = await toasts(); return /old single-file layout/.test(t) ? t : null; }, 10000).catch(async () => { fail(`nothing said the project was converted: ${(await toasts()).slice(0, 300)}`); return ""; });
+    if (told && (told.match(/old single-file layout/g) ?? []).length !== 1) fail(`the conversion was told more than once: ${told.slice(0, 400)}`);
+    const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas")`), 30000);
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await editorUp().catch(() => fail("the terrain editor didn't open on the converted project"));
+    await settled(page);
+    // Opened again: nothing to convert, nothing said.
+    await open(flat);
+    await sleep(1000);
+    if (/old single-file layout/.test(await toasts())) fail("opening the converted project again said it was converted again");
+
+    // A terrain kept raw: opens as it is, one warning why.
+    const raw = join(folder, "raw");
+    cpSync(FIXTURE, raw, { recursive: true });
+    renameSync(join(raw, "map", "war3map.w3e.txt"), join(raw, "map", "war3map.w3e"));
+    writeFileSync(join(raw, "map", "war3map.w3e"), Buffer.from("W3E!not a terrain"));
+    await open(raw);
+    if (existsSync(join(raw, "map", "terrain"))) fail("a project whose terrain is kept raw was converted");
+    if (!existsSync(join(raw, "map", "war3map.doo.json"))) fail("the raw project's doodads left map/");
+    const why = await until("the warning why it stayed", async () => { const t = await toasts(); return /keeps its terrain in the old single-file layout/.test(t) ? t : null; }, 10000).catch(async () => { fail(`nothing said why the raw project stayed flat: ${(await toasts()).slice(0, 300)}`); return ""; });
+    if (why && !/binary file/.test(why)) fail(`the warning doesn't say why: ${why.slice(0, 300)}`);
+
+    // A campaign with a flat chapter map: the chapter converted with it.
+    const camp = join(folder, "campaign");
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${lit(camp)}, name: "Flat Chapters", flags: 0, maxPlayers: 0, campaign: true })`);
+    cpSync(FIXTURE, join(camp, "maps", "One"), { recursive: true });
+    await open(camp);
+    if (!existsSync(join(camp, "maps", "One", "map", "terrain", "terrain.json")) || existsSync(join(camp, "maps", "One", "map", "war3map.w3e.txt"))) fail("the campaign's flat chapter map wasn't converted");
+    if (!/maps\/One/.test(await toasts())) fail(`the message doesn't name the chapter: ${(await toasts()).slice(0, 300)}`);
+  } finally {
+    await clear().catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
+/** A new map's terrain is split into subterrains (map/terrain/, one subterrain main) and opens, edits, saves and reloads
+ *  as a flat one: the terrain editor works on map/war3map.w3e.txt, which the backend assembles from the subterrains and
+ *  slices back into them (crates/backend flatview.rs). Resize Subterrain refuses a layout it can't keep and says why
+ *  (nothing written); New and Rename Subterrain cut main into a 2×2 grid; a paint in the north-east writes only that
+ *  subterrain's terrain.txt. Merge Subterrains and Split Terrain into Subterrains aren't in the palette any more. */
 async function subterrains(page, found) {
   const fail = (what) => found.push(`subterrains: ${what}`);
   // The AI tool's new map asks first: answered yes.
@@ -6697,19 +6798,37 @@ async function subterrains(page, found) {
     const run = (id, arg) => page.evaluate(`w3.commands.execute(${lit(id)}, ${lit(arg)}).then(() => null, (e) => String(e?.message ?? e))`);
     const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
 
-    // A split that leaves corners outside every rectangle that aren't all alike (the border): refused, said, nothing written.
+    // A new map has the split layout already: one subterrain main over the canvas.
+    {
+      const made = JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
+      if (lit(made.subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h])) !== lit([["main", 0, 0, 65, 65]])) fail(`the new map's subterrains are ${lit(made.subterrains)}, not main over the 65×65 corners`);
+    }
+    // A resize that leaves corners outside every rectangle that aren't all alike (the border): refused, said, nothing written.
     let before = snapshot(map);
-    const refused = await run("w3.terrainLayout.split", { layout: ["west:0,0,10,10"], quiet: true });
-    if (!refused || !/would be lost/.test(refused) || !/Nothing was changed/.test(refused)) fail(`the split leaving the border out was refused with ${lit(refused)}`);
-    await until("the refusal's message", async () => /would be lost/.test(await toasts()), 10000).catch(async () => fail(`no message said why the split was refused: ${(await toasts()).slice(0, 300)}`));
-    if (differ(before, snapshot(map)).length) fail(`the refused split changed ${differ(before, snapshot(map)).join(", ")}`);
+    const refused = await run("w3.terrainLayout.resizeSubterrain", { name: "main", rect: "0,0,10,10", quiet: true });
+    if (!refused || !/would be lost/.test(refused) || !/Nothing was changed/.test(refused)) fail(`the resize leaving the border out was refused with ${lit(refused)}`);
+    await until("the refusal's message", async () => /would be lost/.test(await toasts()), 10000).catch(async () => fail(`no message said why the resize was refused: ${(await toasts()).slice(0, 300)}`));
+    if (differ(before, snapshot(map)).length) fail(`the refused resize changed ${differ(before, snapshot(map)).join(", ")}`);
     // The error message stays until closed: it would lie over the views of the checks after this one.
     await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
 
-    // Split 2×2 by the command.
-    const split = await run("w3.terrainLayout.split", { layout: "2x2", quiet: true });
-    if (split) fail(`Split Terrain into Subterrains (2×2) failed: ${split}`);
-    await settled(page);
+    // Cut into 2×2 by the Subterrains commands (as `w3proj terrain split`'s 2x2 grid: sw, se, nw, ne): each new one takes
+    // a whole side of the one it lies in; main, left in the south-west, becomes sw.
+    for (const [id, arg] of [
+      ["w3.terrainLayout.newSubterrain", { name: "se", rect: "32,0,33,65" }],
+      ["w3.terrainLayout.newSubterrain", { name: "ne", rect: "32,32,33,33" }],
+      ["w3.terrainLayout.newSubterrain", { name: "nw", rect: "0,32,32,33" }],
+      ["w3.terrainLayout.renameSubterrain", { name: "main", to: "sw" }],
+    ]) {
+      const said = await run(id, { ...arg, quiet: true });
+      if (said) fail(`${id} ${lit(arg)} failed: ${said}`);
+      await settled(page);
+    }
+    {
+      const grid = JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8")).subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]).sort();
+      const want = [["ne", 32, 32, 33, 33], ["nw", 0, 32, 32, 33], ["se", 32, 0, 33, 32], ["sw", 0, 0, 32, 32]];
+      if (lit(grid) !== lit(want)) fail(`the cut gave ${lit(grid)}, not ${lit(want)}`);
+    }
     // The editor the command opened again is at rest with its minimap panel drawn (the reload showed it black).
     {
       const lit_ = await page.evaluate(`(() => { const c = document.querySelector(".terrain-minimap-canvas"); if (!c || c.closest("[hidden]")) return -1;
@@ -7138,21 +7257,9 @@ async function subterrains(page, found) {
       await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
     }
 
-    // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.
-    const merged = await run("w3.terrainLayout.merge", { quiet: true });
-    if (merged) fail(`Merge Subterrains failed: ${merged}`);
-    await settled(page);
-    if (existsSync(join(map, "terrain"))) fail("map/terrain/ is still there after the merge");
-    const flat = existsSync(join(map, "war3map.w3e.txt")) ? readFileSync(join(map, "war3map.w3e.txt"), "utf8") : null;
-    if (flat !== assembled) fail("the merged map/war3map.w3e.txt isn't the terrain the subterrains held");
-    for (const f of ["war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"]) if (!existsSync(join(map, f))) fail(`the merge wrote no map/${f}`);
-    for (const f of ["war3map.wpm", "war3map.shd", "war3mapMap.blp"]) if (!existsSync(join(map, f))) fail(`the merge didn't bring map/${f} back from .w3proj/derived/`);
-    // Only the generated map script stays in the store (a new map's: it isn't the terrain's, and a merge leaves it).
-    const leftInStore = existsSync(join(root, ".w3proj", "derived")) ? readdirSync(join(root, ".w3proj", "derived")).filter((n) => !/^war3map\.(j|lua)$/i.test(n)) : [];
-    if (leftInStore.length) fail(`.w3proj/derived/ still has ${leftInStore.join(", ")} after the merge`);
-    if (!existsSync(scriptOnDisk(root))) fail("the merge took the generated map script out of .w3proj/derived/ (control)");
-    if (!existsSync(join(root, ".w3proj", "pathing.json"))) fail("the merge didn't write the painted overrides back into .w3proj/pathing.json");
-    await editorUp().catch(() => fail("the terrain editor isn't open after the merge"));
+    // Merge Subterrains is gone from the app (the split layout is the only one): no command by that name.
+    if (await page.evaluate(`w3Workbench.commands.all().some((c) => c.id === "w3.terrainLayout.merge" || c.id === "w3.terrainLayout.split")`)) fail("the palette still has Merge Subterrains or Split Terrain into Subterrains");
+    if (await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`) !== assembled) fail("the terrain read at the end isn't the one the subterrains held");
   } finally {
     await page.evaluate(`(() => { if (window.__subKept) w3.window.confirm = window.__subKept; delete window.__subKept; })()`).catch(() => {});
     await page.evaluate(`(() => { window.__subGroup?.dispose(); delete window.__subGroup; delete window.__subEd; })()`).catch(() => {});
@@ -7160,8 +7267,8 @@ async function subterrains(page, found) {
   }
 }
 
-/** Edit Terrain Layout (terrain-layout/editor.ts), by the mouse: on a new flat map the tab offers Split Terrain with a
- *  grid (Columns +, Rows +, the north-south cut dragged west), split as drawn; then a subterrain drawn along the west
+/** Edit Terrain Layout (terrain-layout/editor.ts), by the mouse: a new map's one subterrain main cut into 2×2 by
+ *  Columns + and Rows +, applied as drawn; then a subterrain drawn along the west
  *  side, its east side dragged two corners further, renamed, previewed (what moves), applied as one change (folders and
  *  terrain.json as drawn), and Undo takes the whole change back (every file of map/terrain/ as before). The editor's
  *  pictures go to target/app-smoke/terrain-layout-*.png. */
@@ -7190,26 +7297,29 @@ async function terrainLayoutEditor(page, found) {
     // The terrain side view's entry opens the tab (the command it runs).
     await page.evaluate(`w3.commands.execute("w3.terrainLayout.edit")`);
     await until("the Terrain Layout tab", () => page.evaluate(`w3.editors.activePath() === "w3:terrain-layout" && !!document.querySelector(".layout-stage canvas") && !!document.querySelector('button[data-layout="cols+"]')`), 20000);
-    let e = await until("the flat layout in the editor", async () => { const s = await editor(); return s?.mode === "flat" && s.view.width > 0 ? s : null; }, 20000);
-    // Split Terrain by the grid: 2 × 2, then the north-south cut dragged five corners west.
+    // A new map is split already: one subterrain main over the canvas (no flat mode, no Split Terrain).
+    let e = await until("the new map's layout in the editor", async () => { const s = await editor(); return s?.mode === "split" && s.view.width > 0 ? s : null; }, 20000);
+    const layoutOf = () => JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
+    const [W, H] = layoutOf().corners;
+    if (lit(e.draft.map((d) => [d.name, d.x, d.y, d.w, d.h])) !== lit([["main", 0, 0, W, H]])) fail(`the new map's draft is ${lit(e.draft)}, not main over the canvas`);
+    // Cut into 2 × 2 by Columns + and Rows + (each a cut through the widest column or row), applied as one change.
     await hands.click('button[data-layout="cols+"]');
     await hands.click('button[data-layout="rows+"]');
-    e = await until("a 2×2 grid", async () => { const s = await editor(); return s?.grid?.xs.length === 1 && s.grid.ys.length === 1 ? s : null; }, 10000);
-    const [cut] = e.grid.xs, [row] = e.grid.ys;
-    await hands.drag(at(e.view, cut, 3), at(e.view, cut - 5, 3));
-    e = await until("the cut moved", async () => { const s = await editor(); return s?.grid?.xs[0] === cut - 5 ? s : null; }, 10000).catch(async () => { fail(`dragging the cut from ${cut} five corners west left the grid at ${lit((await editor())?.grid)}`); return editor(); });
-    await until("the split's preview", async () => !!(await editor())?.preview, 20000).catch(async () => fail(`no preview of the split: ${lit((await editor())?.refusal)}`));
+    e = await until("a 2×2 draft", async () => { const s = await editor(); return s?.draft.length === 4 ? s : null; }, 10000);
+    await until("the cut's preview", async () => !!(await editor())?.preview, 20000).catch(async () => fail(`no preview of the cut: ${lit((await editor())?.refusal)}`));
     await shot("split-grid");
     await hands.click('button[data-layout="apply"]');
-    await until("map/terrain/terrain.json", () => existsSync(join(map, "terrain", "terrain.json")), 30000).catch(() => fail("Split Terrain wrote no map/terrain/terrain.json"));
+    await until("four subterrains on disk", () => layoutOf().subterrains.length === 4, 30000).catch(() => fail(`Apply left terrain.json with ${lit(layoutOf().subterrains.map((s) => s.name))}`));
     await settled(page);
-    const layoutOf = () => JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
-    const x = cut - 5, [W, H] = layoutOf().corners;
-    const want = [["sw", 0, 0, x, row], ["se", x, 0, W - x, row], ["nw", 0, row, x, H - row], ["ne", x, row, W - x, H - row]];
-    if (lit(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h])) !== lit(want)) fail(`the split as drawn: ${lit(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]))}, wanted ${lit(want)}`);
+    const x = Math.floor(W / 2), row = Math.floor(H / 2);
+    const cell = (cx, cy) => layoutOf().subterrains.find((s) => s.x === cx && s.y === cy);
+    const [swName, seName, nwName, neName] = [cell(0, 0), cell(x, 0), cell(0, row), cell(x, row)].map((s) => s?.name);
+    const want = [[swName, 0, 0, x, row], [seName, x, 0, W - x, row], [nwName, 0, row, x, H - row], [neName, x, row, W - x, H - row]];
+    const sorted = (list) => [...list].sort((a, b) => a[2] - b[2] || a[1] - b[1]);
+    if (swName !== "main" || lit(sorted(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]))) !== lit(want)) fail(`the cut as drawn: ${lit(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]))}, wanted ${lit(want)}`);
 
-    // Split now: draw a subterrain along the west side (corners 0–3, the whole height of sw).
-    e = await until("the split layout in the editor", async () => { const s = await editor(); return s?.mode === "split" && s.draft.length === 4 ? s : null; }, 20000);
+    // Draw a subterrain along the west side (corners 0–3, the whole height of the south-west one).
+    e = await until("the cut layout in the editor", async () => { const s = await editor(); return s?.mode === "split" && s.draft.length === 4 && !s.pending ? s : null; }, 20000);
     await hands.click('button[data-layout="draw"]');
     await hands.drag(at(e.view, 0.5, 0.5), at(e.view, 3.5, row - 0.5));
     e = await until("the drawn subterrain", async () => { const s = await editor(); return s?.draft.some((d) => d.name === "new") ? s : null; }, 10000).catch(async () => { fail(`drawing gave the draft ${lit((await editor())?.draft)}`); return null; });
@@ -7220,8 +7330,8 @@ async function terrainLayoutEditor(page, found) {
     await hands.click('button[data-layout="select"]');
     await hands.drag(at(e.view, 4, row / 2), at(e.view, 6, row / 2));
     e = await until("the resize", async () => { const s = await editor(); return s?.draft.find((d) => d.name === "new")?.w === 6 ? s : null; }, 10000).catch(async () => { fail(`dragging the east side gave ${lit((await editor())?.draft.find((d) => d.name === "new"))}`); return editor(); });
-    const sw = e.draft.find((d) => d.name === "sw");
-    if (lit([sw?.x, sw?.w]) !== lit([6, x - 6])) fail(`sw after the resize: ${lit(sw)}`);
+    const sw = e.draft.find((d) => d.name === swName);
+    if (lit([sw?.x, sw?.w]) !== lit([6, x - 6])) fail(`${swName} after the resize: ${lit(sw)}`);
     // Renamed (the question answered).
     await page.evaluate(`(() => { w3.window.inputBox = async () => "west_strip"; })()`);
     await hands.click('button[data-layout="rename"]');
@@ -7236,8 +7346,8 @@ async function terrainLayoutEditor(page, found) {
     await hands.click('button[data-layout="apply"]');
     await until("west_strip on disk", () => existsSync(join(terrainDir, "west_strip", "terrain.txt")), 30000).catch(() => fail("Apply wrote no map/terrain/west_strip/terrain.txt"));
     await settled(page);
-    const subs = layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]);
-    if (lit(subs) !== lit([["sw", 6, 0, x - 6, row], ["se", x, 0, W - x, row], ["nw", 0, row, x, H - row], ["ne", x, row, W - x, H - row], ["west_strip", 0, 0, 6, row]])) fail(`terrain.json after Apply: ${lit(subs)}`);
+    const subs = sorted(layoutOf().subterrains.map((s) => [s.name, s.x, s.y, s.w, s.h]));
+    if (lit(subs) !== lit(sorted([[swName, 6, 0, x - 6, row], [seName, x, 0, W - x, row], [nwName, 0, row, x, H - row], [neName, x, row, W - x, H - row], ["west_strip", 0, 0, 6, row]]))) fail(`terrain.json after Apply: ${lit(subs)}`);
     e = await until("the editor on the applied layout", async () => { const s = await editor(); return s && !s.pending && s.canUndo ? s : null; }, 20000).catch(async () => { fail(`after Apply the editor says ${lit(await editor())}`); return null; });
     await shot("applied");
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
@@ -7559,7 +7669,7 @@ async function playerSyncRefused(page, found) {
     const good = readFileSync(w3iPath);
     const sloc = k.units().find((u) => u.id === "sloc");
     if (!sloc) return fail("the new map has no start location (control)");
-    const unitsBefore = readFileSync(join(map, "war3mapUnits.doo.json"), "utf8");
+    const unitsBefore = readMapFile(join(map, "war3mapUnits.doo.json"), "utf8");
     // A start location nudged by hand (a tool's placement is written at once, without this save): 64 east, unsaved.
     await k.look(sloc.position[0], sloc.position[1], { id: "sloc", x: sloc.position[0], y: sloc.position[1] });
     await k.focusMap();
@@ -7577,7 +7687,7 @@ async function playerSyncRefused(page, found) {
     const moved = [...new Set([...bad.keys(), ...after.keys()])].filter((f) => bad.get(f) !== after.get(f));
     if (moved.length) fail(`the refused save changed ${moved.join(", ")}`);
     if (!readFileSync(rawPath).equals(Buffer.from("not a map info"))) fail("the unreadable war3map.w3i was changed");
-    if (readFileSync(join(map, "war3mapUnits.doo.json"), "utf8") !== unitsBefore) fail("the refused save wrote the moved start location");
+    if (readMapFile(join(map, "war3mapUnits.doo.json"), "utf8") !== unitsBefore) fail("the refused save wrote the moved start location");
     if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the terrain editor isn't unsaved after a refused save");
     // Control: readable again, the same save goes through and moves the start.
     rmSync(rawPath);
@@ -8756,7 +8866,7 @@ async function byHand(page, found) {
   if (!shown(info.name).includes("Typed Map")) fail(`its name is ${info.name}`);
   if (!shown(info.author).includes("Someone")) fail(`its author is ${info.author}`);
   if (info.tileset !== "A") fail(`its tileset is ${info.tileset}`);
-  const wpm = readFileSync(join(root, "map", "war3map.wpm"));
+  const wpm = readMapFile(join(root, "map", "war3map.wpm"));
   if (wpm.readUInt32LE(8) !== 64 * 4 || wpm.readUInt32LE(12) !== 128 * 4) fail("its size isn't the one chosen");
 
   // Painting: a drag on the canvas changes the ground, saving keeps it, undo takes it back.
@@ -9871,16 +9981,16 @@ async function doodadSnapOnLoad(page, found) {
     LTlt: [1, 1, 1, 3], LOrb: [1, 1, 1, 3], LTex: [f(1.5), f(1.5), f(1.5), 3], ZPsh: [1, 1, 1, 2], ZWsw: [1.5, 1.5, 1.5, 6] };
   const heights = (list) => Object.fromEntries((list ?? []).filter((d) => ["ZPsh", "ZWsw"].includes(d.id)).map((d) => [d.id, Math.fround(d.position[2])]));
   const RESTED = { ZPsh: -3, ZWsw: 50 };
-  const scaleFlagsOnDisk = (root) => scaleFlags(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
+  const scaleFlagsOnDisk = (root) => scaleFlags(JSON.parse(readMapFile(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
   /** The units' facings by id, single precision: as the editor holds them, and as the file has them. */
   // The test's three: the save adds a start location to the mini map (it has none).
   const facings = (list) => Object.fromEntries((list ?? []).filter((u) => ["hfoo", "hkni", "hrif"].includes(u.id)).map((u) => [u.id, Math.fround(u.angle)]));
   const liveFacings = async () => facings(await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units ?? null)()`));
-  const facingsOnDisk = (root) => facings(JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8")).units);
+  const facingsOnDisk = (root) => facings(JSON.parse(readMapFile(join(root, "map", "war3mapUnits.doo.json"), "utf8")).units);
   /** What the World Editor reads the units' facings as (a whole number as degrees, into 0..360). */
   const OPENED = { hfoo: f(4.5), hkni: f(5.7831855), hrif: f(0.034906585) };
-  const onDisk = (root) => xyAngle(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
+  const onDisk = (root) => xyAngle(JSON.parse(readMapFile(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   // Every note shown since the last open, collected as it appears: under load a toast can be gone before a slow check reads.
   const toasts = () => page.evaluate(`[...(window.__snapNotes ?? [])].join(" | ")`);
   const noteSeen = (re, ms = 20000) => until("", async () => re.test(await toasts()), ms).then(() => true, () => false);
@@ -9962,7 +10072,7 @@ async function doodadSnapOnLoad(page, found) {
     // The 8 of scale and flags, ZPsh's height, ZWsw's scale, and the hay cart's height (turned on the spot, it stays at
     // 0 over ground of -0.75).
     if (!await noteSeen(/Set the scale, flags, life or height of 11 doodads/)) fail(`no note of the 11 doodads given the World Editor's scale, flags and height: ${(await toasts()).slice(0, 400)}`);
-    const storedHeights = heights(JSON.parse(readFileSync(join(on, "map", "war3map.doo.json"), "utf8")).doodads);
+    const storedHeights = heights(JSON.parse(readMapFile(join(on, "map", "war3map.doo.json"), "utf8")).doodads);
     if (!same(storedHeights, { ZPsh: 50, ZWsw: 50 })) fail(`the stored heights aren't the test's (control): ${lit(storedHeights)}`);
     if (!same(heights(await live()), RESTED)) fail(`fix on load: the heights are ${lit(heights(await live()))}, not ${lit(RESTED)} (ZPsh on its ground, ZWsw's own)`);
     await page.evaluate(`w3.editors.saveAll()`);
@@ -9977,10 +10087,10 @@ async function doodadSnapOnLoad(page, found) {
     const writtenFixes = scaleFlagsOnDisk(on);
     for (const [id, want] of Object.entries(FIXED)) if (!same(writtenFixes[id], want)) fail(`the save after an edit wrote ${id} with scale and flags ${lit(writtenFixes[id])}, not ${lit(want)}`);
     if (!same(facingsOnDisk(on), OPENED)) fail(`the save after an edit wrote the units facing ${lit(facingsOnDisk(on))}, not ${lit(OPENED)}`);
-    if (!same(heights(JSON.parse(readFileSync(join(on, "map", "war3map.doo.json"), "utf8")).doodads), RESTED)) fail("the save after an edit didn't write the heights the open gave");
+    if (!same(heights(JSON.parse(readMapFile(join(on, "map", "war3map.doo.json"), "utf8")).doodads), RESTED)) fail("the save after an edit didn't write the heights the open gave");
 
     // ---- on, opened a second time: what the first open's save wrote is what the rules give, so nothing changes ----
-    const savedOnce = readFileSync(join(on, "map", "war3map.doo.json"), "utf8");
+    const savedOnce = readMapFile(join(on, "map", "war3map.doo.json"), "utf8");
     await open(on);
     await settled(page);
     await sleep(1500);
@@ -9990,7 +10100,7 @@ async function doodadSnapOnLoad(page, found) {
     const pick = (d) => [d.id, d.position.map(f), f(d.angle), d.scale.map(f), d.flags, d.life];
     if (!same((liveAgain ?? []).map(pick), again.map(pick))) fail("the second open holds other doodads than the first open's save wrote");
     await saveAfterEdit();
-    if (readFileSync(join(on, "map", "war3map.doo.json"), "utf8") !== savedOnce) fail("the save after the second open wrote other doodads than the first");
+    if (readMapFile(join(on, "map", "war3map.doo.json"), "utf8") !== savedOnce) fail("the save after the second open wrote other doodads than the first");
 
     // ---- on, the map's doodad data unreadable: a type's range may be the map's, so scales stay; flags are fixed ----
     const broken = make("broken");
@@ -10016,7 +10126,7 @@ async function doodadSnapOnLoad(page, found) {
     if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail("opening the project without the terrain view marked something as changed");
     await packNoView(noView);
     if ((await live()) !== null) fail("packing opened a terrain editor");
-    const packed = JSON.parse(readFileSync(join(noView, "map", "war3map.doo.json"), "utf8")).doodads;
+    const packed = JSON.parse(readMapFile(join(noView, "map", "war3map.doo.json"), "utf8")).doodads;
     const firstSave = JSON.parse(savedOnce).doodads;
     if (!same(packed.map(pick), firstSave.map(pick))) {
       const differ = packed.filter((d, i) => !same(pick(d), firstSave[i] && pick(firstSave[i]))).map((d) => `${d.id} ${lit(pick(d))}`);
@@ -10024,9 +10134,9 @@ async function doodadSnapOnLoad(page, found) {
     }
     if (!same(facingsOnDisk(noView), OPENED)) fail(`packing without the terrain view left the units facing ${lit(facingsOnDisk(noView))}, not the World Editor's ${lit(OPENED)}`);
     // A second pack changes nothing more.
-    const packedOnce = readFileSync(join(noView, "map", "war3map.doo.json"), "utf8");
+    const packedOnce = readMapFile(join(noView, "map", "war3map.doo.json"), "utf8");
     await packNoView(noView);
-    if (readFileSync(join(noView, "map", "war3map.doo.json"), "utf8") !== packedOnce) fail("a second pack without the terrain view changed the doodads again");
+    if (readMapFile(join(noView, "map", "war3map.doo.json"), "utf8") !== packedOnce) fail("a second pack without the terrain view changed the doodads again");
 
     // ---- off ----
     await page.evaluate(`w3.settings.set(${lit(KEY)}, false); w3.settings.set(${lit(FIX)}, false)`);
@@ -10460,7 +10570,7 @@ async function mineStartGrid(page, found) {
 
     // At the edge: a start location nudged right stops 64 inside the whole map, past the playable part, as in the
     // World Editor (4032 on a map whose edge is 4096). Moved there with Enforce Camera Bounds off.
-    const head = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+    const head = readMapFile(join(k.root, "map", "war3map.w3e.txt"), "utf8");
     const right = Number(/^offset (\S+)/m.exec(head)?.[1]) + (Number(/^corners (\d+)/m.exec(head)?.[1]) - 1) * 128;
     const playableRight = right - k.read("war3map.w3i.json").cameraComplements[1] * 128;
     if (!Number.isFinite(right) || !(playableRight < right - 192)) return fail(`the map's edge ${right} and playable edge ${playableRight} (control)`);
@@ -10579,7 +10689,7 @@ async function derivedAfterDeletes(page, found) {
 async function derivedSaveQueue(page, found) {
   const fail = (what) => found.push(`derived save queue: ${what}`);
   const k = await heightKit(page, "DerivedSaveQueue");
-  const file = (name) => readFileSync(join(k.root, "map", name));
+  const file = (name) => readMapFile(join(k.root, "map", name));
   const same = (a, b) => Buffer.compare(a, b) === 0;
   const DERIVED = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp"];
   try {
@@ -10648,7 +10758,7 @@ async function derivedSaveQueue(page, found) {
 async function derivedSaveTaken(page, found) {
   const fail = (what) => found.push(`derived save taken: ${what}`);
   const k = await heightKit(page, "DerivedSaveTaken");
-  const wpm = () => readFileSync(join(k.root, "map", "war3map.wpm"));
+  const wpm = () => readMapFile(join(k.root, "map", "war3map.wpm"));
   const same = (a, b) => Buffer.compare(a, b) === 0;
   try {
     await k.tool("place_objects", { kind: "doodads", objects: [-512, 0, 512].map((x) => ({ id: "LTbr", x, y: 0 })), ignoreRoom: true });
@@ -10879,7 +10989,7 @@ async function moduleFunctionsChecks(page, found) {
     const r = packed.status === 0 ? spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" }) : packed;
     if (r.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(r.stdout ?? "")) fail(`${label}: verify: ${((r.stdout ?? "") + (r.stderr ?? "")).trim().slice(-300)}`);
   };
-  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const json = (p) => JSON.parse(readMapFile(p, "utf8"));
   const put = (p, o) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(o, null, 2)); };
   const openProject = async (root) => {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
@@ -10953,11 +11063,11 @@ async function moduleFunctionsChecks(page, found) {
     put(join(chapter, "map", "war3mapUnits.doo.json"), units);
     await openProject(chapter);
     await answer({});
-    const before = readFileSync(join(chapter, "map", "war3mapUnits.doo.json"), "utf8");
+    const before = readMapFile(join(chapter, "map", "war3mapUnits.doo.json"), "utf8");
     const err = await run("w3.problems.deleteInvalid");
     if (err) fail(`Delete Invalid Objects in a chapter: ${err}`);
     if ((await asked()).length) fail(`Delete Invalid Objects in a chapter offered: ${(await asked())[0]}`);
-    if (readFileSync(join(chapter, "map", "war3mapUnits.doo.json"), "utf8") !== before) fail("Delete Invalid Objects changed a chapter's valid objects");
+    if (readMapFile(join(chapter, "map", "war3mapUnits.doo.json"), "utf8") !== before) fail("Delete Invalid Objects changed a chapter's valid objects");
     if (existsSync(join(chapter, "build", "checkpoints"))) fail(`Delete Invalid Objects made a checkpoint with nothing to delete: ${readdirSync(join(chapter, "build", "checkpoints")).join(", ")}`);
   }
   if (process.env.W3_SMOKE_CHAPTER) {
@@ -11024,12 +11134,12 @@ async function moduleFunctionsChecks(page, found) {
     const given = { size: 64, doodads: false, units: false, icons: false, smooth: false, playableOnly: false };
     const exportWith = async (o, file) => { await answer({ save: file }); return page.evaluate(`w3.commands.execute("w3.terrain.exportMinimap", ${lit(o)}).then(() => null, (e) => String(e))`); };
     const first = join(dir, "minimap-a.png"), second = join(dir, "minimap-b.png");
-    const ground = readFileSync(join(b, "map", "war3map.w3e.txt"));
+    const ground = readMapFile(join(b, "map", "war3map.w3e.txt"));
     const why = (await exportWith(given, first)) ?? (await page.evaluate(`w3.commands.execute("w3.terrain.replaceTiles", { from: "Lgrs", to: "Lrok" }).then(() => null, (e) => String(e))`)) ?? (await exportWith(given, second));
     if (why) fail(`Export Minimap of an unsaved edit: ${why}`);
     else {
       if (picture(first).raw.equals(picture(second).raw)) fail("the exported minimap doesn't show the unsaved tile change");
-      if (!readFileSync(join(b, "map", "war3map.w3e.txt")).equals(ground)) fail("exporting the minimap saved the terrain");
+      if (!readMapFile(join(b, "map", "war3map.w3e.txt")).equals(ground)) fail("exporting the minimap saved the terrain");
       if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the replaced tiles aren't unsaved");
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
       await settled(page);
@@ -11037,12 +11147,12 @@ async function moduleFunctionsChecks(page, found) {
     // Regions as the Region Editor has them: the mini map's one region deleted there and not saved leaves the picture.
     const withRegions = { ...given, terrain: false, water: false, regions: true };
     const r1 = join(dir, "minimap-r1.png"), r2 = join(dir, "minimap-r2.png");
-    const savedRegions = readFileSync(join(b, "map", "war3map.w3r.json"));
+    const savedRegions = readMapFile(join(b, "map", "war3map.w3r.json"));
     const whyR = (await exportWith(withRegions, r1)) ?? (await page.evaluate(`w3.commands.execute("w3.terrain.groupItemAction", "regions", "Middle", "delete").then(() => null, (e) => String(e))`)) ?? (await exportWith(withRegions, r2));
     if (whyR) fail(`Export Minimap of an unsaved region edit: ${whyR}`);
     else {
       if (picture(r1).raw.equals(picture(r2).raw)) fail("the exported minimap still shows the region deleted (unsaved) in the Region Editor");
-      if (!readFileSync(join(b, "map", "war3map.w3r.json")).equals(savedRegions)) fail("exporting the minimap saved the regions");
+      if (!readMapFile(join(b, "map", "war3map.w3r.json")).equals(savedRegions)) fail("exporting the minimap saved the regions");
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
       await settled(page);
     }
@@ -11440,7 +11550,7 @@ async function moduleFunctionsChecks(page, found) {
 }
 
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
-const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
+const hash = (p) => createHash("sha256").update(readMapFile(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
 
 /** Copying objects between maps brings what they refer to. Map A has a custom hero with a custom ability that uses a custom
@@ -11725,7 +11835,7 @@ async function graphicsModes(page, found) {
   const dir = join(work, "graphics-modes");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const json = (p) => JSON.parse(readMapFile(p, "utf8"));
   const put = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2));
   const openProject = async (root) => {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
@@ -12331,10 +12441,10 @@ async function gameReadsOnce(page, found) {
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
   // A tree, a goldmine (a ground mark) and a footman: models, textures and splats from the game.
-  const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+  const doo = JSON.parse(readMapFile(join(root, "map", "war3map.doo.json"), "utf8"));
   doo.doodads.push({ ...doo.doodads[0], id: "LTlt", skinId: "LTlt", variation: 0, position: [256, 256, 0], editorId: 900 });
   writeFileSync(join(root, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
-  const units = JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
+  const units = JSON.parse(readMapFile(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
   const unit = units.units.find((u) => u.id !== "sloc") ?? units.units[0];
   if (unit) {
     units.units.push({ ...unit, id: "ngol", skinId: "ngol", player: 24, position: [-512, -512, 0], gold: 12500, editorId: 901 }, { ...unit, id: "hfoo", skinId: "hfoo", player: 0, position: [512, -512, 0], editorId: 902 });
@@ -12710,7 +12820,7 @@ async function turtleCliffSave(page, found) {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${lit(copy)}, dir: ${lit(dir)}, allowIncomplete: false, install: ${lit(game ?? gamePath(repo))} }); })()`);
     const ground = join(dir, "map", "war3map.w3e.txt");
     const TXT = "map/war3map.w3e.txt";
-    const read = () => w3eSections(readFileSync(ground, "utf8"));
+    const read = () => w3eSections(readMapFile(ground, "utf8"));
     const first = read();
     // Entries 15 (CYdi) and 16 (CYsq) aren't offered: a corner's cliff type is 0 to 14, 15 is reserved and 16 doesn't fit.
     const OPTIONS = "-1=Match the ground, 0=Dirt cliff (CLdi), 1=Grass cliff (CLgr), 3=Dirt cliff (CFdi), 4=Grass cliff (CFgr), 5=Snow cliff (CWsn), 6=Grass cliff (CWgr), 7=Desert cliff (CBde), 8=Grass cliff (CBgr), 9=Dirt cliff (CNdi), 10=Snow cliff (CNsn), 11=Grass cliff (CAgr), 12=Dirt cliff (CAdi), 13=Grass cliff (CCgr), 14=Dirt cliff (CCdi)";
@@ -12844,7 +12954,7 @@ async function cliffTypeList(page, found) {
   const k = await terrainMap(page, "CliffList");
   const hands = new Hands(page);
   try {
-    const read = () => w3eSections(readFileSync(k.w3e, "utf8"));
+    const read = () => w3eSections(readMapFile(k.w3e, "utf8"));
     const cliffsLine = () => read().head.find((l) => l.startsWith("cliffs ")) ?? "";
     const typed = (n) => read()["cliff-texture"].filter((v) => parseInt(v, 36) === n).length;
     if (cliffsLine() !== "cliffs CLdi CLgr") return fail(`a new Lordaeron map's cliff list should be CLdi CLgr (control): ${cliffsLine()}`);
@@ -12917,9 +13027,9 @@ async function realMapSaveRound(page, found, map, name, prepare) {
   const file = (f) => join(dir, "map", f);
   prepare?.(dir);
   const script = readFileSync(file("war3map.j"), "utf8"), info = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
-  const terrain = readFileSync(file("war3map.w3e.txt"), "utf8");
+  const terrain = readMapFile(file("war3map.w3e.txt"), "utf8");
   // The control: the start locations as the World Editor's save found them, at 0 hit points and mana, the masks empty.
-  const startsBefore = JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
+  const startsBefore = JSON.parse(readMapFile(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
   if (startsBefore.length !== (two ? 2 : 1) || startsBefore.some((u) => u.hp !== 0 || u.mana !== 0)) return fail(`the map's start locations aren't as the World Editor's save found them (control): ${lit(startsBefore.map((u) => [u.player, u.hp, u.mana]))}`);
   if (info.players.some((p) => p.allyLow || p.allyHigh)) return fail("the map has ally priorities before the save (control)");
   const TXT = "map/war3map.w3e.txt";
@@ -12937,7 +13047,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
       quietSince ||= Date.now();
       return Date.now() - quietSince > 1000;
     }, 120000);
-    const units = readFileSync(file("war3mapUnits.doo.json"), "utf8");
+    const units = readMapFile(file("war3mapUnits.doo.json"), "utf8");
     const err = await page.evaluate(`w3.commands.execute("w3.terrain.adjustCliffLevels", 1).then(() => null, (e) => String(e))`);
     if (err) return fail(`Adjust Cliff Levels: ${err}`);
     // The second player was added to the project before it opened, so its script isn't what its data makes and the save
@@ -12946,8 +13056,8 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     const logBefore = await page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).length`);
     if (two) await page.evaluate(`(() => { const ask = w3.window.notify; window.__rmsWarn = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Replace the script") : ask(s, m, a, o)); })()`);
     await page.evaluate(`w3.editors.saveAll()`);
-    if (readFileSync(file("war3map.w3e.txt"), "utf8") === terrain) return fail("the terrain edit wasn't saved (control)");
-    if (readFileSync(file("war3mapUnits.doo.json"), "utf8") === units) return fail("the start location didn't go up with the ground (control)");
+    if (readMapFile(file("war3map.w3e.txt"), "utf8") === terrain) return fail("the terrain edit wasn't saved (control)");
+    if (readMapFile(file("war3mapUnits.doo.json"), "utf8") === units) return fail("the start location didn't go up with the ground (control)");
     // The save then writes the w3i's start from the start-location object, and that save the script.
     const scriptLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
     await until("the map script after the save", async () => /war3map\.j (written|up to date|not written)/.test(await scriptLog()), 30000).catch(() => {});
@@ -12982,7 +13092,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     nowInfo.players.forEach((p, k) => { p.allyHigh = info.players[k]?.allyHigh; });
     if (JSON.stringify(nowInfo) !== JSON.stringify(info)) fail("war3map.w3i changed beyond the start location and the ally priorities");
     // war3mapUnits.doo: the start locations' hit points and mana -1, as the World Editor saves 0.
-    const startsAfter = JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
+    const startsAfter = JSON.parse(readMapFile(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
     if (startsAfter.some((u) => u.hp !== -1 || u.mana !== -1)) fail(`the start locations' hit points and mana are ${lit(startsAfter.map((u) => [u.hp, u.mana]))}, the World Editor saves -1`);
     if (two) await mapPropertiesPrioritiesUi(page, fail, file);
   } finally {
@@ -14261,7 +14371,7 @@ async function contextLossChecks(page, found) {
   if (!(await lostShown())) fail("the terrain view's message went when the context came back, but its renderer has nothing on the GPU any more");
   await page.evaluate(`w3.editors.saveAll()`);
   if (await dirty()) fail("saving after the loss left the terrain unsaved");
-  const saved = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8");
+  const saved = readMapFile(join(root, "map", "war3map.w3e.txt"), "utf8");
   if (saved === readFileSync(join(FIXTURE, "map", "war3map.w3e.txt"), "utf8")) fail("the edit made before the loss isn't in the saved terrain");
   await clickReopen();
   await until("the terrain editor to open again", () => page.evaluate(`!window.__lostCanvas.isConnected && w3.editors.activePath() === ${lit(ground)} && !!(${canvasNow})`), 20000)
@@ -14304,7 +14414,7 @@ async function shadowTextureOrder(page, found) {
     const root = join(work, "shadow-texture-order");
     rmSync(root, { recursive: true, force: true });
     cpSync(FIXTURE, root, { recursive: true });
-    const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+    const doo = JSON.parse(readMapFile(join(root, "map", "war3map.doo.json"), "utf8"));
     ["LOh1"].forEach((id, i) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position: [256 + i * 128, 256, 0], editorId: 900 + i }));
     writeFileSync(join(root, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
     await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
@@ -14411,7 +14521,7 @@ async function classicRefusal(page, found) {
   const dir = join(work, "classic-refusal");
   rmSync(dir, { recursive: true, force: true });
   cpSync(FIXTURE, dir, { recursive: true });
-  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const json = (p) => JSON.parse(readMapFile(p, "utf8"));
   const put = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2));
   const doo = json(join(dir, "map", "war3map.doo.json"));
   doo.doodads.push({ ...doo.doodads[0], id: "LCcb", skinId: "LCcb", variation: 0, position: [256, 256, 0] });
@@ -15010,7 +15120,7 @@ async function chapterObjects(page, found) {
   const fail = (what) => found.push(`chapter objects: ${what}`);
   const dir = join(work, "chapter-objects");
   rmSync(dir, { recursive: true, force: true });
-  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const json = (p) => JSON.parse(readMapFile(p, "utf8"));
   const put = (p, o) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, typeof o === "string" ? o : JSON.stringify(o, null, 2)); };
   const openProject = async (root) => {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
@@ -15595,7 +15705,7 @@ async function worldEditorSync(page, found) {
     if (await mark() !== "● World Editor") fail(`with the editor open the status bar shows ${lit(await mark())}`);
     // The edit build's pack applied Snap and Fix Doodads on Load to the placement files, in an app whose terrain view
     // may never have opened (the command activates its extension): the mini map's doodads come off their grid.
-    if (readFileSync(join(proj, "map", "war3map.doo.json"), "utf8") === readFileSync(join(FIXTURE, "map", "war3map.doo.json"), "utf8")) {
+    if (readMapFile(join(proj, "map", "war3map.doo.json"), "utf8") === readFileSync(join(FIXTURE, "map", "war3map.doo.json"), "utf8")) {
       fail("Open in World Editor packed the edit build without Snap and Fix Doodads on Load (war3map.doo.json as the fixture has it)");
     }
     // A save there: the map rewritten as the editor writes it (the project as the edit build has it, which the editor
@@ -18445,7 +18555,7 @@ async function niceToHaves(page, found) {
     await k.tool("place_objects", { objects: [{ id: "LTlt", x: 640, y: 640 }, { id: "LTlt", x: 768, y: 640 }], ignoreRoom: true });
     await page.evaluate(`w3.commands.execute("w3.terrain.settle")`);
     // A shadow map dark everywhere, as if made elsewhere: the whole of it is made again (and a checkpoint first).
-    const cells = readFileSync(join(mapDir, "war3map.shd")).length;
+    const cells = readMapFile(join(mapDir, "war3map.shd")).length;
     await page.evaluate(`w3.workspace.writeBytes("map/war3map.shd", new Uint8Array(${cells}).fill(255))`);
     const first = await run("w3.terrain.calculateShadows");
     if (first.e || !(first.r > 0)) fail(`Calculate Shadows: ${first.e ?? JSON.stringify(first.r)} cells changed`);
@@ -18605,6 +18715,7 @@ async function run() {
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
         editorUndoStacks,
         fastGameTransfer,
+        flatProjectOpens,
         floatingDoodads,
         flyingHeights,
         gameReadsOnce,
@@ -18988,6 +19099,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeRefusedShadows", found);
   await resizeUnreadable(page, found).catch((e) => found.push(`resize unreadable: ${e.message}`));
   await leftOpen(page, "resizeUnreadable", found);
+  await flatProjectOpens(page, found).catch((e) => found.push(`flatProjectOpens: ${e.message}`));
+  await leftOpen(page, "flatProjectOpens", found);
   await subterrains(page, found).catch((e) => found.push(`subterrains: ${e.message}`));
   await leftOpen(page, "subterrains", found);
   await terrainLayoutEditor(page, found).catch((e) => found.push(`terrainLayoutEditor: ${e.message}`));
@@ -19312,9 +19425,9 @@ async function mapSizeUi(page, found) {
     const k = await heightKit(page, "MapSizeUi");
     const { hands } = k;
     const size = () => {
-      const w3e = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+      const w3e = readMapFile(join(k.root, "map", "war3map.w3e.txt"), "utf8");
       const [, w, h] = /corners ([0-9]+) ([0-9]+)/.exec(w3e) ?? [];
-      const wpm = readFileSync(join(k.root, "map", "war3map.wpm"));
+      const wpm = readMapFile(join(k.root, "map", "war3map.wpm"));
       return { tiles: [Number(w) - 1, Number(h) - 1], wpm: [wpm.readUInt32LE(8), wpm.readUInt32LE(12)] };
     };
     const before = size();
@@ -19333,7 +19446,7 @@ async function mapSizeUi(page, found) {
     const area = after.tiles[0] * after.tiles[1];
     if (area !== 96 * 64) fail(`+32 tiles on one side made ${after.tiles.join(" x ")} tiles, wanted 96 x 64 on one of the axes`);
     if (after.wpm[0] !== after.tiles[0] * 4 || after.wpm[1] !== after.tiles[1] * 4) fail(`the pathing map is ${after.wpm.join(" x ")} cells for ${after.tiles.join(" x ")} tiles`);
-    const shd = readFileSync(join(k.root, "map", "war3map.shd")).length;
+    const shd = readMapFile(join(k.root, "map", "war3map.shd")).length;
     if (shd !== after.tiles[0] * 4 * after.tiles[1] * 4) fail(`the shadow map has ${shd} cells for ${after.tiles.join(" x ")} tiles`);
   } finally {
     await page.evaluate(`(() => { if (window.__sizeAsk) w3.window.showWarning = window.__sizeAsk; window.__sizeAsk = null; })()`).catch(() => {});
@@ -19541,7 +19654,7 @@ async function startDeleteUndoRound(page, map, stray, found) {
     for (const f of ["StartLocation.mdl", "StartLocation.mdx"]) writeFileSync(join(at, f), "not a model");
   }
   const file = (f) => join(dir, "map", f);
-  const units = () => JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units;
+  const units = () => JSON.parse(readMapFile(file("war3mapUnits.doo.json"), "utf8")).units;
   const info = () => JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
   const unitsBefore = units(), infoBefore = info();
   const start = unitsBefore.find((u) => u.id === "sloc");

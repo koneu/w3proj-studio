@@ -456,7 +456,7 @@ pub fn list_scripts(root: &Path, files: &mut Vec<FileInfo>) {
     }
 }
 
-/// "Split Terrain into Subterrains…" (`terrain_split`): the project's terrain and placed objects cut into `rects`
+/// Split Terrain of a project still flat (`terrain_split`, the Terrain Layout editor): its terrain and placed objects cut into `rects`
 /// (`name:x,y,w,h` in corners, as `w3proj terrain split --rect`; the one word `2x2` for a 2×2 grid over the canvas,
 /// `sw`, `se`, `nw`, `ne`), or one subterrain `main` over the canvas when there are none. The files written and
 /// removed, relative to the project; the refusal's reason as the error, nothing written then.
@@ -799,7 +799,7 @@ pub fn whole(root: &str) -> CmdResult<Option<WholeTerrain>> {
 pub fn refuse_moving(path: &Path) -> CmdResult<()> {
     match view_of(path)? {
         Some(View::Flat(f)) => Err(format!(
-            "map/{} isn't a file of its own: the project's terrain is split, and it is made from map/terrain/. Merge the subterrains first (Merge Subterrains)",
+            "map/{} isn't a file of its own: the project's terrain is split, and it is made from map/terrain/",
             f.name
         )),
         Some(View::Derived(real)) => Err(format!("{} can't be moved: the project's terrain is split, and it is kept as {}", path.display(), real.display())),

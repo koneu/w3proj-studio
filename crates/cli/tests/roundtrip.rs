@@ -1474,3 +1474,28 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
     ok(&["terrain", "merge-hook", s(&project)]);
     assert!(ok(&["terrain", "merge-hook", s(&project), "--remove"]).contains("removed") && !hook.exists());
 }
+
+/// `w3proj cat <project> <file>` prints a file under map/ as the app reads it: a split project's flat files assembled
+/// from map/terrain/ (the very bytes of the packed map's text form, i.e. of the flat project it was unpacked from), a
+/// derived file from .w3proj/derived/, any other file as it is; a file that is nowhere fails. A map archive still works.
+#[test]
+fn cat_reads_a_projects_files_as_the_app_does() {
+    let dir = workdir("cat_project");
+    let map = dir.join("mini.w3x");
+    pack(&fixture(), &map);
+    let project = dir.join("project");
+    unpack(&map, &project);
+    assert!(project.join("map/terrain/terrain.json").is_file() && !project.join("map/war3map.w3e.txt").exists());
+    for name in ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.w3i.json"] {
+        let o = w3proj(&["cat", s(&project), name]);
+        assert!(o.status.success(), "{name}: {}", text(&o));
+        assert_eq!(o.stdout, fs::read(fixture().join("map").join(name)).unwrap(), "{name}");
+    }
+    let wpm = w3proj(&["cat", s(&project), "war3map.wpm"]);
+    assert!(wpm.status.success() && !project.join("map/war3map.wpm").exists(), "{}", text(&wpm));
+    assert_eq!(wpm.stdout, fs::read(project.join(".w3proj/derived/war3map.wpm")).unwrap());
+    assert!(!w3proj(&["cat", s(&project), "war3map.nothing"]).status.success());
+    // Control: from the archive, the binary terrain.
+    let archive = w3proj(&["cat", s(&map), "war3map.w3e"]);
+    assert!(archive.status.success() && archive.stdout.starts_with(b"W3E!"), "{}", text(&archive));
+}
