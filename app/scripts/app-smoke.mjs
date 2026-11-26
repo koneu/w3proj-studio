@@ -16397,9 +16397,10 @@ async function aiTestRun(page, found) {
   if (teams !== "Observer,Team 1,Team 2") fail(`the teams show ${teams}, as the World Editor shows Observer, Team 1, Team 2`);
   const built = await page.evaluate(`w3.commands.execute("w3.ai.testAi", { launch: false })`);
   const read = (name) => spawnSync(cli, ["cat", built.map, name], { encoding: "utf8", maxBuffer: 1 << 24 });
-  const script = read("war3map.j").stdout ?? "", ai = read("war3mapImported\\w3proj-testai-1.ai").stdout ?? "";
+  const script = read("war3map.j").stdout ?? "", ai = read("war3mapImported\\w3proj-testai-2.ai").stdout ?? "";
   if (!ai.includes("Grunt Master")) fail("the edited AI isn't in the test map");
-  for (const line of ['call StartMeleeAI( Player(0), "war3mapImported\\\\w3proj-testai-1.ai" )', "call W3ProjTestAI_Standard( Player(1) )", "call W3ProjTestAI_RemoveUnits()", "call SetPlayerTeam( Player(1), 1 )"]) {
+  // The user's player is the first one (the game seats the person there), the computers follow.
+  for (const line of ['call SetPlayerController( Player(0), MAP_CONTROL_USER )', 'call StartMeleeAI( Player(1), "war3mapImported\\\\w3proj-testai-2.ai" )', "call W3ProjTestAI_Standard( Player(2) )", "call W3ProjTestAI_StartingUnits(", "call SetPlayerTeam( Player(2), 1 )"]) {
     if (!script.includes(line)) fail(`the test map's script lacks ${line}`);
   }
   if (/call MeleeStartingAI|call MeleeInitVictoryDefeat/.test(script)) fail("the test map's script still starts the map's own AIs or victory conditions");

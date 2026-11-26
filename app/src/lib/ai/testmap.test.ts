@@ -39,19 +39,28 @@ test("the control number: user, observer and AI as the game's AI files hold them
   assert.equal(encodeAiType(12, { ai: "Custom" }), 4);
 });
 
-test("a watching user, two computers: both computers take the map's first players, the observer a left-over one", () => {
+test("the watching user gets the first player, which the game seats the person in; the computers follow", () => {
   const plan = testPlan(grunt(), map(4));
-  assert.deepEqual(plan.slots.map((s) => [s.player, s.user, s.team, s.ai]), [[0, false, 0, "Current"], [1, false, 1, "Standard"]]);
-  assert.equal(plan.observer, 2);
-  assert.equal(plan.fogOff, true);
-  assert.equal(plan.noVictory, true);
+  assert.equal(plan.observer, 0);
+  assert.deepEqual(plan.slots.map((s) => [s.player, s.start, s.user, s.team, s.ai]), [[1, 0, false, 0, "Current"], [2, 1, false, 1, "Standard"]]);
+  assert.equal(plan.observerStart, 2, "a start nobody plays from");
+  assert.deepEqual([plan.fogOff, plan.noVictory], [true, true]);
   assert.match(plan.notes.join(" "), /Game Speed 3/);
   const info = testInfo(map(4), plan);
-  assert.deepEqual(info.players.map((p) => [p.id, p.controller, p.race]), [[0, 2, 2], [1, 2, 0], [2, 1, 1]]);
+  assert.deepEqual(info.players.map((p) => [p.id, p.controller, p.race, p.start[0]]), [[0, 1, 1, 200], [1, 2, 2, 0], [2, 2, 0, 100]]);
 });
 
-test("a map without a player left over gets one more for the observer", () => {
-  assert.equal(testPlan(grunt(), map(2)).observer, 2);
+test("a playing user listed after the computers still gets the first player, and keeps its row's start", () => {
+  const ai = { ...grunt(), players: [slot(0, 12, 0, 2), slot(1, 1, 1, 1), slot(2, 0, 1)] };
+  const plan = testPlan(ai, map(4));
+  assert.equal(plan.observer, null);
+  assert.deepEqual(plan.slots.map((s) => [s.player, s.start, s.user]), [[1, 0, false], [0, 1, true], [2, 2, false]]);
+});
+
+test("computers on every start: the observer is still first, the last computer takes a number the map doesn't use", () => {
+  const plan = testPlan(grunt(), map(2));
+  assert.deepEqual([plan.observer, plan.observerStart, plan.slots.map((s) => [s.player, s.start])], [0, 0, [[1, 0], [2, 1]]]);
+  assert.deepEqual(testInfo(map(2), plan).players.map((p) => [p.id, p.controller]), [[0, 1], [1, 2], [2, 2]]);
 });
 
 test("the configurations the World Editor refuses are refused in its words", () => {
@@ -66,17 +75,22 @@ test("the configurations the World Editor refuses are refused in its words", () 
 
 test("the script: each computer starts its own AI, the map's own start and the victory conditions go, config sets the slots", () => {
   const info = map(4), plan = testPlan(grunt(), info);
-  const out = testScript(script, info, plan, new Map([[0, "war3mapImported\\w3proj-testai-1.ai"]]), new Map([[0, 'Orc, "Grunt" Master'], [1, "random race, standard AI"]]));
+  const out = testScript(script, info, plan, new Map([[1, "war3mapImported\\w3proj-testai-2.ai"]]), new Map([[1, 'Orc, "Grunt" Master'], [2, "random race, standard AI"]]));
   assert.ok(!/call MeleeStartingAI|call MeleeInitVictoryDefeat/.test(out));
-  assert.ok(out.includes('call StartMeleeAI( Player(0), "war3mapImported\\\\w3proj-testai-1.ai" )'));
-  assert.ok(out.includes("call W3ProjTestAI_Standard( Player(1) )"));
+  assert.ok(out.includes('call StartMeleeAI( Player(1), "war3mapImported\\\\w3proj-testai-2.ai" )'));
+  assert.ok(out.includes("call W3ProjTestAI_Standard( Player(2) )"));
   assert.ok(out.includes('\\"Grunt\\" Master'), "a name with quotes stays one string");
   const config = out.slice(out.indexOf("function config"));
   assert.ok(config.indexOf("call SetPlayers( 3 )") > config.indexOf("call SetPlayers( 4 )"), "after the map's own settings");
-  for (const line of ["MAP_CONTROL_COMPUTER )", "call SetPlayerTeam( Player(1), 1 )", "call SetPlayerController( Player(3), MAP_CONTROL_NONE )"]) assert.ok(config.includes(line), line);
+  for (const line of ["MAP_CONTROL_COMPUTER )", "call SetPlayerTeam( Player(2), 1 )", "call SetPlayerController( Player(0), MAP_CONTROL_USER )", "call SetPlayerController( Player(3), MAP_CONTROL_NONE )"]) assert.ok(config.includes(line), line);
   const main = out.slice(out.indexOf("function main"), out.indexOf("function config"));
   assert.ok(main.indexOf("call W3ProjTestAI_Start()") > main.indexOf("RunInitializationTriggers"), "after the melee trigger");
   assert.ok(out.indexOf("function W3ProjTestAI_Start") < out.indexOf("function main "), "declared before main calls it");
+  assert.ok(out.includes("GetPlayerController(Player(1)) == MAP_CONTROL_COMPUTER then"), "an AI starts on a computer only");
+  // The watching user's player gets no starting units: the map's call goes to ours, declared before its caller.
+  assert.ok(/call W3ProjTestAI_StartingUnits\(\s*\)/.test(out) && !/call MeleeStartingUnits\(/.test(out));
+  assert.ok(out.indexOf("function W3ProjTestAI_StartingUnits") < out.indexOf("function Trig_Melee_Initialization_Actions"));
+  assert.ok(out.includes("index != 0 then"));
   assert.ok(out.includes("\r\n"), "keeps the script's line ends");
 });
 

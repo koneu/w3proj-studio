@@ -16,6 +16,8 @@ export interface MapInfo { flags: number; players: MapPlayer[]; [other: string]:
 export interface TestSlot {
   /** The game's player (0-based). */
   player: number;
+  /** The map's start location it plays from (0-based, in the order of the map's players). */
+  start: number;
   /** The row of the Test Configuration (1-based), for messages. */
   row: number;
   user: boolean;
@@ -29,6 +31,8 @@ export interface TestPlan {
   slots: TestSlot[];
   /** The player the user watches as, without units; null when the user plays. */
   observer: number | null;
+  /** The start location the watching user's player is given: one nobody plays from, when the map has one left. */
+  observerStart: number;
   fogOff: boolean;
   /** Victory and defeat conditions left out (asked for, or because a watching user without units would lose at once). */
   noVictory: boolean;
@@ -38,9 +42,13 @@ export interface TestPlan {
 
 const fail = (why: string): never => { throw new Error(`Test AI failed: ${why}`); };
 
-/** The slots of `ai`'s Test Configuration on `info`'s map, or why they can't be tested, in the World Editor's words.
- *  The playing slots take the map's players (and their start locations) in order; a watching user takes a player the
- *  map has left over, else one more. */
+/**
+ * The slots of `ai`'s Test Configuration on `info`'s map, or why they can't be tested, in the World Editor's words.
+ * The user always gets the first player (the map's lowest): the game seats the person who starts the map there,
+ * whatever that slot is set to. With the computers first, the user took the first computer's place and its AI never
+ * ran (the user's game, 2026-11-26: GruntMaster on Lost Temple showed one AI of two). The playing slots take the
+ * map's start locations in the order of the configuration.
+ */
 export function testPlan(ai: AiFile, info: MapInfo): TestPlan {
   if (!(info.flags & MELEE_FLAG)) {
     throw new Error("This map is not a Melee map. The Test AI feature only works with Melee maps. For custom maps, import the AI into the map and use Test Map.");
@@ -54,35 +62,62 @@ export function testPlan(ai: AiFile, info: MapInfo): TestPlan {
   if (!playing.length) fail("No non-observing players specified.");
   const places = [...info.players].sort((a, b) => a.id - b.id);
   if (playing.length > places.length) fail(`Too many non-observing players specified (the map has ${places.length}).`);
-  const slots = playing.map((r, i): TestSlot => ({ player: places[i].id, row: r.row, user: r.control === "User", team: r.p.team, source: r.p, ai: r.ai }));
-  let observer: number | null = null;
-  if (users[0].observer) {
-    const used = new Set(slots.map((s) => s.player));
-    const free = places.find((p) => !used.has(p.id))?.id ?? Array.from({ length: MAX_PLAYERS }, (_, i) => i).find((i) => !used.has(i));
-    if (free === undefined) fail("No player is left for the observer.");
-    observer = free!;
-  }
+  const watching = users[0].observer;
+  // The map's players first, then numbers it doesn't use.
+  const ids = [...places.map((p) => p.id), ...Array.from({ length: MAX_PLAYERS }, (_, i) => i).filter((i) => !places.some((p) => p.id === i))];
+  if (playing.length + (watching ? 1 : 0) > ids.length) fail("No player is left for the observer.");
+  // The user's player is the first one; the others follow in the configuration's order.
+  const seated = [users[0], ...playing.filter((r) => r !== users[0])];
+  const order = watching ? seated : seated.filter((r) => playing.includes(r));
+  const slots = playing.map((r, start): TestSlot => ({ player: ids[order.indexOf(r)], start, row: r.row, user: r.control === "User", team: r.p.team, source: r.p, ai: r.ai }));
+  const observer = watching ? ids[0] : null;
+  const observerStart = playing.length < places.length ? playing.length : 0;
   const asked = (ai.gameOptions & 2) !== 0;
   const notes: string[] = [];
   if (ai.gameSpeed !== 1) notes.push(`Game Speed ${ai.gameSpeed} × isn't set: a map's script can't run the game faster than its own speeds.`);
   if (slots.some((s) => !s.user && s.source.difficulty !== 1)) notes.push("AI Difficulty isn't set per player: the game takes Test Map's difficulty (setting testMap.difficulty).");
   if (observer !== null && !asked) notes.push("Victory and defeat conditions are left out: watching without units would lose at once.");
-  return { slots, observer, fogOff: (ai.gameOptions & 1) !== 0 || observer !== null, noVictory: asked || observer !== null, notes };
+  return { slots, observer, observerStart, fogOff: (ai.gameOptions & 1) !== 0 || observer !== null, noVictory: asked || observer !== null, notes };
 }
 
 /** war3map.w3i's race numbers for the configuration's race bits; 0: any. */
 const W3I_RACE: Record<number, number> = { 1: 1, 2: 2, 4: 3, 8: 4 };
 const RACE_PREF: Record<number, string> = { 1: "HUMAN", 2: "ORC", 4: "UNDEAD", 8: "NIGHTELF" };
 
-/** `info` with the players of `plan`: the playing slots on their map players, the observer; the others go. */
+/** `info` with the players of `plan`: each with its start location's entry, the observer too; the others go. */
 export function testInfo(info: MapInfo, plan: TestPlan): MapInfo {
-  const byId = new Map(info.players.map((p) => [p.id, p]));
-  const players: MapPlayer[] = plan.slots.map((s) => ({ ...byId.get(s.player)!, controller: s.user ? 1 : 2, race: W3I_RACE[s.source.race] ?? 0 }));
-  if (plan.observer !== null) {
-    const base = byId.get(plan.observer) ?? { ...info.players[0], name: "Observer" };
-    players.push({ ...base, id: plan.observer, controller: 1, race: 1 });
-  }
+  const places = [...info.players].sort((a, b) => a.id - b.id);
+  const players: MapPlayer[] = plan.slots.map((s) => ({ ...places[s.start], id: s.player, controller: s.user ? 1 : 2, race: W3I_RACE[s.source.race] ?? 0 }));
+  if (plan.observer !== null) players.push({ ...places[plan.observerStart], id: plan.observer, controller: 1, race: 1, name: "Observer" });
   return { ...info, players: players.sort((a, b) => a.id - b.id) };
+}
+
+/** MeleeStartingUnits of Blizzard.j, without the watching user's player: no units are made for it. */
+function startingUnits(observer: number): string[] {
+  const races = [["RACE_HUMAN", "Human"], ["RACE_ORC", "Orc"], ["RACE_UNDEAD", "Undead"], ["RACE_NIGHTELF", "NightElf"]];
+  return [
+    "function W3ProjTestAI_StartingUnits takes nothing returns nothing",
+    "    local integer index = 0",
+    "    local player p",
+    "    local location at",
+    "    local race r",
+    '    call Preloader( "scripts\\SharedMelee.pld" )',
+    "    loop",
+    "        set p = Player(index)",
+    `        if GetPlayerSlotState(p) == PLAYER_SLOT_STATE_PLAYING and index != ${observer} then`,
+    "            set at = GetStartLocationLoc(GetPlayerStartLocation(p))",
+    "            set r = GetPlayerRace(p)",
+    ...races.flatMap(([race, name], i) => [`            ${i ? "elseif" : "if"} r == ${race} then`, `                call MeleeStartingUnits${name}( p, at, true, true, true )`]),
+    "            else",
+    "                call MeleeStartingUnitsUnknownRace( p, at, true, true, true )",
+    "            endif",
+    "        endif",
+    "        set index = index + 1",
+    "        exitwhen index == bj_MAX_PLAYERS",
+    "    endloop",
+    "endfunction",
+    "",
+  ];
 }
 
 /** A string as JASS writes it. */
@@ -107,6 +142,16 @@ export function testScript(jass: string, info: MapInfo, plan: TestPlan, scripts:
   let lines = jass.split(/\r?\n/);
   const drop = ["MeleeStartingAI", ...(plan.noVictory ? ["MeleeInitVictoryDefeat"] : [])];
   lines = lines.filter((l) => !drop.some((fn) => new RegExp(`^\\s*call\\s+${fn}\\s*\\(\\s*\\)\\s*(//.*)?$`).test(l)));
+  if (plan.observer !== null) {
+    const call = /^(\s*call\s+)MeleeStartingUnits(\s*\(\s*\).*)$/;
+    const first = lines.findIndex((l) => call.test(l));
+    if (first >= 0) {
+      lines = lines.map((l) => l.replace(call, "$1W3ProjTestAI_StartingUnits$2"));
+      let at = first;
+      while (at > 0 && !/^\s*function\s+\S+\s+takes\b/.test(lines[at])) at--;
+      lines.splice(at, 0, ...startingUnits(plan.observer));
+    }
+  }
 
   const everyone = [...plan.slots.map((s) => s.player), ...(plan.observer === null ? [] : [plan.observer])];
   const setup: string[] = [
@@ -118,19 +163,16 @@ export function testScript(jass: string, info: MapInfo, plan: TestPlan, scripts:
   for (const p of info.players.filter((p) => !everyone.includes(p.id))) {
     setup.push(`    call SetPlayerController( Player(${p.id}), MAP_CONTROL_NONE )`, `    call SetPlayerSlotAvailable( Player(${p.id}), MAP_CONTROL_NONE )`);
   }
-  const starts = [...info.players].sort((a, b) => a.id - b.id).map((p) => p.id);
-  /** The map's start location of a player: the config defines them in the players' order. */
-  const startOf = (player: number) => Math.max(0, starts.indexOf(player));
   for (const s of plan.slots) {
     const pl = `Player(${s.player})`, control = s.user ? "USER" : "COMPUTER";
-    setup.push(`    call SetPlayerStartLocation( ${pl}, ${startOf(s.player)} )`, `    call ForcePlayerStartLocation( ${pl}, ${startOf(s.player)} )`,
+    setup.push(`    call SetPlayerStartLocation( ${pl}, ${s.start} )`, `    call ForcePlayerStartLocation( ${pl}, ${s.start} )`,
       `    call SetPlayerColor( ${pl}, ConvertPlayerColor(${s.source.color}) )`, `    call SetPlayerRacePreference( ${pl}, RACE_PREF_${RACE_PREF[s.source.race] ?? "RANDOM"} )`,
       `    call SetPlayerRaceSelectable( ${pl}, true )`, `    call SetPlayerController( ${pl}, MAP_CONTROL_${control} )`,
       `    call SetPlayerSlotAvailable( ${pl}, MAP_CONTROL_${control} )`, `    call SetPlayerTeam( ${pl}, ${s.team} )`);
   }
   if (plan.observer !== null) {
     const pl = `Player(${plan.observer})`;
-    setup.push(`    call SetPlayerStartLocation( ${pl}, ${startOf(plan.observer)} )`, `    call SetPlayerController( ${pl}, MAP_CONTROL_USER )`,
+    setup.push(`    call SetPlayerStartLocation( ${pl}, ${plan.observerStart} )`, `    call SetPlayerController( ${pl}, MAP_CONTROL_USER )`,
       `    call SetPlayerSlotAvailable( ${pl}, MAP_CONTROL_USER )`, `    call SetPlayerTeam( ${pl}, ${Math.max(0, ...plan.slots.map((s) => s.team)) + 1} )`);
   }
   lines.splice(endOf(lines, "config"), 0, ...setup);
@@ -157,7 +199,13 @@ export function testScript(jass: string, info: MapInfo, plan: TestPlan, scripts:
     "    endif",
     "endfunction",
     "",
+    "function W3ProjTestAI_Report takes nothing returns nothing",
+    '    call W3ProjTestAI_Say( "Test AI after 60 seconds:" )',
+    ...plan.slots.filter((s) => !s.user).map((s) => `    call W3ProjTestAI_Say( "player ${s.player + 1}: units and buildings " + I2S(GetPlayerUnitCount(Player(${s.player}), true) + GetPlayerStructureCount(Player(${s.player}), true)) + ", gold " + I2S(GetPlayerState(Player(${s.player}), PLAYER_STATE_RESOURCE_GOLD)) + ", wood " + I2S(GetPlayerState(Player(${s.player}), PLAYER_STATE_RESOURCE_LUMBER)) )`),
+    "endfunction",
+    "",
     "function W3ProjTestAI_Start takes nothing returns nothing",
+    '    call W3ProjTestAI_Say( "Test AI by W3Proj Studio: starting" )',
   ];
   for (const a of plan.slots) {
     for (const b of plan.slots) {
@@ -188,15 +236,17 @@ export function testScript(jass: string, info: MapInfo, plan: TestPlan, scripts:
   }
   if (plan.fogOff) start.push("    call FogEnable( false )", "    call FogMaskEnable( false )");
   for (const s of plan.slots.filter((s) => !s.user)) {
-    const pl = `Player(${s.player})`, file = scripts.get(s.player);
-    start.push(`    if GetPlayerSlotState(${pl}) == PLAYER_SLOT_STATE_PLAYING then`,
+    const pl = `Player(${s.player})`, file = scripts.get(s.player), who = `player ${s.player + 1}, team ${s.team + 1}: ${names.get(s.player) ?? s.ai}`;
+    // Only ever on a computer: never on a slot a person sits in. Said before the AI starts, so it shows even if that fails.
+    start.push(`    if GetPlayerSlotState(${pl}) == PLAYER_SLOT_STATE_PLAYING and GetPlayerController(${pl}) == MAP_CONTROL_COMPUTER then`,
+      `        call W3ProjTestAI_Say( ${quoted(`Test AI: ${who}`)} )`,
       file ? `        call StartMeleeAI( ${pl}, ${quoted(file)} )` : `        call W3ProjTestAI_Standard( ${pl} )`,
       `        call ShareEverythingWithTeamAI( ${pl} )`,
-      `        call W3ProjTestAI_Say( ${quoted(`Test AI: player ${s.player + 1}, team ${s.team + 1}: ${names.get(s.player) ?? s.ai}`)} )`,
       "    else",
-      `        call W3ProjTestAI_Say( ${quoted(`Test AI: player ${s.player + 1} did NOT join (${names.get(s.player) ?? s.ai})`)} )`,
+      `        call W3ProjTestAI_Say( ${quoted(`Test AI: NOT started, the slot has no computer: ${who}`)} )`,
       "    endif");
   }
+  start.push("    call TimerStart( CreateTimer(), 60.0, false, function W3ProjTestAI_Report )");
   start.push("endfunction", "");
 
   const mainAt = lines.findIndex((l) => /^\s*function\s+main\s+takes\b/.test(l));

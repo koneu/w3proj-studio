@@ -28,6 +28,8 @@ Sound flags and new sounds (branch sound-flags-we, 2026-11-15; spec `sound-flags
   watching user shows Observer: bit 1 of the control number (lib/ai/slots.ts). Its rules and messages are
   UI\WorldEditStrings.txt WESTRING_ERROR_TESTAI_*. How the editor hands the setup to the game isn't known (its Test AI
   button wasn't pressed: the we-drive farm holds the game's exe). Studio makes a copy of the map instead
-  (lib/ai/testmap.ts): the w3i's players, the script's config and an own AI start in place of MeleeStartingAI. In the
+  (lib/ai/testmap.ts): the w3i's players, the script's config and an own AI start in place of MeleeStartingAI. The user must
+  take the first player: the game seats the person who starts the map there, whatever the slot is set to (with the
+  computers first, the user replaced the first one and one AI of two appeared; the user's game, 2026-11-26). In the
   game (user, a hand-made map of the same shape) the computer slot joins and the imported AI runs. Not set: Game Speed
   (a script has only the named speeds) and per-player AI Difficulty.
