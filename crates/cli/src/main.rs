@@ -660,6 +660,11 @@ enum Cmd {
         #[arg(long, requires = "check")]
         json: bool,
     },
+    /// Print a project's object data as JSON, as W3Proj Studio reads it: each packed file's tables (format
+    /// w3proj.objects/1) under its flat name (`war3map.w3u.json`, `war3mapSkin.w3a.json`, a campaign's
+    /// `war3campaign.w3u.json`), assembled from map/objects/ (one file per object), or a project's flat files as they
+    /// are. Exit 1 when a file can't be read.
+    Objects { project: PathBuf },
     /// MCP server over stdin and stdout: AI clients start this to use the running W3Proj Studio.
     Mcp,
     /// The app's backend commands over stdin and stdout, framed as `w3proj rebuild` answers them: for the app's
@@ -1116,6 +1121,25 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Triggers { project, .. } => {
             let read = backend::triggers::read(&project.to_string_lossy(), &extra).map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string(&read)?);
+        }
+        Cmd::Objects { project } => {
+            // Through the app's file layer (backend), so a flat file reads as the app reads it in either layout.
+            let map_dir = project.join(w3proj::project::MAP_DIR);
+            let prefix = w3proj::object_layout::Prefix::of_map_dir(&map_dir)?;
+            let mut out = serde_json::Map::new();
+            for kind in w3proj::object_layout::KINDS {
+                for half in 0..2 {
+                    let name = prefix.flat(kind, half);
+                    let path = map_dir.join(&name);
+                    if !backend::exists(&path).map_err(anyhow::Error::msg)? {
+                        continue;
+                    }
+                    let bytes = backend::read_bytes(&path).map_err(anyhow::Error::msg)?;
+                    let v: serde_json::Value = serde_json::from_slice(&bytes).with_context(|| format!("map/{name}"))?;
+                    out.insert(name, v);
+                }
+            }
+            println!("{}", serde_json::Value::Object(out));
         }
         Cmd::Ls { map } => {
             let archive = mpq::Archive::open(&map)?;

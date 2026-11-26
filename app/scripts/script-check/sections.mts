@@ -2,6 +2,8 @@
 // Run from a folder with ws/<n>/map (unpacked maps) and the game tables (see README.md).
 // Args: <path to app/src/lib> [section to show diffs for] [number of diffs]
 import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { printSections } from "./report.mjs";
 const L = process.argv[2];
@@ -72,7 +74,19 @@ for (const m of maps) {
   for (const x of p) luaBroken.push(`${m} lua: ${x.message} (line ${src.slice(0, x.from).split("\n").length})`);
 }
 let shown = 0;
-const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
+/** A map's object data (`war3map.w3u.json`, … by name) as W3Proj Studio reads it, where the map keeps it in map/objects/
+ *  (one file per object): `w3proj objects` assembles it (W3PROJ_BIN, the CLI that unpacked the maps). */
+const objectsCache = new Map<string, Record<string, unknown>>();
+const objectsOf = (d: string): Record<string, unknown> => {
+  let got = objectsCache.get(d);
+  if (!got) {
+    got = existsSync(`${d}/objects/objects.json`) ? JSON.parse(execFileSync(process.env.W3PROJ_BIN!, ["objects", dirname(d)], { encoding: "utf8", maxBuffer: 1 << 28 })) : {};
+    objectsCache.clear();
+    objectsCache.set(d, got!);
+  }
+  return got!;
+};
+const json = (d: string, n: string) => objectsOf(d)[`${n}.json`] ?? (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
 const norm = (x: string) => x.replace(/\s+$/g, "");
 
 for (const m of maps) {

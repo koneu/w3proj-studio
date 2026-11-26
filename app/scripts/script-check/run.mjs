@@ -111,7 +111,8 @@ async function check(script, shards, echo, ...args) {
     rmSync(out, { force: true });
     return new Promise((done) => {
       const p = spawn(process.execPath, ["--no-warnings", "--import", new URL("./tsregister.mjs", import.meta.url).href, join(here, script), join(app, "src", "lib"), ...args], {
-        cwd: work, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SCRIPT_CHECK_JSON: out, SCRIPT_CHECK_SHARD: `${i}/${shards}` },
+        // W3PROJ_BIN: the checks read a map's object folders (map/objects/) through `w3proj objects`.
+        cwd: work, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, W3PROJ_BIN: bin, SCRIPT_CHECK_JSON: out, SCRIPT_CHECK_SHARD: `${i}/${shards}` },
       });
       let stdout = "", stderr = "";
       p.stdout.on("data", (d) => (stdout += d));

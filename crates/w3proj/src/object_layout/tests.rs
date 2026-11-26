@@ -491,6 +491,20 @@ fn the_flat_files_read_and_write_through_the_folder() {
     assert_eq!(std::fs::read(map.join("objects/units/custom/h001.json")).unwrap(), by_hand);
     let w = write_flat(&map, UNITS, 0, &objdata::to_json(&fewer, false).unwrap()).unwrap();
     assert_eq!(w.removed, ["objects/units/custom/h004.json"]);
+    // A new object where the folder wouldn't put it (H000 after h001: unlisted objects come by id): a read gives back what
+    // was written while the files are as the write left them, and the folder's order once they changed.
+    let placed = packed(3, &[], &[e(b"hfoo", b"h001", vec![]), e(b"Hpal", b"H000", vec![])]);
+    let placed_json = objdata::to_json(&placed, false).unwrap();
+    let w = write_flat(&map, UNITS, 0, &placed_json).unwrap();
+    assert_eq!(w.written, ["objects/units/custom/H000~8.json"], "not listed in order.txt");
+    assert_eq!(read_flat(&map, UNITS, 0).unwrap().unwrap(), placed_json);
+    let skin_before = read_flat(&map, UNITS, 1).unwrap().unwrap();
+    std::fs::write(map.join("objects/units/custom/H000~8.json"), b"{\"id\": \"H000\", \"base\": \"Hpal\", \"data\": {}}").unwrap();
+    let by_id = packed(3, &[], &[e(b"Hpal", b"H000", vec![]), e(b"hfoo", b"h001", vec![])]);
+    assert_eq!(read_flat(&map, UNITS, 0).unwrap().unwrap(), objdata::to_json(&by_id, false).unwrap(), "changed outside: the folder's order");
+    assert_eq!(read_flat(&map, UNITS, 1).unwrap().unwrap(), skin_before, "the other half as it was");
+    let w = write_flat(&map, UNITS, 0, &objdata::to_json(&fewer, false).unwrap()).unwrap();
+    assert_eq!(w.removed, ["objects/units/custom/H000~8.json"]);
     // A new kind: listed in objects.json.
     let items = packed(2, &[], &[e(b"ratc", b"I000", vec![])]);
     let w = write_flat(&map, KINDS[1], 0, &objdata::to_json(&items, false).unwrap()).unwrap();

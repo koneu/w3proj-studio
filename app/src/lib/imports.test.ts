@@ -19,6 +19,10 @@ test("files of the map folder the list doesn't name are unlisted; the map's own 
   const folders = ["map/triggers/triggers.json", "map/triggers/order.txt", "map/triggers/Setup/Start.gui.json", "map/triggers/Setup/Lib.j"];
   assert.deepEqual(unlistedFiles(folders, [], "war3mapImported"), []);
   assert.deepEqual(unlistedFiles(["map/triggers/Lib.j"], [], "war3mapImported"), ["map/triggers/Lib.j"]);
+  // The object folders are the packed object files; an import into the game's own Objects\ folder is an import.
+  const objects = ["map/objects/objects.json", "map/objects/units/custom/H000~8.json", "map/objects/units/custom/order.txt", "map/war3map.w3u.json", "map/Objects/InventoryItems/x.blp"];
+  assert.deepEqual(unlistedFiles(objects, [], "war3mapImported"), ["map/Objects/InventoryItems/x.blp"]);
+  assert.deepEqual(unlistedFiles(["map/objects/units/custom/h000.json"], [], "war3mapImported"), ["map/objects/units/custom/h000.json"], "without objects.json they aren't the layout");
 });
 
 // The World Editor's save drops a war3mapPreview.tga the import list doesn't name and keeps a listed one (we-compare

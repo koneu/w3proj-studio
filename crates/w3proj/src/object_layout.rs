@@ -857,10 +857,66 @@ pub fn flat_view(map_dir: &Path, name: &str) -> Result<Option<(Kind, usize)>> {
 
 /// The project's `objects.json` on disk; None when it isn't there. One that can't be read is an error.
 fn read_root(map_dir: &Path) -> Result<Option<Versions>> {
+    Ok(read_root_bytes(map_dir)?.map(|(v, _)| v))
+}
+
+/// `read_root`, with the file's bytes.
+fn read_root_bytes(map_dir: &Path) -> Result<Option<(Versions, Vec<u8>)>> {
     match std::fs::read(crate::paths::join_rel(map_dir, ROOT_FILE)) {
-        Ok(b) => parse_root(&b).map(Some),
+        Ok(b) => Ok(Some((parse_root(&b)?, b))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(bad(format!("map/{ROOT_FILE} can't be read: {e}"))),
+    }
+}
+
+/// A fingerprint of a kind's files as they are (`objects.json` and the kind's folder: names and bytes).
+fn fingerprint(root: &[u8], files: &Files) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut h);
+    files.hash(&mut h);
+    h.finish()
+}
+
+/// What the app last wrote of each flat file of one project's `map/` folder (the kind's index in `KINDS` and the half →
+/// the fingerprint of the kind's files the write left, and the bytes written). While the files are as that write left
+/// them, a read gives back those bytes: the folder holds the same objects, but not their order where the app put a new
+/// one elsewhere than the folder would (unlisted objects come by id), so without it a read after a save would differ
+/// from what was saved (an MCP undo would take that for a change since). Only the latest `map/` folder is kept.
+type LastWritten = HashMap<(usize, usize), (u64, Vec<u8>)>;
+static LAST_WRITTEN: std::sync::Mutex<Option<(std::path::PathBuf, LastWritten)>> = std::sync::Mutex::new(None);
+
+/// What the app last wrote of a flat file, if the kind's files are still as that write left them (`LAST_WRITTEN`).
+fn last_written(map_dir: &Path, key: (usize, usize), print: u64) -> Option<Vec<u8>> {
+    let last = LAST_WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+    let (dir, entries) = last.as_ref()?;
+    let (p, bytes) = entries.get(&key)?;
+    (dir == map_dir && *p == print).then(|| bytes.clone())
+}
+
+/// Notes a change of a kind's files from fingerprint `old` to `new`: the half written (`wrote`: its bytes, None for a
+/// delete) has them now, the other half's note stays good where it was good before (its content didn't change).
+fn note_written(map_dir: &Path, kind: usize, half: usize, wrote: Option<&[u8]>, old: u64, new: u64) {
+    let mut last = LAST_WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+    if last.as_ref().is_none_or(|(dir, _)| dir != map_dir) {
+        *last = Some((map_dir.to_path_buf(), HashMap::new()));
+    }
+    let entries = &mut last.as_mut().expect("set above").1;
+    match wrote {
+        Some(b) => {
+            entries.insert((kind, half), (new, b.to_vec()));
+        }
+        None => {
+            entries.remove(&(kind, half));
+        }
+    }
+    let other = (kind, 1 - half);
+    match entries.get_mut(&other) {
+        Some(e) if e.0 == old => e.0 = new,
+        Some(_) => {
+            entries.remove(&other);
+        }
+        None => {}
     }
 }
 
@@ -911,13 +967,17 @@ fn flat_text(f: &ObjectFile) -> Result<Vec<u8>> {
 /// project's `map/objects/`; None when `objects.json` doesn't list that packed file. Anything the folder has wrong is an
 /// error naming the file, never an empty table.
 pub fn read_flat(map_dir: &Path, kind: Kind, half: usize) -> Result<Option<Vec<u8>>> {
-    let Some(root) = read_root(map_dir)? else { return Ok(None) };
+    let Some((root, root_bytes)) = read_root_bytes(map_dir)? else { return Ok(None) };
     let i = KINDS.iter().position(|k| *k == kind).expect("one of KINDS");
     if root[i][half].is_none() {
         return Ok(None);
     }
     let prefix = Prefix::of_map_dir(map_dir)?;
     let files = read_kind_disk(map_dir, kind)?;
+    // Read as the app wrote it last, while the files are as that write left them (`LAST_WRITTEN`).
+    if let Some(bytes) = last_written(map_dir, (i, half), fingerprint(&root_bytes, &files)) {
+        return Ok(Some(bytes));
+    }
     let data = parse_kind(kind, prefix, root[i], &files, &mut Vec::new())?;
     match data.to_flat().into_iter().nth(half).flatten() {
         Some(f) => flat_text(&f).map(Some),
@@ -948,7 +1008,7 @@ pub fn write_flat(map_dir: &Path, kind: Kind, half: usize, bytes: &[u8]) -> Resu
     }
     objdata::encode(&new, kind.levels)?;
     let _one = WRITES.lock().unwrap_or_else(|e| e.into_inner());
-    change(map_dir, kind, |data, prefix| {
+    change(map_dir, kind, half, Some(bytes), |data, prefix| {
         data.versions[half] = Some(new.version);
         let name = prefix.flat(kind, half);
         for (t, list) in [new.original, new.custom].into_iter().enumerate() {
@@ -1002,7 +1062,7 @@ pub fn write_flat(map_dir: &Path, kind: Kind, half: usize, bytes: &[u8]) -> Resu
 /// half goes (an object left with neither, with its file), and `objects.json` no longer lists it.
 pub fn delete_flat(map_dir: &Path, kind: Kind, half: usize) -> Result<Written> {
     let _one = WRITES.lock().unwrap_or_else(|e| e.into_inner());
-    change(map_dir, kind, |data, _| {
+    change(map_dir, kind, half, None, |data, _| {
         data.versions[half] = None;
         for objs in &mut data.tables {
             for o in objs.iter_mut() {
@@ -1014,10 +1074,13 @@ pub fn delete_flat(map_dir: &Path, kind: Kind, half: usize) -> Result<Written> {
 }
 
 /// Reads a kind from disk, lets `edit` change it, and writes back what changed: objects with neither half go (and
-/// their `order.txt` lines), `objects.json` is written when its versions changed. The caller holds `WRITES`.
-fn change(map_dir: &Path, kind: Kind, edit: impl FnOnce(&mut KindData, Prefix) -> Result<()>) -> Result<Written> {
+/// their `order.txt` lines), `objects.json` is written when its versions changed. `half` and `wrote`: the flat file the
+/// change is a write (its bytes) or a delete (None) of, for `LAST_WRITTEN`. The caller holds `WRITES`.
+fn change(map_dir: &Path, kind: Kind, half: usize, wrote: Option<&[u8]>, edit: impl FnOnce(&mut KindData, Prefix) -> Result<()>) -> Result<Written> {
     let prefix = Prefix::of_map_dir(map_dir)?;
-    let old_root = read_root(map_dir)?;
+    let old = read_root_bytes(map_dir)?;
+    let old_root = old.as_ref().map(|(v, _)| *v);
+    let old_root_bytes = old.map(|(_, b)| b).unwrap_or_default();
     let mut root = old_root.unwrap_or_default();
     let i = KINDS.iter().position(|k| *k == kind).expect("one of KINDS");
     let old_files = read_kind_disk(map_dir, kind)?;
@@ -1047,6 +1110,10 @@ fn change(map_dir: &Path, kind: Kind, edit: impl FnOnce(&mut KindData, Prefix) -
         FOLDER.prune_above(map_dir, p);
         removed.push(p.clone());
     }
+    // The kind's files as this change left them: those it kept as they were on disk, the others as written.
+    let new_root_bytes = files.remove(ROOT_FILE).unwrap_or(old_root_bytes.clone());
+    let now: Files = files.into_iter().map(|(p, b)| if unchanged.contains(&p) { let kept = old_files[&p].clone(); (p, kept) } else { (p, b) }).collect();
+    note_written(map_dir, i, half, wrote, fingerprint(&old_root_bytes, &old_files), fingerprint(&new_root_bytes, &now));
     Ok(Written { written, removed })
 }
 

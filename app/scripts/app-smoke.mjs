@@ -170,19 +170,48 @@ const setScriptMode = (page, root, mode) => page.evaluate(`w3.backend.invoke("sc
 /** The map/ files of the project at `root` by hash (snapshot), with its triggers as the map holds them: map/triggers/ or
  *  a raw war3map.wtg and war3map.wct give way to the war3map.wtg and war3map.wct the CLI packs from the project. So a
  *  project that keeps them in either form (an import is an import: its trigger files store ids, the fixture's don't)
- *  compares with another by what goes into the map. */
+ *  compares with another by what goes into the map. The object data likewise: map/objects/ or the flat files give way to
+ *  the packed object files. */
 function triggersAsPacked(root) {
   const files = snapshot(join(root, "map"));
-  for (const f of [...files.keys()]) if (f.startsWith("triggers/") || f === "war3map.wtg" || f === "war3map.wct") files.delete(f);
+  // The object data too: an unpack keeps it in map/objects/ (one file per object), the fixture in the flat files.
+  const objectFile = /^(war3map(Skin)?\.w3[utbdahq](\.json)?|objects\/(objects\.json|(units|items|destructables|doodads|abilities|buffs|upgrades)\/.+))$/;
+  for (const f of [...files.keys()]) if (f.startsWith("triggers/") || f === "war3map.wtg" || f === "war3map.wct" || objectFile.test(f)) files.delete(f);
   const out = join(work, `triggers-as-packed-${createHash("sha256").update(root).digest("hex").slice(0, 8)}.w3x`);
   const packed = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",out, "--game", "none"], { encoding: "utf8" });
   if (packed.status !== 0) throw new Error(`the CLI can't pack ${root}: ${packed.stderr}`);
-  for (const f of ["war3map.wtg", "war3map.wct"]) {
+  const objectNames = ["", "Skin"].flatMap((s) => ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"].map((e) => `war3map${s}.${e}`));
+  for (const f of ["war3map.wtg", "war3map.wct", ...objectNames]) {
     const r = spawnSync(cli, ["cat", out, f]);
     if (r.status === 0) files.set(f, createHash("sha256").update(r.stdout).digest("hex"));
   }
   rmSync(out, { force: true });
   return files;
+}
+/** The object data's flat files (war3map.w3u.json, … in map/): in a project that keeps its objects in map/objects/ (one
+ *  file per object, as an unpack and a new map write them) the app's file layer makes them from those files. */
+const OBJECT_FLAT = /^war3(map|campaign)(Skin)?\.w3[utbdahq]\.json$/;
+/** The flat object files of the project at `root` as the app reads them, read by the CLI from the disk (`w3proj objects`):
+ *  { "war3map.w3u.json": …, … }; null for a project without map/objects/. Throws when they can't be read. */
+function cliObjects(root) {
+  if (!existsSync(join(root, "map", "objects", "objects.json"))) return null;
+  const r = spawnSync(cli, ["objects", root], { encoding: "utf8", maxBuffer: 1 << 28 });
+  if (r.status !== 0) throw new Error(`w3proj objects ${root}: ${r.stderr || r.error}`);
+  return JSON.parse(r.stdout);
+}
+/** A JSON file of the map/ folder of the project at `root` as the app reads it: an object data file from map/objects/
+ *  where the project keeps its objects there (`cliObjects`), any other from the disk. Throws as a read of a missing file
+ *  does (ENOENT) when it isn't there. */
+function readMapJson(root, file) {
+  const objects = OBJECT_FLAT.test(file) ? cliObjects(root) : null;
+  if (!objects) return JSON.parse(readFileSync(join(root, "map", file), "utf8"));
+  if (!(file in objects)) throw Object.assign(new Error(`ENOENT: no such file or directory, open '${join(root, "map", file)}'`), { code: "ENOENT" });
+  return objects[file];
+}
+/** Whether the project at `root` has the map/ file as the app sees it (an object data file: `readMapJson`). */
+function mapFileThere(root, file) {
+  const objects = OBJECT_FLAT.test(file) ? cliObjects(root) : null;
+  return objects ? file in objects : existsSync(join(root, "map", file));
 }
 /** The trigger folders of the project at `root` as the app reads them, read by the CLI from the disk (`w3proj triggers`,
  *  the backend's own read): { file, custom, files, … }; null without them. Throws when they can't be read. */
@@ -1344,7 +1373,8 @@ async function heightKit(page, name) {
     run: (id, ...args) => page.evaluate(`w3.commands.execute(${lit(id)}, ...${lit(args)}).then(() => null, (e) => String(e))`),
     /** The app at rest first (an edit by a click or key may still be landing), then saved, then at rest again. */
     save: async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); },
-    read: (file) => JSON.parse(readFileSync(join(root, "map", file), "utf8")),
+    /** A map/ JSON file as the app reads it (`readMapJson`: the object data from map/objects/), from the disk. */
+    read: (file) => readMapJson(root, file),
     /** The trigger folders as the app reads them (`w3proj triggers`: { file, custom, files, … }), from the disk. */
     triggers: () => cliTriggers(root),
     doodads: () => kit.read("war3map.doo.json").doodads,
@@ -8945,10 +8975,9 @@ async function retype(hands, selector, text) {
 
 /** The Object Editor: finds the Footman, changes its hit points, saves. */
 async function objectByHand(page, hands, root, fail) {
-  const file = join(root, "map", "war3map.w3u.json");
   // A new map has no unit data yet: the kind's row in the side view makes the file.
   await page.evaluate(`w3.editors.closeAll()`);
-  if (!existsSync(file)) await page.evaluate(`w3.workspace.writeText("map/war3map.w3u.json", JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
+  if (!mapFileThere(root, "war3map.w3u.json")) await page.evaluate(`w3.workspace.writeText("map/war3map.w3u.json", JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
   await page.evaluate(`w3.editors.open("map/war3map.w3u.json")`);
   await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
 
@@ -8966,17 +8995,17 @@ async function objectByHand(page, hands, root, fail) {
   await hands.type("uhpm");
   await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
   await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "777");
-  await limits(page, hands, file, fail);
+  await limits(page, hands, root, fail);
   if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("changing a field didn't mark the file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
   await settled(page);
-  const objects = JSON.parse(readFileSync(file, "utf8"));
+  const objects = readMapJson(root, "war3map.w3u.json");
   const mod = objects.original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
   if (mod?.value !== 777) fail(`the Footman's hit points are ${lit(mod)}`);
 }
 
 /** Hit points stop at 500000 in the World Editor: past that the field warns and still saves. */
-async function limits(page, hands, file, fail) {
+async function limits(page, hands, root, fail) {
   const flagged = () => page.evaluate(`document.querySelectorAll("tr.obj-over").length`);
   const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)").title`);
   if (await flagged()) fail("777 hit points were marked as outside the limits");
@@ -8986,7 +9015,7 @@ async function limits(page, hands, file, fail) {
   if (!/Outside/.test(await tooltip())) fail(`the warning's tooltip is "${await tooltip()}"`);
   await page.evaluate(`w3.editors.saveAll()`);
   await settled(page);
-  const saved = JSON.parse(readFileSync(file, "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
+  const saved = readMapJson(root, "war3map.w3u.json").original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
   if (saved?.value !== 999999) fail(`a value past the limit was saved as ${lit(saved)}`);
   // The filter, with no field search in the way.
   await page.evaluate(`(() => { const e = document.querySelector("input.obj-field-search"); e.value = ""; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
@@ -9287,7 +9316,7 @@ async function typedFieldSave(page, found) {
     const w3u = "map/war3map.w3u.json";
     const meleeStart = JSON.parse(readFileSync(join(root, "map/war3map.w3i.json"), "utf8")).flags & 4;
     await page.evaluate(`w3.editors.closeAll()`);
-    if (!existsSync(join(root, w3u))) await page.evaluate(`w3.workspace.writeText(${lit(w3u)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
+    if (!mapFileThere(root, "war3map.w3u.json")) await page.evaluate(`w3.workspace.writeText(${lit(w3u)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
     await page.evaluate(`w3.editors.open(${lit(w3u)})`);
     await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
     await hands.click(".obj-toolbar-buttons button", "Edit standard…");
@@ -9302,7 +9331,7 @@ async function typedFieldSave(page, found) {
     await hands.type("uhpm");
     await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
     await typeAndSave("the Footman's hit points", `document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)")`, "555");
-    const hp = () => JSON.parse(readFileSync(join(root, w3u), "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm")?.value;
+    const hp = () => readMapJson(root, "war3map.w3u.json").original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm")?.value;
     await until("the typed hit points saved", () => hp() === 555, 5000).catch(() => fail(`Ctrl+S right after typing 555 hit points saved ${lit(hp())}`));
     await settled(page);
     if (await dirty(w3u)) fail("Ctrl+S right after typing in the Object Editor left it unsaved");
@@ -11459,7 +11488,7 @@ async function objectCopy(page, found) {
   mkdirSync(folder, { recursive: true });
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
   const rootOf = () => page.evaluate(`w3.workspace.project()?.root`);
-  const readIn = (root, file) => { const p = join(root, "map", file); return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : { custom: [], original: [] }; };
+  const readIn = (root, file) => (mapFileThere(root, file) ? readMapJson(root, file) : { custom: [], original: [] });
   const customs = (root, ext) => readIn(root, `war3map.${ext}.json`).custom;
   const idOf = async (name, args) => JSON.parse(await tool(name, args)).id;
   const save = async () => { await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
@@ -17313,8 +17342,8 @@ async function objectValueRange(page, found) {
     // Something set by hand first, so the file holds the unit's mods.
     await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "uhpm", value: 500 }, { field: "ucol", value: 20 }] });
     await k.save();
-    const w3uFile = join(k.root, "map", "war3map.w3u.json");
-    const before = readFileSync(w3uFile);
+    const w3uNow = () => JSON.stringify(k.read("war3map.w3u.json"));
+    const before = w3uNow();
     const refusedBy = (changes) => k.tool("set_object_fields", { kind: "units", id: unit, changes }).then(() => null, (e) => e.message);
     const intWhy = await refusedBy([{ field: "uhpm", value: 99999999999 }]);
     if (!/range of a whole number/.test(intWhy ?? "")) fail(`set_object_fields with hit points 99999999999 gave ${lit(intWhy)}`);
@@ -17335,7 +17364,7 @@ async function objectValueRange(page, found) {
     if (!warnings.some((w) => /^1e39 is past the range of a real number/.test(w))) fail(`typed 1e39 warned ${lit(warnings)}`);
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)) fail("the refused values made the unit file unsaved");
     await k.save();
-    if (!readFileSync(w3uFile).equals(before)) fail("the refused values changed war3map.w3u.json");
+    if (w3uNow() !== before) fail("the refused values changed war3map.w3u.json");
     // The control: a value in range is taken, so the refusals above aren't the editor refusing everything.
     if ((await type("uhpm", "2147483647")) !== false) fail("typing 2147483647 into hit points was refused");
     await k.save();

@@ -115,6 +115,29 @@ fn pack_unpack_pack_changes_nothing() {
     }
 }
 
+/// `w3proj objects`: the object data as W3Proj Studio reads it, assembled from map/objects/ in an unpacked project and
+/// as the files are in a project of the flat layout (the fixture): the same tables either way.
+#[test]
+fn objects_prints_the_flat_tables_from_either_layout() {
+    let dir = workdir("objects");
+    let (map, project) = (dir.join("mini.w3x"), dir.join("project"));
+    pack(&fixture(), &map);
+    unpack(&map, &project);
+    assert!(project.join("map/objects/objects.json").is_file() && !project.join("map/war3map.w3u.json").exists());
+    let read = |p: &Path| serde_json::from_str::<serde_json::Value>(&ok(&["objects", s(p)])).unwrap();
+    let (folders, flat) = (read(&project), read(&fixture()));
+    let names: Vec<&String> = folders.as_object().unwrap().keys().collect();
+    assert_eq!(names, ["war3map.w3u.json", "war3map.w3t.json", "war3map.w3b.json", "war3map.w3d.json", "war3map.w3a.json", "war3map.w3h.json", "war3map.w3q.json"]);
+    assert_eq!(folders, flat);
+    let w3u: serde_json::Value = serde_json::from_slice(&fs::read(fixture().join("map/war3map.w3u.json")).unwrap()).unwrap();
+    assert_eq!(folders["war3map.w3u.json"], w3u);
+    // A file that can't be read: exit 1, naming it.
+    fs::write(project.join("map/objects/units/original/hfoo.json"), "{").unwrap();
+    let o = w3proj(&["objects", s(&project)]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("map/objects/units/original/hfoo.json can't be read"), "{}", text(&o));
+}
+
 /// The fixture's map/ files as an unpack of `map` (the fixture packed) writes them. The fixture's trigger folders
 /// (map/triggers/) are made by hand, as a map made in Studio: no ids. Packed, they get ids, and an unpack is an import,
 /// which keeps them in the files: the folders come back as the layout splits the packed war3map.wtg and war3map.wct.
