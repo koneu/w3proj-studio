@@ -14780,6 +14780,44 @@ async function placerAndCampaign(page, found) {
     await k.save();
     if (doodads().length !== before - 1) fail(`one undo left ${doodads().length} of ${before} rocks`);
 
+    // Recent: the rock just placed heads the list; with another thing chosen, taking it there places rocks again.
+    const recent = () => page.evaluate(`[...document.querySelectorAll(".terrain-place-recent option")].map((o) => o.textContent)`);
+    const listed = await recent();
+    if (listed[0] !== "Recent…" || !/\(ARrk\)$/.test(listed[1] ?? "") || listed.length !== 2) fail(`the Recent list after placing rocks: ${lit(listed)}`);
+    await k.hands.click(".terrain-group-tools button", "Start location");
+    await page.evaluate(`(() => { const s = document.querySelector(".terrain-place-recent"); s.value = "0"; s.dispatchEvent(new Event("change")); })()`);
+    if (!(await soon(() => page.evaluate(`/Placing .*ARrk/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) fail("choosing the rock in Recent didn't take it up again");
+    // Scatter stays as set (a setting).
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    if (!(await soon(async () => (await k.setting("terrain.placement.scatter")) === true, 5000))) fail("Scatter isn't kept as a setting");
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);
+    // Place… names a doodad's tilesets, finds by them, and opens again on the tab and search it was left with.
+    const openPlace = async () => {
+      await k.hands.click(".terrain-group-tools button", "Place…");
+      await until("the object browser", () => page.evaluate(`!!document.querySelector(".picker-overlay input.picker-search")`), 20000);
+    };
+    const closePlace = async () => {
+      await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await until("the object browser closed", () => page.evaluate(`!document.querySelector(".picker-overlay")`), 5000);
+    };
+    await openPlace();
+    await page.evaluate(`[...document.querySelectorAll(".picker-tabs button")].at(-1).click()`);
+    await until("the doodads", () => page.evaluate(`!!document.querySelector(".picker-overlay input.picker-search") && [...document.querySelectorAll(".picker-tabs button")].at(-1).classList.contains("on")`), 20000);
+    await page.evaluate(`(() => { const i = document.querySelector("input.picker-search"); i.value = "archway ashenvale"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    const names = await page.evaluate(`[...document.querySelectorAll(".picker-rows .picker-name")].map((e) => e.textContent)`);
+    if (!names.length || !names.every((n) => n.includes(" · ")) || !names.some((n) => /Archway · .*Ashenvale/.test(n))) fail(`the doodads found for "archway ashenvale": ${lit(names.slice(0, 6))}`);
+    await closePlace();
+    await openPlace();
+    const reopened = await page.evaluate(`({ query: document.querySelector("input.picker-search").value, tab: [...document.querySelectorAll(".picker-tabs button")].findIndex((b) => b.classList.contains("on")) })`);
+    if (reopened.query !== "archway ashenvale" || reopened.tab !== 3) fail(`Place… reopened with ${lit(reopened)}, not the doodads' tab and the search`);
+    await page.evaluate(`(() => { const i = document.querySelector("input.picker-search"); i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); [...document.querySelectorAll(".picker-tabs button")][0].click(); })()`);
+    await until("the units again", () => page.evaluate(`[...document.querySelectorAll(".picker-tabs button")][0]?.classList.contains("on") === true`), 20000);
+    await closePlace();
+    // The rock again for what follows.
+    await page.evaluate(`(() => { const s = document.querySelector(".terrain-place-recent"); s.value = "0"; s.dispatchEvent(new Event("change")); })()`);
+    await soon(() => page.evaluate(`/Placing .*ARrk/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000);
+
     // Random objects: a group with a unit and an item position in Map Properties' random groups.
     const info = k.read("war3map.w3i.json");
     info.unitTables = [{ number: 7, name: "Smoke Group", positions: [0, 2], lines: [{ chance: 60, ids: ["hfoo", "ratc"] }, { chance: 40, ids: ["hkni", "ckng"] }] }];
