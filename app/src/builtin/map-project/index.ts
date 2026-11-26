@@ -47,8 +47,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const weItem = w3.statusBar.add({ id: "w3.project.we", text: "", tooltip: "World Editor is open; saves sync into the project", align: "right", priority: 50 });
   // The release step on screen (not only in the command palette): pack, and pack + start the game.
   const buildItem = w3.statusBar.add({ id: "w3.project.build", text: "", command: "w3.project.pack", priority: 99 });
+  const toGameItem = w3.statusBar.add({ id: "w3.project.toGame", text: "", command: "w3.project.packToGame", priority: 98.5 });
   const testItem = w3.statusBar.add({ id: "w3.project.test", text: "", command: "w3.project.testMap", priority: 98 });
-  ctx.subscriptions.push(projectItem, weItem, buildItem, testItem);
+  ctx.subscriptions.push(projectItem, weItem, buildItem, toGameItem, testItem);
   /** World Editors opened from here and not closed yet: the mark stays until the last one has closed. */
   let editorsOpen = 0;
   /** Editors running per edit build: while one has the file open it isn't packed again (its watcher would report that
@@ -67,6 +68,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     projectItem.tooltip = p?.root ?? "";
     buildItem.text = p ? "⬇ Build" : "";
     buildItem.tooltip = p ? `Pack the project into ${p.default_output} (Ctrl+Shift+B outside the terrain view)` : "";
+    toGameItem.text = p ? "⇪ To Game" : "";
+    toGameItem.tooltip = p ? "Pack the project into Warcraft III's Maps folder (its w3proj folder), to start it from Custom Game" : "";
     testItem.text = p ? "▶ Test" : "";
     testItem.tooltip = p ? "Pack and start Warcraft III with the map (Ctrl+F5)" : "";
   };

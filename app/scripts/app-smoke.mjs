@@ -8812,6 +8812,7 @@ async function byHand(page, found) {
 
   await objectByHand(page, hands, root, fail);
   await triggerByHand(page, hands, root, fail);
+  await toGameByHand(page, hands, folder, fail);
   } finally {
     await restoreWindow(page);
   }
@@ -9035,6 +9036,23 @@ async function speedLimits(page, hands, fail) {
 }
 
 /** The Trigger Editor: renames the map's trigger, switches it off, and Build carries both. */
+/** The status bar's To Game: one click packs into the game's Maps folder, in its "w3proj" folder. The backend's answer
+ *  for where that is stands in a scratch folder: the real one is the user's. */
+async function toGameByHand(page, hands, folder, fail) {
+  const maps = join(folder, "stand-in-maps");
+  mkdirSync(maps, { recursive: true });
+  await page.evaluate(`(() => { const real = w3.backend.invoke.bind(w3.backend); window.__realInvoke = w3.backend.invoke;
+    w3.backend.invoke = (cmd, args) => (cmd === "game_maps_folder" ? Promise.resolve(${lit(maps)}) : real(cmd, args)); })()`);
+  try {
+    const output = await page.evaluate(`w3.workspace.project().default_output`);
+    const target = join(maps, "w3proj", output.split(/[\\/]/).pop());
+    await hands.click('.statusbar-item[data-id="w3.project.toGame"]');
+    await until("the map in the stand-in Maps folder", () => existsSync(target), 20000).catch(() => fail(`one click on To Game packed nothing to ${target}`));
+  } finally {
+    await page.evaluate(`w3.backend.invoke = window.__realInvoke`);
+  }
+}
+
 async function triggerByHand(page, hands, root, fail) {
   await page.evaluate(`w3.editors.closeAll()`);
   await page.evaluate(`w3.editors.open("map/triggers")`);

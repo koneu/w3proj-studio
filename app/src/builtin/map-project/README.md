@@ -2,6 +2,8 @@
 
 Extension `w3.mapProject`. Imports, syncs and packs .w3x maps into projects; round-trips with the game.
 
+The status bar has Build (the release map), To Game (the same into Warcraft III's Maps folder, in `w3proj`, for Custom Game) and Test.
+
 ## Data
 Reads a .w3x/.w3m or folder and unpacks it into the project (map/...); packs the project into a map file (build/ or the game's maps folder) and starts the test run. Settings control the test run.
 
