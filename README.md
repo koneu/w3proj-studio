@@ -556,7 +556,9 @@ On Linux:
   `steamapps/compatdata/<id>/config_info`), in the same prefix and with Steam's environment, so it's the setup
   Steam itself starts. (Steam can't pass a map to a game it starts itself, so Studio doesn't go through the Steam
   client. `proton run` isn't used: its steam.exe stays until every other program in the prefix, Battle.net
-  included, has ended.) The programs follow `game.installDir` unless `game.path` / `worldEditor.path` are set.
+  included, has ended. `runinprefix` skips Proton's prefix setup, so Studio itself sets the Wine overrides for
+  the graphics libraries Steam's run has put into the prefix; without them the game's Battle.net login page stays
+  blank.) The programs follow `game.installDir` unless `game.path` / `worldEditor.path` are set.
 - **Your game's Wine prefix is shared.** Studio has no Wine prefix of its own: the game, the World Editor and
   JassHelper (every save of a vJass map) run in the game's Steam prefix, the one your Battle.net may live in. While
   one of them runs you'll see Wine's own processes there (`wineserver`, `explorer.exe`, `services.exe`); they end with

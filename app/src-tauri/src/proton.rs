@@ -73,6 +73,46 @@ pub fn wine_path(p: &str) -> String {
     if p.starts_with('/') { format!("Z:{}", p.replace('/', "\\")) } else { p.to_string() }
 }
 
+/// The graphics libraries Proton can put into a prefix: each name, and the folder of the build it comes from.
+const GRAPHICS_DLLS: [(&str, &str); 8] = [
+    ("d3d9", "dxvk"),
+    ("d3d10core", "dxvk"),
+    ("d3d11", "dxvk"),
+    ("dxgi", "dxvk"),
+    ("d3d12", "vkd3d-proton"),
+    ("d3d12core", "vkd3d-proton"),
+    ("nvapi64", "nvapi"),
+    ("nvofapi64", "nvapi"),
+];
+
+/// The WINEDLLOVERRIDES for the graphics libraries the prefix has from this Proton build. Proton sets them while it
+/// updates the prefix (`setup_prefix`), which `runinprefix` skips; without them Wine loads its own Direct3D beside
+/// the prefix's files, and the game's built-in browser can't start its GPU process, so the Battle.net login page
+/// stays blank (2026-11-26: "Failed to launch GPU process" in BlizzardBrowser's log, only for Studio's launches).
+/// Only a library whose file in the prefix is the build's own is named (a prefix set up for wined3d gets none), and
+/// one that `inherited` (the user's own WINEDLLOVERRIDES) already names stays as the user set it. None: nothing to
+/// add. Proton appends its own overrides to what it is given.
+pub fn graphics_overrides(proton: &Proton, inherited: Option<&str>) -> Option<String> {
+    let system32 = proton.compat_data.join("pfx/drive_c/windows/system32");
+    let named: Vec<&str> = inherited.unwrap_or_default().split(';').filter_map(|e| e.split_once('=')).flat_map(|(names, _)| names.split(',')).map(str::trim).collect();
+    let from_build = |name: &str, folder: &str| {
+        let file = format!("{name}.dll");
+        let Ok(in_prefix) = std::fs::read(system32.join(&file)) else { return false };
+        // Current builds, then the older layout.
+        [format!("files/lib/wine/{folder}/x86_64-windows"), format!("files/lib64/wine/{folder}")]
+            .iter()
+            .any(|dir| std::fs::read(proton.tool.join(dir).join(&file)).is_ok_and(|built| built == in_prefix))
+    };
+    let mut set: Vec<String> = GRAPHICS_DLLS.iter().filter(|(name, folder)| !named.contains(name) && from_build(name, folder)).map(|(name, _)| format!("{name}=n")).collect();
+    if set.is_empty() {
+        return None;
+    }
+    if let Some(own) = inherited.filter(|v| !v.is_empty()) {
+        set.insert(0, own.to_string());
+    }
+    Some(set.join(";"))
+}
+
 /// `proton runinprefix <exe> <args>`, with the environment Steam gives the game.
 ///
 /// Not `proton run`: that starts the program through Proton's own steam.exe, which after the program has ended
@@ -90,6 +130,9 @@ pub fn command(proton: &Proton, exe: &Path, args: &[String]) -> Command {
         .env("STEAM_COMPAT_CLIENT_INSTALL_PATH", &proton.steam_root)
         .env("SteamAppId", &proton.app_id)
         .env("SteamGameId", &proton.app_id);
+    if let Some(overrides) = graphics_overrides(proton, std::env::var("WINEDLLOVERRIDES").ok().as_deref()) {
+        cmd.env("WINEDLLOVERRIDES", overrides);
+    }
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }
@@ -453,6 +496,36 @@ mod tests {
         assert_eq!(wine_path("/home/u/maps/a b.w3x"), r"Z:\home\u\maps\a b.w3x");
         assert_eq!(wine_path("input.j"), "input.j");
         assert_eq!(wine_path("-launch"), "-launch");
+    }
+
+    #[test]
+    fn the_prefixs_graphics_libraries_from_the_build_are_overridden_to_native() {
+        let (root, exe) = steam();
+        let p = proton_for(&exe).unwrap();
+        let system32 = p.compat_data.join("pfx/drive_c/windows/system32");
+        std::fs::create_dir_all(&system32).unwrap();
+        let put = |dir: &str, name: &str, bytes: &str| {
+            let dir = p.tool.join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name), bytes).unwrap();
+        };
+        // An empty prefix: nothing to add.
+        assert_eq!(graphics_overrides(&p, None), None);
+        put("files/lib/wine/dxvk/x86_64-windows", "d3d11.dll", "dxvk d3d11");
+        put("files/lib/wine/dxvk/x86_64-windows", "dxgi.dll", "dxvk dxgi");
+        put("files/lib/wine/vkd3d-proton/x86_64-windows", "d3d12.dll", "vkd3d");
+        put("files/lib64/wine/nvapi", "nvapi64.dll", "nvapi, older layout");
+        // The build has them, the prefix not yet.
+        assert_eq!(graphics_overrides(&p, None), None);
+        std::fs::write(system32.join("d3d11.dll"), "dxvk d3d11").unwrap();
+        std::fs::write(system32.join("dxgi.dll"), "dxvk dxgi").unwrap();
+        // Wine's own d3d12 in the prefix, not the build's: left alone.
+        std::fs::write(system32.join("d3d12.dll"), "wine's own").unwrap();
+        std::fs::write(system32.join("nvapi64.dll"), "nvapi, older layout").unwrap();
+        assert_eq!(graphics_overrides(&p, None).unwrap(), "d3d11=n;dxgi=n;nvapi64=n");
+        // The user's own setting stays, and what it names isn't named again.
+        assert_eq!(graphics_overrides(&p, Some("dxgi=b;winemenubuilder.exe,d3d11=d")).unwrap(), "dxgi=b;winemenubuilder.exe,d3d11=d;nvapi64=n");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// `runinprefix`, not `run`: `run`'s steam.exe outlives the program while the user's Battle.net runs in the prefix.
