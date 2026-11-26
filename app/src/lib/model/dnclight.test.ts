@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fmt, lightAt, readLightMdl, readLightMdx, writeLightMdl, type LightModel } from "./dnclight";
+import { fmt, lightAt, readLightMdl, readLightMdx, writeLightMdl, writeLightMdx, type LightModel } from "./dnclight";
+import { gameFiles } from "../testhelpers/gamefiles";
+import { skipOrFail } from "../testhelpers/testutil";
 
 test("fmt prints numbers like C's %g (6 significant digits, 3-digit exponent)", () => {
   assert.equal(fmt(0), "0");
@@ -156,4 +158,27 @@ test("cliff.w3m's own lighting is the same at 06:00, 08:00 and 12:00, and carrie
   }
   same(six.diffuse, [1.9423521, 1.9423521, 1.9423521], "06:00 is the white key at intensity 1.95");
   assert.equal(six.shadow, 5.85);
+});
+
+test("a light written as .mdx reads back as the same model", () => {
+  const m = sample();
+  const back = readLightMdx(writeLightMdx(m));
+  // The file's numbers are 32-bit floats.
+  assert.equal(writeLightMdl(back, new Date(0)), writeLightMdl(m, new Date(0)));
+});
+
+test("a name longer than .mdx holds is refused, not cut", () => {
+  const m = sample();
+  m.lights[0].name = "x".repeat(80);
+  assert.throws(() => writeLightMdx(m), /longer than an \.mdx name holds/);
+});
+
+// The World Editor's Export Current Values of an unchanged light is the game's own file (we-drive, 2026-11-26), so
+// writing a game light read back must give its bytes.
+test("the game's day/night lights written as .mdx are their files, byte for byte", (ctx) => {
+  const lights = ["Lordaeron/DNCLordaeronTerrain", "Lordaeron/DNCLordaeronUnit", "Ashenvale/DNCAshenValeTerrain", "Dalaran/DNCDalaranUnit", "Dungeon/DNCDungeonUnit", "Lordaeron/DNCLordaeronTarget"]
+    .map((n) => { const [folder, name] = n.split("/"); return `War3.w3mod:Environment/DNC/DNC${folder}/${name}/${name}.mdx`; });
+  const found = gameFiles(lights);
+  if (found.length < 2) { skipOrFail(ctx, "the game's light models aren't readable (no game or no release CLI)"); return; }
+  for (const f of found) assert.ok(Buffer.from(writeLightMdx(readLightMdx(f.bytes))).equals(Buffer.from(f.bytes)), f.name);
 });

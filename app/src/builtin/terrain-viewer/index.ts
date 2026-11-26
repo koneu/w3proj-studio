@@ -88,7 +88,7 @@ import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
-import { MAP_INFO_SERVICE, MCP_EDITS_SERVICE, type MapInfoService, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
+import { LIGHT_PREVIEW_SERVICE, type LightPreviewService, MAP_INFO_SERVICE, MCP_EDITS_SERVICE, type MapInfoService, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { HD_WATER_DEFAULTS } from "./hdwater";
 import { planShoreline, type ShoreModels } from "./shoreline";
@@ -1792,6 +1792,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Settings: on/off (off: an even light) and the hour; both remembered across maps.
         let lighting: MapLighting | null = null;
         const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
+        let lightPreview: LightPreviewService | null = null;
+        let lightPreviewWatch: { dispose(): void } | null = null;
+        void w3.services.get<LightPreviewService>(LIGHT_PREVIEW_SERVICE).then((service) => {
+          if (disposed) return;
+          lightPreview = service;
+          lightPreviewWatch = service.onDidChange(() => applyLight());
+          if (service.current()) applyLight();
+        }, () => {});
         const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
         /** The running cycle's hour (setting terrain.lighting.dayNightCycle); the stored hour stays as the user set it. */
         let cycleHour = lightHour();
@@ -1824,19 +1832,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let viewSyncsAfterTab = () => {};
         const applyLight = () => {
           // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
-          const on = lightOn() || gameViewOn(), hour = lightHourNow();
+          // A light being edited in the Lighting side bar: shown at its preview's time, whatever the box says.
+          const edited = lightPreview?.current();
+          const preview = edited && edited.root === w3.workspace.project()?.root ? edited : null;
+          const on = lightOn() || gameViewOn() || !!preview, hour = preview?.hour ?? lightHourNow();
           // Greyed in game view, the box shows the lighting drawn then.
           lightBox.checked = on;
-          lightBox.disabled = gameViewOn();
+          lightBox.disabled = gameViewOn() || !!preview;
           lightSelect.value = String(Math.floor(hour));
-          lightSelect.disabled = !on || cycleOn();
+          lightSelect.disabled = !on || cycleOn() || !!preview;
           renderer.gameView = on;
           // The game's own lighting models light HD's real shadows more than a map's own do (tone.ts GAME_LIGHT_FILL).
           const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
-          renderer.terrainLight = on && lighting?.terrain ? filled(lightAt(lighting.terrain, hour), lighting.own.terrain) : null;
+          const model = (kind: "terrain" | "unit") => preview?.[kind] ?? lighting?.[kind] ?? null;
+          const own = (kind: "terrain" | "unit") => !!preview?.[kind] || lighting?.own[kind];
+          renderer.terrainLight = on && model("terrain") ? filled(lightAt(model("terrain")!, hour), own("terrain")) : null;
           renderer.waterTint = lighting && lighting.flags & WATER_TINTING ? lighting.waterTint : null;
           renderer.hdWater = lighting?.water ?? HD_WATER_DEFAULTS;
-          renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
+          renderer.unitLight = on && model("unit") ? filled(lightAt(model("unit")!, hour), own("unit")) : null;
           redraw();
         };
         // The running cycle: a step twice a second, none while the page or the view is hidden.
@@ -5902,7 +5915,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight), farZ: renderer.farZ }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts(), selection: selectedEntries().map((p) => ({ id: p.id, position: [...p.position] })) }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), light: { terrain: renderer.terrainLight, unit: renderer.unitLight }, shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight), farZ: renderer.farZ }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts(), selection: selectedEntries().map((p) => ({ id: p.id, position: [...p.position] })) }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -6945,6 +6958,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             startJudge.dispose();
             lastView = { key: viewKey, view: handle.view(), selection: selectionRefs() };
             stopLightWatch.dispose();
+            lightPreviewWatch?.dispose();
             stopObjectWatch.dispose();
             objectReload.cancel();
             stopLightSettings.dispose();

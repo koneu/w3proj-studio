@@ -305,6 +305,17 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-fold::before { content: "▸"; width: 1.2em; flex: none; }
 .obj-fold.open::before { content: "▾"; }
 .obj-subgroup { padding-left: 20px; }
+/* A light edited in the Lighting side bar (lighting-editor/session.ts): the editor's form, made narrow. */
+.lighting-session { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+.lighting-clock { display: flex; gap: 8px; align-items: center; }
+.lighting-clock .lighting-hour { flex: 1; min-width: 0; }
+.lighting-time { font-variant-numeric: tabular-nums; min-width: 3.5em; text-align: right; }
+.lighting-session .lighting-row { white-space: normal; }
+.lighting-forms.form-body { padding: 0; overflow: visible; }
+.lighting-forms .form-row { flex-direction: column; align-items: stretch; gap: 2px; }
+.lighting-forms .form-label { width: auto; text-align: left; }
+.lighting-forms .lighting-num, .lighting-forms .form-table .form-num.lighting-num { width: 64px; }
+.lighting-forms .lighting-keys td { padding: 1px 3px 1px 0; }
 /* The room of the rows a long list hasn't made (listwindow.ts). The list keeps its own scroll position. */
 .obj-space { flex: none; }
 .obj-list { overflow-anchor: none; }

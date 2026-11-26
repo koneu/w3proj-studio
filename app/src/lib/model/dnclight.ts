@@ -162,6 +162,85 @@ export function readLightMdx(buf: Uint8Array): LightModel {
   return m;
 }
 
+/** The model as .mdx bytes, as the World Editor's Export Current Values writes one (its export of an unchanged light
+ *  is the game's file): VERS, MODL, SEQS, GLBS (when there are any), LITE, PIVT. The model's animation file and the
+ *  extents are empty, as in the game's light models. A value that is animated has `fixedValue` in the light's fixed part. */
+export function writeLightMdx(m: LightModel): Uint8Array {
+  const parts: number[] = [];
+  const u32 = (to: number[], v: number) => to.push(v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255);
+  const f32 = (to: number[], v: number) => to.push(...new Uint8Array(new Float32Array([v]).buffer));
+  const tag = (to: number[], t: string) => to.push(...[...t].map((c) => c.charCodeAt(0)));
+  const str = (to: number[], v: string, size: number) => {
+    const b = new TextEncoder().encode(v);
+    if (b.length >= size) throw new Error(`"${v}" is longer than an .mdx name holds (${size - 1} bytes)`);
+    to.push(...b, ...new Array<number>(size - b.length).fill(0));
+  };
+  const zeros = (to: number[], n: number) => to.push(...new Array<number>(n).fill(0));
+  const chunk = (name: string, fill: (to: number[]) => void) => {
+    const body: number[] = [];
+    fill(body);
+    tag(parts, name); u32(parts, body.length);
+    for (const v of body) parts.push(v);
+  };
+  const track = (to: number[], name: string, t: Track) => {
+    tag(to, name); u32(to, t.keys.length); u32(to, t.interp); u32(to, t.globalSeq);
+    for (const k of t.keys) {
+      u32(to, k.time);
+      for (const v of k.value) f32(to, v);
+      if (t.interp > 1) { for (const v of k.inTan!) f32(to, v); for (const v of k.outTan!) f32(to, v); }
+    }
+  };
+  /** Bytes preceded by their length, which counts itself. */
+  const sized = (to: number[], fill: (body: number[]) => void) => {
+    const body: number[] = [];
+    fill(body);
+    u32(to, body.length + 4);
+    for (const v of body) to.push(v);
+  };
+  tag(parts, "MDLX");
+  chunk("VERS", (to) => u32(to, m.version));
+  chunk("MODL", (to) => { str(to, m.name, 80); zeros(to, 260 + 28); u32(to, m.blendTime); });
+  chunk("SEQS", (to) => {
+    for (const s of m.sequences) {
+      str(to, s.name, 80); u32(to, s.start); u32(to, s.end); f32(to, s.moveSpeed); u32(to, s.nonLooping ? 1 : 0); f32(to, s.rarity); zeros(to, 4 + 28);
+    }
+  });
+  if (m.globalSequences.length) chunk("GLBS", (to) => { for (const d of m.globalSequences) u32(to, d); });
+  chunk("LITE", (to) => {
+    for (const l of m.lights) {
+      sized(to, (light) => {
+        sized(light, (node) => {
+          str(node, l.name, 80); u32(node, l.objectId); u32(node, l.parentId); u32(node, l.flags);
+          for (const [name, key] of NODE_TRACKS) if (l[key]) track(node, name, l[key]!);
+        });
+        u32(light, l.type); u32(light, l.unknown);
+        const fixed = (key: FixedProp) => {
+          const p = l[key];
+          for (const v of "track" in p ? fixedValue(key, p.track) : p.value) f32(light, v);
+        };
+        for (const key of FIXED_ORDER) fixed(key);
+        for (const v of [l.shadowIntensity, l.shadowCastingStart, l.shadowCastingEnd, l.quadraticFalloff, l.linearFalloff, l.damping]) f32(light, v);
+        for (const [name, key] of LIGHT_TRACKS) {
+          if (key === "visibility") { if (l.visibility) track(light, name, l.visibility); continue; }
+          const p = l[key] as Prop;
+          if ("track" in p) track(light, name, p.track);
+        }
+      });
+    }
+  });
+  chunk("PIVT", (to) => { for (const p of m.pivots) for (const v of p) f32(to, v); });
+  return Uint8Array.from(parts);
+}
+
+/** A light's values that can be animated, in the order of its fixed part. */
+type FixedProp = "attenuationStart" | "attenuationEnd" | "color" | "intensity" | "ambColor" | "ambIntensity";
+const FIXED_ORDER: readonly FixedProp[] = ["attenuationStart", "attenuationEnd", "color", "intensity", "ambColor", "ambIntensity"];
+/** The fixed part of an animated value, as the game's light models have it: white for a colour, else 0. */
+function fixedValue(key: FixedProp, track: Track): Vec {
+  const colour = key === "color" || key === "ambColor";
+  return new Array<number>(track.keys[0]?.value.length ?? (colour ? 3 : 1)).fill(colour ? 1 : 0);
+}
+
 // ---- MDL text ----------------------------------------------------------------------------
 
 /** A float32 the way C's %g prints it (6 significant digits, 3-digit exponent as on Windows). */

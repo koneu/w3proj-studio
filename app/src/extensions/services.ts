@@ -96,6 +96,15 @@ export interface TerrainService {
   onDidEdit(listener: (what: { terrain: boolean; objects: boolean }) => void): { dispose(): void };
 }
 
+export const LIGHT_PREVIEW_SERVICE = "w3.lightPreview";
+/** A light being edited in the Lighting side bar, for the terrain view to show: the project it belongs to, the time of
+ *  day, and the model for the slot being edited (null: the view keeps its own for that one). */
+export interface LightPreview { root: string; hour: number; terrain: import("../lib/model/dnclight").LightModel | null; unit: import("../lib/model/dnclight").LightModel | null }
+export interface LightPreviewService {
+  /** The light to show now, or null. */
+  current(): LightPreview | null;
+  onDidChange(listener: () => void): { dispose(): void };
+}
 export const TERRAIN_SERVICE = "w3.terrain";
 
 export interface TerrainToolGroup {

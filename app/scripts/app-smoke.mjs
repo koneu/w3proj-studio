@@ -9620,7 +9620,9 @@ async function editDuringSave(page, found) {
     await page.evaluate(`(() => { window.__slowQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
     try {
       await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
-      await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector("input.lighting-num")`), 30000);
+      await until("the light's form in the side bar", () => page.evaluate(`!!document.querySelector(".lighting-session input.lighting-num")`), 30000);
+      await page.evaluate(`(async () => { const b = [...document.querySelectorAll(".lighting-session button")].find((x) => x.textContent === "Done"); b.click(); await new Promise((r) => setTimeout(r, 500)); await w3.editors.open(w3.workspace.files().map((f) => f.path).find((p) => /^map\\/[0-9a-f-]{36}\\.mdl$/i.test(p)), "w3.lightingEditor"); })()`);
+      await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector(".lighting-editor.form-body input.lighting-num")`), 30000);
       const lightPath = await page.evaluate(`w3.editors.activePath()`);
       await check("Lighting Editor", `document.querySelector("input.lighting-num")`, "0.31", "0.32", null, lightPath);
     } finally {
@@ -16380,6 +16382,66 @@ async function campaignNumbersRefused(page, found) {
   } catch (e) { found.push(`Campaign Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** The Lighting side bar: Customize copies a light into the map and opens its form there; the terrain view shows it at
+ *  the preview's time; a change is saved at once and drawn, Undo takes it back; Export writes the .mdx and .mdl; Done
+ *  gives the view its own light again. */
+async function lightSideBar(page, found) {
+  try {
+  const fail = (what) => found.push(`Lighting side bar: ${what}`);
+  const k = await heightKit(page, "LightSide");
+  const TXT = "map/war3map.w3e.txt";
+  const lit_ = () => page.evaluate(`(async () => JSON.stringify((await w3.services.get("w3.terrain")).viewCommands.get(${lit(TXT)})?.state().light ?? null))()`);
+  const session = `document.querySelector(".lighting-session")`;
+  const press = (label) => page.evaluate(`(() => { const b = [...${session}.querySelectorAll("button")].find((x) => x.textContent === ${lit(label)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
+  const time = (v) => page.evaluate(`(() => { const s = ${session}.querySelector(".lighting-hour"); s.value = ${lit(String(v))}; s.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  const own = await lit_();
+  await page.evaluate(`(() => { window.__sideQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; window.__sideSave = w3.window.pickSaveFile; w3.commands.execute("w3.lighting.show"); })()`);
+  try {
+    await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+    await until("the form in the side bar", () => page.evaluate(`!!${session}?.querySelector(".lighting-forms input[type=color]")`), 30000);
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== TXT) fail("Customize took the terrain view's tab away");
+    await time(12);
+    await settled(page);
+    const noon = await lit_();
+    await time(0);
+    await settled(page);
+    const night = await lit_();
+    if (noon === night) fail(`the preview's time changes nothing in the terrain view: ${noon}`);
+    await time(12);
+    const file = await page.evaluate(`w3.workspace.files().map((f) => f.path).find((p) => /^map\\/[0-9a-f-]{36}\\.mdl$/i.test(p))`);
+    const body = async () => (await page.evaluate(`w3.workspace.readText(${lit(file)})`)).split("\n").slice(2).join("\n");
+    const before = await body();
+    await page.evaluate(`(() => { for (let i = 0; ; i++) { const p = ${session}.querySelectorAll("input[type=color]")[i]; if (!p) break; p.value = "#00ff00"; p.dispatchEvent(new Event("input", { bubbles: true })); } })()`);
+    await settled(page);
+    const green = await lit_();
+    if (green === noon) fail("a changed colour isn't drawn in the terrain view");
+    await until("the change saved to the light's file", async () => (await body()) !== before, 10000).catch((e) => fail(e.message));
+    if ((await page.evaluate(`w3.editors.unsavedPaths().length`)) !== 0) fail("a side bar change left something unsaved");
+    for (const ext of ["mdx", "mdl"]) {
+      const out = join(work, `light-side.${ext}`);
+      rmSync(out, { force: true });
+      await page.evaluate(`(() => { w3.window.pickSaveFile = async () => ${lit(out)}; })()`);
+      await press("Export…");
+      await until(`the exported .${ext}`, () => existsSync(out), 10000).catch((e) => fail(e.message));
+      if (existsSync(out)) {
+        const bytes = readFileSync(out);
+        if (ext === "mdx" ? bytes.toString("latin1", 0, 8) !== "MDLXVERS" : !/Light "/.test(bytes.toString("utf8"))) fail(`the exported .${ext} isn't a light model`);
+      }
+    }
+    for (let i = 0; i < 60 && (await press("\u21b6")); i++);
+    await until("Undo back to the first state, saved", async () => (await body()) === before, 10000).catch((e) => fail(e.message));
+    await press("Done");
+    await until("the form closed", () => page.evaluate(`!${session}`), 10000);
+    await settled(page);
+    // The slot is on, so the view now reads the map's own copy: the game's values, at the view's own hour again.
+    if ((await lit_()) === green) fail(`after Done the view still shows the edited light (before: ${own})`);
+  } finally {
+    await page.evaluate(`(() => { if (window.__sideQuick) w3.window.quickPick = window.__sideQuick; if (window.__sideSave) w3.window.pickSaveFile = window.__sideSave; delete window.__sideQuick; delete window.__sideSave; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Lighting side bar: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Lighting Editor refuses numbers a lighting model's float can't hold (app/src/builtin/lighting-editor/numbers.ts): a
  *  value typed as 1e39 or an hour past the day is refused with why, the box shows the value kept, the model isn't
  *  changed; 0.31 is taken (control, one change). */
@@ -16391,7 +16453,9 @@ async function lightNumbersRefused(page, found) {
   await page.evaluate(`(() => { window.__refuseQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
   try {
     await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
-    await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector("input.lighting-num")`), 30000);
+    await until("the light's form in the side bar", () => page.evaluate(`!!document.querySelector(".lighting-session input.lighting-num")`), 30000);
+      await page.evaluate(`(async () => { const b = [...document.querySelectorAll(".lighting-session button")].find((x) => x.textContent === "Done"); b.click(); await new Promise((r) => setTimeout(r, 500)); await w3.editors.open(w3.workspace.files().map((f) => f.path).find((p) => /^map\\/[0-9a-f-]{36}\\.mdl$/i.test(p)), "w3.lightingEditor"); })()`);
+      await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector(".lighting-editor.form-body input.lighting-num")`), 30000);
     const path = await page.evaluate(`w3.editors.activePath()`);
     const dirty = () => page.evaluate(`w3.editors.isDirty(${lit(path)})`);
     const field = `document.querySelector("input.lighting-num")`;
@@ -18459,6 +18523,7 @@ async function run() {
         keybindings,
         keyChords,
         lightNumbersRefused,
+        lightSideBar,
         luaNames,
         mapInfoColorTools,
         mapInfoUndoKept,
@@ -18898,6 +18963,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "aiClientSetup", found);
   await lightNumbersRefused(page, found);
   await leftOpen(page, "lightNumbersRefused", found);
+  await lightSideBar(page, found).catch((e) => found.push(`Lighting side bar: ${e.message}`));
+  await leftOpen(page, "lightSideBar", found);
   await soundNumbersRefused(page, found);
   await leftOpen(page, "soundNumbersRefused", found);
   await campaignNumbersRefused(page, found);
