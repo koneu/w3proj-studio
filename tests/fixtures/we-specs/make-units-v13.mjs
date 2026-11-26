@@ -55,7 +55,11 @@ const layout = (key, version, subversion, skins) => (doc) => {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 run("unpack", autumn, join(out, "autumn"));
+// An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+if (existsSync(join(join(out, "autumn"), "map", "terrain", "terrain.json"))) run("terrain", "merge", join(out, "autumn"));
 run("unpack", flat, join(out, "flat"));
+// An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+if (existsSync(join(join(out, "flat"), "map", "terrain", "terrain.json"))) run("terrain", "merge", join(out, "flat"));
 const variants = {
   "autumn-noskin": ["autumn", (p) => { edit(p, "war3map.w3i.json", preReforged); edit(p, "war3map.doo.json", layout("doodads", 8, undefined, false)); edit(p, "war3mapUnits.doo.json", layout("units", 8, 11, false)); }],
   "autumn-v7": ["autumn", (p) => { edit(p, "war3map.w3i.json", preReforged); edit(p, "war3map.doo.json", layout("doodads", 8, undefined, false)); edit(p, "war3mapUnits.doo.json", layout("units", 7, 9, false)); }],

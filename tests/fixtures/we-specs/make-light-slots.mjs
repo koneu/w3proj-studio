@@ -13,7 +13,7 @@
 // --base MAP: the same objects and lights on MAP as it is (its tileset and ground kept; e.g. smoketest_maps/cliff.w3m,
 // branch we-compare-10's map), written as light-base-<variant>.w3x.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,6 +78,8 @@ for (const [variant, first, second] of [["both", 1, 1], ["first", 1, 0], ["secon
   try {
     const dir = join(scratch, "map");
     run("unpack", base ?? join(here, "flat.w3x"), dir);
+    // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+    if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
     const m = (f) => join(dir, "map", f);
     if (!base) {
       const info = JSON.parse(readFileSync(m("war3map.w3i.json"), "utf8"));

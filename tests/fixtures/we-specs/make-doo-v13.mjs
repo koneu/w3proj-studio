@@ -65,6 +65,8 @@ const drops = (doc) => {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 run("unpack", autumn, join(out, "autumn"));
+// An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+if (existsSync(join(join(out, "autumn"), "map", "terrain", "terrain.json"))) run("terrain", "merge", join(out, "autumn"));
 const variants = {
   "autumn-doo-v7": (p) => { edit(p, "war3map.w3i.json", preReforged); edit(p, "war3mapUnits.doo.json", unitsNoSkin); edit(p, "war3map.doo.json", dooV7); },
   "autumn-doo-v12": (p) => { edit(p, "war3map.doo.json", dooV12); },

@@ -10,7 +10,7 @@
 // and two random groups (numbers 2 and 7, which don't start at 0) whose lines hold plain ids, random creeps
 // ("YYU3"), a random building ("YYB/") and random items ("YiI2", "YlI/").
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { requireFresh } from "../../binfresh.mjs";
@@ -34,6 +34,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-random-script-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", gamePath());
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const infoFile = join(map, "war3map.w3i.json");
   const info = JSON.parse(readFileSync(infoFile, "utf8"));

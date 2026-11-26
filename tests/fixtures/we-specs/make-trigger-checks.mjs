@@ -7,7 +7,7 @@
 // Player 1, a disabled Apply Bravo, a Custom Script action naming gg_cam_Alpha); "Block" (an If/Then/Else with a condition, an action and a comment); the custom text trigger "Textual"
 // (JASS naming gg_cam_Bravo). The trigger editor's Copy As Text and a camera rename have something to work on.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { addLookCameras, lookCamera, parseLook, resolveLook, terrainHead } from "../../../app/scripts/we-camera.mjs";
@@ -30,6 +30,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-trigger-checks-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", gamePath()); // the trigger file needs the game's TriggerData
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const head = terrainHead(readFileSync(join(map, "war3map.w3e.txt"), "utf8"));
   const camerasFile = join(map, "war3map.w3c.json");

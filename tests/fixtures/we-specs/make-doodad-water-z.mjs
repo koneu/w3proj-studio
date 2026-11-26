@@ -19,7 +19,7 @@
 // dry ground (its nudge step is 64, so Select All + Numpad 6 moves all by 64), a fixed lily pad (flags 6, z 50) in B,
 // and a lily pad and a ZPsh on dry ground.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,6 +83,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, "water-z");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const w3e = join(dir, "map", "war3map.w3e.txt");
   const lines = readFileSync(w3e, "utf8").split("\n");
   // The text's height is the stored word less 0x2000 (a quarter world unit, the level not counted), its water the stored

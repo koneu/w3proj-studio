@@ -12,7 +12,7 @@
 // c: names that repeat (a fourth start at (1280, -1664)): players "Twin", "Twin", "Player 1" (the text of string 1),
 //    "twin"; custom forces "Twin", "Force 1" (the text of string 2) and "Lone", players 1, 2 and 3 + 4.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,8 @@ for (const [variant, v] of Object.entries(VARIANTS)) {
   try {
     const dir = join(scratch, "p");
     run("unpack", empty, dir, "--game", "none");
+    // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+    if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
     const map = join(dir, "map");
     const infoFile = join(map, "war3map.w3i.json");
     const info = JSON.parse(readFileSync(infoFile, "utf8"));

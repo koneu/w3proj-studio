@@ -669,7 +669,7 @@ test("every file unpack and a terrain split write for the corpus maps passes its
   // With the game, unpack splits the triggers into folders (it needs the game's TriggerData); without it they stay raw.
   const game = gameCli()?.install[1];
   const scratch = mkdtempSync(join(tmpdir(), "w3-schemas-"));
-  const failures: string[] = [], unsplit: string[] = [], counts = new Map<string, number>();
+  const failures: string[] = [], counts = new Map<string, number>();
   try {
     let next = 0;
     const worker = async (slot: number) => {
@@ -690,7 +690,8 @@ test("every file unpack and a terrain split write for the corpus maps passes its
         } else if (existsSync(join(project, "map", "war3map.w3e.txt"))) {
           const split = await run(found.bin, ["terrain", "split", project]);
           if (split.code === 0) for (const f of checkFiles(project, counts, (rel) => rel.startsWith("map/terrain/"))) failures.push(`${maps[i]} (split): ${f}`);
-          else unsplit.push(`${basename(maps[i])}: ${(split.err.trim().split("\n").pop() ?? "").replace(/^.*?: map\//, "map/").slice(0, 160)}`);
+          // An unpack splits every terrain it wrote as text: one left flat is a failure (the split layout is the only one).
+          failures.push(`${maps[i]}: unpack left map/war3map.w3e.txt flat${split.code === 0 ? " though it splits" : `: ${(split.err.trim().split("\n").pop() ?? "").replace(/^.*?: map\//, "map/").slice(0, 160)}`}`);
         }
         rmSync(project, { recursive: true, force: true });
       }
@@ -700,7 +701,6 @@ test("every file unpack and a terrain split write for the corpus maps passes its
     rmSync(scratch, { recursive: true, force: true });
   }
   ctx.diagnostic(`${maps.length} maps; documents per schema: ${[...counts].sort().map(([k, n]) => `${k} ${n}`).join(", ")}`);
-  if (unsplit.length) ctx.diagnostic(`${unsplit.length} maps not split: ${unsplit.join("; ")}`);
   assert.deepEqual(failures.slice(0, 30), [], `${failures.length} failures`);
   // Every schema meets a file, but the pathing overrides (only the app's Pathing tool writes them) and, without the
   // game, the trigger folders.

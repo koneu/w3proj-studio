@@ -10,7 +10,7 @@
 //   cell of red between), n3 d 224 (the blue reaches the farm's edge: the control), n4 the farm d 192 south of the
 //   footman instead of west, n5 d 288 (far: the control), n6 d 128 (the reds overlap: refused either way).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { requireFresh } from "../../binfresh.mjs";
@@ -32,6 +32,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-compare-replace-units-newring-"))
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", "none");
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const unitsFile = join(map, "war3mapUnits.doo.json");
   const units = JSON.parse(readFileSync(unitsFile, "utf8"));

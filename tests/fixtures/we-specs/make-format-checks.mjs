@@ -24,7 +24,7 @@
 // light of nine different values (0, 1, 0xff102030, 2.5, 3.5, 4.5, 0.125, 0.25, 0.375), and a tree LTlt at (-384, 0),
 // for the Doodad Properties dialog (Roll, Pitch, the Lights tab).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +58,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, kind);
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const edit = (file, f) => { const p = join(map, file); const doc = JSON.parse(readFileSync(p, "utf8")); f(doc); writeFileSync(p, JSON.stringify(doc, null, 1)); };
   if (kind === "fields") {

@@ -96,6 +96,9 @@ for (const [n, map] of maps.entries()) {
     else if (!sameBytes(fromText(rustText), bytes)) problems.push(`${name}: bytes from the text differ`);
     else checked++;
   };
+  // Every map has a terrain, and the unpack was merged into war3map.w3e.txt above: without it (kept raw, or left split)
+  // nothing of the terrain would be compared, which is a failure and not a map to pass over.
+  if (text("war3map.w3e.txt") === null) problems.push("war3map.w3e.txt isn't in the unpacked project (the terrain kept raw, or left in map/terrain/): the terrain wasn't compared");
   check("war3map.w3e", text("war3map.w3e.txt"), ts.w3eToText, ts.w3eFromText);
   if (text("war3map.w3e.txt") !== null) {
     const bytes = raw("war3map.w3e");
@@ -127,6 +130,8 @@ for (const [n, map] of maps.entries()) {
     else if (!sameBytes(ts.writeWtg(read.file), wtgBytes) && Object.keys(read.stored).length === 0) problems.push("map/triggers/: the backend's tree doesn't write war3map.wtg back");
     else checked++;
   }
+  // Triggers the unpack kept raw (the game's TriggerData read with --game doesn't know a function) weren't compared either.
+  else if (existsSync(join(dir, "map", "war3map.wtg"))) problems.push("war3map.wtg was kept raw (no map/triggers/): the triggers weren't compared");
   if (problems.length) { failed++; problems.forEach((p) => console.log(`FAIL ${map} — ${p}`)); }
   rmSync(dir, { recursive: true, force: true });
 }

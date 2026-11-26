@@ -8,7 +8,7 @@
 // (6, 6, 4 and 8 tiles) with the camera bounds worked out from them as the editor's own map has them, the pathing map
 // (war3map.wpm) and the shadow map (war3map.shd) are cut to the new size, all clear.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, "odd-size");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
 
   const w3e = join(dir, "map", "war3map.w3e.txt");
   const lines = readFileSync(w3e, "utf8").split("\n");

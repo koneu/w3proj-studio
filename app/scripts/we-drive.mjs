@@ -615,6 +615,8 @@ export function addCamerasToMap(cli, copy, project, looks) {
   };
   // The game's TriggerData isn't needed: the triggers stay as the map has them.
   run(["unpack", copy, project, "--game", "none"]);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script reads them as single files.
+  if (existsSync(join(project, "map", "terrain", "terrain.json"))) run(["terrain", "merge", project]);
   const map = join(project, "map");
   const w3e = join(map, "war3map.w3e.txt");
   const head = existsSync(w3e) ? terrainHead(readFileSync(w3e, "utf8")) : null;

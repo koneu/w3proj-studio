@@ -22,7 +22,7 @@
 //    15  D001           the same based model war3mapImported\LightB.mdl: a version-800 text model of one light only
 //    16  LOth var 0     torch, white, intensity 4 (LightA's original)
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,6 +107,8 @@ try {
   mkdirSync(out, { recursive: true });
   const dir = join(scratch, "lights");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   mkdirSync(join(map, "war3mapImported"), { recursive: true });
   writeFileSync(join(map, "war3mapImported", "LightA.mdx"), lightA(run("game", "cat", "--mode", "sd", "Doodads/LordaeronSummer/Props/TorchHuman/TorchHuman.mdx")));

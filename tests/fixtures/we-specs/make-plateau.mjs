@@ -10,7 +10,7 @@
 // instead: level 3 on the corners with |x - 32| + |y - 32| <= 8, a square turned 45 degrees whose four faces are
 // diagonal cliffs, one corner step at a time (tests/we-compare/ramp-diagonal.json).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, "plateau");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const w3e = join(dir, "map", "war3map.w3e.txt");
   const lines = readFileSync(w3e, "utf8").split("\n");
   const sections = {

@@ -9,7 +9,7 @@
 // LOsh + tree, barrel + tree), units at y -650 (a footman, an item ratf, a farm hhou 4x4, footman + farm, footman +
 // item). The editor moves each doodad with a texture onto its grid when it loads the map; the rest stay where they are.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { addLookCameras, parseLook, resolveLook, terrainHead } from "../../../app/scripts/we-camera.mjs";
@@ -39,6 +39,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-compare-paste-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", "none");
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const unitsFile = join(map, "war3mapUnits.doo.json");
   const units = JSON.parse(readFileSync(unitsFile, "utf8"));

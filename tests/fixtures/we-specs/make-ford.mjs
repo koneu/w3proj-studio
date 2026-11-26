@@ -10,7 +10,7 @@
 // to 10 + 3i) are all of one depth. The stored war3map.wpm is flat.w3x's (all dry ground): the pack keeps it stale, so
 // the World Editor's save shows the pathing map it makes itself.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, "ford");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const file = join(dir, "map", "war3map.w3e.txt");
   const lines = readFileSync(file, "utf8").split("\n");
   section(lines, "height", (y) => Array.from({ length: 65 }, (_, x) => (wet(y) ? ground(x) : 0)).join(" "));

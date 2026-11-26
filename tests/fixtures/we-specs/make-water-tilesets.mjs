@@ -7,7 +7,7 @@
 // 4, 12, 24, 38.4, 64, 96, 200, 800 (eight corner rows each; the last takes the rest). Water.slk's own height adds to
 // the surface the same on both sides of a comparison, so the depths are the bands' within it.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,8 @@ for (const ch of TILESETS) {
   try {
     const dir = join(scratch, "map");
     run("unpack", join(here, "flat.w3x"), dir);
+    // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+    if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
     const w3i = join(dir, "map", "war3map.w3i.json");
     const info = JSON.parse(readFileSync(w3i, "utf8"));
     info.tileset = ch;

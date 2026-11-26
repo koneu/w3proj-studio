@@ -8,7 +8,7 @@
 // (example map 22's Fence 1 as played: pairs 64 apart, 128 between pairs, facing 90, scale 1.2; and a solid line, a
 // piece every 64, facing 0). The editor snaps them when it opens the map and makes war3map.wpm when it saves.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,6 +49,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, "fence");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const file = join(dir, "map", "war3map.doo.json");
   const doc = JSON.parse(readFileSync(file, "utf8"));
   const put = (id, x, y, angle, scale = 1, flags = 2) => doc.doodads.push({

@@ -9,7 +9,7 @@
 // fractions, one touching the map's edges by less than a cell, and two whose left and right (bottom and top) both round
 // to one line (40..47, -47..-40).
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-region-round-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", "none");
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const regionsFile = join(dir, "map", "war3map.w3r.json");
   const regions = JSON.parse(readFileSync(regionsFile, "utf8"));
   regions.regions = REGIONS.map(([name, left, bottom, right, top], index) => ({

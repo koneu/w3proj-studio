@@ -18,7 +18,7 @@
 // already west of the map, one between the left camera bound and where a growth by 4 tiles takes it (-3000), one just
 // inside the left bound (-2800, outside it after the cut), one past the right bound (3000), one well inside.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-resize-objects-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", "none");
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const regionsFile = join(map, "war3map.w3r.json");
   const regions = JSON.parse(readFileSync(regionsFile, "utf8"));

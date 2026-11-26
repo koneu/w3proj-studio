@@ -7,7 +7,7 @@
 // "west" crosses the west edge (x -3584) and "south" the south edge (y -3584), pure yellow; "inside" lies wholly in the
 // playable part, pure red, for the line's width there.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-region-outline-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", join(here, "region-round.w3m"), dir, "--game", "none");
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const file = join(dir, "map", "war3map.w3r.json");
   const doc = JSON.parse(readFileSync(file, "utf8"));
   doc.regions = REGIONS.map(([name, left, bottom, right, top, red, green, blue], index) => ({

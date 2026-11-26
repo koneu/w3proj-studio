@@ -16,7 +16,7 @@
 //   node tests/fixtures/we-compare/make-camera-bounds-input.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli> camera-farz.w3m \
 //     "0,0,500;0,0,1000,9000,50;0,0,1650;0,0,2000,9000,50;0,0,2500;0,0,3000,9000,50;0,0,4000;0,0,5000,9000,50"
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { addLookCameras, parseLook, resolveLook, terrainHead } from "../../../app/scripts/we-camera.mjs";
@@ -37,6 +37,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-compare-cambounds-"));
 try {
   const dir = join(scratch, "p");
   run("unpack", empty, dir, "--game", "none");
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const map = join(dir, "map");
   const unitsFile = join(map, "war3mapUnits.doo.json");
   const units = JSON.parse(readFileSync(unitsFile, "utf8"));

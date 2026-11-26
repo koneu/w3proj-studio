@@ -107,6 +107,12 @@ async function unpacked(map) {
   if (!existsSync(ready)) {
     const r = await run(cli, ["unpack", map, dir, "--game", game]);
     if (r.code !== 0) return { why: `unpack failed: ${r.err.trim().split("\n").pop()}` };
+    // An unpack writes the terrain and placed objects split (map/terrain/); this script reads them as single files.
+    // The merge also puts the map's war3map.wpm back into map/.
+    if (existsSync(join(dir, "map", "terrain", "terrain.json"))) {
+      const m = await run(cli, ["terrain", "merge", dir]);
+      if (m.code !== 0) return { why: `terrain merge failed: ${m.err.trim().split("\n").pop()}` };
+    }
     writeFileSync(ready, "");
   }
   const need = ["war3map.wpm", "war3map.w3e.txt", "war3map.doo.json"].filter((f) => !existsSync(join(dir, "map", f)));

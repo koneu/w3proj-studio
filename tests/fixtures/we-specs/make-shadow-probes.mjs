@@ -32,7 +32,7 @@
 //   toClassicMdx), custom doodads D000.. of LRrk using them, see BOXES (not committed: 8 of the editor's 235 cells,
 //   on projected triangles' edges, aren't Studio's).
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -255,6 +255,8 @@ for (const [name, spotsOf] of Object.entries(maps)) {
   try {
     const dir = join(scratch, "map");
     run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+    // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+    if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
     patchW3e(dir, name);
     if (spotsOf) {
       const doo = join(dir, "map", "war3map.doo.json");

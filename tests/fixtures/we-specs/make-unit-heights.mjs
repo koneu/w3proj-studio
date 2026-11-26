@@ -7,7 +7,7 @@
 // the w3e rows run from the north, so rows 20-40 are corners y 24-44: world y from -1024 to 1536), and four units with a height of their own in the file: footmen at 0 and 500 on the plateau, a footman at 500
 // on the flat ground, a gryphon at 0 on the plateau. The editor saves every unit at the height of the ground it stands on.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,8 @@ const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
 try {
   const dir = join(scratch, "unit-heights");
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+  // An unpack writes the terrain and placed objects split (map/terrain/); this script edits them as single files.
+  if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   const w3e = join(dir, "map", "war3map.w3e.txt");
   const lines = readFileSync(w3e, "utf8").split("\n");
   const at = lines.findIndex((l) => l.startsWith("[layer]"));

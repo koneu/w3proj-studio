@@ -75,6 +75,8 @@ for (const line of listed) {
     try {
       writeFileSync(file, run(["game", "--install", game, "cat", line]));
       run(["unpack", file, join(dir, "p"), "--game", game]);
+      // An unpack writes the terrain and placed objects split (map/terrain/); this script reads them as single files.
+      if (existsSync(join(dir, "p", "map", "terrain", "terrain.json"))) run(["terrain", "merge", join(dir, "p")]);
     } catch (e) { results.push({ name, skip: `unpack failed: ${String(e.stderr ?? e).trim().split("\n").pop()}` }); continue; }
     writeFileSync(join(dir, ".unpacked"), "");
   }
