@@ -13,6 +13,7 @@ pub mod lossless;
 mod manifest_text;
 pub mod names;
 pub mod objdata;
+pub mod object_layout;
 pub mod paths;
 pub mod project;
 pub mod terrain_ids;

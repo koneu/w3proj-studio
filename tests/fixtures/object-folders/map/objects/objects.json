@@ -1,0 +1,12 @@
+{
+  "format": "w3proj.objectfolders/1",
+  "files": {
+    "units": {"data": 3, "skin": 3},
+    "items": {"data": 3},
+    "destructables": {"data": 3},
+    "doodads": {"data": 3},
+    "abilities": {"data": 3},
+    "buffs": {"data": 3},
+    "upgrades": {"data": 3}
+  }
+}

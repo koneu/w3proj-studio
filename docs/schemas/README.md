@@ -24,7 +24,9 @@ The formats defined in code (no definition; each schema says what its codec in `
 
 | Schema | Project file | Codec |
 |---|---|---|
-| `objects.schema.json` | `map/*.w3u.json`, `.w3t`, `.w3b`, `.w3d`, `.w3a`, `.w3h`, `.w3q` (also `war3mapSkin.*`, `war3campaign.*`) | `objdata.rs`, tag `w3proj.objects/1` |
+| `objects.schema.json` | `map/*.w3u.json`, `.w3t`, `.w3b`, `.w3d`, `.w3a`, `.w3h`, `.w3q` (also `war3mapSkin.*`, `war3campaign.*`): the flat form, which the app reads and writes through its file layer (from `map/objects/`) and projects of the flat layout keep | `objdata.rs`, tag `w3proj.objects/1` |
+| `object-folders.schema.json` | `map/objects/objects.json` | `object_layout.rs`, tag `w3proj.objectfolders/1` |
+| `object-file.schema.json` | `map/objects/<kind>/original/*.json`, `map/objects/<kind>/custom/*.json` | `object_layout.rs` |
 | `terrain.schema.json` | `map/terrain/terrain.json` | `terrain_layout.rs`, tag `w3proj.terrain/1` |
 | `terrain-doodads.schema.json` | `map/terrain/<folder>/doodads.json` | `terrain_objects.rs` |
 | `terrain-units.schema.json` | `map/terrain/<folder>/units.json` | `terrain_objects.rs` |
@@ -38,7 +40,8 @@ The formats defined in code (no definition; each schema says what its codec in `
 | `trigger-frontmatter.schema.json` | the JSON on the first line (`// @w3proj {…}`, `-- @w3proj {…}`) of `map/triggers/**/*.j`, `.vjass`, `.lua` | `trigger_layout.rs` |
 
 The split terrain's files are described in `docs/terrain-subterrains-spec.md`, the trigger folders in
-`docs/trigger-folders-spec.md`. The three per-subterrain object files refer to the flat files' schemas for their
+`docs/trigger-folders-spec.md`, the object folders in `docs/object-folders-spec.md` (an object file's halves refer to
+`objects.schema.json#/$defs/…`). The three per-subterrain object files refer to the flat files' schemas for their
 entries (`doodads.schema.json#/properties/doodads/items`, …), and the comment and frontmatter schemas to
 `trigger-gui.schema.json#/$defs/eca`, so keep `docs/schemas` together (editors resolve these references beside the
 file).

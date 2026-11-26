@@ -1,0 +1,9 @@
+{
+  "base": "ratc",
+  "data": {
+    "end": "ratc",
+    "mods": [
+      {"field": "igol", "type": "int", "value": 450}
+    ]
+  }
+}

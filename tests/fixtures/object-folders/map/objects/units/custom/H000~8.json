@@ -1,0 +1,10 @@
+{
+  "id": "H000",
+  "base": "Hpal",
+  "data": {},
+  "skin": {
+    "mods": [
+      {"field": "unam", "type": "string", "value": "TRIGSTR_001"}
+    ]
+  }
+}

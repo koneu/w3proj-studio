@@ -6,6 +6,9 @@ test("saving what the script is made from regenerates it: the destructables' and
   // Destructable tints (war3map.w3b, war3mapSkin.w3b) and hero abilities (war3mapSkin.w3a) go into the script.
   for (const p of ["map/war3map.w3b.json", "map/war3mapSkin.w3b.json", "map/war3mapSkin.w3a.json", "map/war3mapSkin.w3u", "map/war3map.w3u.json", "map/war3map.wtg"]) assert.ok(SCRIPT_INPUTS.test(p), p);
   for (const p of ["map/war3map.w3q.json", "map/war3mapSkin.w3h.json", "map/war3map.wpm"]) assert.ok(!SCRIPT_INPUTS.test(p), p);
+  // The object folders (map/objects/, one file per object) of those kinds, and the list of their packed files.
+  for (const p of ["map/objects/objects.json", "map/objects/units/custom/H000~8.json", "map/objects/abilities/original/order.txt", "map/objects/destructables/custom/B000~8.json", "map/objects/items/custom/I000~8.json"]) assert.ok(SCRIPT_INPUTS.test(p), p);
+  for (const p of ["map/objects/upgrades/custom/R000~8.json", "map/objects/buffs/original/BHbd~c.json", "map/Objects/InventoryItems/x.blp"]) assert.ok(!SCRIPT_INPUTS.test(p), p);
 });
 
 test("code that isn't made from the triggers is noticed, in JASS and Lua", () => {

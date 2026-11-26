@@ -533,6 +533,50 @@ fn split_triggers(files: &mut BTreeMap<String, Vec<u8>>, report: &mut UnpackRepo
     }
 }
 
+/// The map's object data (as the codec unpacked it among `files`) cut into `map/objects/`
+/// (`crate::object_layout::split_flat`, which checks that each kind comes back byte for byte). A kind that can't go
+/// into the layout stays as its packed files, raw, and their report entries say why.
+fn split_objects(files: &mut BTreeMap<String, Vec<u8>>, report: &mut UnpackReport) {
+    use crate::object_layout as ol;
+    let prefix = ol::Prefix::of_files(files);
+    let split = ol::split_flat(files, prefix);
+    for k in &split.taken {
+        files.remove(k);
+        for e in report.files.iter_mut().filter(|e| e.project_path == *k) {
+            e.codec = Some(ol::CODEC_ID.to_string());
+            e.project_path = ol::ROOT_FILE.to_string();
+            e.note = None;
+        }
+    }
+    files.extend(split.layout);
+    for (kind, why) in split.kept {
+        for h in 0..2 {
+            let name = prefix.packed(kind, h);
+            let json = format!("{name}.json");
+            let note = format!("{}: {why}", ol::CODEC_ID);
+            if let Some(bytes) = files.remove(&json) {
+                match crate::objdata::from_json(&bytes, kind.levels) {
+                    Ok(bin) => {
+                        files.insert(name.clone(), bin);
+                        for e in report.files.iter_mut().filter(|e| e.project_path == json) {
+                            e.codec = None;
+                            e.project_path = name.clone();
+                            e.note = Some(note.clone());
+                        }
+                    }
+                    Err(_) => {
+                        files.insert(json, bytes);
+                    }
+                }
+            } else {
+                for e in report.files.iter_mut().filter(|e| e.project_path == name && e.note.is_none()) {
+                    e.note = Some(note.clone());
+                }
+            }
+        }
+    }
+}
+
 /// What follows reading a map's files: the trigger folders, chapter maps as projects, raw marks,
 /// the header and the manifest. `prefix`: the bytes before the archive.
 fn finish(
@@ -562,6 +606,7 @@ fn finish(
     }
 
     split_triggers(&mut files, &mut report, codecs);
+    split_objects(&mut files, &mut report);
 
     // Chapter maps of a campaign become projects of their own (if they unpack completely).
     let mut nested = BTreeMap::new();
@@ -583,10 +628,15 @@ fn finish(
     }
 
     // A raw file whose path looks like a codec output must be marked raw (and the map's own file named like the trigger
-    // layout's root file, which is the layout's only when it isn't raw).
+    // layout's root file, which is the layout's only when it isn't raw, and the map's own files where the object layout
+    // keeps its files: the layout's are those that aren't raw).
     let mut raw = Vec::new();
     for e in &report.files {
-        if e.codec.is_none() && (codecs.for_project_path(&e.project_path).is_some() || e.project_path == crate::trigger_layout::ROOT_FILE) {
+        if e.codec.is_none()
+            && (codecs.for_project_path(&e.project_path).is_some()
+                || e.project_path == crate::trigger_layout::ROOT_FILE
+                || crate::object_layout::layout_path(&e.project_path).is_some())
+        {
             raw.push(e.project_path.clone());
         }
     }
@@ -779,11 +829,17 @@ fn archive_key(path: &str, raw: &[String], codecs: &Registry, triggers: bool) ->
     if triggers && crate::trigger_layout::is_layout_path(path) && !raw.iter().any(|r| r == path) {
         return crate::trigger_layout::WTG.to_string();
     }
+    // The object layout's files and the packed object files they make (either half, raw or flat) compare by their
+    // kind (`object_layout::object_key`): a kind kept in another form isn't lost.
+    if let Some(key) = crate::object_layout::layout_key(path).filter(|_| !raw.iter().any(|r| r == path)) {
+        return key;
+    }
     let name = match codecs.for_project_path(path) {
         Some((stem, _)) if !raw.iter().any(|r| r == path) => paths::to_archive_name(&stem),
         _ => paths::to_archive_name(path),
     };
-    name.to_ascii_lowercase()
+    let name = name.to_ascii_lowercase();
+    crate::object_layout::object_key(&name).unwrap_or(name)
 }
 
 /// What syncing `ex` into `project` would delete under `map/` and `maps/`: the files the user may
@@ -1057,6 +1113,9 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     // The trigger folders keep the names they have on disk; a script Studio generated goes into the store
     // (`crate::trigger_layout::prepare_sync`).
     let script = crate::trigger_layout::prepare_sync(project, &mut ex.files)?;
+    // The object folders keep an order.txt that still gives the map's order (`crate::object_layout::prepare_sync`). A
+    // project still holding the flat object files (`war3map.w3u.json`, …) loses them below: the map's go into map/objects/.
+    crate::object_layout::prepare_sync(&map_dir, &mut ex.files)?;
     fs::create_dir_all(project)?;
     if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
@@ -1318,6 +1377,17 @@ pub fn encode_files_noting(
     use crate::trigger_layout as tl;
     let mut out: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    // The object folders (`map/objects/`) pack into the packed object files of the map or campaign
+    // (`crate::object_layout::assemble`).
+    let objects = crate::object_layout::is_layout(files, raw);
+    crate::object_layout::check_root(files, raw)?;
+    if objects {
+        let prefix = crate::object_layout::Prefix::of_files(files);
+        for (name, data) in crate::object_layout::assemble(files, raw, prefix, warnings)? {
+            seen.insert(name.to_ascii_uppercase(), format!("{}/", crate::object_layout::DIR));
+            out.insert(name, data);
+        }
+    }
     let triggers = tl::is_layout(files, raw);
     if triggers {
         let (wtg, wct, notes) = tl::assemble(files, tl::language(files, codecs), codecs.trigger_data().as_deref()).map_err(|e| Error::Project(e.to_string()))?;
@@ -1329,6 +1399,9 @@ pub fn encode_files_noting(
     }
     for (path, bytes) in files {
         if triggers && tl::is_layout_path(path) && !raw.iter().any(|r| r == path) {
+            continue;
+        }
+        if objects && crate::object_layout::is_layout_file(path, raw) {
             continue;
         }
         let (name, data) = match codecs.for_project_path(path) {

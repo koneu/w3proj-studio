@@ -128,7 +128,20 @@ fn fixture_unpacked(map: &Path) -> BTreeMap<String, Vec<u8>> {
     // The terrain and placed objects go into one subterrain, the derived files into the store (.w3proj/derived/).
     w3proj::terrain_layout::split(&mut want, &[]).unwrap();
     w3proj::derived::take(&mut want);
+    objects_split(&mut want);
     want
+}
+
+/// The flat object files (`war3map.w3u.json`, …) among a fixture's files cut into map/objects/, as an unpack writes them.
+fn objects_split(files: &mut BTreeMap<String, Vec<u8>>) {
+    use w3proj::object_layout as ol;
+    let split = ol::split_flat(files, ol::Prefix::of_files(files));
+    assert!(split.kept.is_empty(), "{:?}", split.kept);
+    assert!(!split.taken.is_empty());
+    for k in &split.taken {
+        files.remove(k);
+    }
+    files.extend(split.layout);
 }
 
 /// The map's files loose in a folder, as the World Editor saves a "Warcraft III Scenario Folder"
@@ -230,13 +243,14 @@ fn verify_finds_every_codec_at_work() {
         ("war3map.w3s", "format:sounds"),
         ("war3map.w3l", "format:lights"),
         ("war3map.imp", "format:imports"),
-        ("war3map.w3u", "objdata-json"),
-        ("war3map.w3t", "objdata-json"),
-        ("war3map.w3b", "objdata-json"),
-        ("war3map.w3d", "objdata-json"),
-        ("war3map.w3a", "objdata-json"),
-        ("war3map.w3h", "objdata-json"),
-        ("war3map.w3q", "objdata-json"),
+        // The object data goes into map/objects/ (one file per object).
+        ("war3map.w3u", "object-folders"),
+        ("war3map.w3t", "object-folders"),
+        ("war3map.w3b", "object-folders"),
+        ("war3map.w3d", "object-folders"),
+        ("war3map.w3a", "object-folders"),
+        ("war3map.w3h", "object-folders"),
+        ("war3map.w3q", "object-folders"),
         ("war3map.w3e", "w3e-text"),
         // The fixture has the trigger folders: both files go into map/triggers/.
         ("war3map.wtg", "trigger-folders"),
@@ -258,7 +272,9 @@ fn the_mini_campaign_round_trips_through_its_codecs() {
     ok(&["unpack", s(&first), s(&project), "--game", "none"]);
     ok(&["pack", s(&project), "-o", s(&second)]);
     assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "the campaign changed");
-    let (want, got) = (files(&fixture.join("map")), files(&project.join("map")));
+    let (mut want, got) = (files(&fixture.join("map")), files(&project.join("map")));
+    objects_split(&mut want);
+    assert!(got.contains_key("objects/units/custom/h000.json"), "the campaign's own objects in its map/objects/: {:?}", got.keys().collect::<Vec<_>>());
     assert_eq!(want.keys().collect::<Vec<_>>(), got.keys().collect::<Vec<_>>());
     for (name, bytes) in &want {
         assert!(*bytes == got[name], "{name} came back different");
@@ -266,7 +282,7 @@ fn the_mini_campaign_round_trips_through_its_codecs() {
 
     ok(&["verify", s(&first), "--game", "none", "--baseline", s(&baseline), "--update-baseline"]);
     let table = fs::read_to_string(&baseline).unwrap();
-    for (file, id) in [("war3campaign.w3f", "format:campaign"), ("war3campaign.imp", "format:imports"), ("war3campaign.w3u", "objdata-json")] {
+    for (file, id) in [("war3campaign.w3f", "format:campaign"), ("war3campaign.imp", "format:imports"), ("war3campaign.w3u", "object-folders")] {
         let row = table.lines().map(|l| l.split('\t').collect::<Vec<_>>()).find(|c| c.get(1) == Some(&file)).map(|c| c[2].to_string());
         assert_eq!(row.as_deref(), Some(id), "{file} in\n{table}");
     }

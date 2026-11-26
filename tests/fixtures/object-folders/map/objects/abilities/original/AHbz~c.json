@@ -1,0 +1,9 @@
+{
+  "base": "AHbz",
+  "data": {
+    "end": "AHbz",
+    "mods": [
+      {"field": "Hbz1", "type": "int", "level": 1, "data": 1, "value": 8}
+    ]
+  }
+}

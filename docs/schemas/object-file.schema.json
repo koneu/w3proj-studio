@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One object (map/objects/<kind>/original/<name>.json, map/objects/<kind>/custom/<name>.json)",
+  "description": "One object of a kind with its entries in both packed files (docs/object-folders-spec.md, section 2), read and written by crates/w3proj/src/object_layout.rs. The file name is a function of the id (the base in original/): the id itself, `~` and a hex digit marking its upper-case letters, or `0x` and 8 hex digits. The writer puts one change per line; the reader takes any valid JSON. Keys the codec doesn't know are allowed: it ignores them.",
+  "type": "object",
+  "required": ["base"],
+  "properties": {
+    "id": { "$ref": "objects.schema.json#/$defs/id", "description": "a custom object's own id: in custom/ only, and there required" },
+    "base": { "$ref": "objects.schema.json#/$defs/id", "description": "the object it is made from (custom/) or changes (original/)" },
+    "data": { "$ref": "#/$defs/half", "description": "its entry in war3map.<ext>; missing: it isn't in that file, {}: it is there without changes" },
+    "skin": { "$ref": "#/$defs/half", "description": "its entry in war3mapSkin.<ext>; missing: it isn't in that file, {}: it is there without changes" }
+  },
+  "$defs": {
+    "half": {
+      "description": "the entry as the flat object data file has it, without base and id",
+      "type": "object",
+      "properties": {
+        "end": { "$ref": "objects.schema.json#/$defs/id", "description": "the token after each change, where a change has no `end` of its own; missing means four zero bytes" },
+        "sets": { "$ref": "objects.schema.json#/$defs/object/properties/sets" },
+        "mods": { "$ref": "objects.schema.json#/$defs/object/properties/mods" }
+      }
+    }
+  }
+}
