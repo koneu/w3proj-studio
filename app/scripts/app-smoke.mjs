@@ -4976,6 +4976,41 @@ async function cameraEditing(page, found) {
     if (JSON.stringify(cameras()[0]) !== JSON.stringify(was)) fail(`one undo of the aiming drag left ${lit(cameras()[0])}`);
   }
   await page.evaluate(`window.__camGroup?.dispose(); window.__camGroup = window.__camEd = null;`);
+
+  // A free camera (the World Editor's Create Free Camera), made beside a normal one from the same view: it stands at
+  // that one's eye, its target one unit ahead, camera type 1; its panel has no distance; Set from view keeps it free.
+  const count0 = cameras().length;
+  await k.look(0, 512);
+  await button("Create from view");
+  if ((await button("Create free camera")) === "missing") return fail("no Create free camera button");
+  await until("the free camera's panel", () => page.evaluate(`!!document.querySelector(".terrain-camera-free")`), 10000);
+  await k.save();
+  const [plain, free] = cameras().slice(count0);
+  const eyeOf = (c, base) => {
+    const f = [Math.cos(c.angleOfAttack * R) * Math.cos(c.rotation * R), Math.cos(c.angleOfAttack * R) * Math.sin(c.rotation * R), Math.sin(c.angleOfAttack * R)];
+    return [c.targetX - f[0] * c.distance, c.targetY - f[1] * c.distance, base + c.zOffset - f[2] * c.distance];
+  };
+  if (!free || free.trailer !== 1 || free.distance !== 1 || plain.trailer) fail(`Create from view and Create free camera made ${lit([plain, free].map((c) => c && [c.trailer, c.distance]))} (type, distance)`);
+  else {
+    // The new map is flat: the ground under the normal camera's target is the view's own.
+    const want = eyeOf(plain, ground - (was.zOffset ?? 0)), got = eyeOf(free, 0);
+    // This view's eye is above what a camera's height holds (4096): the height stops there, X and Y don't (as in the editor).
+    if (!(want[2] > 4096)) fail(`the view's eye isn't above 4096 (control): ${want[2]}`);
+    // (2 units: the normal camera's angles are kept to a hundredth of a degree, which is that much at this distance.)
+    if ([0, 1].some((i) => Math.abs(want[i] - got[i]) > 2) || free.posAbsoluteZ !== 4096 || free.zOffset !== 4096) fail(`the free camera stands at ${got.map(Math.round)}, Pos Absolute Z ${free.posAbsoluteZ}, not at the view's eye ${want.map(Math.round)}: ${lit([plain, free])}`);
+    if (free.rotation !== plain.rotation || free.angleOfAttack !== plain.angleOfAttack || free.fieldOfView !== plain.fieldOfView) fail("the free camera's angles or field of view aren't the view's");
+    if ((await shown("Dist")) !== null || (await shown("Near")) !== null || (await shown("Yaw")) === null) fail("a free camera's panel shows a distance or near clipping, or no Yaw");
+    await k.look(512, 0);
+    await button("Create from view");
+    await k.save();
+    await page.evaluate(`(() => { const j = document.querySelector('select[title="Go to a camera"]'); j.value = [...j.options].find((o) => o.textContent === ${lit(free.name)}).value; j.dispatchEvent(new Event("change")); })()`);
+    await k.look(-512, 0);
+    await page.evaluate(`[...document.querySelectorAll(".terrain-region-panel button")].find((b) => b.textContent === "Set from view").click()`);
+    await settled(page);
+    await k.save();
+    const set = cameras().find((c) => c.name === free.name);
+    if (set.trailer !== 1 || set.distance !== 1 || Math.abs(set.targetX - free.targetX) < 100) fail(`Set from view on a free camera gave ${lit([set.trailer, set.distance, set.targetX])}, not a free camera moved with the view`);
+  }
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
     await restoreWindow(page);

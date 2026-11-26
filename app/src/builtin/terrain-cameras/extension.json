@@ -7,7 +7,7 @@
   "extensionDependencies": ["w3.terrainViewer"],
   "contributes": {
     "mcpTools": [
-      { "name": "list_cameras", "description": "The open map's cameras: name, target, rotation, angle of attack, distance, field of view. Triggers call them gg_cam_<name>.", "readOnly": true }
+      { "name": "list_cameras", "description": "The open map's cameras: name, target, rotation, angle of attack, distance, field of view; free: true for a free camera (its target is 1 unit in front of it). Triggers call them gg_cam_<name>.", "readOnly": true }
     ]
   }
 }

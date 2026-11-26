@@ -13,7 +13,7 @@ import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type Terra
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
-import { CAMERA_FIELDS, cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, typedCameraValue, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, type CameraField } from "../../lib/terrain/cameras";
+import { CAMERA_FIELDS, cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, typedCameraValue, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, type CameraField, isFreeCamera, freeCameraAt, lookCamera, markerCamera, sightPoint } from "../../lib/terrain/cameras";
 import { readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
 import { storableFloat32 } from "../../lib/formats/float32";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
@@ -29,6 +29,14 @@ const RAD = Math.PI / 180;
  *  the picture within a pixel), as the model is scaled. */
 const SELECTED_RGB: [number, number, number] = [0, 255, 0];
 const SELECTED_RADIUS = 0.096;
+/** A free camera's fields, named as the World Editor's Camera Properties names them; it shows no distance and no near
+ *  clipping for one. */
+const FREE_LABELS: Partial<Record<CameraField, [string, string]>> = {
+  targetX: ["X", "X"], targetY: ["Y", "Y"], rotation: ["Yaw", "Yaw (degrees; 90 looks north)"], angleOfAttack: ["Pitch", "Pitch (degrees; 270 looks straight down)"],
+};
+const FREE_HIDDEN: readonly CameraField[] = ["distance", "nearZ"];
+/** What places a free camera: a change of one moves its height (Pos Absolute Z) along. */
+const PLACING = ["targetX", "targetY", "zOffset", "rotation", "angleOfAttack"] as const;
 /** How near (CSS pixels) a click must come to a camera's model to take it. */
 const PICK_PX = 10;
 
@@ -65,7 +73,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     requireProject(w3);
     const file = await readMapDoc<{ cameras: Camera[] }>(w3, "map/war3map.w3c.json");
     return (file?.cameras ?? []).map((c) => ({
-      name: c.name, target: [c.targetX, c.targetY], rotation: c.rotation, angleOfAttack: c.angleOfAttack, distance: c.distance, fieldOfView: c.fieldOfView,
+      name: c.name, ...(isFreeCamera(c) ? { free: true } : {}), target: [c.targetX, c.targetY], rotation: c.rotation, angleOfAttack: c.angleOfAttack, distance: c.distance, fieldOfView: c.fieldOfView,
     }));
   }));
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
@@ -113,7 +121,8 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** A camera whose target has numbers (else it has no marker or circle). */
   const drawable = (c: Camera) => [c.targetX, c.targetY, targetZ(c), c.distance].every(Number.isFinite) && c.distance > 0;
   /** The editor view that shows what the camera sees (roll left out). */
-  const toView = (c: Camera): TerrainView => {
+  const toView = (camera: Camera): TerrainView => {
+    const c = lookCamera(camera, ground);
     // The game camera looks along rotation/angle of attack; the view's yaw and
     // pitch point the other way, from the target to the eye.
     const pitch = -((wrap(c.angleOfAttack) + 180) % 360 - 180) * RAD;
@@ -124,6 +133,14 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     };
   };
   const round = (v: number, k = 100) => Math.round(v * k) / k;
+  /** The current view as a camera's placing values, unrounded. */
+  const lookFromView = () => {
+    const v = ed.view();
+    return {
+      targetX: v.target[0], targetY: v.target[1], zOffset: v.target[2] - ground(v.target[0], v.target[1]),
+      rotation: wrap(v.yaw / RAD - 180), angleOfAttack: wrap(-v.pitch / RAD), distance: v.distance,
+    };
+  };
   /** Camera values from the current view. */
   const fromView = (): Partial<Camera> => {
     const v = ed.view();
@@ -132,6 +149,14 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       rotation: round(wrap(v.yaw / RAD - 180)), angleOfAttack: round(wrap(-v.pitch / RAD)), distance: round(v.distance),
       fieldOfView: round(horizontalFov(v.fov, ed.aspect()) / RAD),
     };
+  };
+
+  /** A free camera's height, from where it stands now. */
+  const freeHeight = (c: Camera) => round(freeCameraAt(c, ground).posAbsoluteZ);
+  /** The values of a free camera standing where `c` (a view's values, or a camera) has its eye. */
+  const freeValues = (c: Parameters<typeof freeCameraAt>[0]): Partial<Camera> => {
+    const f = freeCameraAt(c, ground);
+    return { targetX: round(f.targetX), targetY: round(f.targetY), zOffset: round(f.zOffset), distance: f.distance, posAbsoluteZ: round(f.posAbsoluteZ) };
   };
 
   // ---- overlay -----------------------------------------------------------------------
@@ -144,7 +169,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     // As the World Editor's camera mode: each camera's model (as the Camera Objects layer draws it), and a green
     // circle round the target of each selected one.
     ed.setShapes(cameraMarkers(doc.cameras, ground));
-    ed.setRings(selection.filter(drawable).map((c) => ({ x: c.targetX, y: c.targetY, r: SELECTED_RADIUS * c.distance, rgb: SELECTED_RGB })));
+    ed.setRings(selection.filter(drawable).map((c) => markerCamera(c, ground)).map((c) => ({ x: c.targetX, y: c.targetY, r: SELECTED_RADIUS * c.distance, rgb: SELECTED_RGB })));
     ed.setLabels(doc.cameras.map((c) => ({ x: c.targetX, y: c.targetY, text: c.name })));
   };
 
@@ -164,15 +189,22 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       terrain: false, objects: false,
     });
   };
+  /** A copy of `c` with `change`; a free camera that moved or turned gets its height from where it now stands (unless
+   *  the change gives it one). */
+  const changed = (c: Camera, change: Partial<Camera>): Camera => {
+    const next = { ...structuredClone(c), ...change };
+    if (isFreeCamera(next) && change.posAbsoluteZ === undefined && PLACING.some((k) => change[k] !== undefined && change[k] !== c[k])) next.posAbsoluteZ = freeHeight(next);
+    return next;
+  };
   /** Changes cameras (by copy) as one undo step; they stay selected. */
   const updateAll = (cams: Camera[], change: Partial<Camera> | ((c: Camera) => Partial<Camera>)) => {
-    const copies = new Map(cams.map((c) => [c, names.copy(c, { ...structuredClone(c), ...(typeof change === "function" ? change(c) : change) })]));
+    const copies = new Map(cams.map((c) => [c, names.copy(c, changed(c, typeof change === "function" ? change(c) : change))]));
     const after = doc.cameras.map((x) => copies.get(x) ?? x);
     commit(doc.cameras, after, selection.map((c) => copies.get(c) ?? c).filter((c) => after.includes(c)));
   };
   /** Changes one camera (by copy) as an undo step, and selects it alone. */
   const update = (c: Camera, change: Partial<Camera>) => {
-    const copy = names.copy(c, { ...structuredClone(c), ...change });
+    const copy = names.copy(c, changed(c, change));
     commit(doc.cameras, doc.cameras.map((x) => (x === c ? copy : x)), [copy]);
   };
   const uniqueName = (taken = new Set(doc.cameras.map((c) => c.name))) => {
@@ -227,21 +259,26 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     // The box shows what the camera has, not what was typed.
     else renderPanel();
   };
-  const create = async () => {
+  /** Create from view, or (`free`) the World Editor's Create Free Camera: a camera standing where the view's eye is. */
+  const create = async (free = false) => {
     const v = fromView(), clip = clipping.current();
+    // The same view's own values for the free camera, unrounded: its place is worked out from them.
+    const eye = free ? lookFromView() : null;
     if (await viewRefused(v) || gone || !ed.editable) return;
     const c: Camera = {
       targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70,
-      ...v, ...clip, name: uniqueName(),
+      ...v, ...clip, name: uniqueName(), ...(eye ? { ...freeValues(eye), trailer: 1 } : {}),
     };
     commit(doc.cameras, [...doc.cameras, c], [c]);
   };
   /** Set from view: the camera takes the view's values, unless Enforce Camera Bounds refuses the view. The camera may
    *  have gone while the bounds were read (deleted, or put back by an undo): then nothing changes. */
   const setFromView = async (c: Camera) => {
+    // A free camera stays one (as the World Editor's Set Camera To Current View keeps it).
+    const eye = isFreeCamera(c) ? lookFromView() : null;
     const v = { ...fromView(), ...clipping.current() };
     if (await viewRefused(v) || gone || !ed.editable || !doc.cameras.includes(c)) return;
-    update(c, v);
+    update(c, eye ? { ...v, ...freeValues(eye) } : v);
   };
   /** Duplicate: a copy of each selected camera with every value but its name (a new one, as Create gives), after the
    *  originals; the copies are selected. One undo step. */
@@ -335,7 +372,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         if (v && v !== c.name) update(c, { name: v });
       } });
     // Several selected: a field shows the value they share, or stays empty where they differ; a value typed goes to all.
-    const fields = FIELDS.map(([key, label, title]) => {
+    const free = selection.every(isFreeCamera);
+    const fields = FIELDS.filter(([key]) => !free || !FREE_HIDDEN.includes(key)).map(([key, normalLabel, normalTitle]) => {
+      const [label, title] = (free && FREE_LABELS[key]) || [normalLabel, normalTitle];
       // A classic camera has no depth of field values: 0, as a version 3 save gives it.
       const values = new Set(selection.map((x) => (x[key] as number | undefined) ?? 0));
       const shared = values.size === 1 ? round((c[key] as number | undefined) ?? 0) : null;
@@ -356,6 +395,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return h("label.terrain-camera-field", { title }, label, input);
     });
     panel.replaceChildren(name,
+      ...(free ? [h("span.muted.terrain-camera-free", { title: "A free camera is kept by where it stands, not by what it looks at" }, many ? "Free cameras" : "Free camera")] : []),
       h("button", { title: "Look through this camera", onclick: () => { clipping.lookThrough(c); preview(c); } }, "View"),
       // Several cameras made one by the view would be nothing but copies: this is for one.
       ...(many ? [] : [h("button", { title: "Take target, angles, distance, field of view and clipping from the current view", onclick: () => void setFromView(c) }, "Set from view")]),
@@ -389,6 +429,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   };
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "New camera from the current view", onclick: () => { if (ed.editable) void create(); } }, "Create from view"),
+    h("button", { title: "New free camera where the view is, looking the same way (the World Editor's Create Free Camera)", onclick: () => { if (ed.editable) void create(true); } }, "Create free camera"),
     jump, count, hover, panel);
 
   return {
@@ -452,8 +493,15 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         const r0 = Math.hypot(drag.start[0] - o.targetX, drag.start[1] - o.targetY), r1 = Math.hypot(x - o.targetX, y - o.targetY);
         if (r0 < 1 || r1 < 1) return;
         const turn = Math.atan2(y - o.targetY, x - o.targetX) - Math.atan2(drag.start[1] - o.targetY, drag.start[0] - o.targetX);
-        c.rotation = round(wrap(o.rotation + turn / RAD));
-        c.distance = round(Math.max(CELL, o.distance * (r1 / r0)));
+        if (isFreeCamera(o)) {
+          // A free camera turns where it stands; nearer or farther means nothing to it.
+          const rotation = round(wrap(o.rotation + turn / RAD));
+          const [ex, ey, ez] = sightPoint(o, ground, 0);
+          Object.assign(c, freeValues({ targetX: ex, targetY: ey, zOffset: ez - ground(ex, ey), distance: 0, rotation, angleOfAttack: o.angleOfAttack }), { rotation, posAbsoluteZ: o.posAbsoluteZ });
+        } else {
+          c.rotation = round(wrap(o.rotation + turn / RAD));
+          c.distance = round(Math.max(CELL, o.distance * (r1 / r0)));
+        }
       }
       render();
     },
@@ -463,11 +511,12 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!d || !d.moved || !selected) return;
       // The live edit becomes one undo step: restore, then apply as an update.
       const moved = new Map([[selected, d.orig], ...(d.part === "target" ? d.others : [])]);
-      const now = new Map([...moved.keys()].map((c) => [c, { targetX: c.targetX, targetY: c.targetY, rotation: c.rotation, distance: c.distance }]));
-      for (const [c, was] of moved) Object.assign(c, { targetX: was.targetX, targetY: was.targetY, rotation: was.rotation, distance: was.distance });
+      const dragged = (c: Camera) => ({ targetX: c.targetX, targetY: c.targetY, zOffset: c.zOffset, rotation: c.rotation, distance: c.distance });
+      const now = new Map([...moved.keys()].map((c) => [c, dragged(c)]));
+      for (const [c, was] of moved) Object.assign(c, dragged(was));
       // A click whose pointer didn't take a camera anywhere is no edit.
-      const changed = [...moved.keys()].filter((c) => (["targetX", "targetY", "rotation", "distance"] as const).some((k) => now.get(c)![k] !== c[k]));
-      if (changed.length) updateAll(changed, (c) => now.get(c)!);
+      const touched = [...moved.keys()].filter((c) => (["targetX", "targetY", "rotation", "distance"] as const).some((k) => now.get(c)![k] !== c[k]));
+      if (touched.length) updateAll(touched, (c) => now.get(c)!);
     },
     pointerLeave() { hover.textContent = ""; ed.host.style.cursor = ""; },
     // What the Camera Objects layer draws: the cameras as edited here, saved or not.

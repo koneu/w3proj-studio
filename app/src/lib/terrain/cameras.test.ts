@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFixture } from "../testhelpers/testutil";
-import { CAMERA_FIELDS, CAMERA_RANGES, type CameraField, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, FAR_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, stepFarClip, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewDepthRange, viewInCameraBounds } from "./cameras";
+import { CAMERA_FIELDS, CAMERA_RANGES, type CameraField, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, FAR_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, stepFarClip, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewDepthRange, viewInCameraBounds, FREE_LOOK_DISTANCE, FREE_MARKER_DISTANCE, freeCameraAt, lookCamera, markerCamera, sightPoint } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
 const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
@@ -297,4 +297,64 @@ test("typedCameraValue agrees with every Camera Properties value recorded from t
     else { changed++; assert.ok("refused" in got, `${row.field} = ${row.typed}: the editor changed it (to ${row.we}), Studio took it`); }
   }
   assert.deepEqual({ kept, changed }, { kept: 15, changed: 36 });
+});
+
+// The World Editor's own cameras from one view (we-drive 2026-11-26, SD, a flat map): Create Camera, then Create Free Camera.
+const normalView = { targetX: 500, targetY: 300, zOffset: 0, rotation: 45, angleOfAttack: 320, distance: 1800 };
+const flat = () => 0;
+const near = (got: number, want: number, what: string, by = 0.03) => assert.ok(Math.abs(got - want) <= by, `${what}: ${got}, want ${want}`);
+
+test("freeCameraAt: a free camera stands at the view's eye, its target one unit ahead, as the World Editor makes it", () => {
+  const f = freeCameraAt(normalView, flat);
+  near(f.targetX, -474.47357, "X");
+  near(f.targetY, -674.4736, "Y");
+  near(f.zOffset, 1156.3751, "Z");
+  near(f.posAbsoluteZ, 1157.018, "Pos Absolute Z");
+  assert.equal(f.distance, 1);
+});
+
+test("freeCameraAt: Z is the target's height itself, whatever the ground; a free camera made from itself stays", () => {
+  const hill = (x: number) => (x < 0 ? 200 : 0);
+  // A view's own Z offset counts from the ground under its target (here 0).
+  const f = freeCameraAt(normalView, hill);
+  near(f.posAbsoluteZ, 1157.018, "Pos Absolute Z");
+  near(f.zOffset, 1156.3751, "Z, over raised ground too");
+  const again = freeCameraAt({ ...normalView, ...f, trailer: 1 }, hill);
+  for (const k of ["targetX", "targetY", "zOffset", "posAbsoluteZ"] as const) near(again[k], f[k], k, 1e-6);
+  // Looking through it and drawing it start from the same eye, over raised ground too.
+  const free = { ...normalView, ...f, fieldOfView: 60, trailer: 1 };
+  const eye = sightPoint(free, hill, 0);
+  near(eye[2], f.posAbsoluteZ, "eye", 1e-6);
+  eye.forEach((v, i) => near(sightPoint(lookCamera(free, hill), hill, 0)[i], v, `looked through from ${i}`, 1e-6));
+  [free.targetX, free.targetY, free.zOffset].forEach((v, i) => near(markerHandles(free, hill)!.target[i], v, `drawn at ${i}`, 1e-6));
+});
+
+test("lookCamera: a free camera is looked through from farther along its sight: the same eye, a target to turn round", () => {
+  const free = { ...normalView, ...freeCameraAt(normalView, flat), trailer: 1 };
+  const look = lookCamera(free, flat);
+  assert.equal(look.distance, FREE_LOOK_DISTANCE);
+  sightPoint(free, flat, 0).forEach((v, i) => near(sightPoint(look, flat, 0)[i], v, `eye ${i}`, 1e-6));
+  const normal = { ...normalView, trailer: 0 };
+  assert.equal(lookCamera(normal, flat), normal);
+});
+
+test("a free camera's marker has one size, its arrow ending at the camera, whatever its distance of 1", () => {
+  const free = { ...normalView, ...freeCameraAt(normalView, flat), fieldOfView: 60, trailer: 1 };
+  const m = markerCamera(free, flat);
+  assert.equal(m.distance, FREE_MARKER_DISTANCE);
+  // The selection circle's radius, 0.096 of the marker's distance: 36.8 on the World Editor's picture.
+  near(0.096 * m.distance, 36.8, "radius", 0.1);
+  const hands = markerHandles(free, flat)!;
+  const target = [free.targetX, free.targetY, free.zOffset];
+  target.forEach((v, i) => near(hands.target[i], v, `the arrow's tip at the camera ${i}`, 1e-6));
+  near(Math.hypot(...hands.back.map((v, i) => v - target[i])), 0.365 * FREE_MARKER_DISTANCE, "the model's length", 1e-6);
+  assert.ok(cameraMarkers([free], flat).length > 0);
+});
+
+test("freeCameraAt: heights past a camera's range stop at it, X and Y as they are, as the World Editor writes them", () => {
+  // From the editor's view of distance 5000 (angle of attack 304) at 0, 0: the eye 4145 up.
+  const f = freeCameraAt({ targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 5000 }, flat);
+  near(f.targetY, -2795.4055, "Y");
+  assert.equal(f.zOffset, 4096);
+  assert.equal(f.posAbsoluteZ, 4096);
 });

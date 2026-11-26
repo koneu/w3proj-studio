@@ -5,7 +5,66 @@
 import { float32Text, storableFloat32 } from "../formats/float32";
 
 /** The values of a camera object the drawing needs (the w3c entry has more). */
-export interface CameraObject { name?: string; targetX: number; targetY: number; zOffset?: number; rotation: number; distance: number; angleOfAttack: number; fieldOfView: number }
+export interface CameraObject { name?: string; targetX: number; targetY: number; zOffset?: number; rotation: number; distance: number; angleOfAttack: number; fieldOfView: number; posAbsoluteZ?: number; trailer?: number }
+
+/**
+ * A free camera (war3map.w3c's camera type 1, the World Editor's Create Free Camera) is kept by where it stands, not
+ * by what it looks at: its distance is 1, its target one unit in front of it, and Pos Absolute Z is its height
+ * (we-drive 2026-11-26, SD: from the view of target 500, 300, distance 1800, angle of attack 320, rotation 45 the
+ * editor made target -474.47, -674.47, Z offset 1156.38, distance 1, Pos Absolute Z 1157.02; the angles, field of
+ * view and clipping as for a normal camera). Set Camera To Current View keeps a free camera free. A free camera's Z
+ * offset is its target's height itself, not one over the ground (on a hill the editor wrote Z 1492.66 and Pos Absolute
+ * Z 1493.49, one unit of the line of sight apart).
+ */
+export const isFreeCamera = (c: { trailer?: number }) => !!c.trailer;
+/** A free camera's distance: its target this far in front of it. */
+export const FREE_DISTANCE = 1;
+/** A free camera's marker is that of a camera of this distance with its arrow ending at the free camera's target: the
+ *  World Editor's has one size, whatever the camera holds (measured on its pictures: the selection circle's radius is
+ *  36.8, 0.096 of 384, and the model's length on screen fits). */
+export const FREE_MARKER_DISTANCE = 384;
+/** How far in front of a free camera Studio's view turns and zooms while looking through it (the picture is the same
+ *  from any point on the camera's line of sight; round a point one unit away the view couldn't be moved). */
+export const FREE_LOOK_DISTANCE = 1650;
+
+/** The direction a camera looks (unit length), from its rotation and angle of attack in degrees. */
+export function cameraForward(c: { rotation: number; angleOfAttack: number }): [number, number, number] {
+  const r = c.rotation * RAD, a = c.angleOfAttack * RAD;
+  return [Math.cos(a) * Math.cos(r), Math.cos(a) * Math.sin(r), Math.sin(a)];
+}
+
+type Placed = Pick<CameraObject, "targetX" | "targetY" | "zOffset" | "rotation" | "angleOfAttack" | "distance" | "trailer">;
+/** The height a camera's `zOffset` counts from: the ground under its target, and nothing for a free camera. */
+const zBase = (c: Placed, groundZ: (x: number, y: number) => number) => (isFreeCamera(c) ? 0 : groundZ(c.targetX, c.targetY));
+
+/** The point `along` its line of sight from a camera's eye (0: the eye itself), in world coordinates. */
+export function sightPoint(c: Placed, groundZ: (x: number, y: number) => number, along: number): [number, number, number] {
+  const f = cameraForward(c), k = along - c.distance;
+  return [c.targetX + f[0] * k, c.targetY + f[1] * k, zBase(c, groundZ) + (c.zOffset ?? 0) + f[2] * k];
+}
+
+/** The values of a free camera standing where the camera (or view) `c` has its eye, looking the same way. */
+export function freeCameraAt(c: Placed, groundZ: (x: number, y: number) => number): { targetX: number; targetY: number; zOffset: number; distance: number; posAbsoluteZ: number } {
+  const [x, y, z] = sightPoint(c, groundZ, FREE_DISTANCE);
+  // Heights past what a camera holds stop there, X and Y as they are: the editor's free camera from a view 4145 up had
+  // Z and Pos Absolute Z 4096 (we-compare camera-free-high).
+  const held = (v: number, key: "zOffset" | "posAbsoluteZ") => Math.min(CAMERA_RANGES[key]![1], Math.max(CAMERA_RANGES[key]![0], v));
+  return { targetX: x, targetY: y, zOffset: held(z, "zOffset"), distance: FREE_DISTANCE, posAbsoluteZ: held(sightPoint(c, groundZ, 0)[2], "posAbsoluteZ") };
+}
+
+/** A camera that isn't free, with another target and distance on `c`'s line of sight: the same eye, looking the same way. */
+function onSight<C extends Placed>(c: C, groundZ: (x: number, y: number) => number, along: number): C {
+  const [x, y, z] = sightPoint(c, groundZ, along);
+  return { ...c, targetX: x, targetY: y, zOffset: z - groundZ(x, y), distance: along, trailer: 0 };
+}
+
+/** The camera whose target and distance Studio's view takes to look through `c`. */
+export const lookCamera = <C extends Placed & { trailer?: number }>(c: C, groundZ: (x: number, y: number) => number): C =>
+  (isFreeCamera(c) ? onSight(c, groundZ, FREE_LOOK_DISTANCE) : c);
+
+/** The camera whose marker and selection circle stand for `c`. */
+export const markerCamera = <C extends CameraObject>(c: C, groundZ: (x: number, y: number) => number): C =>
+  (isFreeCamera(c) ? { ...c, zOffset: (c.zOffset ?? 0) - groundZ(c.targetX, c.targetY), distance: FREE_MARKER_DISTANCE, trailer: 0 } : c);
 
 /** What the World Editor says when Enforce Camera Bounds refuses Create Camera or Set Camera To Current View (its
  *  "Error" box, WESTRING_WARNING_CREATECAMOUTOFBOUNDS). */
@@ -210,7 +269,9 @@ const MARKER = {
  * right) and `up` (the camera's up) away from its target, all as fractions of its distance. The target stands
  * `zOffset` over the ground (`groundZ`). Null for a camera with a value that isn't a number, or no distance.
  */
-function markerFrame(c: CameraObject, groundZ: (x: number, y: number) => number): ((along: number, side: number, up: number) => number[]) | null {
+function markerFrame(camera: CameraObject, groundZ: (x: number, y: number) => number): ((along: number, side: number, up: number) => number[]) | null {
+  if (!(camera.distance > 0)) return null;
+  const c = markerCamera(camera, groundZ);
   const zOff = c.zOffset ?? 0;
   if (![c.targetX, c.targetY, zOff, c.rotation, c.distance, c.angleOfAttack].every(Number.isFinite) || c.distance <= 0) return null;
   const tz = groundZ(c.targetX, c.targetY) + zOff;
@@ -229,7 +290,7 @@ function markerFrame(c: CameraObject, groundZ: (x: number, y: number) => number)
 export function markerHandles(c: CameraObject, groundZ: (x: number, y: number) => number): { target: number[]; front: number[]; back: number[]; width: number } | null {
   const at = markerFrame(c, groundZ);
   if (!at) return null;
-  return { target: at(0, 0, 0), front: at(MARKER.lens.front, 0, 0), back: at(MARKER.body.back, 0, 0), width: 2 * MARKER.body.half * c.distance };
+  return { target: at(0, 0, 0), front: at(MARKER.lens.front, 0, 0), back: at(MARKER.body.back, 0, 0), width: 2 * MARKER.body.half * (isFreeCamera(c) ? FREE_MARKER_DISTANCE : c.distance) };
 }
 
 /** How far a point (x, y) is from the segment a–b (points on the view, pixels). */

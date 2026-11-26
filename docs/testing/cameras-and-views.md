@@ -42,6 +42,16 @@ Camera bounds, the default camera, camera objects, zoom and the View menu. Part 
   The editor puts the target above the middle of the view (an off-centre projection, at 0.385 of the height), which
   a centred camera matches only at this aspect.
 
+- **Free cameras** (branch feat/free-camera, 2026-11-26, SD; spec `tests/we-compare/camera-free.json`): Create Free Camera
+  (1476,100) stores where the view's eye is: distance 1, target one unit ahead, Z the target's height itself (not over
+  the ground, as a normal camera's Z offset is), Pos Absolute Z the eye's height; angles, field of view and clipping as Create Camera. Set Camera To Current View keeps a free
+  camera free. Camera Properties shows X, Y, Z, Yaw, Pitch, Roll (no distance, no near clipping). View Selected Camera of
+  one doesn't look through it: the view looks straight down (angle of attack 270) at the ground under it from its
+  height (Studio's View looks through it, on purpose). The marker has one size (as a camera of distance about 384 with
+  its arrow's tip at the free camera's target; from the selection circle, radius 36.8, and the model's length).
+  On hills the editor's view sits lower than Studio's (37 and 33 units on two spots of AutumnLeaves), so a camera made
+  from the same view stands that much higher in Studio.
+
 - **A new camera's clipping** (branch camera-farz-we, 2026-11-15, SD; specs `tests/we-compare/camera-farz.json`, input
   `camera-farz.w3m`: eight cameras at 0, 0 from 500 to 5000, every second with far 9000 / near 50): Create Camera, Create
   Free Camera and Set Camera To Current View give the camera the view's far and near clipping, never one from the
