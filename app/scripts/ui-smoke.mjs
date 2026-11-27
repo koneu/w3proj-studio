@@ -222,6 +222,17 @@ async function run() {
         return document.body.innerText.includes("Could not") ? "error" : "ok";
       })()`));
     }
+    // The gear: the last button, at the bottom of the activity bar, and it opens the Settings editor.
+    const gear = await page.evaluate(`(async () => {
+      w3Workbench.editors.closeAll?.();
+      const bar = document.querySelector(".activitybar"), g = document.querySelector(".activity-settings");
+      if (!g) return { missing: true };
+      const last = bar.lastElementChild === g, below = bar.getBoundingClientRect().bottom - g.getBoundingClientRect().bottom;
+      g.click();
+      for (let i = 0; i < 100 && !document.querySelector(".settings .settings-search"); i++) await new Promise((r) => setTimeout(r, 50));
+      return { last, below, title: g.title, opened: !!document.querySelector(".settings .settings-search"), active: w3.editors.activePath() };
+    })()`);
+    await page.evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
     const unknown = await page.evaluate(`window.__smoke.unknown`);
     const shot = await page.send("Page.captureScreenshot", { format: "png" });
     mkdirSync(dirname(join(work, "x")), { recursive: true });
@@ -229,6 +240,7 @@ async function run() {
     ws.close();
 
     const found = problems(page.events);
+    if (gear.missing || !gear.last || !(gear.below >= 0 && gear.below < 12) || !gear.opened || gear.active !== "w3:settings" || !/^Open Settings \(Ctrl\+,\)$/.test(gear.title)) found.push(`the Settings gear: ${JSON.stringify(gear)}`);
     if (!menuKeys.opened || !menuKeys.moved || !menuKeys.nextMenu || menuKeys.nextFocus !== "Edit" || !menuKeys.closed || menuKeys.backOnBar !== "Edit"
       || !menuKeys.leftBar || menuKeys.altTap !== "File" || !menuKeys.altAgain || !menuKeys.altClick || !menuKeys.altGr) found.push(`menu bar keys: ${JSON.stringify(menuKeys)}`);
     if (!menuKeys.greyed?.includes("Close Project") || !menuKeys.greyed?.includes("Save") || menuKeys.greyed?.includes("New Map…") || !/project/.test(menuKeys.why ?? "")) found.push(`menu entries greyed out: ${JSON.stringify(menuKeys)}`);

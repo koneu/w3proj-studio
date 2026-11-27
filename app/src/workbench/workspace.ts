@@ -529,7 +529,7 @@ const CORE_SETTINGS: Record<string, ConfigurationProperty> = {
   "game.cacheMegabytes": { type: "number", scope: "user", default: 1024, description: "Game files read are kept in memory up to this size, so a map opened again reads nothing from the game's storage. Less than what a map reads (GoldRush in HD: about 600 MB) keeps little of it. 0 keeps nothing." },
   "game.fastTransfer": { type: "boolean", scope: "user", default: false, description: "Read game files over a local HTTP connection to the app itself (127.0.0.1, a random port and a secret token, served only to this app's pages) instead of the app's internal messages: several times faster for big models and textures. A request that fails is read the usual way." },
   "project.syncOnWorldEditorSave": { type: "string", scope: "user", default: "ask", enum: ["ask", "always", "never"], description: "Sync the project back when the World Editor saves the map." },
-  "recentProjects": { type: "array", scope: "user", default: [], description: "Recently opened projects (Welcome page)." },
+  "recentProjects": { type: "array", scope: "user", default: [], description: "Recently opened projects (Welcome page, File > Open Recent)." },
   "extensions.disabled": { type: "array", scope: "user", default: [], description: "Extension ids that aren't loaded (built-ins included). Applies after a reload." },
   "editorAssociations": { type: "object", scope: "user", default: {}, description: "File glob → editor id, e.g. { \"*.w3u.json\": \"w3.textEditor\" }." },
 };

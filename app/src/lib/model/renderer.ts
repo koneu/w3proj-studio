@@ -362,7 +362,7 @@ uniform float uCoord;
 uniform highp sampler2D uBones;
 // Optional ground height map (R32F, one texel per terrain corner): cliff models
 // follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
-uniform highp sampler2D uHeight; uniform float uUseHeight; uniform vec4 uHeightRect;
+uniform highp sampler2D uHeight; uniform float uUseHeight; uniform vec4 uHeightRect; uniform float uCliffFoot;
 ${EDGE_UNIFORMS}
 out vec3 vNormal; out vec2 vUV; out highp vec3 vWorldPos;
 // The border shade of the whole instance, at its origin (EdgeShade's "object" and "tile").
@@ -402,6 +402,10 @@ void main() {
     // across two tiles), not the model's own tilted one, or each cliff tile shows as a lighter or darker square.
     vec3 n = normalize(vNormal);
     float flatness = smoothstep(0.85, 0.95, n.z);
+    // A cliff model's strip along its foot rises to the face with the face's tilted normals, which differ between a
+    // tile's two sides: lit by them, each tile's foot is a dark block. The World Editor shows it lit as the ground.
+    // (The face's own vertices at a level's height look sideways, n.z about 0.1.)
+    if (uCliffFoot > 0.0 && n.z > 0.3 && mod(aPos.z + 0.5, 128.0) <= uCliffFoot + 0.5) flatness = 1.0;
     if (flatness > 0.0) {
       vec2 p = world.xy;
       float sx = (groundAt(p + vec2(128.0, 0.0)) - groundAt(p - vec2(128.0, 0.0))) / 256.0;
@@ -434,6 +438,8 @@ uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 ${EDGE_UNIFORMS}
 uniform vec3 uEdgeColor;
 flat in float vEdge;
+// The ground's shadows (GroundShadow), for the models that are part of the ground; uGroundDark 0 for the others.
+uniform float uGroundLit; uniform sampler2D uGroundShadow; uniform highp vec4 uGroundRect; uniform vec2 uGroundShift; uniform vec2 uGroundDark;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
@@ -461,9 +467,16 @@ void main() {
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c.rgb *= uColor.rgb;
   float lit = uUnshaded > 0.5 ? 1.0 : sunLit(vWorldPos, vNormal);
-  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : objectLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
+  // What is part of the ground is lit as the ground is (sunLight): objectLight's fill would light a cliff's face that
+  // looks away from the sun half as bright as flat ground.
+  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uGroundLit > 0.5 ? sunLight(uAmbient, uDiffuse, vNormal, uLightDir, lit) : objectLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
   vec3 glow = uGlow > 0.5 ? texture(uEmissive, vUV).rgb * uColor.rgb : vec3(0.0);
-  outColor = vec4(edged(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), edgeShade()), c.a);
+  float shade = 0.0;
+  if (uGroundDark.x + uGroundDark.y > 0.0) {
+    highp vec2 at = (vWorldPos.xy - uGroundRect.xy) / uGroundRect.zw;
+    shade = max(texture(uGroundShadow, at).r * uGroundDark.x, texture(uGroundShadow, at - uGroundShift).g * uGroundDark.y);
+  }
+  outColor = vec4(edged(fogged(mix(tonedGlow(c.rgb, light, glow) * (1.0 - shade), uMix.rgb, uMix.a)), edgeShade()), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -553,10 +566,12 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uCoord", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep", "uEdge", "uEdgeRect", "uEdgeTiles", "uEdgeMode", "uEdgeColor", "uEdgeReach"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uCliffFoot", "uGroundShadow", "uGroundLit", "uGroundRect", "uGroundShift", "uGroundDark", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uCoord", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep", "uEdge", "uEdgeRect", "uEdgeTiles", "uEdgeMode", "uEdgeColor", "uEdgeReach"] as const;
 
 /** Texture unit of the border shade (EdgeShade): past the HD water's depth picture (6) and the sun's map (5). */
 const EDGE_UNIT = 7;
+/** The texture unit of a ground model's shadows (GroundShadow). */
+const GROUND_SHADOW_UNIT = 6;
 
 /** What a layer of a filter mode turns into under the border shade, at full shade: black for what covers or adds,
  *  and for a layer that multiplies what's behind it the colour that changes nothing there (fogColorForBlend), since
@@ -642,6 +657,12 @@ export interface DrawOptions {
   pass?: DrawPass;
   /** Raise vertices by a terrain height map (R32F texture, one texel per corner). */
   heightMap?: HeightMap;
+  /** The ground's shadows on a model that is part of the ground (cliffs, special doodads): it darkens as the ground
+   *  round it does. */
+  groundShadow?: GroundShadow | null;
+  /** A cliff model: its foot, up to this height over a cliff level where it still faces mostly up, is lit as the
+   *  ground (0 or none: nowhere but where it is flat). */
+  cliffFoot?: number;
   /** Multiplies colour and opacity (r, g, b, a in 0–1); every layer is then blended (ghost previews). */
   tint?: [number, number, number, number];
   /** Multiplies the layers' colour only (r, g, b in 0-1), nothing else: a unit's Tinting Color. */
@@ -678,6 +699,16 @@ export interface EdgeShade {
 }
 
 const EDGE_MODES = { pixel: 1, object: 2, tile: 3 } as const;
+
+/** The ground's shadow map as the ground's shader samples it: red the baked shadows, green the objects' shadow
+ *  images; `rect` the world x, y, width and height it covers, `shift` the images' offset in texture units, `dark`
+ *  how much of the picture a full shadow of each takes away. */
+export interface GroundShadow {
+  texture: WebGLTexture;
+  rect: [number, number, number, number];
+  shift: [number, number];
+  dark: [number, number];
+}
 
 /** The depth texture shaders read as "no shadow anywhere" in this context (setSunShadow's fallback). */
 export function noSunTexture(gl: WebGL2RenderingContext): WebGLTexture {
@@ -979,6 +1010,7 @@ export class ModelGpu {
     gl.uniform1i(u.uEmissive, 4);
     const hm = opts.heightMap;
     gl.uniform1f(u.uUseHeight, hm ? 1 : 0);
+    gl.uniform1f(u.uCliffFoot, hm ? opts.cliffFoot ?? 0 : 0);
     if (hm) {
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, hm.texture);
@@ -996,6 +1028,14 @@ export class ModelGpu {
       gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
       gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
       gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);
+      const under = opts.groundShadow;
+      gl.uniform1f(u.uGroundLit, under ? 1 : 0);
+      gl.activeTexture(gl.TEXTURE0 + GROUND_SHADOW_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, under?.texture ?? sh.white);
+      gl.uniform1i(u.uGroundShadow, GROUND_SHADOW_UNIT);
+      gl.uniform4f(u.uGroundRect, ...(under?.rect ?? [0, 0, 1, 1]));
+      gl.uniform2f(u.uGroundShift, ...(under?.shift ?? [0, 0]));
+      gl.uniform2f(u.uGroundDark, ...(under?.dark ?? [0, 0]));
       const edge = opts.edge;
       gl.uniform1f(u.uEdgeMode, edge ? EDGE_MODES[edge.mode] : 0);
       gl.activeTexture(gl.TEXTURE0 + EDGE_UNIT);

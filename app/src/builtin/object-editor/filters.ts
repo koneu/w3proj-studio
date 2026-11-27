@@ -7,8 +7,16 @@ import type { FieldMeta } from "../../lib/objects/metadata";
 export const OPS = [">=", "<=", "!=", ">", "<", "=", ":"] as const;
 export type Op = (typeof OPS)[number];
 export const OP_LABEL: Record<Op, string> = { ">=": "≥", "<=": "≤", "!=": "≠", ">": ">", "<": "<", "=": "=", ":": "contains" };
-// Built from a string: written out, the angle brackets read to a code scanner as an HTML tag filter.
-const TOKEN = new RegExp("^([^\\s\\x3c>=!:]+)(>=|\\x3c=|!=|>|\\x3c|=|:)(.*)$");
+/** Where a filter's operator can start; the key before it has none of these and no spaces. */
+const KEY_END = /[\s<>=!:]/;
+
+/** "hp>=500" as its key, operator and value; null for a plain word (no key, or no operator after it). */
+function splitFilter(token: string): { key: string; op: Op; value: string } | null {
+  const at = token.search(KEY_END);
+  // OPS lists the two-character operators before the ones they start with.
+  const op = at > 0 ? OPS.find((o) => token.startsWith(o, at)) : undefined;
+  return op ? { key: token.slice(0, at), op, value: token.slice(at + op.length) } : null;
+}
 
 export interface FieldFilter {
   token: string;
@@ -60,8 +68,8 @@ const unquote = (s: string) => s.replace(/"/g, "");
 export function parseQuery(text: string, fields: FieldMeta[]): { words: string[]; filters: FieldFilter[] } {
   const words: string[] = [], filters: FieldFilter[] = [];
   for (const token of tokenize(text)) {
-    const m = TOKEN.exec(token);
-    if (m) filters.push({ token, key: m[1], op: m[2] as Op, value: unquote(m[3]), field: resolveField(fields, m[1]) });
+    const f = splitFilter(token);
+    if (f) filters.push({ token, key: f.key, op: f.op, value: unquote(f.value), field: resolveField(fields, f.key) });
     else if (unquote(token)) words.push(unquote(token).toLowerCase());
   }
   return { words, filters };

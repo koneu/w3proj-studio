@@ -9,10 +9,14 @@ import terrain from "./guides/terrain.md?raw";
 export interface Guide { summary: string; text: string }
 
 const stripComments = (text: string) => {
-  // Repeated, so a comment cut out can't leave the start of another one behind; a comment never closed is cut too.
+  // Looked for again after every cut, so one cut out can't leave the start of another behind; a comment never closed
+  // is cut to the end.
   let out = text;
-  for (let prev = ""; prev !== out;) { prev = out; out = out.replace(/<!--[\s\S]*?(?:-->|$)/g, ""); }
-  return out.replace(/<!--/g, "").trim();
+  for (let at = out.indexOf("<!--"); at >= 0; at = out.indexOf("<!--")) {
+    const end = out.indexOf("-->", at + 4);
+    out = out.slice(0, at) + (end < 0 ? "" : out.slice(end + 3));
+  }
+  return out.trim();
 };
 
 /** A guide as stored: `summary:` in a comment, which like all comments the AI never sees. */

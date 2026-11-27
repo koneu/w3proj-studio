@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, problems, until } from "./cdp.mjs";
+import { lit } from "./jslit.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(app, "dist-demo");
@@ -88,7 +89,7 @@ try {
   // The Trigger Editor, on the made-up trigger definitions the demo serves: the tree, a trigger's parts and its folding.
   try {
     await page.evaluate(`w3Workbench.editors.open("map/triggers")`);
-    const click = (label) => page.evaluate(`(() => { const el = [...document.querySelectorAll(".editor-area *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(label)}); if (el) el.click(); return !!el; })()`);
+    const click = (label) => page.evaluate(`(() => { const el = [...document.querySelectorAll(".editor-area *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${lit(label)}); if (el) el.click(); return !!el; })()`);
     await until("the trigger tree", () => page.evaluate(`document.body.innerText.includes("Demo Timers")`), 10_000);
     const tree = await page.evaluate(`document.body.innerText`);
     for (const name of ["Demo Setup", "Demo Init", "Demo Score", "Demo Tick", "Demo Chat", "Demo Timers"]) if (!tree.includes(name)) found.push(`trigger tree lacks "${name}"`);
