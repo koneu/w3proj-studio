@@ -1435,6 +1435,7 @@ async function heightsPreserve(page, found) {
   if (loose.length !== 1 || loose[0].position[2] !== ground || (loose[0].flags & k.FIXED)) fail(`a pasted fixed doodad with Preserve Copied Object Height off: ${lit(loose.map((d) => [d.position, d.flags]))}`);
 
   // The toolbar box switches it on again, and gives the keys back to the map.
+  await unfold(page, "Behaviour");
   await k.hands.click(".model-toggle", "Keep pasted height");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box didn't switch Preserve Copied Object Height on");
   if (!(await page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`))) fail("the Preserve Copied Object Height box kept the keyboard");
@@ -1459,6 +1460,7 @@ async function heightsPreserve(page, found) {
   await page.evaluate(`w3.settings.set("terrain.preserveCopiedHeight", true, "project")`);
   await k.run("w3.terrain.togglePreserveCopiedHeight");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== false || (await k.box("Keep pasted height")) !== false) fail("the toggle command did nothing while the project keeps its own Preserve Copied Object Height");
+  await unfold(page, "Behaviour");
   await k.hands.click(".model-toggle", "Keep pasted height");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box did nothing while the project keeps its own Preserve Copied Object Height");
   await k.verify(fail);
@@ -2378,8 +2380,10 @@ async function viewModes(page, found) {
   await key("Escape", "Escape", 27);
 
   // The toolbar's box is the same item as the key.
+  await unfold(page, "Overlays");
   await k.hands.click(".model-toggle", "Light ranges");
   if (!(await state()).lightRanges) fail("the Light ranges box didn't turn them on");
+  await unfold(page, "Overlays");
   await k.hands.click(".model-toggle", "Light ranges");
   // Light Ranges and the graphics mode: rings for the brazier in HD, none in SD, back in HD.
   {
@@ -2391,6 +2395,7 @@ async function viewModes(page, found) {
       let n = -2;
       await until(what, async () => {
         // The editor opened again for the mode: Light Ranges is a choice of the view, put it on if the new one lost it.
+        await unfold(page, "Overlays");
         if ((await state())?.lightRanges === false) await k.hands.click(".model-toggle", "Light ranges");
         n = await lightRings();
         return want(n);
@@ -2406,6 +2411,7 @@ async function viewModes(page, found) {
       await ringsBecome("Light Ranges back in HD shows rings again", (n) => n > 0);
     } finally {
       await setMode(mode);
+      await unfold(page, "Overlays");
       if ((await state())?.lightRanges) await k.hands.click(".model-toggle", "Light ranges");
     }
   }
@@ -5734,6 +5740,7 @@ async function heightsLimits(page, found) {
     await hands.drag({ x: c.x - (down ? 6 : 40), y: c.y + down }, { x: c.x + (down ? 6 : 40), y: c.y + down });
     await k.save();
   };
+  await unfold(page, "Behaviour");
   await hands.click(".model-toggle", "Water limits");
   if ((await k.setting("terrain.enforceWaterLimits")) !== true) fail("the toolbar box didn't switch Enforce Water Height Limits on");
   await stroke(-1024, -1024);
@@ -8152,6 +8159,9 @@ async function gridDefault(page, found) {
   }
 }
 
+/** Unfolds one of the terrain toolbar's groups (folded ones hide their boxes from the pointer). */
+const unfold = (page, name) => page.evaluate(`document.querySelector(${lit(`.model-toggle-group.closed[data-group="${name}"] > .model-toggle-group-title`)})?.click()`);
+
 /** The terrain view's toggles in three labelled groups (View, Overlays, Behaviour), each one also a command, and what
  *  game view does to them: greyed with the note "Forced by game view", showing what the view draws then (Fog and
  *  Effects on, Doodads on though the choice is off, Regions off). Nothing is edited; the map is left saved. */
@@ -8180,6 +8190,21 @@ async function toggleGroups(page, found) {
       if (!has || JSON.stringify(has.labels) !== JSON.stringify(want)) fail(`${g} holds ${lit(has?.labels)}, not ${lit(want)}`);
       if (has && (has.selects !== SELECTS[g] || has.title !== g)) fail(`${g}: ${has.selects} selects, title ${has.title}`);
     }
+    // Folded, a group is its name alone (its boxes take no room); its name unfolds and folds it, which is kept, and the
+    // open one comes after the folded ones.
+    const shape = () => page.evaluate(`(() => Object.fromEntries([...document.querySelectorAll(".model-toggle-group")].map((g) => [g.dataset.group,
+      { open: g.querySelector(".model-toggle-group-title").getAttribute("aria-expanded"), shown: [...g.querySelectorAll(".model-toggle")].filter((l) => l.getBoundingClientRect().width > 0).length, x: g.getBoundingClientRect().x, y: g.getBoundingClientRect().y }])))()`);
+    const press = (name) => page.evaluate(`document.querySelector(${lit(`.model-toggle-group[data-group="${name}"] > .model-toggle-group-title`)}).click()`);
+    const folded = await shape();
+    if (Object.values(folded).some((g) => g.open !== "false" || g.shown)) fail(`the groups don't start folded: ${lit(folded)}`);
+    await press("View");
+    const one = await shape();
+    if (one.View.open !== "true" || one.View.shown !== WANT.View.length || one.Overlays.shown) fail(`after View's name: ${lit(one)}`);
+    if (!(one.Overlays.y < one.View.y || (one.Overlays.y === one.View.y && one.Overlays.x < one.View.x))) fail(`the open View group doesn't follow the folded Overlays: ${lit(one)}`);
+    const keptOpen = await page.evaluate(`localStorage.getItem("w3.terrain.openGroups")`);
+    if (keptOpen !== `["View"]`) fail(`the open groups are kept as ${lit(keptOpen)}`);
+    await press("View");
+    if ((await shape()).View.shown) fail("View's name doesn't fold the group again");
     // Every toggle is a command: the command flips its box, and the same command flips it back.
     const COMMANDS = {
       Doodads: "toggleDoodads", Units: "toggleUnits", Water: "toggleWater", Blight: "toggleBlight", Cliffs: "toggleCliffs", Effects: "toggleEffects",
@@ -8260,6 +8285,7 @@ async function toolbarNarrow(page, found) {
     })()`).then((x) => x);
     const squeeze = (w) => page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); v.style.width = "${w}px"; v.style.height = "1000px"; v.style.maxHeight = "none"; v.style.overflow = "hidden"; v.style.flex = "none"; })()`);
     const unsqueeze = () => page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); for (const p of ["width", "height", "maxHeight", "overflow", "flex"]) v.style[p] = ""; })()`);
+    for (const name of ["View", "Overlays", "Behaviour"]) await unfold(page, name);
     const hit = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
     for (const w of [800, 500, 400]) {
       await squeeze(w);
@@ -8271,6 +8297,14 @@ async function toolbarNarrow(page, found) {
       for (let i = 0; i < m.groups.length; i++) for (let j = i + 1; j < m.groups.length; j++) if (hit(m.groups[i], m.groups[j])) fail(`${w} px wide: the ${m.groups[i].name} and ${m.groups[j].name} groups intersect`);
       if (w === 400 && !m.scrolls) fail("at 400 px the toolbar doesn't scroll (control: it should have more than it shows)");
     }
+    // Folded again, the toolbar is a few lines where it filled its cap.
+    await squeeze(800);
+    await new Promise((r) => setTimeout(r, 400));
+    const unfolded = (await measure()).toolbar.h;
+    await page.evaluate(`document.querySelectorAll(".model-toggle-group:not(.closed) > .model-toggle-group-title").forEach((b) => b.click())`);
+    const low = (await measure()).toolbar.h;
+    console.log(`  800 px wide: the toolbar is ${unfolded} px high with its groups open, ${low} folded`);
+    if (!(low <= 130 && low < unfolded * 0.6)) fail(`800 px wide: the toolbar is ${low} px high with its groups folded, ${unfolded} with them open`);
     await unsqueeze();
     await k.save();
   } finally {
@@ -8564,14 +8598,18 @@ async function viewCommandsOn(page, fail, shots, size) {
 
   // Focus: after a click on a toolbar control the keys belong to the map again, so an arrow key pans.
   const before = (await state()).camera.target;
+  await unfold(page, "Overlays");
   await hands.click(".model-toggle", "Camera objects");
   if (!(await canvasFocused())) bad("a toolbar box kept the keyboard");
   await hands.key("ArrowRight", "ArrowRight", 39);
   const after = (await state()).camera.target;
   if (Math.hypot(after[0] - before[0], after[1] - before[1]) < 1) bad("an arrow key after a click on a toolbar box didn't pan");
+  await unfold(page, "Overlays");
   await hands.click(".model-toggle", "Camera objects");
+  await unfold(page, "View");
   await hands.click(".model-toggle", "Fog");
   if (!(await canvasFocused())) bad("the Fog box kept the keyboard");
+  await unfold(page, "View");
   await hands.click(".model-toggle", "Fog");
   await page.evaluate(`(() => { const s = document.querySelector('select[title^="Grid"]'); s.focus(); s.value = "large"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   if (!(await canvasFocused())) bad("the grid box kept the keyboard");

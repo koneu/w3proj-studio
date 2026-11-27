@@ -466,8 +466,16 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .model-frame { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 110px; }
 .model-toggle { display: inline-flex; align-items: center; gap: 2px; }
 /* The terrain view's toggles in labelled groups: View, Overlays, Behaviour. */
+.model-toggle-groups { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .model-toggle-group { display: inline-flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; }
-.model-toggle-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+/* Folded groups keep together at the front; an open one follows them with its content. */
+.model-toggle-group:not(.closed) { order: 1; }
+.model-toggle-group.closed > :not(.model-toggle-group-title) { display: none !important; }
+.model-toggle-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; }
+.model-toggle-group-title:hover, .model-toggle-group-title:focus-visible { opacity: 1; background: none; }
+.model-toggle-group-title::before { content: "▾ "; }
+.model-toggle-group.closed > .model-toggle-group-title::before { content: "▸ "; }
+.terrain-view-hint { flex: 1 1 140px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .model-stage { flex: 1; position: relative; min-height: 0; }
 .terrain-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 /* Game view's note in the view's upper right, as the World Editor's "Game View Settings". */
