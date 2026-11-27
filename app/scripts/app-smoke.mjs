@@ -17041,10 +17041,10 @@ async function aiAllBut(page, found) {
   try {
     await until("the attack units", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "Attacking"); b?.click(); return !!b && !!document.querySelector("tr.ai-row"); })()`), 20000);
     await page.evaluate(`document.querySelector("tr.ai-row").click()`);
-    const select = `[...document.querySelectorAll(".ai-detail select")].find((s) => [...s.options].some((o) => o.value === "allBut"))`;
+    const select = `[...document.querySelectorAll(".ai-detail select")].find((s) => [...s.options].some((o) => o.textContent === "All but N"))`;
     await until("the quantity choice", () => page.evaluate(`!!(${select})`), 20000);
-    if (await page.evaluate(`[...(${select}).options].find((o) => o.value === "allBut")?.textContent`) !== "All but N") fail("the choice isn't labelled All but N");
-    await page.evaluate(`(() => { const s = ${select}; s.value = "allBut"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    if (await page.evaluate(`[...(${select}).options].map((o) => o.textContent).join("|")`) !== "All|All but N|Fixed Value|Range: Minimum - All|Range: Minimum - Maximum") fail("the quantity choices aren't All, All but N, Fixed, Range");
+    await page.evaluate(`(() => { const s = ${select}; s.selectedIndex = 1; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     await settled(page);
     const kept = `[...document.querySelectorAll(".ai-detail input.ai-num")].find((e) => e.getAttribute("aria-label") === "Units kept back" || e.title === "Units kept back") ?? document.querySelector(".ai-detail input.ai-num")`;
     await until("the number of units kept back", () => page.evaluate(`!!(${kept})`), 20000);
