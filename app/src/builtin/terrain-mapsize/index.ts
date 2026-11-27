@@ -16,6 +16,7 @@ import { errorText } from "../../lib/oserror";
 import { KEPT_SCRIPT_WORDS } from "../../lib/script/guard";
 import { checkpointOrStop } from "../../lib/checkpoint";
 import { withAllSubterrainsOpen } from "../../lib/terrain/openall";
+import { loadIdLayout } from "../../lib/terrain/creationids";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
@@ -221,6 +222,9 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         : `${grow || shrink ? "Resize the map" : "Change the camera bounds"}? The map is saved first. ${undoable}.`,
       "Apply", "Cancel");
     if (c !== "Apply") return;
+    // The subterrains' names (none in a flat project): a resize can add one (terrain_layout.rs cover_growth).
+    const subterrains = (): Promise<string[]> => loadIdLayout(w3).then((l) => l?.subterrains.map((x) => x.name) ?? [], () => []);
+    const before = await subterrains();
     try {
       // A restart forgets the kept files; what a shrink cuts off stays in a checkpoint. The checkpoint is part of the
       // progress shown: packing a big map takes a while, and nothing else says that something is happening.
@@ -229,7 +233,10 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         if (lost.length) await checkpointOrStop(w3, shrink ? "Shrinking the map" : "Resizing the map");
         return ed.resizeMap(ch, co);
       });
-      void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} removed` : ""}.`);
+      await w3.workspace.refresh();
+      const added = before.length ? (await subterrains()).filter((n) => !before.includes(n)) : [];
+      const strips = added.length ? `; the ground added beside an edge no subterrain reached is in the new subterrain${added.length === 1 ? "" : "s"} ${added.join(", ")}` : "";
+      void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} removed` : ""}${strips}.`);
     } catch (e) {
       void w3.window.showError(`Map size: ${(e as Error).message ?? e}`);
     }

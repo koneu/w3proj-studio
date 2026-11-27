@@ -107,6 +107,7 @@ The root `terrain/terrain.json` owns all map-wide invariants that must not drift
 - Loading then saving never changes the map: a corner is omitted from disk only when it equals `defaultCorner`.
 - A split that leaves corners uncovered is **refused** when any of them differs from `defaultCorner` (on real maps the area outside the playable bounds has `waterBits` set, so it isn't one value). Studio then says which corners and asks for a rectangle covering them. A split that covers the whole canvas always works.
 - A save that would have to drop such a corner is refused too, never silently dropped.
+- Map Size is no such save: where the strip it adds lies in no subterrain and differs from `defaultCorner` (the copied ground gets new variations), the strip becomes a subterrain of its own (`<side>_edge`, the next id block), which shrinking the map back removes.
 - Splitting without rectangles makes one subterrain `main` over the whole canvas; `defaultCorner` is then the most common corner.
 - At least one subterrain is required; unknown keys in `terrain.json` and unknown files under `map/terrain/` are errors (until a stage adds them).
 

@@ -1093,6 +1093,18 @@ impl std::str::FromStr for Planned {
     }
 }
 
+/// The first block of 10000 creation numbers above every range of `subs` (1 at least).
+fn next_block(subs: &[Subterrain]) -> u64 {
+    subs.iter().flat_map(|s| s.id_ranges.iter()).map(|r| u64::from(r[1]) / 10000 + 1).max().unwrap_or(1)
+}
+
+/// Block `block`'s id range, for the new subterrain `name`.
+fn block_range(block: u64, name: &str) -> Result<[u32; 2]> {
+    let none = || Error::Project(format!("no id range is left above the others for \"{name}\""));
+    let lo = u32::try_from(block * 10000).map_err(|_| none())?;
+    Ok([lo, lo.checked_add(9999).ok_or_else(none)?])
+}
+
 /// The split project files (relative to `map/`) cut into a new set of subterrains (`plan`): the whole terrain, the
 /// placed objects and regions and the pathing overrides are read from the current layout and sliced into the new one,
 /// so nothing changes but which file holds what. Objects go where their position lies (`terrain_objects`, as a split).
@@ -1109,7 +1121,7 @@ pub fn relayout(files: &mut BTreeMap<String, Vec<u8>>, plan: &[Planned]) -> Resu
         return Err(Error::Project("there has to be one subterrain at least".into()));
     }
     let old = Layout::parse(&files[LAYOUT_FILE])?;
-    let mut block = old.subterrains.iter().flat_map(|s| s.id_ranges.iter()).map(|r| u64::from(r[1]) / 10000 + 1).max().unwrap_or(1);
+    let mut block = next_block(&old.subterrains);
     let mut taken: HashMap<&str, &str> = HashMap::new();
     let mut subs = Vec::with_capacity(plan.len());
     for p in plan {
@@ -1137,9 +1149,7 @@ pub fn relayout(files: &mut BTreeMap<String, Vec<u8>>, plan: &[Planned]) -> Resu
             )));
         }
         if ranges.is_empty() {
-            let lo = u32::try_from(block * 10000).map_err(|_| Error::Project(format!("no id range is left above the others for \"{name}\"")))?;
-            let hi = lo.checked_add(9999).ok_or_else(|| Error::Project(format!("no id range is left above the others for \"{name}\"")))?;
-            ranges.push([lo, hi]);
+            ranges.push(block_range(block, name)?);
             block += 1;
         }
         ranges.sort();
@@ -1643,12 +1653,8 @@ fn resized_files(
     kept: Option<&objects::Twice>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let shift = canvas_shift(layout, t)?;
-    let subs = resized_canvas(&layout.subterrains, layout.corners(), [t.width, t.height], shift)?;
-    if let Some(side) = uncovered_growth(&subs, layout.corners(), t, shift, &layout.default_corner) {
-        return Err(Error::Project(format!(
-            "Map Size can't grow the map to the {side}: part of that edge lies in no subterrain (map/{LAYOUT_FILE}), so the ground added beside it would be lost. Make a subterrain reach that edge (Edit Terrain Layout…) first"
-        )));
-    }
+    let mut subs = resized_canvas(&layout.subterrains, layout.corners(), [t.width, t.height], shift)?;
+    cover_growth(&mut subs, layout.corners(), t, shift, &layout.default_corner)?;
     let pathing = crate::terrain_pathing::assemble(layout, &|p| files.get(p).cloned())?;
     let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats, kept)?;
     if let Some(json) = pathing {
@@ -1667,32 +1673,54 @@ fn resized_files(
     Ok(sliced)
 }
 
-/// The side ("west", "east", "south" or "north") on which Map Size added a corner of `t` that lies in none of the
-/// resized subterrains `subs` and isn't the default corner: beside an edge no subterrain reaches, the strip added stays
-/// outside every subterrain, and the ground it copies (with new variations) can't be stored there. None when every
-/// added corner is kept (or equals the default corner). `old`: the canvas before, `shift`: corners added west and south.
-fn uncovered_growth(subs: &[Subterrain], old: [usize; 2], t: &Terrain, shift: [i64; 2], default_corner: &Corner) -> Option<&'static str> {
-    let mut covered = vec![false; t.width * t.height];
-    for s in subs {
-        for row in s.y..(s.y + s.h).min(t.height) {
-            let at = row * t.width;
-            covered[at + s.x.min(t.width)..at + (s.x + s.w).min(t.width)].iter_mut().for_each(|c| *c = true);
+/// Beside an edge no subterrain reaches, the strip Map Size adds lies in none of the resized subterrains `subs`. Where
+/// it holds a corner other than the default one (the copied ground gets new variations), it is added as a subterrain of
+/// its own, so nothing is lost: rectangles over the added, uncovered corners, named after the side ("east_edge"), each
+/// with the next block of creation numbers. A rectangle holding the default corner alone stays uncovered. Cutting the
+/// strip off again (Undo Resize) takes its subterrain with it. `old`: the canvas before, `shift`: corners added west
+/// and south.
+fn cover_growth(subs: &mut Vec<Subterrain>, old: [usize; 2], t: &Terrain, shift: [i64; 2], default_corner: &Corner) -> Result<()> {
+    let (w, h) = (t.width, t.height);
+    // The added corners in no subterrain.
+    let added = |at: usize, d: i64, old_n: usize| (at as i64) < d || at as i64 - d >= old_n as i64;
+    let mut open: Vec<bool> = (0..w * h).map(|i| added(i % w, shift[0], old[0]) || added(i / w, shift[1], old[1])).collect();
+    for s in subs.iter() {
+        for row in s.y..(s.y + s.h).min(h) {
+            open[row * w + s.x.min(w)..row * w + (s.x + s.w).min(w)].fill(false);
         }
     }
-    (0..covered.len()).filter(|&i| !covered[i] && t.corners[i] != *default_corner).find_map(|i| {
-        let (ox, oy) = ((i % t.width) as i64 - shift[0], (i / t.width) as i64 - shift[1]);
-        if ox < 0 {
-            Some("west")
-        } else if ox >= old[0] as i64 {
-            Some("east")
-        } else if oy < 0 {
-            Some("south")
-        } else if oy >= old[1] as i64 {
-            Some("north")
-        } else {
-            None
+    let mut block = next_block(subs);
+    for start in 0..w * h {
+        if !open[start] {
+            continue;
         }
-    })
+        let (x, y) = (start % w, start / w);
+        let width = (x..w).take_while(|&cx| open[y * w + cx]).count();
+        let height = (y..h).take_while(|&cy| open[cy * w + x..cy * w + x + width].iter().all(|&o| o)).count();
+        let mut keep = false;
+        for row in y..y + height {
+            open[row * w + x..row * w + x + width].fill(false);
+            keep |= t.corners[row * w + x..row * w + x + width].iter().any(|c| c != default_corner);
+        }
+        if !keep {
+            continue;
+        }
+        let side = if ((x + width) as i64) <= shift[0] {
+            "west"
+        } else if x as i64 - shift[0] >= old[0] as i64 {
+            "east"
+        } else if ((y + height) as i64) <= shift[1] {
+            "south"
+        } else {
+            "north"
+        };
+        let used = |n: &str| subs.iter().any(|s| s.name.eq_ignore_ascii_case(n) || s.folder.eq_ignore_ascii_case(n));
+        let name = std::iter::once(format!("{side}_edge")).chain((2..).map(|i| format!("{side}_edge_{i}"))).find(|n| !used(n)).expect("a free name");
+        let range = block_range(block, &name)?;
+        block += 1;
+        subs.push(Subterrain { folder: name.clone(), name, x, y, w: width, h: height, id_ranges: vec![range] });
+    }
+    Ok(())
 }
 
 /// The corners a terrain of another size adds on the canvas's west and south side (negative: cuts), as Map Size
@@ -1723,8 +1751,7 @@ fn canvas_shift(layout: &Layout, t: &Terrain) -> Result<[i64; 2]> {
 /// The rule for growth, per axis: the strip added on a side joins every subterrain that reached that side, each over
 /// its own span along it, so the rectangles stay rectangles and still tile the canvas; a corner region (two sides grown)
 /// joins the subterrain that held that corner, as it reached both sides. A layout covering the whole canvas therefore
-/// covers the new one; a strip beside the default corner (no subterrain on that edge) is refused when written, as the
-/// new ground's variations make it differ from the default corner.
+/// covers the new one; for a strip no subterrain reaches see `cover_growth`.
 pub fn resized_canvas(subs: &[Subterrain], old: [usize; 2], new: [usize; 2], shift: [i64; 2]) -> Result<Vec<Subterrain>> {
     let span = |at: usize, len: usize, old_n: usize, new_n: usize, d: i64| -> Option<(usize, usize)> {
         let (mut a, mut b) = (at as i64 + d, (at + len) as i64 + d);
@@ -1985,11 +2012,11 @@ mod tests {
         assert!(files.contains_key(FLAT_FILE), "a refused split leaves the files as they were");
     }
 
-    /// Map Size beside an edge no subterrain reaches (the corners there are the default corner): the strip added stays
-    /// in no subterrain. Ground equal to the default corner there is kept (as `w3proj verify`'s round trip grows it);
-    /// ground with the new variations the app rolls is refused, naming the side and what to do, with nothing written.
+    /// Map Size beside an edge no subterrain reaches (the corners there are the default corner). Ground equal to the
+    /// default corner stays outside every subterrain (as `w3proj verify`'s round trip grows it); ground with the new
+    /// variations the app rolls goes into a new subterrain, which shrinking the map back removes again.
     #[test]
-    fn map_size_beside_an_uncovered_edge_names_the_side() {
+    fn map_size_beside_an_uncovered_edge_adds_a_subterrain() {
         let mut t = terrain(12, true);
         let fill = t.corners[t.width * t.height - 1];
         for y in 0..t.height {
@@ -2003,23 +2030,42 @@ mod tests {
         split(&mut files, &[rect("left:0,0,3,5"), rect("mid:3,0,3,5")]).unwrap();
         let layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
         let flats: Flats = Flats::new();
+        let names = |l: &Layout| l.subterrains.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+        let split_files: BTreeMap<String, Vec<u8>> = files.iter().filter(|(k, _)| under_dir(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
         // Copied exactly (map_sized): the new corners are the default corner, kept outside every subterrain.
         for change in [[0, 2, 0, 0], [0, 0, 0, 2], [0, 2, 0, 2]] {
-            resized_files(&files, &layout, &map_sized(&t, change), &flats, Some(&layout.objects.twice)).unwrap_or_else(|e| panic!("{change:?}: {e}"));
+            let grown = resized_files(&files, &layout, &map_sized(&t, change), &flats, Some(&layout.objects.twice)).unwrap();
+            assert_eq!(names(&Layout::parse(&grown[LAYOUT_FILE]).unwrap()), ["left", "mid"], "{change:?}");
         }
-        // With new variations, as the app's resize rolls them: refused, naming the side.
-        for (change, side) in [([0, 2, 0, 0], "east"), ([0, 0, 0, 2], "north")] {
+        // With new variations, as the app's resize rolls them, on the uncovered edges: every such corner is kept in a
+        // subterrain named after its side. [left, right, bottom, top].
+        for (change, want) in [([0, 2, 0, 0], vec!["east_edge"]), ([0, 0, 0, 2], vec!["north_edge"]), ([0, 2, 0, 2], vec!["east_edge", "north_edge"])] {
             let mut grown = map_sized(&t, change);
             let (w, h) = (grown.width, grown.height);
-            let last = if side == "east" { w - 1 } else { (h - 1) * w };
-            grown.corners[last].variation ^= 1;
-            let e = resized_files(&files, &layout, &grown, &flats, Some(&layout.objects.twice)).unwrap_err().to_string();
-            assert!(e.contains(&format!("can't grow the map to the {side}")) && e.contains("Edit Terrain Layout"), "{change:?}: {e}");
+            for y in 0..h {
+                for x in 0..w {
+                    if x >= t.width || y >= t.height {
+                        grown.corners[y * w + x].variation ^= 1;
+                    }
+                }
+            }
+            let sliced = resized_files(&files, &layout, &grown, &flats, Some(&layout.objects.twice)).unwrap_or_else(|e| panic!("{change:?}: {e}"));
+            let new = Layout::parse(&sliced[LAYOUT_FILE]).unwrap();
+            assert_eq!(names(&new)[2..], want[..], "{change:?}");
+            let ranges: Vec<[u32; 2]> = new.subterrains.iter().flat_map(|s| s.id_ranges.clone()).collect();
+            assert_eq!(ranges, (1..=ranges.len() as u32).map(|i| [i * 10000, i * 10000 + 9999]).collect::<Vec<_>>(), "{change:?}");
+            let mut flat = sliced.clone();
+            flatten(&mut flat).unwrap();
+            assert_eq!(w3e::terrain_from_text(&flat[FLAT_FILE]).unwrap().corners, grown.corners, "{change:?}: nothing lost");
+            // Shrunk back: the strip's subterrain goes, every file as it was.
+            let back = resized_files(&sliced, &new, &t, &flats, Some(&new.objects.twice)).unwrap();
+            assert_eq!(back, split_files, "{change:?} shrunk back");
         }
-        // Growth on the covered sides (west, south) is as before.
+        // Growth on the covered sides (west, south) adds none.
         let mut grown = map_sized(&t, [2, 0, 2, 0]);
         grown.corners[0].variation ^= 1;
-        resized_files(&files, &layout, &grown, &flats, Some(&layout.objects.twice)).unwrap();
+        let sliced = resized_files(&files, &layout, &grown, &flats, Some(&layout.objects.twice)).unwrap();
+        assert_eq!(names(&Layout::parse(&sliced[LAYOUT_FILE]).unwrap()), ["left", "mid"]);
     }
 
     fn layout_json(subterrains: &str) -> String {
