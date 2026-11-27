@@ -16,16 +16,15 @@
 //   node scripts/app-smoke.mjs --only=placerAndCampaign --break-autocycle   Auto Cycle Random Groups stays off: that check alone fails
 //   node scripts/app-smoke.mjs --build-only   builds the app and stops (the gate's step before the parts)
 //   node scripts/app-smoke.mjs --part=1/3 the project checks and the first third of the full run's checks
-//   node scripts/app-smoke.mjs --part=2/3 the second third, --part=3/3 the last (with --no-build on one build: side by side)
+//   node scripts/app-smoke.mjs --part=2/3 the second third, --part=3/3 the last (with --no-build on one build: side by
+//                                         side); any <k>/<n> up to 16 parts
 //   --verbose shows what each editor put on screen
 //
-// The three parts are three apps of one build at once: each has its own folder (target/app-smoke-part<n>, or
-// W3_SMOKE_DIR with -part<n>), its settings in it (W3PROJ_CONFIG_DIR: the build's identifier is the same), its own Xvfb
-// display and WebDriver ports on Linux (webdriver.mjs) or DevTools port and WebView2 folder on Windows. The full run is
-// checksA, checksB, checksC, and each part runs one of them (part 1 after the project checks): each keeps the checks'
-// order, so a check that relies on what an earlier one left (testMapWithoutGame on the map objectsWhileOpening left
-// open) stays behind it. The checks take as long in three apps as in two (2026-11-27, an idle machine: 1654 s in all
-// against 1736 s), so a third app ends the run sooner.
+// The parts are apps of one build at once: each has its own folder (target/app-smoke-part<k>, or W3_SMOKE_DIR with
+// -part<k>), its settings in it (W3PROJ_CONFIG_DIR: the build's identifier is the same), its own Xvfb display and
+// WebDriver ports on Linux (webdriver.mjs) or DevTools port and WebView2 folder on Windows. The full run is the project
+// checks and then the list CHECKS; a part is a run of that list (part 1 after the project checks), cut so the parts
+// take about as long (smoke-parts.mjs). The gate says how many (tests/gate.mjs, SMOKE_PARTS, and why three).
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -41,20 +40,24 @@ import { ensureCli, smokeId } from "./appctl.mjs";
 import { checkFresh, sourceFingerprint, staleAllowed, writeStamp } from "../../tests/binfresh.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 import { lit } from "./jslit.mjs";
+import { MAX_PARTS, parsePart, splitParts } from "./smoke-parts.mjs";
 import { wineserverReport } from "../../tests/wineservers.mjs";
 
 const LINUX = process.platform === "linux";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
-// --part=<n>/3: one third of the full run (null: all of it).
-const PARTS = 3;
+// --part=<k>/<n>: part k of the full run cut into n (null: all of it).
 const partArg = process.argv.find((x) => x.startsWith("--part="))?.slice(7);
-const part = partArg === undefined ? null : ({ "1/3": 1, "2/3": 2, "3/3": 3 })[partArg];
+const [part, PARTS] = partArg === undefined ? [null, 1] : parsePart(partArg) ?? [undefined, 1];
 if (part === undefined || (part && process.argv.some((x) => x.startsWith("--only=")))) {
-  console.error(`FAIL --part takes 1/3, 2/3 or 3/3, and not with --only: ${process.argv.slice(2).join(" ")}`);
+  console.error(`FAIL --part takes <k>/<n> with k from 1 to n (n up to ${MAX_PARTS}), and not with --only: ${process.argv.slice(2).join(" ")}`);
   process.exit(2);
 }
+// About how long each check takes, for cutting the list into parts of the same length.
+const SECONDS = JSON.parse(readDiskFile(join(app, "scripts", "app-smoke-times.json"), "utf8"));
+// The project checks come before part 1's share of the list.
+const PROJECT_CHECKS_SECONDS = 30;
 // --build-only: the build and nothing else, for parts started with --no-build afterwards.
 const buildOnly = process.argv.includes("--build-only");
 if (buildOnly && (part || process.argv.includes("--no-build") || process.env.W3_APP_BIN)) {
@@ -10578,6 +10581,13 @@ async function editDuringSave(page, found) {
  *  nothing is left uncaught in the page (the run's `problems` list would show it). */
 async function testMapWithoutGame(page, found) {
   try {
+  // Test Map needs a map it could start: a new one (it has a start location).
+  const folder = join(work, "test-map-only");
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await mcpTool(page)("new_map", { name: "TestMapOnly", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   const hands = new Hands(page);
   const gamePath = await page.evaluate(`w3.settings.inspect("game.path").user ?? null`);
   const noExe = join(work, "no-game", "test-map", "Warcraft III.exe");
@@ -20040,15 +20050,7 @@ async function run() {
         terrainSelectCameras,
         terrainTabKeys,
         terrainWiring,
-        // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
-        testMapWithoutGame: async (p, f) => {
-          const folder = join(work, "test-map-only");
-          mkdirSync(folder, { recursive: true });
-          await p.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
-          await mcpTool(p)("new_map", { name: "TestMapOnly", width: 64, height: 64, folder });
-          await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
-          return testMapWithoutGame(p, f);
-        },
+        testMapWithoutGame,
         textEditorOwnCommon,
         textEditorTabs,
         tileCleanup,
@@ -20087,10 +20089,11 @@ async function run() {
       return found;
     }
 
-    // Parts 2 and 3 have no project checks: they and the first third of the checks are part 1's.
-    let summary = null;
+    // The later parts have no project checks: those are part 1's.
+    let summary = null, opened = null;
     if (part === null || part === 1) {
-      const { info, onDisk, opened } = await projectChecks(page, found, { project, before, wanted, packed });
+      const { info, onDisk, opened: editors } = await projectChecks(page, found, { project, before, wanted, packed });
+      opened = editors;
       if (process.argv.includes("--only=graphics")) {
         await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
         found.push(...problems(page.events));
@@ -20099,22 +20102,21 @@ async function run() {
       }
       console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start, build and the project checks`);
       checkEnded = Date.now();
-      const made = await checksA(page, found);
-      summary = `${info.files.length} files in "${info.name}", ${onDisk.length} opened, ${made} new maps`;
-      if (process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${lit(r)}`);
+      summary = `${info.files.length} files in "${info.name}", ${onDisk.length} opened`;
     } else {
       console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start (part ${part} of ${PARTS})`);
       checkEnded = Date.now();
     }
-    if (part === null || part === 2) await checksB(page, found);
-    if (part === null || part === 3) await checksC(page, found, project);
+    const made = await runChecks(page, found, project, part, PARTS);
+    if (summary && made !== null) summary += `, ${made} new maps`;
+    if (opened && process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${lit(r)}`);
     found.push(...problems(page.events));
     if (exited() !== null) found.push(`the app exited with ${exited()}`);
 
     const shot = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     if (shot) writeFileSync(join(work, "screen.png"), Buffer.from(shot.data, "base64"));
     page.ws.close();
-    console.log(summary ?? `part ${part} of ${PARTS}: the project checks and the first third are part 1's`);
+    console.log(summary ?? `part ${part} of ${PARTS}: the project checks are part 1's`);
     return found;
   } finally {
     await stop();
@@ -20201,364 +20203,200 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   return { info, onDisk, opened };
 }
 
-/** The full run's first checks (after the project checks), which rely on each other's order: part 1 of 3. Returns how
- *  many new maps newMaps made. */
-async function checksA(page, found) {
-  const made = await newMaps(page, found);
-  await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
-  await leftOpen(page, "terrainWiring", found);
-  await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
-  await leftOpen(page, "placeObjects", found);
-  await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
-  await leftOpen(page, "mcpStartMove", found);
-  await atmosphereTools(page, found).catch((e) => found.push(`sky and weather tools: ${e.message}`));
-  await leftOpen(page, "atmosphereTools", found);
-  await meleeByHand(page, found).catch((e) => found.push(`melee by hand: ${e.message}`));
-  await leftOpen(page, "meleeByHand", found);
-  await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
-  await leftOpen(page, "mcpGuides", found);
-  await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
-  await leftOpen(page, "waterPathing", found);
-  await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
-  await leftOpen(page, "tileTemplate", found);
-  await tilesetUnreadable(page, found).catch((e) => found.push(`tileset unreadable: ${e.message}`));
-  await leftOpen(page, "tilesetUnreadable", found);
-  await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
-  await leftOpen(page, "tilesInPlace", found);
-  await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
-  await leftOpen(page, "tileCleanup", found);
-  await sourceControlHistory(page, found).catch((e) => found.push(`source control history: ${e.message}`));
-  await leftOpen(page, "sourceControlHistory", found);
-  await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
-  await leftOpen(page, "objectsWhileOpening", found);
-  // Test Map needs a map it could start: the one objectsWhileOpening left open.
-  await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
-  await leftOpen(page, "testMapWithoutGame", found);
-  for (const check of [heightsPreserve, heightsUniform, heightsLimits, pasteWaitsForSizes]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
-  await leftOpen(page, "height tools", found);
-  await mcpLimits(page, found).catch((e) => found.push(`mcp limits: ${e.message}`));
-  await leftOpen(page, "mcpLimits", found);
-  await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
-  await leftOpen(page, "flyingHeights", found);
-  await gridDefault(page, found).catch((e) => found.push(`grid default: ${e.message}`));
-  await leftOpen(page, "gridDefault", found);
-  await specialDoodads(page, found).catch((e) => found.push(`special doodads: ${e.message}`));
-  await leftOpen(page, "specialDoodads", found);
-  await startPreviewFollow(page, found).catch((e) => found.push(`start preview: ${e.message}`));
-  await leftOpen(page, "startPreviewFollow", found);
-  await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
-  await leftOpen(page, "artModeReload", found);
-  await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
-  await leftOpen(page, "wholeMapGround", found);
-  await packAttributes(page, found).catch((e) => found.push(`pack attributes: ${e.message}`));
-  await leftOpen(page, "packAttributes", found);
-  await destructableFlags(page, found).catch((e) => found.push(`destructable flags: ${e.message}`));
-  await leftOpen(page, "destructableFlags", found);
-  await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
-  await leftOpen(page, "areaLevels", found);
-  await areaReplaceCt0(page, found).catch((e) => found.push(`area replace (custom tilesets 0): ${e.message}`));
-  await leftOpen(page, "areaReplaceCt0", found);
-  await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
-  await leftOpen(page, "cameraEditing", found);
-  await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
-  await leftOpen(page, "terrainSelectCameras", found);
-  await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
-  await leftOpen(page, "viewModes", found);
-  await terrainTabKeys(page, found).catch((e) => found.push(`terrain tab keys: ${e.message}`));
-  await leftOpen(page, "terrainTabKeys", found);
-  await toggleGroups(page, found).catch((e) => found.push(`toggle groups: ${e.message}`));
-  await leftOpen(page, "toggleGroups", found);
-  await toolbarNarrow(page, found).catch((e) => found.push(`toolbar narrow: ${e.message}`));
-  await leftOpen(page, "toolbarNarrow", found);
-  await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
-  await leftOpen(page, "unitProperties", found);
-  // Last: it makes a map of its own, which the checks above would find open.
-  await viewCommands(page, found).catch((e) => found.push(`view commands: ${e.message}`));
-  await leftOpen(page, "viewCommands", found);
+/** The full run's checks after the project checks, in its order: [check, the name its failure is reported under, and
+ *  "project" for a check that takes the scratch project's folder]. Each makes what it needs (a map of its own, mostly)
+ *  and runs alone with --only too, so a split run (--part=k/n) deals them to its apps as smoke-parts.mjs cuts this list:
+ *  n runs of about the same length, by the seconds in app-smoke-times.json. A new check goes anywhere in here (and
+ *  into the --only map); one that needs what another left behind belongs inside that check instead. */
+const CHECKS = [
+  [newMaps, "new maps"],
+  [terrainWiring, "terrain wiring"],
+  [placeObjects, "place objects"],
+  [mcpStartMove, "start location moved by a tool"],
+  [atmosphereTools, "sky and weather tools"],
+  [meleeByHand, "melee by hand"],
+  [mcpGuides, "MCP guides"],
+  [waterPathing, "water pathing"],
+  [tileTemplate, "tile template"],
+  [tilesetUnreadable, "tileset unreadable"],
+  [tilesInPlace, "terrain in place"],
+  [tileCleanup, "tile cleanup"],
+  [sourceControlHistory, "source control history"],
+  [objectsWhileOpening, "objects while opening"],
+  [testMapWithoutGame, "test map"],
+  [heightsPreserve, "height tools (heightsPreserve)"],
+  [heightsUniform, "height tools (heightsUniform)"],
+  [heightsLimits, "height tools (heightsLimits)"],
+  [pasteWaitsForSizes, "height tools (pasteWaitsForSizes)"],
+  [mcpLimits, "mcp limits"],
+  [flyingHeights, "flying heights"],
+  [gridDefault, "grid default"],
+  [specialDoodads, "special doodads"],
+  [startPreviewFollow, "start preview"],
+  [artModeReload, "art mode reload"],
+  [wholeMapGround, "whole-map ground"],
+  [packAttributes, "pack attributes"],
+  [destructableFlags, "destructable flags"],
+  [areaLevels, "area levels"],
+  [areaReplaceCt0, "area replace (custom tilesets 0)"],
+  [cameraEditing, "camera editing"],
+  [terrainSelectCameras, "terrain select and cameras"],
+  [viewModes, "view modes"],
+  [terrainTabKeys, "terrain tab keys"],
+  [toggleGroups, "toggle groups"],
+  [toolbarNarrow, "toolbar narrow"],
+  [unitProperties, "unit properties"],
+  [viewCommands, "view commands"],
+  [itemTablesAccess, "item tables"],
+  [mapInfoColorTools, "Map Properties colour tools"],
+  [objectEditorColorTools, "Object Editor colour tools"],
+  [codePageStrings, "code page string table"],
+  [codePageTextEditor, "code page text editor"],
+  [codePageChoice, "map text encoding"],
+  [objectListSuffix, "object list suffix"],
+  [objectPickerSuffix, "object picker suffix"],
+  [triggerParamColorTools, "trigger parameter colour tools"],
+  [explorerRealFiles, "explorer real files"],
+  [objectEditorMerge, "object editor merge"],
+  [hotExit, "hot exit"],
+  [unitEditRederives, "unit edit rederives"],
+  [triggerCodeWarning, "trigger code warning"],
+  [triggerValueLimits, "trigger value limits"],
+  [mapInfoUndoKept, "Map Properties undo"],
+  [itemDrops, "item drops"],
+  [techtreeRandomLevels, "techtree random levels"],
+  [triggersAndAi, "triggers and AI"],
+  [problemsIgnore, "problems ignore"],
+  [staleEditors, "stale editors"],
+  [scriptGuard, "script guard"],
+  [vjassCheck, "vJASS check"],
+  [worldEditorSync, "World Editor sync"],
+  [worldEditorReal, "World Editor (real)"],
+  [scriptQuestionsOnSwitch, "script questions on switch"],
+  [scriptGenerated, "script generated"],
+  [resizeUndo, "resize undo"],
+  [resizeDooV13, "resize doo v13"],
+  [resizeLimits, "resize limits"],
+  [resizeRefusedShadows, "resize refused shadows"],
+  [resizeUnreadable, "resize unreadable"],
+  [flatProjectOpens, "flatProjectOpens"],
+  [subterrains, "subterrains"],
+  [terrainLayoutEditor, "terrainLayoutEditor"],
+  [shadowLeftOut, "shadow left out"],
+  [dataSafety, "data safety"],
+  [unreadableChapter, "unreadable chapter"],
+  [truncatedChapter, "truncated chapter"],
+  [pathingImport, "pathing import"],
+  [pathingSquare, "pathing square"],
+  [configSafety, "config safety"],
+  [syncSafety, "sync safety"],
+  [workbenchState, "workbench state"],
+  [shouldHaves, "should-haves"],
+  [placerAndCampaign, "placer and campaign"],
+  [campaignPresets, "campaign presets"],
+  [chapterObjects, "chapter objects"],
+  [editorExtras, "editor extras"],
+  [objectValueRange, "object value range"],
+  [triggerMultiSelect, "trigger multi-select"],
+  [triggerFolders, "trigger folders"],
+  [triggerTree, "check trigger tree"],
+  [luaNames, "Lua names"],
+  [importArtReload, "import art reload"],
+  [importPathTab, "import path tab"],
+  [importSortImages, "import sort and images"],
+  [importWriteOrder, "import write order"],
+  [importListCleanup, "import list cleanup"],
+  [groundTextureReload, "ground texture reload"],
+  [importedBlightWaterReload, "imported blight and water reload"],
+  [importWarnings, "import warnings"],
+  [objectManagerLive, "object manager live"],
+  [objectEditorRawSkin, "object editor raw skin"],
+  [objectManagerSkin, "object manager skin"],
+  [objectOneFile, "object one file"],
+  [oldLocalFiles, "old local files"],
+  [niceToHaves, "nice-to-haves"],
+  [byHand, "by hand"],
+  [soundEditorKeys, "sound editor keys"],
+  [soundEditorColorTools, "sound editor colour tools"],
+  [typedFieldSave, "typed field save"],
+  [aiNumbersRefused, "aiNumbersRefused"],
+  [aiAllBut, "aiAllBut"],
+  [aiClientSetup, "aiClientSetup"],
+  [lightNumbersRefused, "lightNumbersRefused"],
+  [lightTangents, "lightTangents"],
+  [lightSideBar, "Lighting side bar"],
+  [aiTestRun, "Test AI"],
+  [soundNumbersRefused, "soundNumbersRefused"],
+  [campaignNumbersRefused, "campaignNumbersRefused"],
+  [aiDocTools, "aiDocTools"],
+  [dropChancesRefused, "dropChancesRefused"],
+  [turtleCliffSave, "TurtleRock cliff save"],
+  [cliffTypeList, "cliff type list"],
+  [editDuringSave, "edit during save"],
+  [moduleFunctions, "module functions"],
+  [derivedAfterDeletes, "derived after deletes"],
+  [derivedSaveQueue, "derived save queue"],
+  [derivedSaveTaken, "derived save taken"],
+  [rebuildCli, "rebuild cli"],
+  [cliCheck, "cli check"],
+  [addPathReady, "add path ready"],
+  [doodadSnapOnLoad, "doodad snap on load"],
+  [mcpReplaceSnap, "mcp replace after snap"],
+  [mcpReplaceUnitsRoom, "mcp replace units room"],
+  [replaceUndoLife, "replace undo life"],
+  [doodadRulesEdit, "doodad rules on edit"],
+  [mineStartGrid, "mine and start grid"],
+  [modelViewerTextures, "model viewer textures"],
+  [shadowTextureOrder, "shadow texture order"],
+  [terrainModelTexture, "terrain model texture"],
+  [classicRefusal, "classic refusal"],
+  [objectCopy, "object copy"],
+  [verify3Steps, "verify 3 steps"],
+  [graphicsModes, "graphics modes"],
+  [keyChords, "key chords"],
+  [keybindings, "keybindings"],
+  [paletteMouse, "palette mouse"],
+  [gameReadsOnce, "game reads"],
+  [fastGameTransfer, "fast game transfer"],
+  [editorTabRaces, "editor tabs", "project"],
+  [playerStarts, "player starts", "project"],
+  [objectFilePicker, "object file picker", "project"],
+  [objectLayout, "object editor layout", "project"],
+  [objectListKept, "object list kept", "project"],
+  [objectStandardList, "object standard list", "project"],
+  [objectPreview, "object preview", "project"],
+  [realMapSave, "real map save"],
+  [mapPropertiesPriorities, "map properties priorities"],
+  [moveTextsToTable, "move texts to string table"],
+  [stringsBeforeListing, "strings before the file list"],
+  [tabsBeforeListing, "tabs before the file list"],
+  [drawCalls, "draw calls"],
+  [objectEditorWtsWriteFail, "Object Editor wts write failure"],
+  [importListWriteFail, "import list write failure"],
+  [startGoldPalette, "start gold by the palette"],
+  [floatingDoodads, "floating doodads"],
+  [mapSizeUi, "map size by the UI"],
+  [campaignFieldFocus, "campaign number field focus"],
+  [startDeleteUndo, "start delete and undo"],
+  [editorUndoStacks, "editor undo stacks"],
+  [contextLoss, "context loss"],
+  [textEditorOwnCommon, "text editor own common.j"],
+  [textEditorTabs, "text editor Tab keys"],
+  [playerSyncRefused, "player sync refused"],
+];
+
+/** The checks of `part` of `parts` (all of them without a part), one after the other. Returns how many maps newMaps
+ *  made (null when it isn't among them). */
+async function runChecks(page, found, project, part, parts) {
+  const names = CHECKS.map(([check]) => check.name);
+  const mine = part === null ? CHECKS : splitParts(names, parts, SECONDS, { first: PROJECT_CHECKS_SECONDS })[part - 1].map((i) => CHECKS[i]);
+  let made = null;
+  for (const [check, label, wants] of mine) {
+    const got = await (wants === "project" ? check(page, found, project) : check(page, found)).catch((e) => { found.push(`${label}: ${e.message}`); return null; });
+    if (check === newMaps) made = got;
+    await leftOpen(page, check.name, found);
+  }
   return made;
-}
-
-/** The full run's checks from itemTablesAccess to niceToHaves: part 2 of 3, in a second app when the run is split. From
- *  here on no check needs what an earlier one left (each runs alone with --only too), so the cut between this and
- *  checksC can be anywhere: it is where the parts take about as long (`took X s: <check>`; 2026-11-27: 522, 565 and
- *  564 s; move checks across it when one part grows). */
-async function checksB(page, found) {
-  await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
-  await leftOpen(page, "itemTablesAccess", found);
-  await mapInfoColorTools(page, found).catch((e) => found.push(`Map Properties colour tools: ${e.message}`));
-  await leftOpen(page, "mapInfoColorTools", found);
-  await objectEditorColorTools(page, found).catch((e) => found.push(`Object Editor colour tools: ${e.message}`));
-  await leftOpen(page, "objectEditorColorTools", found);
-  await codePageStrings(page, found).catch((e) => found.push(`code page string table: ${e.message}`));
-  await leftOpen(page, "codePageStrings", found);
-  await codePageTextEditor(page, found).catch((e) => found.push(`code page text editor: ${e.message}`));
-  await leftOpen(page, "codePageTextEditor", found);
-  await codePageChoice(page, found).catch((e) => found.push(`map text encoding: ${e.message}`));
-  await leftOpen(page, "codePageChoice", found);
-  await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
-  await leftOpen(page, "objectListSuffix", found);
-  await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));
-  await leftOpen(page, "objectPickerSuffix", found);
-  await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
-  await leftOpen(page, "triggerParamColorTools", found);
-  await explorerRealFiles(page, found).catch((e) => found.push(`explorer real files: ${e.message}`));
-  await leftOpen(page, "explorerRealFiles", found);
-  await objectEditorMerge(page, found).catch((e) => found.push(`object editor merge: ${e.message}`));
-  await leftOpen(page, "objectEditorMerge", found);
-  await hotExit(page, found).catch((e) => found.push(`hot exit: ${e.message}`));
-  await leftOpen(page, "hotExit", found);
-  await unitEditRederives(page, found).catch((e) => found.push(`unit edit rederives: ${e.message}`));
-  await leftOpen(page, "unitEditRederives", found);
-  await triggerCodeWarning(page, found).catch((e) => found.push(`trigger code warning: ${e.message}`));
-  await leftOpen(page, "triggerCodeWarning", found);
-  await triggerValueLimits(page, found).catch((e) => found.push(`trigger value limits: ${e.message}`));
-  await leftOpen(page, "triggerValueLimits", found);
-  await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
-  await leftOpen(page, "mapInfoUndoKept", found);
-  await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
-  await leftOpen(page, "itemDrops", found);
-  await techtreeRandomLevels(page, found).catch((e) => found.push(`techtree random levels: ${e.message}`));
-  await leftOpen(page, "techtreeRandomLevels", found);
-  await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
-  await leftOpen(page, "triggersAndAi", found);
-  await problemsIgnore(page, found).catch((e) => found.push(`problems ignore: ${e.message}`));
-  await leftOpen(page, "problemsIgnore", found);
-  await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
-  await leftOpen(page, "staleEditors", found);
-  await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
-  await leftOpen(page, "scriptGuard", found);
-  await vjassCheck(page, found).catch((e) => found.push(`vJASS check: ${e.message}`));
-  await leftOpen(page, "vjassCheck", found);
-  await worldEditorSync(page, found).catch((e) => found.push(`World Editor sync: ${e.message}`));
-  await leftOpen(page, "worldEditorSync", found);
-  await worldEditorReal(page, found).catch((e) => found.push(`World Editor (real): ${e.message}`));
-  await leftOpen(page, "worldEditorReal", found);
-  await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
-  await leftOpen(page, "scriptQuestionsOnSwitch", found);
-  await scriptGenerated(page, found).catch((e) => found.push(`script generated: ${e.message}`));
-  await leftOpen(page, "scriptGenerated", found);
-  await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
-  await leftOpen(page, "resizeUndo", found);
-  await resizeDooV13(page, found).catch((e) => found.push(`resize doo v13: ${e.message}`));
-  await leftOpen(page, "resizeDooV13", found);
-  await resizeLimits(page, found).catch((e) => found.push(`resize limits: ${e.message}`));
-  await leftOpen(page, "resizeLimits", found);
-  await resizeRefusedShadows(page, found).catch((e) => found.push(`resize refused shadows: ${e.message}`));
-  await leftOpen(page, "resizeRefusedShadows", found);
-  await resizeUnreadable(page, found).catch((e) => found.push(`resize unreadable: ${e.message}`));
-  await leftOpen(page, "resizeUnreadable", found);
-  await flatProjectOpens(page, found).catch((e) => found.push(`flatProjectOpens: ${e.message}`));
-  await leftOpen(page, "flatProjectOpens", found);
-  await subterrains(page, found).catch((e) => found.push(`subterrains: ${e.message}`));
-  await leftOpen(page, "subterrains", found);
-  await terrainLayoutEditor(page, found).catch((e) => found.push(`terrainLayoutEditor: ${e.message}`));
-  await leftOpen(page, "terrainLayoutEditor", found);
-  await shadowLeftOut(page, found).catch((e) => found.push(`shadow left out: ${e.message}`));
-  await leftOpen(page, "shadowLeftOut", found);
-  await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
-  await leftOpen(page, "dataSafety", found);
-  await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));
-  await leftOpen(page, "unreadableChapter", found);
-  await truncatedChapter(page, found).catch((e) => found.push(`truncated chapter: ${e.message}`));
-  await leftOpen(page, "truncatedChapter", found);
-  await pathingImport(page, found).catch((e) => found.push(`pathing import: ${e.message}`));
-  await leftOpen(page, "pathingImport", found);
-  await pathingSquare(page, found).catch((e) => found.push(`pathing square: ${e.message}`));
-  await leftOpen(page, "pathingSquare", found);
-  await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
-  await leftOpen(page, "configSafety", found);
-  await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
-  await leftOpen(page, "syncSafety", found);
-  await workbenchState(page, found).catch((e) => found.push(`workbench state: ${e.message}`));
-  await leftOpen(page, "workbenchState", found);
-  await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
-  await leftOpen(page, "shouldHaves", found);
-  await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
-  await leftOpen(page, "placerAndCampaign", found);
-  await campaignPresets(page, found).catch((e) => found.push(`campaign presets: ${e.message}`));
-  await leftOpen(page, "campaignPresets", found);
-  await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
-  await leftOpen(page, "chapterObjects", found);
-  await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
-  await leftOpen(page, "editorExtras", found);
-  await objectValueRange(page, found).catch((e) => found.push(`object value range: ${e.message}`));
-  await leftOpen(page, "objectValueRange", found);
-  await triggerMultiSelect(page, found).catch((e) => found.push(`trigger multi-select: ${e.message}`));
-  await leftOpen(page, "triggerMultiSelect", found);
-  await triggerFolders(page, found).catch((e) => found.push(`trigger folders: ${e.message}`));
-  await leftOpen(page, "triggerFolders", found);
-  await triggerTree(page, found).catch((e) => found.push(`check trigger tree: ${e.message}`));
-  await leftOpen(page, "triggerTree", found);
-  await luaNames(page, found).catch((e) => found.push(`Lua names: ${e.message}`));
-  await leftOpen(page, "luaNames", found);
-  await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
-  await leftOpen(page, "importArtReload", found);
-  await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
-  await leftOpen(page, "importPathTab", found);
-  await importSortImages(page, found).catch((e) => found.push(`import sort and images: ${e.message}`));
-  await leftOpen(page, "importSortImages", found);
-  await importWriteOrder(page, found).catch((e) => found.push(`import write order: ${e.message}`));
-  await leftOpen(page, "importWriteOrder", found);
-  await importListCleanup(page, found).catch((e) => found.push(`import list cleanup: ${e.message}`));
-  await leftOpen(page, "importListCleanup", found);
-  await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
-  await leftOpen(page, "groundTextureReload", found);
-  await importedBlightWaterReload(page, found).catch((e) => found.push(`imported blight and water reload: ${e.message}`));
-  await leftOpen(page, "importedBlightWaterReload", found);
-  await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
-  await leftOpen(page, "importWarnings", found);
-  await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
-  await leftOpen(page, "objectManagerLive", found);
-  await objectEditorRawSkin(page, found).catch((e) => found.push(`object editor raw skin: ${e.message}`));
-  await leftOpen(page, "objectEditorRawSkin", found);
-  await objectManagerSkin(page, found).catch((e) => found.push(`object manager skin: ${e.message}`));
-  await leftOpen(page, "objectManagerSkin", found);
-  await objectOneFile(page, found).catch((e) => found.push(`object one file: ${e.message}`));
-  await leftOpen(page, "objectOneFile", found);
-  await oldLocalFiles(page, found).catch((e) => found.push(`old local files: ${e.message}`));
-  await leftOpen(page, "oldLocalFiles", found);
-  await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
-  await leftOpen(page, "niceToHaves", found);
-}
-
-/** The full run's checks from byHand on: part 3 of 3, in a third app when the run is split. */
-async function checksC(page, found, project) {
-  await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
-  await leftOpen(page, "byHand", found);
-  await soundEditorKeys(page, found).catch((e) => found.push(`sound editor keys: ${e.message}`));
-  await leftOpen(page, "soundEditorKeys", found);
-  await soundEditorColorTools(page, found).catch((e) => found.push(`sound editor colour tools: ${e.message}`));
-  await leftOpen(page, "soundEditorColorTools", found);
-  await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
-  await leftOpen(page, "typedFieldSave", found);
-  await aiNumbersRefused(page, found);
-  await leftOpen(page, "aiNumbersRefused", found);
-  await aiAllBut(page, found);
-  await leftOpen(page, "aiAllBut", found);
-  await aiClientSetup(page, found);
-  await leftOpen(page, "aiClientSetup", found);
-  await lightNumbersRefused(page, found);
-  await leftOpen(page, "lightNumbersRefused", found);
-  await lightTangents(page, found);
-  await leftOpen(page, "lightTangents", found);
-  await lightSideBar(page, found).catch((e) => found.push(`Lighting side bar: ${e.message}`));
-  await leftOpen(page, "lightSideBar", found);
-  await aiTestRun(page, found).catch((e) => found.push(`Test AI: ${e.message}`));
-  await leftOpen(page, "aiTestRun", found);
-  await soundNumbersRefused(page, found);
-  await leftOpen(page, "soundNumbersRefused", found);
-  await campaignNumbersRefused(page, found);
-  await leftOpen(page, "campaignNumbersRefused", found);
-  await aiDocTools(page, found);
-  await leftOpen(page, "aiDocTools", found);
-  await dropChancesRefused(page, found);
-  await leftOpen(page, "dropChancesRefused", found);
-  await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));
-  await leftOpen(page, "turtleCliffSave", found);
-  await cliffTypeList(page, found).catch((e) => found.push(`cliff type list: ${e.message}`));
-  await leftOpen(page, "cliffTypeList", found);
-  await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));
-  await leftOpen(page, "editDuringSave", found);
-  await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
-  await leftOpen(page, "moduleFunctions", found);
-  await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));
-  await leftOpen(page, "derivedAfterDeletes", found);
-  await derivedSaveQueue(page, found).catch((e) => found.push(`derived save queue: ${e.message}`));
-  await leftOpen(page, "derivedSaveQueue", found);
-  await derivedSaveTaken(page, found).catch((e) => found.push(`derived save taken: ${e.message}`));
-  await leftOpen(page, "derivedSaveTaken", found);
-  await rebuildCli(page, found).catch((e) => found.push(`rebuild cli: ${e.message}`));
-  await leftOpen(page, "rebuildCli", found);
-  await cliCheck(page, found).catch((e) => found.push(`cli check: ${e.message}`));
-  await leftOpen(page, "cliCheck", found);
-  await addPathReady(page, found).catch((e) => found.push(`add path ready: ${e.message}`));
-  await leftOpen(page, "addPathReady", found);
-  await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
-  await leftOpen(page, "doodadSnapOnLoad", found);
-  await mcpReplaceSnap(page, found).catch((e) => found.push(`mcp replace after snap: ${e.message}`));
-  await leftOpen(page, "mcpReplaceSnap", found);
-  await mcpReplaceUnitsRoom(page, found).catch((e) => found.push(`mcp replace units room: ${e.message}`));
-  await leftOpen(page, "mcpReplaceUnitsRoom", found);
-  await replaceUndoLife(page, found).catch((e) => found.push(`replace undo life: ${e.message}`));
-  await leftOpen(page, "replaceUndoLife", found);
-  await doodadRulesEdit(page, found).catch((e) => found.push(`doodad rules on edit: ${e.message}`));
-  await leftOpen(page, "doodadRulesEdit", found);
-  await mineStartGrid(page, found).catch((e) => found.push(`mine and start grid: ${e.message}`));
-  await leftOpen(page, "mineStartGrid", found);
-  await modelViewerTextures(page, found).catch((e) => found.push(`model viewer textures: ${e.message}`));
-  await leftOpen(page, "modelViewerTextures", found);
-  await shadowTextureOrder(page, found).catch((e) => found.push(`shadow texture order: ${e.message}`));
-  await leftOpen(page, "shadowTextureOrder", found);
-  await terrainModelTexture(page, found).catch((e) => found.push(`terrain model texture: ${e.message}`));
-  await leftOpen(page, "terrainModelTexture", found);
-  await classicRefusal(page, found).catch((e) => found.push(`classic refusal: ${e.message}`));
-  await leftOpen(page, "classicRefusal", found);
-  await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
-  await leftOpen(page, "objectCopy", found);
-  await verify3Steps(page, found).catch((e) => found.push(`verify 3 steps: ${e.message}`));
-  await leftOpen(page, "verify3Steps", found);
-  await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
-  await leftOpen(page, "graphicsModes", found);
-  await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
-  await leftOpen(page, "keyChords", found);
-  await keybindings(page, found).catch((e) => found.push(`keybindings: ${e.message}`));
-  await leftOpen(page, "keybindings", found);
-  await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
-  await leftOpen(page, "paletteMouse", found);
-  await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
-  await leftOpen(page, "gameReadsOnce", found);
-  await fastGameTransfer(page, found).catch((e) => found.push(`fast game transfer: ${e.message}`));
-  await leftOpen(page, "fastGameTransfer", found);
-  await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
-  await leftOpen(page, "editorTabRaces", found);
-  await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
-  await leftOpen(page, "playerStarts", found);
-  await objectFilePicker(page, found, project).catch((e) => found.push(`object file picker: ${e.message}`));
-  await leftOpen(page, "objectFilePicker", found);
-  await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
-  await leftOpen(page, "objectLayout", found);
-  await objectListKept(page, found, project).catch((e) => found.push(`object list kept: ${e.message}`));
-  await leftOpen(page, "objectListKept", found);
-  await objectStandardList(page, found, project).catch((e) => found.push(`object standard list: ${e.message}`));
-  await leftOpen(page, "objectStandardList", found);
-  await objectPreview(page, found, project).catch((e) => found.push(`object preview: ${e.message}`));
-  await leftOpen(page, "objectPreview", found);
-  await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
-  await leftOpen(page, "realMapSave", found);
-  await mapPropertiesPriorities(page, found).catch((e) => found.push(`map properties priorities: ${e.message}`));
-  await leftOpen(page, "mapPropertiesPriorities", found);
-  await moveTextsToTable(page, found).catch((e) => found.push(`move texts to string table: ${e.message}`));
-  await leftOpen(page, "moveTextsToTable", found);
-  await stringsBeforeListing(page, found).catch((e) => found.push(`strings before the file list: ${e.message}`));
-  await leftOpen(page, "stringsBeforeListing", found);
-  await tabsBeforeListing(page, found).catch((e) => found.push(`tabs before the file list: ${e.message}`));
-  await leftOpen(page, "tabsBeforeListing", found);
-  await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
-  await leftOpen(page, "drawCalls", found);
-  await objectEditorWtsWriteFail(page, found).catch((e) => found.push(`Object Editor wts write failure: ${e.message}`));
-  await leftOpen(page, "objectEditorWtsWriteFail", found);
-  await importListWriteFail(page, found).catch((e) => found.push(`import list write failure: ${e.message}`));
-  await leftOpen(page, "importListWriteFail", found);
-  await startGoldPalette(page, found).catch((e) => found.push(`start gold by the palette: ${e.message}`));
-  await leftOpen(page, "startGoldPalette", found);
-  await floatingDoodads(page, found).catch((e) => found.push(`floating doodads: ${e.message}`));
-  await leftOpen(page, "floatingDoodads", found);
-  await mapSizeUi(page, found).catch((e) => found.push(`map size by the UI: ${e.message}`));
-  await leftOpen(page, "mapSizeUi", found);
-  await campaignFieldFocus(page, found).catch((e) => found.push(`campaign number field focus: ${e.message}`));
-  await leftOpen(page, "campaignFieldFocus", found);
-  await startDeleteUndo(page, found).catch((e) => found.push(`start delete and undo: ${e.message}`));
-  await leftOpen(page, "startDeleteUndo", found);
-  await editorUndoStacks(page, found).catch((e) => found.push(`editor undo stacks: ${e.message}`));
-  await leftOpen(page, "editorUndoStacks", found);
-  await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
-  await leftOpen(page, "contextLoss", found);
-  await textEditorOwnCommon(page, found).catch((e) => found.push(`text editor own common.j: ${e.message}`));
-  await leftOpen(page, "textEditorOwnCommon", found);
-  await textEditorTabs(page, found).catch((e) => found.push(`text editor Tab keys: ${e.message}`));
-  await leftOpen(page, "textEditorTabs", found);
-  await playerSyncRefused(page, found).catch((e) => found.push(`player sync refused: ${e.message}`));
-  await leftOpen(page, "playerSyncRefused", found);
 }
 
 /** The Object Editor's save when war3map.wts really can't be written (read-only file; not on Windows, not as root): the
