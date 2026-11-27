@@ -3577,22 +3577,18 @@ async function codePageChoice(page, found) {
     // lossless text is one private-use character per byte (raw); 中文地图's C4 B5 is one (U+0135).
     const MAP_NAME = [0xd6, 0xd0, 0xce, 0xc4, 0xb5, 0xd8, 0xcd, 0xbc, 0xff], UNIT = [0xb2, 0xbd, 0xb1, 0xf8], COMMENT = [0xb2, 0xe2, 0xca, 0xd4];
     const TYPED_NAME = [0xd0, 0xc2, 0xc3, 0xfb, 0xd7, 0xd6];
-    // The map's name: its string in war3map.wts with the GBK bytes for a text.
-    const nameRef = /^TRIGSTR_(\d+)$/.exec(k.read("war3map.w3i.json").name ?? "");
-    if (!nameRef) return fail(`the new map's name isn't a string of war3map.wts: ${lit(k.read("war3map.w3i.json").name)}`);
-    const withText = (wts, num, text) => {
-      const s = wts.toString("latin1");
-      const head = new RegExp(`STRING 0*${num}\\r?\\n\\{\\r?\\n`).exec(s);
-      if (!head) throw new Error(`no string ${num} in war3map.wts`);
-      const from = head.index + head[0].length, to = s.indexOf("}", from);
-      const end = s.slice(from, to).match(/\r?\n$/)?.[0].length ?? 0;
-      return Buffer.concat([wts.subarray(0, from), Buffer.from(text), wts.subarray(to - end)]);
-    };
-    const wts = withText(readFileSync(wtsFile), Number(nameRef[1]), MAP_NAME);
+    // The map's name: a string of war3map.wts (string 900) holding the GBK bytes, as an old map has it.
+    const NUM = 900;
+    const before = existsSync(wtsFile) ? readFileSync(wtsFile) : Buffer.from("﻿");
+    const block = Buffer.concat([Buffer.from(`\r\nSTRING ${NUM}\r\n{\r\n`), Buffer.from(MAP_NAME), Buffer.from("\r\n}\r\n")]);
+    const wts = Buffer.concat([before, block]), textAt = before.length + block.indexOf("{\r\n") + 3;
     await page.evaluate(`w3.workspace.writeBytes("map/war3map.wts", new Uint8Array(${lit([...wts])}))`);
+    const info = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...JSON.parse(info), name: `TRIGSTR_${NUM}` }, null, 2) + "\n")})`);
     const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
     await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: raw(UNIT) }] });
-    const unitName = () => k.read("war3map.w3u.json").custom.find((o) => o.id === unit)?.mods?.find((m) => m.field === "unam")?.value;
+    // A name is a Skin field: in war3mapSkin.w3u when the map has one.
+    const unitName = () => ["war3map.w3u.json", "war3mapSkin.w3u.json"].map((n) => { try { return k.read(n).custom.find((o) => o.id === unit)?.mods?.find((m) => m.field === "unam")?.value; } catch { return undefined; } }).find((v) => v !== undefined);
     await page.evaluate(`(async () => {
       const t = await w3.workspace.readTriggers();
       const item = t?.file.items.find((i) => i.name === "Melee Initialization");
@@ -3632,11 +3628,13 @@ async function codePageChoice(page, found) {
     const said = await page.evaluate(`${nameBox}.closest(".form-control").querySelector(".map-info-cut")?.textContent ?? ""`);
     if (!/can't be written in GBK/.test(said)) fail(`Hangul typed in GBK says ${lit(said)}, not that GBK can't write it`);
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3i.json")`)) fail("the refused text left Map Properties unsaved");
-    // A text GBK has: taken, saved as its GBK bytes; the rest of the table stays.
+    // A text GBK has: taken, saved as its GBK bytes; the table before it stays (the map's other plain texts become
+    // strings after it, as the World Editor's Map Properties does: map-info/textedit.ts).
     await page.evaluate(`(() => { const e = ${nameBox}; e.value = "新名字"; e.dispatchEvent(new Event("input", { bubbles: true })); e.blur(); })()`);
     await k.save();
-    const saved = readFileSync(wtsFile), want = withText(wts, Number(nameRef[1]), TYPED_NAME);
-    if (!saved.equals(want)) fail(`after the edit war3map.wts holds ${lit(saved.toString("latin1").slice(0, 300))}, not the name's GBK bytes in an otherwise unchanged table`);
+    const saved = readFileSync(wtsFile);
+    const want = Buffer.concat([wts.subarray(0, textAt), Buffer.from(TYPED_NAME), Buffer.from("\r\n}")]);
+    if (!saved.subarray(0, want.length).equals(want)) fail(`after the edit war3map.wts holds ${lit(saved.subarray(Math.max(0, textAt - 40), textAt + 40).toString("latin1"))} around the name, not its GBK bytes in an otherwise unchanged table`);
 
     // The Object Editor: the unit's name readable; nothing edited, nothing changes.
     const cell = ".obj-table .obj-value-cell", input = `${cell} input:not(.color-tools-picker)`;
@@ -3682,7 +3680,7 @@ async function codePageChoice(page, found) {
     if (existsSync(built)) {
       const cat = (name) => spawnSync(cli, ["cat", built, name], { maxBuffer: 1 << 28 }).stdout ?? Buffer.alloc(0);
       if (!cat("war3map.wts").includes(Buffer.from(TYPED_NAME))) fail("the packed war3map.wts lacks the edited name's GBK bytes");
-      if (!cat("war3map.w3u").includes(Buffer.from(UNIT))) fail("the packed war3map.w3u lacks the unit name's GBK bytes");
+      if (!Buffer.concat([cat("war3map.w3u"), cat("war3mapSkin.w3u")]).includes(Buffer.from(UNIT))) fail("the packed war3map.w3u and war3mapSkin.w3u lack the unit name's GBK bytes");
       if (!cat("war3map.wtg").includes(Buffer.from([...COMMENT, ...Buffer.from(" ok")]))) fail("the packed war3map.wtg lacks the edited comment's GBK bytes");
     }
 
