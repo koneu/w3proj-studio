@@ -13,6 +13,7 @@ import { readTextFile, writeTextFile, wtsStrayLines } from "../../lib/formats/wt
 import { joinPath } from "../../lib/paths";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { resizeHistory } from "../../lib/terrain/resizeundo";
+import { isWaiPath, waiFromText, waiToText } from "../../lib/ai/waitext";
 import { SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP } from "../../lib/script/guard";
 
 /** One read_file answer; `offset` gets the rest. */
@@ -46,7 +47,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const out = w3.output.channel("MCP");
   const log = new EditLog({
     // A string table as lossless text (lib/formats/wts readWts): one in an old code page can be edited and undone too.
-    read: (path) => readTextFile(w3.workspace, path).catch(async (e) => {
+    // An AI Editor file is binary: the list holds it as a text of its bytes (lib/ai/waitext.ts).
+    read: (path) => (isWaiPath(path) ? w3.workspace.readBytes(path).then(waiToText) : readTextFile(w3.workspace, path)).catch(async (e) => {
       // Absent only when the whole list lacks it: a file not listed yet (right after an open) that can't be read
       // isn't a new one, and would be written over.
       await w3.workspace.filesReady();
@@ -55,7 +57,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     write: async (path, text) => {
       const isNew = !w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase());
-      if (text === null) await w3.workspace.delete(path); else await writeTextFile(w3.workspace, path, text);
+      if (text === null) await w3.workspace.delete(path);
+      else if (isWaiPath(path)) await w3.workspace.writeBytes(path, waiFromText(text));
+      else await writeTextFile(w3.workspace, path, text);
       if (isNew || text === null) await w3.workspace.refresh();
     },
     unsaved: () => w3.editors.unsavedPaths(),
@@ -357,7 +361,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   // Requests only arrive once the pipe is open, so the listener comes first.
   void w3.backend.listen<{ key: number; message: string }>("w3://mcp-request", ({ key, message }) => {
-    void w3.mcp.handle(message).then((reply) => w3.backend.invoke("mcp_respond", { key, message: reply }));
+    // What a long tool says before its answer (notifications/progress) goes out on the same connection, ahead of it.
+    const notify = (line: string) => void w3.backend.invoke("mcp_progress", { key, message: line }).catch(() => {});
+    void w3.mcp.handle(message, notify).then((reply) => w3.backend.invoke("mcp_respond", { key, message: reply }));
   }).then((listener) => { ctx.subscriptions.push(listener); return apply(); });
 }
 

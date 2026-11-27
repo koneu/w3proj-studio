@@ -23,6 +23,9 @@ import { keepFiles, removeStep, stepRemove, type RemoveStep } from "./remove";
 import { stepPath, type PathFs, type PathStep } from "./path";
 import { listWriter } from "./listwrite";
 import { findCampaign } from "../../lib/objects/campaign";
+import { editMapDoc } from "../../extensions/mcpdocs";
+import { readMapDocStrict } from "../../lib/formats/mapdoc";
+import { addImport, describeImports, emptyImports, importTarget, removeImport, type ToolImportsDoc } from "./tools";
 import { cleanedList, cleanupIsEmpty, cleanupSummary, entriesWithoutFile, entryGameNames, importCleanup, type ImportCleanup } from "../../lib/importcleanup";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
@@ -48,7 +51,56 @@ const REMOVE_ONLY = "Remove from list", REMOVE_AND_DELETE = "Remove and delete f
 let openView: ImportView | null = null;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** What the import tools go by: the project's list (the campaign's in a campaign project), its folder and its files. */
+  const importFacts = async () => {
+    await projectWithFiles(w3);
+    const files = new Map(w3.workspace.files().map((f) => [f.path.replace(/\\/g, "/").toLowerCase(), { path: f.path, size: f.size }]));
+    const campaign = files.has("map/war3campaign.w3f.json") || files.has("map/war3campaign.w3f");
+    const name = campaign ? "war3campaign.imp" : "war3map.imp";
+    // A list that is there and can't be read refuses: read as empty, it would be written over.
+    const doc = (await readMapDocStrict<ToolImportsDoc>(w3, `map/${name}.json`)) ?? emptyImports();
+    if (!Array.isArray(doc.files)) throw new Error(`map/${name}.json has no file list.`);
+    return { files, name, folder: campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER, doc };
+  };
   ctx.subscriptions.push(
+    w3.mcp.registerTool("list_imports", async () => {
+      const { files, folder, doc } = await importFacts();
+      const paths = [...files.values()].map((f) => f.path);
+      return { imports: describeImports(doc, files, folder), unlisted: unlistedFiles(paths, doc.files, folder).map((p) => archivePath(p)) };
+    }),
+    w3.mcp.registerTool("import_file", async ({ source, path }) => {
+      if (typeof source !== "string" || !source.trim()) throw new Error("source must be the file's full path on this computer.");
+      const from = source.trim();
+      if (!(await w3.backend.invoke<boolean>("fs_exists", { path: from }).catch(() => false))) throw new Error(`There's no file ${from} on this computer.`);
+      const { files, name, folder, doc } = await importFacts();
+      const target = importTarget(doc, files, from, path, folder);
+      // Asked before anything is copied: the list's edit below is refused while an editor has unsaved changes.
+      const unsaved = w3.editors.unsavedPaths();
+      if (unsaved.length) throw new Error(`Not imported: ${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes in the editor. Ask the user to save or discard them first.`);
+      // Copied in the backend: an import can be far larger than the webview can hold.
+      const { copied, error } = await w3.window.withProgress(`Importing ${target.archive}`, () => w3.workspace.copyMany([[from, target.file]]));
+      if (!copied) throw new Error(`Not imported: ${error ?? "the file couldn't be copied"}`);
+      try {
+        await editMapDoc<ToolImportsDoc>(w3, name, `Import ${target.archive}`, (list) => { list.files ??= []; addImport(list, target.archive); }, emptyImports);
+      } catch (e) {
+        // The file without its entry would be packed into the map all the same.
+        await w3.workspace.delete(target.file).catch(() => {});
+        throw e;
+      }
+      return { imported: target.archive, file: target.file, note: "undo_last_edit takes the entry off the list again, not the file out of the map folder: remove_import with deleteFile does both." };
+    }),
+    w3.mcp.registerTool("remove_import", async ({ path, deleteFile }) => {
+      if (deleteFile !== undefined && typeof deleteFile !== "boolean") throw new Error("deleteFile must be true or false.");
+      const { files, name, folder } = await importFacts();
+      let gone: ReturnType<typeof removeImport> | null = null;
+      await editMapDoc<ToolImportsDoc>(w3, name, `Remove import ${String(path)}`, (list) => { gone = removeImport(list, files, path, folder); });
+      const r = gone as ReturnType<typeof removeImport> | null;
+      if (!r) throw new Error("Nothing was changed.");
+      if (!r.file) return `Removed ${r.entry.path} from the import list. Its file wasn't in the project.`;
+      if (deleteFile !== true) return `Removed ${r.entry.path} from the import list. Its file ${r.file} stays in the map folder, so it is still packed into the map and used by the game: deleteFile: true deletes it too.`;
+      await w3.workspace.delete(r.file);
+      return `Removed ${r.entry.path} from the import list and deleted ${r.file}. undo_last_edit puts the entry back, not the file.`;
+    }),
     w3.commands.register("w3.imports.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       // Which list (the map's or the campaign's, JSON or raw) from the whole file list, not one still being read.

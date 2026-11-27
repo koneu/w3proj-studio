@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 use crate::CmdResult;
 
@@ -20,27 +20,52 @@ use crate::CmdResult;
 const CALL_LIMIT: Duration = Duration::from_secs(120);
 const QUICK_LIMIT: Duration = Duration::from_secs(5);
 
+/// What the webview says about a request: a notification on the way (a long tool's progress), or the answer.
+enum Said {
+    Note(String),
+    Reply(String),
+}
+
 #[derive(Default)]
 struct Shared {
     next: AtomicU64,
-    waiting: Mutex<HashMap<u64, oneshot::Sender<String>>>,
+    waiting: Mutex<HashMap<u64, mpsc::UnboundedSender<Said>>>,
     server: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 #[derive(Default, Clone)]
 pub struct Mcp(Arc<Shared>);
 
-/// Hands one request to the webview and waits for the answer; a late answer is dropped.
-async fn ask(app: &AppHandle, mcp: &Mcp, line: &str) -> String {
+/// Hands one request to the webview and waits for the answer; a late answer is dropped. What the webview says on the
+/// way (a long tool's progress, one line each) goes to `out` as it comes, but only for a bridge that reads more than
+/// one line: it marks such a request with `w3progress` (an older bridge takes the first line for the answer). A note
+/// doesn't move the time limit: the webview's clock sends them, whether or not the tool gets anywhere.
+async fn ask<W: tokio::io::AsyncWrite + Unpin>(app: &AppHandle, mcp: &Mcp, line: &str, out: &mut W) -> String {
+    use tokio::io::AsyncWriteExt;
     let request: Value = serde_json::from_str(line).unwrap_or(Value::Null);
     let limit = if request["method"] == "tools/call" { CALL_LIMIT } else { QUICK_LIMIT };
+    let streams = request["w3progress"] == true;
     let key = mcp.0.next.fetch_add(1, Ordering::Relaxed);
-    let (answer, wait) = oneshot::channel();
-    mcp.0.waiting.lock().unwrap().insert(key, answer);
+    let (said, mut wait) = mpsc::unbounded_channel();
+    mcp.0.waiting.lock().unwrap().insert(key, said);
     let sent = app.emit("w3://mcp-request", json!({ "key": key, "message": line }));
-    let reply = match sent {
-        Ok(()) => tokio::time::timeout(limit, wait).await.ok().and_then(Result::ok),
-        Err(_) => None,
+    let until = tokio::time::Instant::now() + limit;
+    let reply = loop {
+        if sent.is_err() {
+            break None;
+        }
+        match tokio::time::timeout_at(until, wait.recv()).await {
+            Ok(Some(Said::Reply(reply))) => break Some(reply),
+            Ok(Some(Said::Note(note))) => {
+                // A client that hung up misses the answer too; the tool still ends its work.
+                if streams && !note.contains('\n') {
+                    let _ = out.write_all(note.as_bytes()).await;
+                    let _ = out.write_all(b"\n").await;
+                    let _ = out.flush().await;
+                }
+            }
+            _ => break None,
+        }
     };
     mcp.0.waiting.lock().unwrap().remove(&key);
     reply.unwrap_or_else(|| {
@@ -61,7 +86,7 @@ async fn connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite>(app: AppHan
     if read.read_line(&mut line).await? == 0 {
         return Ok(());
     }
-    let reply = ask(&app, &mcp, line.trim_end()).await;
+    let reply = ask(&app, &mcp, line.trim_end(), &mut write).await;
     write.write_all(reply.as_bytes()).await?;
     write.write_all(b"\n").await?;
     write.flush().await?;
@@ -246,7 +271,15 @@ pub async fn mcp_serve(app: AppHandle, state: State<'_, Mcp>, enabled: bool) -> 
 #[tauri::command]
 pub fn mcp_respond(state: State<'_, Mcp>, key: u64, message: String) {
     if let Some(waiting) = state.0.waiting.lock().unwrap().remove(&key) {
-        let _ = waiting.send(message);
+        let _ = waiting.send(Said::Reply(message));
+    }
+}
+
+/// A notification of the webview about a request it hasn't answered yet (a long tool's progress).
+#[tauri::command]
+pub fn mcp_progress(state: State<'_, Mcp>, key: u64, message: String) {
+    if let Some(waiting) = state.0.waiting.lock().unwrap().get(&key) {
+        let _ = waiting.send(Said::Note(message));
     }
 }
 

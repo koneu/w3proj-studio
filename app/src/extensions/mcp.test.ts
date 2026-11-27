@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AiWordedError, McpTools, projectPath, type McpHostHooks } from "./mcp";
+import { AiWordedError, CallProgress, McpTools, projectPath, type McpHostHooks } from "./mcp";
 
 function tools(over: Partial<McpHostHooks> = {}) {
   const logged: string[] = [];
@@ -155,4 +155,68 @@ test("an argument the tool's schema doesn't list is refused, naming what it take
   assert.equal((await t.call("none", { anything: 1 })).isError, undefined);
   const e = await t.call("empty", { a: 1, b: 2 });
   assert.match(e.content[0].type === "text" ? e.content[0].text : "", /the arguments "a", "b".*no arguments/);
+});
+
+test("a long call tells a listening client that it is still at work, by the clock, with what the app is doing", async () => {
+  let now = 0;
+  const lines: string[] = [];
+  let activity: string | undefined;
+  const p = new CallProgress("tok", (l) => lines.push(l), () => activity, () => now, 5);
+  const params = () => lines.map((l) => JSON.parse(l).params);
+  const tick = () => new Promise((r) => setTimeout(r, 12));
+  now = 3000;
+  await tick();
+  assert.deepEqual(JSON.parse(lines[0]), { jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: "tok", progress: 3, message: "Working (3 s)" } });
+  const sent = lines.length;
+  await tick();
+  assert.equal(lines.length, sent, "the value must grow: the same second isn't sent twice");
+  now = 6000;
+  activity = "Creating the map";
+  await tick();
+  assert.deepEqual(params().at(-1), { progressToken: "tok", progress: 6, message: "Creating the map (6 s)" });
+  // What the tool says itself comes before the app's activity.
+  p.progress("Reading the game's files");
+  now = 9000;
+  await tick();
+  assert.equal(params().at(-1).message, "Reading the game's files (9 s)");
+  p.end();
+  const after = lines.length;
+  now = 12000;
+  await tick();
+  p.progress("late", 1, 2);
+  assert.equal(lines.length, after, "nothing after the answer");
+});
+
+test("a tool that counts is reported by its counts: never backwards, not every step of a long loop, always the last", () => {
+  let now = 10_000;
+  const lines: string[] = [];
+  const p = new CallProgress(7, (l) => lines.push(l), () => undefined, () => now, 60_000);
+  const params = () => lines.map((l) => JSON.parse(l).params);
+  p.progress("Placing objects", 0, 3000);
+  assert.deepEqual(params(), [{ progressToken: 7, progress: 0, total: 3000, message: "Placing objects" }]);
+  for (let i = 1; i < 100; i++) p.progress("Placing objects", i, 3000);
+  assert.equal(lines.length, 1, "steps within a quarter second are left out");
+  now += 300;
+  p.progress("Placing objects", 100, 3000);
+  p.progress("Placing objects", 50, 3000);
+  assert.deepEqual(params().map((x) => x.progress), [0, 100]);
+  p.progress("Placing objects", 3000, 3000);
+  assert.equal(params().at(-1).progress, 3000, "the last step goes out at once");
+  p.end();
+});
+
+test("only a call with a progress token reports, and a handler gets the call to report on", async () => {
+  const { t } = tools();
+  t.declare("ext.a", "builtin", [{ name: "slow", description: "Takes long" }]);
+  t.registerTool("slow", (_args, call) => { call.progress("Half way", 1, 2); call.progress("Done", 2, 2); return "ok"; });
+  const notes: string[] = [];
+  const call = (meta?: object) => t.handle(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "slow", arguments: {}, ...(meta ? { _meta: meta } : {}) } }), (l) => notes.push(l));
+  assert.equal(JSON.parse(await call()).result.content[0].text, "ok");
+  assert.deepEqual(notes, [], "no token, no notifications");
+  assert.equal(JSON.parse(await call({ progressToken: "p1" })).result.content[0].text, "ok");
+  assert.deepEqual(notes.map((l) => JSON.parse(l).params), [
+    { progressToken: "p1", progress: 1, total: 2, message: "Half way" }, { progressToken: "p1", progress: 2, total: 2, message: "Done" },
+  ]);
+  // Without a listener (the headless host, an older app side) a token changes nothing.
+  assert.equal(JSON.parse(await t.handle(JSON.stringify({ id: 2, method: "tools/call", params: { name: "slow", _meta: { progressToken: 1 } } }))).result.content[0].text, "ok");
 });

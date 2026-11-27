@@ -1464,6 +1464,7 @@ pub fn run() {
             game_fast_transfer_served,
             mcp::mcp_serve,
             mcp::mcp_respond,
+            mcp::mcp_progress,
             mcp::mcp_bridge_path,
             mcpclients::mcp_clients,
             mcpclients::mcp_client_setup,

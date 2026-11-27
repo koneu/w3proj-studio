@@ -100,6 +100,10 @@ export class Progress {
       this.render();
     }
   }
+  /** The task shown, if any is running. */
+  current(): string | undefined {
+    return [...this.running.values()].at(-1);
+  }
   private render() {
     const titles = [...this.running.values()];
     this.el.hidden = titles.length === 0;

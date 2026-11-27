@@ -8,6 +8,7 @@ Reads and writes map/war3map.w3s (as .json); reads the game's sound table, map/w
 ## Contributes
 - Commands (14): w3.sounds.open, w3.sounds.export, w3.sounds.replace, w3.sounds.findUsages, w3.sounds.removeUnused, w3.sounds.moveUp, w3.sounds.moveDown, w3.sounds.sort, and 6 more
 - Editors (1): w3.soundEditor
+- MCP tools (3): set_sound, remove_sound, list_sounds
 - Services (1): w3.sounds
 
 Full list: `extension.json` in this folder.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { editablePath, EditLog, type EditIO } from "./edits";
+import { editablePath, EditLog, loggedPath, type EditIO } from "./edits";
 import type { W3Api } from "../../extensions/api";
 import { checkpointIfOn, forgetCheckpointsOffWarning } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
@@ -349,4 +349,22 @@ test("unsaved opened and closed categories are saved, other unsaved changes stil
   state.viewOnly = false;
   await assert.rejects(log.edit("Two", put("map/a", "new2")), /war3map\.wtg has unsaved changes/);
   assert.equal(files.get("map/a"), "new1");
+});
+
+test("the tools' own files outside map/ join the edit list; a client's text never does", async () => {
+  assert.equal(loggedPath(".w3proj/reserved-areas.json"), ".w3proj/reserved-areas.json");
+  assert.equal(loggedPath("ai/Rush.wai"), "ai/Rush.wai");
+  assert.equal(loggedPath("map/war3map.w3c.json"), "map/war3map.w3c.json");
+  assert.throws(() => loggedPath(".w3proj/settings.json"), /stay inside map/);
+  assert.throws(() => loggedPath(".w3proj/extensions/x.wai"), /stay inside map/);
+  assert.throws(() => loggedPath("../Rush.wai"), /isn't a path inside the project/);
+  // edit_text_file's own check is the narrow one.
+  assert.throws(() => editablePath(".w3proj/reserved-areas.json"), /stay inside map/);
+  // Reserving is an edit like any other: listed, and undone.
+  const { log, files } = setup();
+  const file = ".w3proj/reserved-areas.json";
+  assert.equal(await log.edit('Reserve "gate"', async (read) => [{ path: file, text: JSON.stringify([...(JSON.parse((await read(file)) ?? "[]")), { name: "gate" }]) }]), true);
+  assert.equal(files.get(file), '[{"name":"gate"}]');
+  assert.equal(await log.undo(), 'Reserve "gate"');
+  assert.equal(files.has(file), false, "the list wasn't there before");
 });

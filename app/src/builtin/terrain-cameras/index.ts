@@ -18,6 +18,8 @@ import { readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/
 import { storableFloat32 } from "../../lib/formats/float32";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
+import { editMapDoc } from "../../extensions/mcpdocs";
+import { describeCamera, emptyCameras, removeCamera, setCamera, type ToolCamerasDoc } from "./tools";
 
 const FILE = "map/war3map.w3c";
 /** The shortest distance a drag leaves a camera (world units). */
@@ -72,10 +74,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(w3.mcp.registerTool("list_cameras", async () => {
     requireProject(w3);
     const file = await readMapDoc<{ cameras: Camera[] }>(w3, "map/war3map.w3c.json");
-    return (file?.cameras ?? []).map((c) => ({
-      name: c.name, ...(isFreeCamera(c) ? { free: true } : {}), target: [c.targetX, c.targetY], rotation: c.rotation, angleOfAttack: c.angleOfAttack, distance: c.distance, fieldOfView: c.fieldOfView,
-    }));
+    return (file?.cameras ?? []).map(describeCamera);
   }));
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("set_camera", async (args) => {
+      requireProject(w3);
+      // Enforce Camera Bounds, as for a target typed in the Cameras tab; a map info that can't be read holds nothing back.
+      const enforced = w3.settings.get<boolean>("terrain.enforceCameraBounds", true) !== false;
+      const bounds = enforced ? await readMapDocStrict<{ cameraBounds?: number[] }>(w3, "map/war3map.w3i.json").then((i) => i?.cameraBounds ?? null, () => null) : null;
+      let done: ReturnType<typeof setCamera> | null = null;
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      await editMapDoc<ToolCamerasDoc>(w3, "war3map.w3c", `Set camera ${name}`, (doc) => { done = setCamera(doc, args, bounds); }, emptyCameras);
+      const r = done as ReturnType<typeof setCamera> | null;
+      if (!r) throw new Error("Nothing was changed.");
+      return {
+        ...(r.created ? { created: true } : r.changed ? { changed: true } : { changed: false, note: "It had these values already." }),
+        camera: describeCamera(r.camera),
+        ...(r.moved ? { note: `The target was outside the map's camera bounds and went to ${r.moved[0]}, ${r.moved[1]} (the user's setting Enforce Camera Bounds).` } : {}),
+      };
+    }),
+    w3.mcp.registerTool("remove_camera", async ({ name }) => {
+      requireProject(w3);
+      let gone = "";
+      await editMapDoc<ToolCamerasDoc>(w3, "war3map.w3c", `Remove camera ${String(name)}`, (doc) => { gone = removeCamera(doc, name).name; });
+      return `Removed the camera ${gone}. list_problems shows triggers still using it.`;
+    }),
+  );
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
     ctx.subscriptions.push(s.registerToolGroup({ id: "cameras", title: "Cameras", order: 30, create: (ed) => cameraEditor(w3, ed) }));
   });

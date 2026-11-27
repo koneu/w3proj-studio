@@ -26,6 +26,10 @@ import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
+import { editMapDoc } from "../../extensions/mcpdocs";
+import { importedPath } from "../../lib/imports";
+import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { describeSound, emptySounds, removeSound, setSound, type SoundFacts, type ToolSoundsDoc } from "./tools";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
   sortSounds, stepVolume, type Sound, type SoundLabel,
@@ -126,7 +130,40 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     liveSounds: () => (current?.canEdit ? current.sounds : null),
     onDidEdit: (listener) => edits.add(listener),
   };
+  /** What set_sound goes by: the game's sound files, labels, channels and effects, and the map's imported files. */
+  const soundFacts = async (): Promise<SoundFacts> => {
+    const game = await loadGameSounds(w3);
+    const inGame = (path: string) => {
+      const key = path.replace(/\//g, "\\");
+      return game.files.has(key) || [".flac", ".mp3", ".wav", ".ogg"].some((e) => game.files.has(key.replace(SOUND_EXTENSIONS, e)));
+    };
+    return {
+      fileKind: (path) => (importedPath(w3, path.replace(/\//g, "\\")) ? "map" : inGame(path) ? "game" : null),
+      label: (path) => findLabel(game.labels, path),
+      channels: game.channels.map(([n]) => n), effects: game.effects.map(([id]) => id),
+    };
+  };
   ctx.subscriptions.push(
+    w3.mcp.registerTool("list_sounds", async () => {
+      requireProject(w3);
+      return ((await readMapDoc<ToolSoundsDoc>(w3, FILE))?.sounds ?? []).map(describeSound);
+    }),
+    w3.mcp.registerTool("set_sound", async (args) => {
+      requireProject(w3);
+      const facts = await soundFacts();
+      let done: ReturnType<typeof setSound> | null = null;
+      await editMapDoc<ToolSoundsDoc>(w3, "war3map.w3s", `Set sound ${typeof args.name === "string" && args.name.trim() ? args.name.trim() : String(args.file ?? "")}`,
+        (doc) => { done = setSound(doc, args, facts); }, emptySounds);
+      const r = done as ReturnType<typeof setSound> | null;
+      if (!r) throw new Error("Nothing was changed.");
+      return { ...(r.created ? { created: true } : r.changed ? { changed: true } : { changed: false, note: "It had these values already." }), sound: describeSound(r.sound) };
+    }),
+    w3.mcp.registerTool("remove_sound", async ({ name }) => {
+      requireProject(w3);
+      let gone = "";
+      await editMapDoc<ToolSoundsDoc>(w3, "war3map.w3s", `Remove sound ${String(name)}`, (doc) => { gone = removeSound(doc, name).name; });
+      return `Removed the sound ${gone}. list_problems shows triggers still using it.`;
+    }),
     w3.services.provide(SOUNDS_SERVICE, service),
     w3.commands.register("w3.sounds.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
