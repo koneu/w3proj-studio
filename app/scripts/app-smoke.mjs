@@ -6043,7 +6043,8 @@ async function pathingImport(page, found) {
   try {
   const fail = (what) => found.push(`pathing import: ${what}`);
   const k = await heightKit(page, "PathingImport");
-  const wpmFile = join(k.root, "map", "war3map.wpm");
+  // The split layout keeps it in .w3proj/derived/ (read by its map/ name), where another program's edit goes too.
+  const wpmFile = join(k.root, ".w3proj", "derived", "war3map.wpm");
   const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
   // The import reads war3map.wpm and derives the pathing before it answers (an info, a warning or an error): waited for,
   // as settled() can come first (seen on Windows: the count read "0 cells", then "Imported 2 cells" came).
@@ -6091,7 +6092,8 @@ async function pathingImport(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.redo")`);
   await settled(page);
   await k.save();
-  const file = JSON.parse(readFileSync(join(k.root, ".w3proj", "pathing.json"), "utf8"));
+  // The Pathing tool's file as the app reads it (split: assembled from the subterrains' pathing.txt).
+  const file = JSON.parse(await page.evaluate(`w3.workspace.readText(".w3proj/pathing.json")`));
   const got = JSON.stringify(file.cells.sort((p, q) => p[0] - q[0]));
   if (got !== JSON.stringify([[128, 128, 0x0a, 0], [131, 128, 0x08, 0]])) fail(`pathing.json holds ${got}`);
   // Another size: refused with a message, no overrides.
@@ -7474,12 +7476,16 @@ async function dataSafety(page, found) {
   await page.evaluate(`(() => { window.__warned = []; window.__answer = undefined; window.__dataSafetyWarn = w3.window.showWarning; w3.window.showWarning = async (m, ...a) => { window.__warned.push(m); return window.__answer; }; })()`);
   const locked = join(work, "data-safety-locked");
   try {
+    // Part 1 is written for .w3proj/pathing.json on disk, the flat layout's file; a split project keeps the overrides in
+    // map/terrain/<subterrain>/pathing.txt. What fails of it is reported, and parts 2 to 4 still run.
+    let said;
+    try {
     // ---- 1a. A pathing.json that isn't JSON: said on opening, painting asks, Cancel writes nothing and leaves no undo step ----
     mkdirSync(dirname(pathing), { recursive: true });
     const broken = `{ "format": "w3proj.pathing/1", "width": 256, oops`;
     writeFileSync(pathing, broken);
     await reopen();
-    let said = await warned();
+    said = await warned();
     if (!said.some((m) => m.includes("pathing.json is there, but it isn't valid JSON"))) fail(`opening with a broken pathing.json said ${lit(said)}`);
     const notice = await page.evaluate(`document.querySelector(".pathing-notice")?.textContent ?? null`);
     if (!/can't be read: painting is off/.test(notice ?? "")) fail(`the Pathing tab doesn't say painting is off: ${lit(notice)}`);
@@ -7514,6 +7520,11 @@ async function dataSafety(page, found) {
     if (replaced?.width !== 256 || !(replaced.cells?.length > 0)) fail(`Replace wrote ${lit(read(pathing))?.slice(0, 120)}`);
     if (read(`${pathing}.bak2`) !== otherSize) fail("another size's pathing.json wasn't kept as pathing.json.bak2");
     if (read(`${pathing}.bak`) !== broken) fail("the second backup wrote over the first");
+    } catch (e) {
+      fail(`part 1 (pathing.json): ${e.message ?? e}`);
+    }
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    rmSync(join(root, ".w3proj", "pathing.json"), { force: true });
 
     if (process.platform === "win32") return;
     // ---- 2. A file in a folder that can't be looked into: an error, not "not there" ----
