@@ -182,21 +182,25 @@ fn project_create(dir: String, name: String, flags: u32, max_players: u32, campa
     w3proj::project::create_as(Path::new(&dir), header, campaign.unwrap_or(false)).map_err(err)
 }
 
+/// Packs the project (`w3proj::pack`). `attributes`: the map (and its chapter maps) gets an (attributes) as
+/// `w3proj pack --attributes` writes it (setting pack.attributes); left out, the output is as without it.
 #[tauri::command]
-async fn project_pack(app: AppHandle, root: String, output: Option<String>) -> CmdResult<Value> {
+async fn project_pack(app: AppHandle, root: String, output: Option<String>, attributes: Option<bool>) -> CmdResult<Value> {
     let user_formats = user_format_dirs(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let codecs = Registry::for_project(Path::new(&root), &user_formats).map_err(err)?;
-        let r = w3proj::pack(
-            Path::new(&root),
-            output.as_deref().map(Path::new),
-            &codecs,
-        )
-        .map_err(err)?;
+        let r = pack_project(Path::new(&root), output.as_deref().map(Path::new), &codecs, attributes).map_err(err)?;
         serde_json::to_value(&r).map_err(err)
     })
     .await
     .map_err(err)?
+}
+
+/// `project_pack`'s packing: the project's files as they are (the app pruned its strings first), through the CLI's own
+/// `w3proj::pack_with`, so `attributes` gives the (attributes) of `w3proj pack --attributes`.
+fn pack_project(root: &Path, output: Option<&Path>, codecs: &Registry, attributes: Option<bool>) -> w3proj::Result<w3proj::PackReport> {
+    let options = w3proj::PackOptions { attributes: attributes.unwrap_or(false), ..Default::default() };
+    w3proj::pack_with(root, output, codecs, options)
 }
 
 /// The project's terrain and doodad files as they are now (`w3proj::derived`), taken before pathing, shadows and the
@@ -1876,6 +1880,56 @@ mod program_tests {
         assert_eq!(cmd.get_program(), tool.join("proton").as_os_str());
         assert_eq!(args[0], "runinprefix", "proton run's steam.exe waits for every program in the prefix, Battle.net too");
         assert_eq!(args[1..], [exe.to_string_lossy().into_owned(), "-launch".into(), "-loadfile".into(), r"Z:\m\a.w3x".into()]);
+    }
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+
+    fn fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map")
+    }
+    /// The built-in codecs with the fixture's made-up TriggerData, as the CLI's tests pack the mini map.
+    fn registry() -> Registry {
+        let text = std::fs::read_to_string(fixture().join("../TriggerData.txt")).unwrap();
+        let data = std::sync::Arc::new(w3proj::triggerdata::TriggerData::parse(&text));
+        let mut codecs = Registry::default();
+        codecs.set_trigger_data(std::sync::Arc::new(move || Some(data.clone())));
+        codecs
+    }
+    /// The mini map packed by `pack` into a file of its own; its bytes.
+    fn packed(name: &str, pack: impl FnOnce(&Path) -> w3proj::Result<w3proj::PackReport>) -> Vec<u8> {
+        let dir = std::env::temp_dir().join(format!("w3proj-pack-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join(name);
+        pack(&out).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        bytes
+    }
+
+    #[test]
+    fn without_the_setting_the_app_packs_as_before_and_with_it_writes_the_clis_attributes() {
+        let (root, codecs) = (fixture(), registry());
+        let before = packed("before.w3x", |o| w3proj::pack(&root, Some(o), &codecs));
+        let unset = packed("unset.w3x", |o| pack_project(&root, Some(o), &codecs, None));
+        let off = packed("off.w3x", |o| pack_project(&root, Some(o), &codecs, Some(false)));
+        assert!(unset == before, "with no attributes asked for, the app's pack isn't byte for byte what it was");
+        assert!(off == before, "with attributes off, the app's pack isn't byte for byte what it was");
+        let none = mpq::Archive::from_bytes(before.clone()).unwrap();
+        assert!(none.read(mpq::attributes::NAME).is_err(), "a default pack has an (attributes)");
+
+        // `w3proj pack --attributes --keep-unused-strings` (main.rs: PackOptions { prune: false, attributes }).
+        let cli_options = w3proj::PackOptions { prune: false, attributes: true };
+        let cli = packed("cli.w3x", |o| w3proj::pack_with(&root, Some(o), &codecs, cli_options));
+        let on = packed("on.w3x", |o| pack_project(&root, Some(o), &codecs, Some(true)));
+        assert!(on != before, "control: the pack with (attributes) is another archive");
+        assert!(on == cli, "the app's pack with (attributes) isn't the CLI's");
+        let archive = mpq::Archive::from_bytes(on).unwrap();
+        let raw = archive.read(mpq::attributes::NAME).expect("the app's pack with the setting has an (attributes)");
+        let blocks = archive.header().block_table_entries as usize;
+        assert!(mpq::attributes::Attributes::parse(&raw, blocks).is_ok(), "its (attributes) reads");
     }
 }
 

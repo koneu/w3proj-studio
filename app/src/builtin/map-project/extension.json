@@ -22,8 +22,9 @@
       { "id": "w3.project.close", "when": "project", "menu": "File:2:3", "title": "Close Project", "category": "Project" }
     ],
     "configuration": {
-      "title": "Test Map",
+      "title": "Test Map and Pack",
       "properties": {
+        "pack.attributes": { "type": "boolean", "default": false, "description": "Write (attributes): packed maps get the archive's CRC32 per file, as the World Editor's save writes it (w3proj pack --attributes). Off: no (attributes)." },
         "testMap.difficulty": { "type": "string", "scope": "user", "default": "normal", "enum": ["easy", "normal", "hard"], "enumDescriptions": ["Easy", "Normal", "Hard"], "description": "Difficulty Level the game starts the map at (-mapdiff)." },
         "testMap.profile": { "type": "string", "scope": "user", "default": "WorldEdit", "description": "Player Profile the test runs under (-testmapprofile), as the World Editor's \"WorldEdit\" profile keeps tests out of your own. Empty: your own profile." },
         "testMap.windowMode": { "type": "string", "scope": "user", "default": "default", "enum": ["default", "windowed", "windowedFullscreen", "fullscreen"], "enumDescriptions": ["Default (the game's own setting)", "Windowed", "Windowed Fullscreen", "Fullscreen"], "description": "Window Mode of the game (-windowmode)." },

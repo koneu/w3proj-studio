@@ -5677,6 +5677,57 @@ async function destructableFlags(page, found) {
   }
 }
 
+/** Setting pack.attributes (off by default): Pack Release .w3x writes no (attributes) and the archive `w3proj pack` writes
+ *  for the project; on, the archive `w3proj pack --attributes` writes, byte for byte, with its (attributes). */
+async function packAttributes(page, found) {
+  try {
+  const fail = (what) => found.push(`pack attributes: ${what}`);
+  const k = await heightKit(page, "PackAttributes");
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const built = resolve(k.root, await page.evaluate(`w3.workspace.project().default_output`));
+  /** Pack Release .w3x, as the user runs it; the map it wrote. */
+  const appPack = async () => {
+    rmSync(built, { force: true });
+    await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+    await until("the build", () => existsSync(built), 60000);
+    await settled(page);
+    return readFileSync(built);
+  };
+  /** The CLI on the same project as the app left it: the strings the app pruned already, its script as it is. */
+  const cliPack = (name, extra) => {
+    const out = join(work, name);
+    const r = spawnSync(cli, ["pack", k.root, "-o", out, "--keep-unused-strings", "--keep-script", "--game", "none", ...extra], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`w3proj pack ${extra.join(" ")}: ${(r.stdout + r.stderr).slice(-300)}`);
+    return readFileSync(out);
+  };
+  const attributesOf = (map) => {
+    const r = spawnSync(cli, ["cat", map, "(attributes)"], { maxBuffer: 1 << 26 });
+    return r.status === 0 ? r.stdout : null;
+  };
+  if ((await k.setting("pack.attributes")) !== false) fail(`pack.attributes isn't off by default: ${lit(await k.setting("pack.attributes"))}`);
+  const off = await appPack();
+  if (!off.equals(cliPack("pack-attributes-cli-off.w3x", []))) fail("with the setting off, the app's pack isn't the archive `w3proj pack` writes");
+  if (attributesOf(built)) fail("with the setting off, the app's pack has an (attributes)");
+
+  await page.evaluate(`w3.settings.set("pack.attributes", true)`);
+  const on = await appPack();
+  const cliOn = cliPack("pack-attributes-cli-on.w3x", ["--attributes"]);
+  if (on.equals(off)) fail("with the setting on, the app's pack is the one without (control)");
+  if (!on.equals(cliOn)) fail(`with the setting on, the app's pack (${on.length} bytes) isn't the archive \`w3proj pack --attributes\` writes (${cliOn.length} bytes)`);
+  const own = attributesOf(built), theirs = attributesOf(join(work, "pack-attributes-cli-on.w3x"));
+  if (!own) fail("with the setting on, the app's pack has no (attributes)");
+  else if (!theirs || !own.equals(theirs)) fail("the app's (attributes) isn't the CLI's");
+  const verify = spawnSync(cli, ["verify", "-q", built, "--game", "none"], { encoding: "utf8" });
+  if (verify.status !== 0) fail(`the app's pack with (attributes) doesn't verify: ${(verify.stdout + verify.stderr).slice(-300)}`);
+  } finally {
+    await page.evaluate(`w3.settings.set("pack.attributes", undefined)`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
  *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past level 0 stops every
  *  corner there (as the World Editor does), and undoing gives every file back byte for byte. */
@@ -19490,6 +19541,7 @@ async function run() {
         objectsWhileOpening,
         objectValueRange,
         oldLocalFiles,
+        packAttributes,
         paletteMouse,
         pasteWaitsForSizes,
         pathingImport,
@@ -19741,6 +19793,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
   await leftOpen(page, "wholeMapGround", found);
+  await packAttributes(page, found).catch((e) => found.push(`pack attributes: ${e.message}`));
+  await leftOpen(page, "packAttributes", found);
   await destructableFlags(page, found).catch((e) => found.push(`destructable flags: ${e.message}`));
   await leftOpen(page, "destructableFlags", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
