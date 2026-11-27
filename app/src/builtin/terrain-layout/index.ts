@@ -1,7 +1,9 @@
-// Subterrains: "Split Terrain into Subterrains…" and "Merge Subterrains", thin wrappers over the backend's
-// terrain_split / terrain_merge (crates/w3proj terrain_layout.rs, as `w3proj terrain split` and `merge`). Both are
-// lossless: the map is the same afterwards, and every editor keeps reading and saving map/war3map.w3e.txt and the
-// object files by those names (the backend answers for them from map/terrain/, crates/backend flatview.rs).
+// Subterrains: the terrain's layout in map/terrain/ (crates/w3proj terrain_layout.rs), the only one since 2026-11-26
+// (docs/terrain-subterrains-spec.md): a new map and every project opened have it (one subterrain main to begin with),
+// and Edit Terrain Layout cuts it into more. Every change is lossless: the map is the same afterwards, and every editor
+// keeps reading and saving map/war3map.w3e.txt and the object files by those names (the backend answers for them from
+// map/terrain/, crates/backend flatview.rs). A project that couldn't be converted (its terrain kept raw, …) stays flat;
+// the Terrain Layout editor and change_subterrains still offer it Split Terrain (terrain_split).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -41,29 +43,8 @@ export function isSplit(w3: W3Api): boolean {
   return w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === LAYOUT_FILE);
 }
 
-/** Rectangles as typed: `name:x,y,w,h`, separated by `;` or new lines. */
-export function parseRects(text: string): string[] {
-  return text.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
-}
-
 /** The backend's argument for a layout: no rectangles for `main`. */
 export const rectsOf = (layout: SplitLayout): string[] => (layout === "main" ? [] : layout === "2x2" ? ["2x2"] : layout);
-
-async function askLayout(w3: W3Api): Promise<SplitLayout | undefined> {
-  const pick = await w3.window.quickPick<"main" | "2x2" | "custom">([
-    { label: "One subterrain (main)", description: "The whole canvas in map/terrain/main/, ready to be cut up later", value: "main" },
-    { label: "2×2 grid", description: "Four subterrains: sw, se, nw, ne", value: "2x2" },
-    { label: "Rectangles…", description: "name:x,y,w,h in corners, (0,0) the south-west corner", value: "custom" },
-  ], { placeholder: "Split the terrain into" });
-  if (!pick?.value) return undefined;
-  if (pick.value !== "custom") return pick.value;
-  const text = await w3.window.inputBox({
-    prompt: "Subterrains as name:x,y,w,h (corners, (0,0) south-west), separated by ;. Corners outside all of them must all be alike.",
-    placeholder: "west:0,0,65,129; east:65,0,64,129",
-  });
-  const rects = text ? parseRects(text) : [];
-  return rects.length ? rects : undefined;
-}
 
 /** Runs a conversion: refused while an editor has unsaved changes (they'd be saved into the old layout's files, or
  *  lost); the derived work of the last edit first; a checkpoint where they're on; afterwards the file list read again
@@ -91,19 +72,12 @@ async function convert<T extends Converted>(w3: W3Api, what: string, run: (root:
   return done;
 }
 
-/** Split Terrain into Subterrains…: `arg.layout` skips the questions (MCP, app-smoke). Resolves with what was written,
- *  null when cancelled; rejects with the backend's reason when the split can't be lossless (nothing written then). */
-export async function splitTerrain(w3: W3Api, arg?: { layout?: SplitLayout; quiet?: boolean }): Promise<Converted | null> {
+/** Split Terrain of a project still flat (one opening couldn't convert: the Terrain Layout editor, change_subterrains).
+ *  Resolves with what was written; rejects with the backend's reason when the split can't be lossless (nothing written
+ *  then). */
+export async function splitTerrain(w3: W3Api, arg: { layout: SplitLayout; quiet?: boolean }): Promise<Converted> {
   if (isSplit(w3)) throw new Error("Split Terrain: the terrain is split already (map/terrain/).");
-  const layout = arg?.layout ?? (await askLayout(w3));
-  if (!layout) return null;
-  return convert(w3, "Split Terrain", (root) => w3.backend.invoke<Converted>("terrain_split", { root, rects: rectsOf(layout) }), arg?.quiet === true);
-}
-
-/** Merge Subterrains: map/terrain/ back into map/war3map.w3e.txt and the flat object files. */
-export async function mergeTerrain(w3: W3Api, arg?: { quiet?: boolean }): Promise<Converted | null> {
-  if (!isSplit(w3)) throw new Error("Merge Subterrains: the terrain isn't split (there is no map/terrain/terrain.json).");
-  return convert(w3, "Merge Subterrains", (root) => w3.backend.invoke<Converted>("terrain_merge", { root }), arg?.quiet === true);
+  return convert(w3, "Split Terrain", (root) => w3.backend.invoke<Converted>("terrain_split", { root, rects: rectsOf(arg.layout) }), arg.quiet === true);
 }
 
 /** What `backend::mergehook::run` did (crates/backend mergehook.rs Outcome). */
@@ -532,7 +506,7 @@ const gridLayout = (rects: SubRect[]): SplitLayout => (rects.length ? rects.map(
  *  the Subterrains commands. The number to take it back with. */
 export async function applyLayout(w3: W3Api, plan: PlannedSubterrain[]): Promise<number> {
   const what = "Change Subterrains";
-  if (!isSplit(w3)) throw new Error(`${what}: the terrain isn't split into subterrains (Split Terrain first).`);
+  if (!isSplit(w3)) throw new Error(`${what}: the terrain is still in the old single-file layout (Split Terrain in Edit Terrain Layout… first).`);
   const done = await convert(w3, what, (root) => w3.backend.invoke<Converted & { undo: number }>("terrain_relayout", { root, plan: plan.map(planText), undoable: true }), true);
   w3.views.refresh(SUBTERRAINS_VIEW);
   return done.undo;
@@ -555,7 +529,6 @@ export function layoutOps(w3: W3Api): LayoutOps {
     apply: (plan) => applyLayout(w3, plan),
     undo: (id, redo) => undoLayoutChange(w3, id, redo),
     split: async (rects) => { await splitTerrain(w3, { layout: gridLayout(rects), quiet: true }); },
-    merge: async () => { await mergeTerrain(w3, { quiet: true }); },
     seams: async () => {
       const r = await checkTerrainSeams(w3, { quiet: true });
       return r.issues.flatMap((i) => i.corners.map((c) => ({ x: c.x, y: c.y, error: i.severity === "error", text: i.message })));
@@ -579,7 +552,7 @@ export async function getSubterrainsTool(w3: W3Api) {
 async function openState(w3: W3Api, what: string): Promise<OpenState> {
   const project = w3.workspace.project();
   if (!project) throw new Error(`${what}: no project is open.`);
-  if (!isSplit(w3)) throw new Error(`${what}: the terrain isn't split into subterrains (Split Terrain into Subterrains… first).`);
+  if (!isSplit(w3)) throw new Error(`${what}: the terrain is still in the old single-file layout (Split Terrain in Edit Terrain Layout… first).`);
   const s = await loadOpenState((cmd, args) => w3.backend.invoke(cmd, args), project.root);
   if (!s) throw new Error(`${what}: the terrain isn't split into subterrains.`);
   return s;
@@ -709,8 +682,6 @@ const shown = <A, R>(w3: W3Api, run: (arg?: A) => Promise<R>) => async (arg?: A)
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
-    w3.commands.register("w3.terrainLayout.split", shown(w3, (arg?: { layout?: SplitLayout; quiet?: boolean }) => splitTerrain(w3, arg))),
-    w3.commands.register("w3.terrainLayout.merge", shown(w3, (arg?: { quiet?: boolean }) => mergeTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.installMergeHook", shown(w3, (arg?: { quiet?: boolean }) => mergeHook(w3, arg))),
     w3.commands.register("w3.terrainLayout.removeMergeHook", shown(w3, (arg?: { quiet?: boolean }) => mergeHook(w3, { ...arg, remove: true }))),
     w3.commands.register("w3.terrainLayout.checkIds", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainIds(w3, arg))),

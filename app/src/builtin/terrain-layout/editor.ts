@@ -44,9 +44,9 @@ export interface LayoutOps {
   apply(plan: PlannedSubterrain[]): Promise<number>;
   /** Takes an applied change back (`redo`: makes it again). */
   undo(id: number, redo: boolean): Promise<void>;
-  /** Split Terrain into `rects`; none: one subterrain main over the canvas. */
+  /** Split Terrain into `rects`; none: one subterrain main over the canvas. Not undone: the flat layout is gone for
+   *  users (docs/terrain-subterrains-spec.md), so there is nothing to go back to. */
   split(rects: SubRect[]): Promise<void>;
-  merge(): Promise<void>;
   seams(): Promise<{ x: number; y: number; error: boolean; text: string }[]>;
 }
 
@@ -67,12 +67,11 @@ export interface LayoutEditorState {
   view: { scale: number; cx: number; cy: number; left: number; top: number; width: number; height: number };
 }
 
-/** An undo step: a draft change, an applied change (its backend number), a grid change, or a split. */
+/** An undo step: a draft change, an applied change (its backend number), or a grid change. */
 type Step =
   | { kind: "draft"; before: Draft; after: Draft }
   | { kind: "apply"; id: number; label: string }
-  | { kind: "grid"; before: SplitGrid; after: SplitGrid }
-  | { kind: "split"; rects: SubRect[] };
+  | { kind: "grid"; before: SplitGrid; after: SplitGrid };
 
 /** What Split Terrain gets for a grid: its rectangles, none without a cut (one subterrain main, as the command's first choice). */
 const splitArg = (g: SplitGrid): SubRect[] => (g.xs.length || g.ys.length ? gridRects(g) : []);
@@ -259,8 +258,8 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
       } else if (grid) {
         const rects = splitArg(grid);
         await ops.split(rects);
-        while (history.length && history[history.length - 1].kind === "grid") history.pop();
-        history.push({ kind: "split", rects });
+        // The grid's steps belonged to the flat project; the split itself isn't undone (`LayoutOps.split`).
+        history.length = 0;
       }
       future.length = 0;
     } catch (e) {
@@ -289,9 +288,7 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
     busy = true;
     renderToolbar();
     try {
-      if (s.kind === "apply") await ops.undo(s.id, redo);
-      else if (redo) await ops.split(s.rects);
-      else await ops.merge();
+      await ops.undo(s.id, redo);
       done();
     } catch (e) {
       // Refused (unsaved changes, files changed since): the step stays where it was.

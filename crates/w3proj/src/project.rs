@@ -856,8 +856,15 @@ pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result
     let on_disk = there(&project.join(MAP_DIR).join(crate::trigger_layout::ROOT_FILE))? && !old_raw.iter().any(|r| r == crate::trigger_layout::ROOT_FILE);
     // The files as the sync writes them (a split terrain layout kept: `terrain_layout::prepare_sync`).
     let mut files = ex.files.clone();
-    // A split project's derived files go into the store, not map/.
-    let _derived = crate::terrain_layout::prepare_sync(&project.join(MAP_DIR), &mut files)?;
+    // A split project's derived files go into the store, not map/. A map that doesn't fit the project's subterrains (a
+    // canvas of another size) can't be synced into it (the write says why), but it can replace it (`replaces`: Replace
+    // Map unpacks it into a new folder, one subterrain main over its canvas): its files are then compared as that cut.
+    if crate::terrain_layout::prepare_sync(&project.join(MAP_DIR), &mut files).is_err() {
+        files = ex.files.clone();
+        if crate::terrain_layout::split(&mut files, &[]).is_ok() {
+            let _derived = crate::derived::take(&mut files);
+        }
+    }
     let (gone, _) = extra_files(&project.join(MAP_DIR), &files)?;
     out.extend(
         gone.into_iter()

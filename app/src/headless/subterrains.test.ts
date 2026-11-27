@@ -24,7 +24,7 @@ import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
 import { MCP_EDITS_SERVICE } from "../extensions/services";
-import { activate, changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, getSubterrainsTool, isSplit, joinSubterrains, mergeHook, layoutOps, mergeTerrain, type MergeHookResult, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { activate, changeSubterrainsTool, checkTerrainIds, checkTerrainSeams, fixCreationIds, FLAT_FILES, getSubterrainsTool, isSplit, joinSubterrains, mergeHook, layoutOps, type MergeHookResult, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { addSub, draftOf, gridRects, planOf, renameSub, resizeSub } from "../lib/terrain/layoutdraft";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, resizeTerrain, type PathingOverrides } from "../lib/terrain/resize";
@@ -260,18 +260,15 @@ test("an edit of a subterrain file by another program shows as a change of the f
   assert.ok(!changed.has("map/war3mapUnits.doo.json"), "control: the units aren't made from it");
 });
 
-test("merge puts the flat files back, and the project reads as before", async () => {
-  const want = await loaded(flat);
-  await mergeTerrain(grid, { quiet: true });
-  assert.ok(!isSplit(grid));
-  const files = [...snapshot(gridRoot).keys()];
-  assert.ok(!files.some((f) => f.startsWith("map/terrain/")), files.join(", "));
-  for (const f of FLAT_FILES) assert.ok(files.includes(f), f);
-  assert.deepEqual(await loaded(grid), want);
-  // The same edits on both: the same files, byte for byte.
-  const a = snapshot(flatRoot), b = snapshot(gridRoot);
-  assert.deepEqual(changedFiles(a, b), []);
-  await assert.rejects(mergeTerrain(grid, { quiet: true }), /isn't split/);
+test("after the same edits the split project reads as the flat one, file for file", async () => {
+  assert.ok(isSplit(grid) && !isSplit(flat));
+  assert.deepEqual(await loaded(grid), await loaded(flat));
+  for (const f of FLAT_FILES) assert.equal(await grid.workspace.readText(f), await flat.workspace.readText(f), f);
+  // Every other file of the flat project's map/ reads alike in the split one (its derived files from .w3proj/derived/).
+  for (const [f, bytes] of snapshot(flatRoot)) {
+    if (FLAT_FILES.includes(f)) continue;
+    assert.equal(Buffer.from(await grid.workspace.readBytes(f)).toString("latin1"), bytes, f);
+  }
 });
 
 // ---- creation numbers (lib/terrain/creationids.ts over the real backend: terrain_id_layout, write_flat, terrain_check) ----
@@ -796,7 +793,7 @@ test("Terrain Layout editor: a draft of several steps previews what moves (nothi
   assert.deepEqual([got.layout, got.open.length, got.editor], ["split", 7, null]);
 });
 
-test("change_subterrains delete and preview, and a flat project's split by the grid: previewed, refused, applied, undone by merging", async () => {
+test("change_subterrains delete and preview, and a flat project's split by the grid: previewed, refused, applied", async () => {
   const { w3, root } = await bigSplit("layout-delete");
   const before = snapshot(root);
   // Delete b1: it joins the first neighbour that lines up with it (a1 below it: the same columns).
@@ -808,7 +805,7 @@ test("change_subterrains delete and preview, and a flat project's split by the g
   assert.deepEqual(done.subterrains.map((s) => [s.name, s.h]), [["a0", 8], ["a1", 17], ["a2", 8], ["b0", 9], ["b2", 9]]);
   await assert.rejects(changeSubterrainsTool(w3, { action: "delete", name: "nope" }), /no subterrain "nope"/);
 
-  // A flat project: the grid's rectangles previewed (objects per subterrain), a refused grid, then split; Undo merges.
+  // A flat project: the grid's rectangles previewed (objects per subterrain), a refused grid, then split.
   const flatRoot = project("layout-flat");
   const fw3 = await open(flatRoot);
   const ops = layoutOps(fw3);
@@ -822,15 +819,14 @@ test("change_subterrains delete and preview, and a flat project's split by the g
   assert.ok(p.removed.includes("map/war3map.w3e.txt"));
   await assert.rejects(ops.previewSplit([{ name: "west", x: 0, y: 0, w: 2, h: 3 }]), /Split Terrain: .*would be lost/);
   assert.deepEqual(changedFiles(flatBefore, snapshot(flatRoot)), []);
-  await ops.split(rects);
-  assert.ok(isSplit(fw3));
-  assert.deepEqual((await ops.readState()).subterrains.map((s) => s.name), ["sw", "se", "nw", "ne"]);
-  await ops.merge();
-  assert.deepEqual(changedFiles(flatBefore, snapshot(flatRoot)), [], "split and merged back: the flat files as they were");
   // The tool's split preview, and the single main of a grid without cuts.
   const tp = await changeSubterrainsTool(fw3, { action: "split", preview: true }) as { plan: string[]; subterrains: { name: string }[] };
   assert.deepEqual([tp.plan, tp.subterrains.map((s) => s.name)], [[], ["main"]]);
   assert.deepEqual(gridRects({ canvas: [5, 3], xs: [], ys: [] }).map((r) => r.name), ["main"]);
+  await ops.split(rects);
+  assert.ok(isSplit(fw3));
+  assert.deepEqual((await ops.readState()).subterrains.map((s) => s.name), ["sw", "se", "nw", "ne"]);
+  for (const f of FLAT_FILES) assert.equal(await fw3.workspace.readText(f), flatBefore.get(f), `${f} reads as it was`);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */

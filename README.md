@@ -341,9 +341,10 @@ takes in what changed on disk since it read and asks before writing over an item
 when `.gitattributes` lacks `map/triggers/** -text`. `w3proj triggers <project>` prints the tree as the app reads it
 (JSON); `w3proj rebuild` and `w3proj check` read the triggers from the folders as the app does.
 
-A large map's terrain can be split into named rectangles (**Split Terrain into Subterrains…**, `w3proj terrain split`):
-`map/terrain/terrain.json` and one folder per subterrain with its `terrain.txt`, `doodads.json`, `units.json`,
-`regions.json` and `pathing.txt`, so people working on different parts merge in git without conflicts. **Open
+A map's terrain lives in named rectangles, subterrains: `map/terrain/terrain.json` and one folder per subterrain with
+its `terrain.txt`, `doodads.json`, `units.json`, `regions.json` and `pathing.txt`, so people working on different parts
+merge in git without conflicts. A new or imported map has one, `main`, over the whole map; **Edit Terrain Layout** cuts
+it into more. Opening a project made before this layout (terrain in `map/war3map.w3e.txt`) converts it once and says so. **Open
 Subterrains…** (or the Subterrains view beside Terrain) opens only some of them: the choice is local
 (`.w3proj/open-subterrains.json`, git-ignored; no file opens all), the others aren't read, drawn or saved, and a strip
 of two corners around the open ones comes from the neighbours read-only. Every file command, AI tool and the headless

@@ -71,7 +71,7 @@ export type Deleted = { draft: Draft; into: string | null };
 export function deleteSub(d: Draft, name: string): Deleted | string {
   const s = d.subs.find((x) => x.name === name);
   if (!s) return `There is no subterrain "${name}".`;
-  if (d.subs.length === 1) return `${name} is the only subterrain: a split terrain has one at least (Merge Subterrains goes back to the single files).`;
+  if (d.subs.length === 1) return `${name} is the only subterrain: the terrain has one at least.`;
   for (const n of d.subs) {
     if (n === s || !sideBySide(n, s)) continue;
     const joined = joinSubs(d, [n.name, name], n.name);

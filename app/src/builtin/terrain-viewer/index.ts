@@ -5856,7 +5856,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const byTabNow = () => Object.fromEntries((["regions", "pathing", "cameras"] as const).filter(shownByTab).map((l) => [l, true]));
         const setGrid = (g: GridSize) => { viewState.grid = g; applyView(); };
         const toggleLayer = (layer: ToggleLayer | "water"): boolean | string => {
-          if (layer === "subterrains" && !openState) return "The terrain isn't split into subterrains: Split Terrain into Subterrains… makes them.";
+          if (layer === "subterrains" && !openState) return "The terrain is still in the old single-file layout: Split Terrain in Edit Terrain Layout… makes subterrains.";
           const no = refusedInGameView() ?? (shownByTab(layer) ? TAB_LAYERS[layer]!.note : null);
           if (no) return no;
           viewState[layer] = !viewState[layer];
