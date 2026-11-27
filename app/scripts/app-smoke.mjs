@@ -17782,7 +17782,8 @@ async function objectOneFile(page, found) {
     const clean = await page.evaluate(`w3.commands.execute("w3.problems.checkObjects")`);
     if (!clean || clean.problems.length) fail(`control: Check Objects on a sound project gave ${lit(clean?.problems ?? clean)}`);
     const kept = files().get(theirs);
-    writeFileSync(join(dir, theirs), kept.replace("\n", "\n<<<<<<< HEAD\n"));
+    const [head, ...rest] = kept.split("\n");
+    writeFileSync(join(dir, theirs), [head, "<<<<<<< HEAD", ...rest].join("\n"));
     await page.evaluate(`w3.workspace.refresh()`);
     const group = await page.evaluate(`w3.commands.execute("w3.problems.checkObjects")`);
     const listed = (group?.problems ?? []).map((p) => `${p.severity} ${p.location}: ${p.message}`);
