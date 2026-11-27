@@ -536,6 +536,12 @@ enum Cmd {
         /// priorities); a script edited by hand or from the World Editor stays as it is anyway.
         #[arg(long)]
         keep_script: bool,
+        /// Pack the placed objects as the project has them. Without it, with the game's data there, they are first made
+        /// what the app's Pack Map makes them (the World Editor's own rules on opening a map: doodads on their grids,
+        /// the scales and flags it saves, the units' facings, the destructables' flags the script goes by), written
+        /// into the project.
+        #[arg(long)]
+        keep_objects: bool,
         /// Game install folder: its tables go into a map script made again ("none": the script
         /// isn't made again), its TriggerData.txt checks the GUI functions of map/triggers/ (one
         /// it doesn't know, or given another number of parameters, would make war3map.wtg unreadable).
@@ -925,9 +931,15 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept the project's {s}: only its export header changed");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, attributes, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, game, trigger_data } => {
+        Cmd::Pack { project, output, keep_unused_strings, attributes, force_stale, allow_terrain_only_derived, allow_seam_issues, allow_stale_script, keep_script, keep_objects, game, trigger_data } => {
             check_trigger_data(&trigger_data)?;
             check_derived(&project, force_stale, allow_terrain_only_derived)?;
+            // The placed objects as the app's Pack Map leaves them, before the script reads them.
+            if !keep_objects && game != "none" {
+                for (at, dir) in packed_projects(&project) {
+                    rebuild::prepare_for_pack(&dir, &at, &game, &extra)?;
+                }
+            }
             seams::check_for_pack(&packed_projects(&project), allow_seam_issues, &extra)?;
             // The script Studio wrote last, made again from the files now there (the pack works out war3map.w3i's ally
             // priorities as the generator does, so the two agree); one that isn't Studio's goes in as it is, and

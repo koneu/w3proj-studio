@@ -200,6 +200,7 @@ fn packed_script(map: &Path, game: &str) -> String {
     String::from_utf8_lossy(&o.stdout).into_owned()
 }
 
+/// (The packs here take `--keep-objects`: the mini map's hand-made doodads aren't on the editor's grids.)
 /// `w3proj pack` makes the script Studio wrote last again before packing, so a second player added to war3map.w3i
 /// outside the app reaches the packed war3map.j (its InitAllyPriorities is what the pack works out for the w3i:
 /// allies.rs script_agrees gives no warning). Controls: --keep-script packs the stale script and warns; a script
@@ -226,7 +227,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     }
 
     // Nothing changed: the pack makes the same script and writes nothing.
-    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("same.w3x"))], &game);
+    let o = w3proj(&["pack", s(&project), "--keep-objects", "-o", s(&dir.join("same.w3x"))], &game);
     assert!(o.status.success(), "{}", text(&o));
     assert!(!text(&o).contains("warning:") && !text(&o).contains("written"), "{}", text(&o));
     assert_eq!(fs::read_to_string(&script).unwrap(), studios);
@@ -243,12 +244,12 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     let stale = "InitAllyPriorities doesn't set the ally priorities";
 
     // Control: --keep-script packs the stale script, and the pack's check says so.
-    let o = w3proj(&["pack", s(&project), "--keep-script", "-o", s(&dir.join("kept.w3x"))], &game);
+    let o = w3proj(&["pack", s(&project), "--keep-objects", "--keep-script", "-o", s(&dir.join("kept.w3x"))], &game);
     assert!(o.status.success() && text(&o).contains(stale), "{}", text(&o));
     assert!(!packed_script(&dir.join("kept.w3x"), &game).contains(prio));
     assert_eq!(fs::read_to_string(&script).unwrap(), studios);
 
-    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("made.w3x"))], &game);
+    let o = w3proj(&["pack", s(&project), "--keep-objects", "-o", s(&dir.join("made.w3x"))], &game);
     let said = text(&o);
     assert!(o.status.success(), "{said}");
     assert!(said.contains("written    map/war3map.j (map script made again"), "{said}");
@@ -266,7 +267,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     third["start"] = serde_json::json!([1280.0, 0.0]);
     v["players"].as_array_mut().unwrap().push(third);
     fs::write(&info, serde_json::to_string_pretty(&v).unwrap()).unwrap();
-    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("edited.w3x"))], &game);
+    let o = w3proj(&["pack", s(&project), "--keep-objects", "-o", s(&dir.join("edited.w3x"))], &game);
     assert!(o.status.success() && text(&o).contains(stale), "{}", text(&o));
     assert!(!text(&o).contains("written"), "{}", text(&o));
     assert_eq!(fs::read_to_string(&script).unwrap(), edited);
@@ -293,7 +294,8 @@ fn pack_makes_a_generated_script_in_the_store_and_records_it() {
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown, "a moved script follows nothing yet");
     let pack = |label: &str, extra: &[&str], game: &str| {
         let out = dir.join(format!("{label}.w3x"));
-        let mut args = vec!["pack", s(&project), "-o", s(&out)];
+        // --keep-objects: the script is what this is about (the placed objects: pack_puts_the_placed_objects_…).
+        let mut args = vec!["pack", s(&project), "--keep-objects", "-o", s(&out)];
         args.extend_from_slice(extra);
         (w3proj(&args, game), out)
     };
@@ -584,3 +586,44 @@ fn an_unknown_part_is_refused() {
     assert!(text(&o).contains("no part \"pathing\""), "{}", text(&o));
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// A pack applies to the placed objects what the app's Pack Map does (the World Editor's rules on opening a map): a tree
+/// off its grid is put on it and the project written, and the derived files that followed the project still count as
+/// following it (the pack goes through, and the next one changes nothing). `--keep-objects` packs it as it is.
+#[test]
+fn pack_puts_the_placed_objects_on_their_grids_as_the_app_does() {
+    let Some(game) = game() else {
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("pack-prepare");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    // The mini map's first destructable, a tree wall with a pathing texture, moved off its grid.
+    let doo = project.join("map/war3map.doo.json");
+    let mut list: serde_json::Value = serde_json::from_slice(&fs::read(&doo).unwrap()).unwrap();
+    assert_eq!(list["doodads"][0]["id"], "ATtr");
+    let x = list["doodads"][0]["position"][0].as_f64().unwrap();
+    let off = (x / 32.0).floor() * 32.0 + 13.0;
+    list["doodads"][0]["position"][0] = off.into();
+    fs::write(&doo, serde_json::to_vec_pretty(&list).unwrap()).unwrap();
+    let made = w3proj(&["rebuild", s(&project)], &game);
+    assert!(made.status.success(), "{}", text(&made));
+    let stored = fs::read(&doo).unwrap();
+    let placed_x = || serde_json::from_slice::<serde_json::Value>(&fs::read(&doo).unwrap()).unwrap()["doodads"][0]["position"][0].as_f64().unwrap();
+
+    // Control: as it is.
+    let kept = w3proj(&["pack", s(&project), "-o", s(&dir.join("kept.w3x")), "--keep-objects", "--keep-script"], &game);
+    assert!(kept.status.success(), "{}", text(&kept));
+    assert_eq!(fs::read(&doo).unwrap(), stored, "--keep-objects wrote the placed objects");
+
+    let packed = w3proj(&["pack", s(&project), "-o", s(&dir.join("out.w3x"))], &game);
+    let said = text(&packed);
+    assert!(packed.status.success(), "{said}");
+    assert!(said.contains("written    the placed objects in map/"), "{said}");
+    let now = placed_x();
+    assert!(now != off && now % 16.0 == 0.0, "the tree at {off} is at {now}: {said}");
+    let again = w3proj(&["pack", s(&project), "-o", s(&dir.join("again.w3x"))], &game);
+    assert!(again.status.success() && !text(&again).contains("written    the placed objects"), "{}", text(&again));
+}
+

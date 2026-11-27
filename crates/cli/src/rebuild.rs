@@ -345,6 +345,64 @@ pub enum PackScript {
     NoneMade(String),
 }
 
+/// What the app's Pack Map does to a project's placed objects, for a command-line pack, by the app's own code
+/// (app/src/headless/packprepare.ts): Snap and Fix Doodads on Load, the units' facings, pathing, shadows and the minimap
+/// after doodads that moved, and the destructables' flags the map script goes by. `at`: the project's place in the pack,
+/// for the lines printed. Derived files that followed the project's sources before are recorded as following them
+/// after; when they couldn't be made again after doodads moved, the pack stops.
+pub fn prepare_for_pack(project: &Path, at: &str, game: &str, formats: &[PathBuf]) -> Result<()> {
+    let map = project.join(w3proj::project::MAP_DIR);
+    // A campaign's own archive has no terrain and no placed objects.
+    if !map.join(w3proj::terrain_layout::LAYOUT_FILE).is_file() && !map.join(w3proj::terrain_layout::FLAT_FILE).is_file() {
+        return Ok(());
+    }
+    let server = Server { root: project.to_path_buf(), formats: formats.to_vec(), game: backend::GameCache::default(), read_only: false };
+    let skipped = |why: String| {
+        eprintln!("warning: {at}placed objects packed as the project has them ({why}): the app's Pack Map would first put doodads on their grids and give them the values the World Editor saves (--keep-objects packs them as they are without trying)");
+    };
+    if let Err(e) = server.game.get(game) {
+        skipped(format!("the game's data can't be read: {e}"));
+        return Ok(());
+    }
+    // The whole map, whatever subterrains are chosen to be open (a pack takes them all).
+    w3proj::terrain_open::set_override(Some(w3proj::terrain_open::Choice::All));
+    let fresh = derived::check(project)? == Freshness::Fresh;
+    let job = json!({ "task": "packPrepare", "root": project.to_string_lossy(), "settings": { "game.installDir": game } });
+    let report = run_host(&job, &server);
+    w3proj::terrain_open::set_override(None);
+    let report = match report {
+        Ok(r) => r,
+        Err(e) => {
+            skipped(format!("{e:#}"));
+            return Ok(());
+        }
+    };
+    if let Some(e) = report.get("error").and_then(Value::as_str) {
+        skipped(e.to_string());
+        return Ok(());
+    }
+    for note in report["notes"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        eprintln!("warning: {at}{note}");
+    }
+    if report["changed"].as_array().is_none_or(Vec::is_empty) {
+        return Ok(());
+    }
+    let count = |k: &str| report[k].as_u64().unwrap_or(0);
+    // Where they are on disk: a split terrain's in its subterrains (the report names the app's single files).
+    let place = if map.join(w3proj::terrain_layout::LAYOUT_FILE).is_file() { "map/terrain/" } else { "map/" };
+    println!(
+        "written    the placed objects in {at}{place} (as the app's Pack Map writes them: {} doodads put on their grid and facing, {} given the World Editor's values, {} units its facing)",
+        count("snapped"), count("fixed"), count("units")
+    );
+    if let Some(why) = report.get("derivedFailed").and_then(Value::as_str) {
+        bail!("{at}doodads moved, and pathing, shadows and the minimap couldn't be made again ({why}): run `w3proj rebuild`, then pack again");
+    }
+    if fresh {
+        derived::record(project, &derived::sources(project)?)?;
+    }
+    Ok(())
+}
+
 /// Makes the project's map script again from its files when it is the one Studio wrote last (`script_is_studios`),
 /// as `w3proj rebuild --only script` makes it, so a pack doesn't ship a script made from other players, start
 /// locations or ally priorities than war3map.w3i has. `at`: the project's place in the pack, for the lines printed

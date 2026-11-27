@@ -601,7 +601,11 @@ w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.
                                     # --allow-seam-issues. A generated map script (map/triggers/triggers.json
                                     # "script": "generated") comes from build/derived/ and is refused when stale
                                     # (--allow-stale-script) or missing; the game's TriggerData checks the GUI
-                                    # functions of map/triggers/
+                                    # functions of map/triggers/. With the game there, the placed objects are
+                                    # first made what the app's Pack Map makes them, and written into the
+                                    # project: doodads on their grids, the scales and flags the World Editor
+                                    # saves, units' facings, the destructables' flags the script goes by
+                                    # (--keep-objects packs them as they are)
 w3proj terrain seams MyMap/         # a split terrain's seams checked with the brushes' cliff, ramp and water
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
