@@ -32,3 +32,11 @@ test("Replace Map's question names the files, says where they go, and its first 
   assert.match(q.message, /build\/campaign-maps/);
   assert.deepEqual(q.actions, ["Replace", "Cancel"]);
 });
+
+test("both questions name other files before the object files", () => {
+  const gone = ["a", "b", "c", "d"].map((i) => `maps/One.w3x/map/objects/units/custom/h00${i}.json`);
+  gone.push("maps/One.w3x/map/smoke-added.txt");
+  for (const q of [deleteQuestion(gone, "One"), replaceQuestion(gone, "One.w3x", "Two.w3x")]) {
+    assert.match(q.message, /: maps\/One\.w3x\/map\/smoke-added\.txt, .*h00a\.json, .*h00b\.json and 2 more/);
+  }
+});

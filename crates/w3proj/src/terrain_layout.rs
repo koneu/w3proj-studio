@@ -850,7 +850,17 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
     };
     let t = w3e::terrain_from_text(&files[&flat])?;
     let (flats, names) = flat_object_files(files)?;
-    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats, None).map_err(|e| {
+    // A map whose size or position changed (Map Size in the World Editor): the subterrains and the painted pathing
+    // follow as with Studio's own Map Size.
+    let moved = [t.width, t.height] != layout.corners() || t.offset != layout.head.offset;
+    let mut painted = BTreeMap::new();
+    read_if_there(map_dir, &pathing.iter().map(String::as_str).collect::<Vec<_>>(), &mut painted)?;
+    let sliced = if moved {
+        resized_files(&painted, &layout, &t, &flats, None)
+    } else {
+        slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats, None)
+    }
+    .map_err(|e| {
         Error::Project(format!("the map's terrain and objects don't fit the project's subterrains ({e}): merge the terrain first (`w3proj terrain merge`), then split it again"))
     })?;
     files.remove(&flat);
@@ -858,7 +868,9 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
         files.remove(name);
     }
     files.extend(sliced);
-    read_if_there(map_dir, &pathing.iter().map(String::as_str).collect::<Vec<_>>(), files)?;
+    if !moved {
+        files.extend(painted);
+    }
     Ok(crate::derived::take(files))
 }
 
@@ -1566,7 +1578,7 @@ pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String
     // Map Size: the canvas grows or shrinks; what no subterrain holds any more goes. The layout's files as on disk
     // (the flat files above were assembled from them, which took them out), for the pathing overrides and what goes.
     let old_files = read_layout_files(map_dir)?;
-    let sliced = resized_files(&old_files, &layout, &t, &flats)?;
+    let sliced = resized_files(&old_files, &layout, &t, &flats, Some(&layout.objects.twice))?;
     let written = write_changed(map_dir, &sliced)?;
     // The old layout's files the new one doesn't have (a subterrain cut away, overrides cut off) go.
     FOLDER.remove_stale(map_dir, old_files.keys(), &sliced)?;
@@ -1603,8 +1615,8 @@ pub fn map_size_round_trip(files: &BTreeMap<String, Vec<u8>>, by: i64) -> Result
     flatten(&mut flat)?;
     let t = w3e::terrain_from_text(&flat[FLAT_FILE])?;
     let flats: Flats = KINDS.into_iter().filter(|k| layout.objects.has(*k)).map(|k| (k, flat[k.flat()].clone())).collect();
-    let grown = resized_files(files, &layout, &map_sized(&t, [by; 4]), &flats)?;
-    let back = resized_files(&grown, &Layout::parse(&grown[LAYOUT_FILE])?, &t, &flats)?;
+    let grown = resized_files(files, &layout, &map_sized(&t, [by; 4]), &flats, Some(&layout.objects.twice))?;
+    let back = resized_files(&grown, &Layout::parse(&grown[LAYOUT_FILE])?, &t, &flats, Some(&layout.objects.twice))?;
     Ok(back.into_iter().eq(files.iter().filter(|(k, _)| under_dir(k)).map(|(k, v)| (k.clone(), v.clone()))))
 }
 
@@ -1612,7 +1624,14 @@ pub fn map_size_round_trip(files: &BTreeMap<String, Vec<u8>>, by: i64) -> Result
 /// object files `flats` as the resize left them): the subterrains follow (`resized_canvas`), every file is cut anew from
 /// `t` and `flats`, the pathing overrides (read from `files` with `layout`) move with their ground, those now off the
 /// map go. The whole new set of files: one of `files` under `map/terrain/` that isn't in it is no longer the layout's.
-fn resized_files(files: &BTreeMap<String, Vec<u8>>, layout: &Layout, t: &Terrain, flats: &Flats) -> Result<BTreeMap<String, Vec<u8>>> {
+/// `kept`: as for `slice_terrain`.
+fn resized_files(
+    files: &BTreeMap<String, Vec<u8>>,
+    layout: &Layout,
+    t: &Terrain,
+    flats: &Flats,
+    kept: Option<&objects::Twice>,
+) -> Result<BTreeMap<String, Vec<u8>>> {
     let shift = canvas_shift(layout, t)?;
     let subs = resized_canvas(&layout.subterrains, layout.corners(), [t.width, t.height], shift)?;
     if let Some(side) = uncovered_growth(&subs, layout.corners(), t, shift, &layout.default_corner) {
@@ -1621,7 +1640,7 @@ fn resized_files(files: &BTreeMap<String, Vec<u8>>, layout: &Layout, t: &Terrain
         )));
     }
     let pathing = crate::terrain_pathing::assemble(layout, &|p| files.get(p).cloned())?;
-    let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats, Some(&layout.objects.twice))?;
+    let mut sliced = slice_terrain(t, subs, layout.default_corner, layout.doo_header.clone(), flats, kept)?;
     if let Some(json) = pathing {
         let cells = crate::terrain_pathing::parse_json(&json, layout.corners())?;
         let [w, h] = crate::terrain_pathing::map_size([t.width, t.height]);
@@ -1976,7 +1995,7 @@ mod tests {
         let flats: Flats = Flats::new();
         // Copied exactly (map_sized): the new corners are the default corner, kept outside every subterrain.
         for change in [[0, 2, 0, 0], [0, 0, 0, 2], [0, 2, 0, 2]] {
-            resized_files(&files, &layout, &map_sized(&t, change), &flats).unwrap_or_else(|e| panic!("{change:?}: {e}"));
+            resized_files(&files, &layout, &map_sized(&t, change), &flats, Some(&layout.objects.twice)).unwrap_or_else(|e| panic!("{change:?}: {e}"));
         }
         // With new variations, as the app's resize rolls them: refused, naming the side.
         for (change, side) in [([0, 2, 0, 0], "east"), ([0, 0, 0, 2], "north")] {
@@ -1984,13 +2003,13 @@ mod tests {
             let (w, h) = (grown.width, grown.height);
             let last = if side == "east" { w - 1 } else { (h - 1) * w };
             grown.corners[last].variation ^= 1;
-            let e = resized_files(&files, &layout, &grown, &flats).unwrap_err().to_string();
+            let e = resized_files(&files, &layout, &grown, &flats, Some(&layout.objects.twice)).unwrap_err().to_string();
             assert!(e.contains(&format!("can't grow the map to the {side}")) && e.contains("Edit Terrain Layout"), "{change:?}: {e}");
         }
         // Growth on the covered sides (west, south) is as before.
         let mut grown = map_sized(&t, [2, 0, 2, 0]);
         grown.corners[0].variation ^= 1;
-        resized_files(&files, &layout, &grown, &flats).unwrap();
+        resized_files(&files, &layout, &grown, &flats, Some(&layout.objects.twice)).unwrap();
     }
 
     fn layout_json(subterrains: &str) -> String {
@@ -2138,6 +2157,40 @@ mod tests {
         prepare_sync(&dir, &mut sync).unwrap();
         assert_eq!(write_changed(&dir, &sync).unwrap(), vec!["terrain/ne/terrain.txt".to_string()]);
         assert_eq!(assemble(&read_layout_files(&dir).unwrap()).unwrap(), w3e::write(&edited));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A sync from a map whose size changed (Map Size in the World Editor) into a project with one subterrain over the
+    /// whole map, as every new project has: the subterrain follows the new canvas and the painted pathing its ground.
+    #[test]
+    fn a_sync_follows_a_changed_map_size() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-syncsize-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let t = terrain(12, false);
+        let mut files = flat_files(&t);
+        files.remove("war3map.j");
+        split(&mut files, &[]).unwrap();
+        write_changed(&dir, &files).unwrap();
+        let layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
+        let painted = crate::terrain_pathing::sample_json([t.width, t.height]).unwrap();
+        write_changed(&dir, &crate::terrain_pathing::slice(&painted, &layout).unwrap()).unwrap();
+        let cells = crate::terrain_pathing::parse_json(&painted, [t.width, t.height]).unwrap();
+        // Grown on the west and north, then cut back.
+        for (change, shift) in [([2i64, 0, 0, 3], 8i64), ([-2, 0, 0, -3], 0)] {
+            let from = if shift == 0 { map_sized(&t, [2, 0, 0, 3]) } else { t.clone() };
+            let to = map_sized(&from, change);
+            let mut sync = BTreeMap::from([(FLAT_FILE.to_string(), w3e::terrain_text(&to).unwrap())]);
+            prepare_sync(&dir, &mut sync).unwrap();
+            write_changed(&dir, &sync).unwrap();
+            let now = read_layout_files(&dir).unwrap();
+            assert_eq!(assemble(&now).unwrap(), w3e::write(&to));
+            let layout = Layout::parse(&now[LAYOUT_FILE]).unwrap();
+            assert_eq!(layout.subterrains.iter().map(|s| (s.name.as_str(), s.w, s.h)).collect::<Vec<_>>(), [("main", to.width, to.height)]);
+            let got = crate::terrain_pathing::assemble(&layout, &|p| now.get(p).cloned()).unwrap();
+            let want: Vec<crate::terrain_pathing::Cell> = cells.iter().map(|c| crate::terrain_pathing::Cell { x: (i64::from(c.x) + shift) as u32, ..*c }).collect();
+            assert_eq!(got, Some(crate::terrain_pathing::json_text([to.width, to.height], &want)));
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2781,7 +2834,7 @@ mod tests {
             files.insert(FLAT_FILE.into(), w3e::terrain_text(&t).unwrap());
             files.extend(objects.clone());
             let flats: Flats = KINDS.into_iter().map(|k| (k, objects[k.flat()].clone())).collect();
-            let out = resized_files(&files, &old_layout, &t, &flats).unwrap_or_else(|e| panic!("round {round} {change:?}: {e}"));
+            let out = resized_files(&files, &old_layout, &t, &flats, Some(&old_layout.objects.twice)).unwrap_or_else(|e| panic!("round {round} {change:?}: {e}"));
             assert!(out.keys().all(|k| under_dir(k)), "round {round}");
             let layout = Layout::parse(&out[LAYOUT_FILE]).unwrap();
             assert_eq!(layout.corners(), [t.width, t.height]);
@@ -2825,7 +2878,7 @@ mod tests {
                 let mut again = out.clone();
                 again.insert(FLAT_FILE.into(), flat[FLAT_FILE].clone());
                 let flats: Flats = KINDS.into_iter().map(|k| (k, flat[k.flat()].clone())).collect();
-                let undone = resized_files(&again, &layout, &old_t, &flats).unwrap();
+                let undone = resized_files(&again, &layout, &old_t, &flats, Some(&layout.objects.twice)).unwrap();
                 let before: Files = split.iter().filter(|(k, _)| under_dir(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
                 assert_eq!(undone, before, "round {round} {change:?}: grown and shrunk back");
                 grown_back += 1;

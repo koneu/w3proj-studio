@@ -16,10 +16,20 @@ export function wouldDelete(error: unknown): string[] | null {
   }
 }
 
+/** One object's file (`map/objects/<kind>/custom|original/…`, a campaign's chapters' too). */
+const OBJECT_FILE = /(^|\/)map\/objects\/[a-z]+\/(custom|original)\/[^/]+$/i;
+
+/** The files a question names: three of them, others before object files (there is one per object, and they would
+ *  push a file the user added out of sight). */
+function named(gone: string[]): string {
+  const first = [...gone.filter((f) => !OBJECT_FILE.test(f)), ...gone.filter((f) => OBJECT_FILE.test(f))].slice(0, 3);
+  return first.join(", ") + (gone.length > 3 ? ` and ${gone.length - 3} more` : "");
+}
+
 /** The question before such a sync; the first action deletes, the second shows the list. */
 export function deleteQuestion(gone: string[], map: string): { message: string; actions: string[] } {
   const n = gone.length;
-  const shown = gone.slice(0, 3).join(", ") + (n > 3 ? ` and ${n - 3} more` : "");
+  const shown = named(gone);
   return {
     message: `Syncing from ${map} removes ${n} ${n === 1 ? "file" : "files"} of the project that the map doesn't have: ${shown}.`
       + ` What isn't in git or a checkpoint can't be got back. Remove ${n === 1 ? "it" : "them"} and sync?`,
@@ -32,7 +42,7 @@ export function deleteQuestion(gone: string[], map: string): { message: string; 
  *  build/ with the old map, which git ignores. */
 export function replaceQuestion(gone: string[], map: string, src: string): { message: string; actions: string[] } {
   const n = gone.length;
-  const shown = gone.slice(0, 3).join(", ") + (n > 3 ? ` and ${n - 3} more` : "");
+  const shown = named(gone);
   return {
     message: `${src} doesn't have ${n} ${n === 1 ? "file" : "files"} of ${map}'s project: ${shown}. Replacing moves ${n === 1 ? "it" : "them"}`
       + " out of the project with the old map, into build/campaign-maps (which git ignores); Ctrl+Z puts the old map back while Studio stays open. Replace anyway?",
