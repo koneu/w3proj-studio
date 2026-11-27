@@ -107,6 +107,14 @@ export class WtsSession {
     return true;
   }
 
+  /** The strings the editor holds unsaved: number, the saved text, the editor's. */
+  changes(): [number, string, string][] {
+    return [...this.owned.keys()].flatMap((n): [number, string, string][] => {
+      const was = this.savedValues.get(n), mine = this.table.get(n);
+      return mine !== undefined && was !== undefined && norm(mine) !== norm(was) ? [[n, was, mine]] : [];
+    });
+  }
+
   /** Whether a string differs from the saved file, or the last write failed and may have left the file cut short. */
   get dirty(): boolean {
     if (this.torn) return true;

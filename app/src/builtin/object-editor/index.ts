@@ -514,6 +514,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           merging = next.catch(() => {});
           return next;
         };
+        const restoreBackup = async (data: string) => {
+          const kept = JSON.parse(data) as { file: ObjectFile; main: EditFile | null; skin: EditFile | null; strings: [number, string, string][] };
+          if (kept.file?.format !== FORMAT || !Array.isArray(kept.file.custom) || !Array.isArray(kept.file.original) || !Array.isArray(kept.strings)) throw new Error("the kept changes aren't this editor's");
+          const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
+          // A file the editor made itself had nothing on disk to compare with.
+          if (kept.main) {
+            [savedMain, savedSkin] = [kept.main, kept.skin];
+            const base = mergeSkin(kept.main, kept.skin, { addSkinOnly: true }) as unknown as ObjectFile;
+            saved = JSON.stringify({ ...base, original: base.original.filter(hasMods) });
+          }
+          Object.assign(file, kept.file);
+          for (const key of [...untouched.keys()]) if (file.original.some((o) => o.base === key)) untouched.delete(key);
+          // A string that also changed on disk since: the kept text is put back, and said.
+          const clash: number[] = [];
+          for (const [n, was, mine] of kept.strings) {
+            const now = wts.table.get(n);
+            if (now === undefined) continue;
+            if (now !== was && now !== mine) clash.push(n);
+            wts.set(n, mine);
+          }
+          reselect(keys, anchor);
+          markDirty();
+          renderDetail();
+          if (clash.length) void w3.window.showWarning(`${clash.length === 1 ? `String ${clash[0]}` : `Strings ${clash.join(", ")}`} of ${wtsName} changed on disk since the unsaved changes were kept: the kept text is back; saving writes it over theirs.`);
+          // Now what changed on disk since the snapshot comes in.
+          if (kept.main && !(await mergeOutside())) throw new Error("what changed on disk since can't be merged with the kept changes");
+        };
+
         /** Their object in place of the editor's (or the removal of it), as one edit. */
         const takeTheirObject = (o: Obj, c: ObjectConflict) => {
           if (doc.readOnly) return;
@@ -1793,6 +1821,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => step(-1),
           redo: () => step(1),
           mergeOutside,
+          // The unsaved objects and strings, with the files' state they came from: restored, what changed on disk since
+          // is merged as any outside change is.
+          backup: () => (doc.readOnly ? null : JSON.stringify({ file: JSON.parse(serialize()), main: savedMain, skin: savedSkin, strings: hasWts ? wts.changes() : [] })),
+          restoreMergesDisk: true,
+          restoreBackup,
           async save() {
             // What another program changed since is taken in first, so the save doesn't write over it.
             await mergeOutside();

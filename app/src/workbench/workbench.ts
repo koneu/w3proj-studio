@@ -24,6 +24,7 @@ import { StatusBar } from "./statusbar";
 import { ViewService } from "./views";
 import { PROJECT_SETTINGS, SettingsService, WorkspaceService } from "./workspace";
 import { isFullPath, joinPath, separatorOf } from "../lib/paths";
+import { BACKUP_FOLDER } from "../lib/hotexit";
 import { settleRounds } from "../lib/settle";
 
 /** Shows the mouse pointer before a native dialog (see ui_show_cursor in the backend). */
@@ -118,6 +119,21 @@ export class Workbench {
         });
       },
     }, this.workspace.pending);
+    // Snapshots of unsaved changes (lib/hotexit.ts), written past the workspace: they are no project files.
+    this.editors.backups = {
+      folder: () => { const root = this.workspace.project()?.root; return root ? joinPath(root, ...BACKUP_FOLDER) : null; },
+      list: (folder) => invoke<string[]>("fs_list_tree", { path: folder }).catch(() => []),
+      read: (file) => invoke<string>("fs_read_text", { path: file }),
+      write: async (file, text) => {
+        const root = file.replace(/[\\/]build[\\/]unsaved[\\/][^\\/]+$/, "");
+        await invoke("fs_mkdir", { root, path: file.replace(/[\\/][^\\/]+$/, "") });
+        await invoke("fs_write_text", { path: file, text });
+      },
+      remove: async (file) => {
+        if (await invoke<boolean>("fs_exists", { path: file })) await invoke("fs_delete", { root: file.replace(/[\\/]build[\\/]unsaved[\\/][^\\/]+$/, ""), path: file });
+      },
+    };
+    setInterval(() => void this.editors.backupUnsaved(), 3000);
     this.statusBar = new StatusBar((c) => this.run(c));
     this.progress = new Progress(this.statusBar.progress);
 
@@ -266,9 +282,26 @@ export class Workbench {
         this.log.append(`could not scan project extensions: ${e}`);
       }
       if (this.workspace.project()?.root === root) await this.editors.restore().catch((e) => this.log.append(`could not restore tabs: ${e}`));
+      // Not waited for: the question stays until it is answered.
+      if (this.workspace.project()?.root === root) void this.offerUnsaved(root).catch((e) => this.log.append(`could not offer unsaved changes back: ${e}`));
     };
     this.workspace.onDidChange.on(projectChanged);
     void projectChanged();
+  }
+
+  /** Unsaved changes Studio didn't get to settle last time (lib/hotexit.ts): asks to restore or discard them.
+   *  Dismissed, they are asked about again when the project next opens. */
+  private async offerUnsaved(root: string) {
+    const found = await this.editors.leftBackups();
+    if (!found.length || this.workspace.project()?.root !== root) return;
+    const names = found.map((b) => virtualTab(b.backup.path, this.workspace.files())?.label ?? b.backup.path.split(/[/:]/).pop()!);
+    const when = new Date(Math.max(...found.map((b) => b.backup.time))).toLocaleString();
+    const answer = await this.notifications.show("warning", `Studio didn't close properly: restore the unsaved changes of ${names.join(", ")} (last kept ${when})?`, ["Restore", "Discard"]);
+    if (this.workspace.project()?.root !== root) return;
+    if (answer === "Discard") await this.editors.discardBackups(found);
+    if (answer !== "Restore") return;
+    const failed = await this.editors.restoreBackups(found);
+    if (failed.length) void this.notifications.show("error", `Not restored (kept for the next time the project opens): ${failed.join("; ")}`, []);
   }
 
   /**

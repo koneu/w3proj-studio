@@ -89,7 +89,17 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return;
     }
     for (const [x, y, set, clear] of f.file.cells) if (x >= 0 && x < W && y >= 0 && y < H) overrides.set(y * W + x, { set, clear });
-  }).finally(() => { if (active) render(); });
+  }).then(restoreKept).finally(() => { if (active) render(); });
+  /** Hot exit: the unsaved overrides this editor is restored from, in place of the file's. */
+  function restoreKept() {
+    const kept = ed.restored?.("pathing");
+    if (!kept) return;
+    const k = JSON.parse(kept) as { cells: [number, Override][]; replacing: boolean };
+    overrides = new Map(k.cells);
+    replacing = k.replacing;
+    unsaved = true;
+    changes++;
+  }
   /** Asks whether to replace a file painting can't use; painting starts with the next stroke once the user agreed. */
   const ask = async () => {
     const q = replaceQuestion(found, FILE, W, H);
@@ -276,6 +286,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         for (const [i, set, clear] of taken) cells[i] = (cells[i] | set) & ~clear;
       };
     },
+    backup: () => (unsaved ? JSON.stringify({ cells: [...overrides], replacing }) : null),
     async save() {
       if (!unsaved || (!fileExists && !overrides.size)) return;
       // Never over a file that couldn't be used, unless the user chose to replace it: then it is backed up first.

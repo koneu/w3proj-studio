@@ -499,6 +499,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           undo: () => view.step(-1),
           redo: () => view.step(1),
+          // The unsaved state and, for the trigger folders, the files' state it came from: restored, it is merged over
+          // the files as they are then (reload.ts). Folds alone are not worth keeping.
+          backup: () => (doc.readOnly || !view.dirty || view.onlyFoldsDirty ? null : JSON.stringify({ mine: view.side(), base })),
+          restoreMergesDisk: folders,
+          restoreBackup: (data: string) => {
+            const kept = JSON.parse(data) as { mine: ReloadSide; base: ReloadSide | null };
+            const disk = view.side();
+            if (!Array.isArray(kept.mine?.file?.items) || (folders && !kept.base)) throw new Error("the kept changes aren't this editor's");
+            const merged = folders ? mergeReload(kept.base!, kept.mine, disk) : { file: kept.mine.file, texts: kept.mine.texts, header: kept.mine.header, conflicts: [], kept: 0 };
+            view.takeFromDisk(disk.file, view.customFile(), disk.files, merged, "Restore unsaved changes");
+          },
           viewState: () => view.viewState(),
           flush: () => view.flush(),
           viewOnlyUnsaved: () => view.onlyFoldsDirty,
@@ -1174,7 +1185,7 @@ class TriggerView {
   /** The trigger folders as they are on disk now (`file`, `custom`), in place: the state saved; with `merged` (the
    *  unsaved changes kept over them, reload.ts) that is one undo step on top, unsaved. The undo history before it
    *  goes (its states are the old files'). The selection and the open and closed categories stay where their items are. */
-  takeFromDisk(file: TriggerFile, custom: CustomTextFile, files: (string | null)[], merged: Merged | null) {
+  takeFromDisk(file: TriggerFile, custom: CustomTextFile, files: (string | null)[], merged: Merged | null, label = "Keep my changes over the trigger files changed outside the app") {
     this.flush();
     const was = this.find(this.selected);
     const selectedKey = was ? this.keyOf(was) : null;
@@ -1194,7 +1205,7 @@ class TriggerView {
     this.history.clear();
     if (merged) {
       put(merged.file, merged.texts, merged.header);
-      this.history.push("Keep my changes over the trigger files changed outside the app", { before: theirs, after: this.snapshot(), replaces: true });
+      this.history.push(label, { before: theirs, after: this.snapshot(), replaces: true });
     }
     this.savedToggles = this.toggles;
     this.follows.clear();

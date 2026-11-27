@@ -266,6 +266,10 @@ What the World Editor doesn't have:
   ![The Problems view next to the map script, opened at the error](docs/images/problems.png)
 
 - **A map is a folder you can keep in git.**
+- **Unsaved changes survive a crash.** The text, Object, Trigger and terrain editors (with their Regions, Cameras and
+  Pathing tabs) keep a snapshot of unsaved changes in `build/unsaved/` every few seconds. After Studio didn't close
+  properly, opening the project offers them back (**Restore** or **Discard**), as unsaved changes. Saving or closing an
+  editor deletes its snapshot.
 - **Extensions.** Nearly every editor is an extension on a public API; you can add commands, views, editors,
   settings, MCP tools and Problems checks, or turn a built-in off and replace it.
 - **Linux.** Runs natively; the game and the World Editor start through Steam's Proton when you test a map. Only tested with  a warcraft installation via, steam.
@@ -428,6 +432,7 @@ MyMap/
     checkpoints/    automatic packed copies (Restore Checkpoint…)
     derived/        pathing, shadows, the minimap and a generated map script
     derived-from.json   what those were made from (pack refuses stale ones)
+    unsaved/        snapshots of unsaved changes, offered back after a crash
     generated-script    hash of the map script the app wrote last (a script without it
                     isn't replaced if that would lose functions the triggers don't make;
                     opening the project records it again for a script the map's data makes)

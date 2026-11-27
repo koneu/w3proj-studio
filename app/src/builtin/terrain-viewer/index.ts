@@ -14,6 +14,7 @@ import { openAreaTest } from "../../lib/terrain/openarea";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { errorText, isNotFoundError } from "../../lib/oserror";
+import { fromBase64, parseTerrainBackup, toBase64, type TerrainBackup } from "../../lib/hotexit";
 import { OBJECTS_SERVICE, PROBLEMS_SERVICE, type ProblemsService, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
@@ -1741,6 +1742,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Whether a placed object lies in an open subterrain (always, when every one is open): the open rules (Snap and
          *  Fix Doodads on Load, Units on the Ground on Save) change only those; the others are read-only. */
         const inOpenArea = (p: { position: readonly number[] }) => editableAt(partial, terrain.offsetX, terrain.offsetY, p.position[0], p.position[1]);
+        // Hot exit: this opening starts from unsaved changes kept before (lib/hotexit.ts), over the files read above,
+        // which stay what is saved. One that doesn't fit the map as it is now is refused, and the files shown.
+        let kept: TerrainBackup | null = null, restoreFailed: string | undefined;
+        if (doc.restore !== undefined) {
+          try {
+            const read = parseTerrainBackup(doc.restore);
+            const was = await applyTilesetWater(w3, parseW3e(fromBase64(read.w3e)));
+            if (was.width !== terrain.width || was.height !== terrain.height || was.offsetX !== terrain.offsetX || was.offsetY !== terrain.offsetY) throw new Error("the map's size changed since they were kept");
+            if (read.open !== (partial ? openState?.mask ?? "" : null)) throw new Error("other subterrains are open than when they were kept (Open Subterrains…)");
+            [terrain, kept] = [was, read];
+          } catch (e) {
+            restoreFailed = errorText(e);
+          }
+        }
+        /** The kept placed objects in place of the file's (whose records stay the saved ones). */
+        const restorePlaced = (f: PlacedFile | null, text: string | null) => {
+          if (!f || text === null) return false;
+          const placed = JSON.parse(text) as Record<string, unknown>;
+          const list = (placed[f.key] ?? []) as Placed[];
+          placed[f.key] = list;
+          splitOwners(list);
+          [f.doc, f.list] = [placed, list];
+          return true;
+        };
         const partialHiddenTiles = () => (partial ? partial.hiddenTiles.reduce<number[]>((out, v, i) => (v ? (out.push(i), out) : out), []) : []);
         const partialHiddenAt = (x: number, y: number) => {
           if (!partial) return false;
@@ -3075,6 +3100,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
             savedStarts = startLocations(uf?.list ?? []);
+            if (kept) {
+              const restored = [restorePlaced(df, kept.doodads), restorePlaced(uf, kept.units)];
+              if (restored.some(Boolean)) objectsTouched = true;
+            }
             objCtx = { skins: withObjectArt(skins, art), bases };
             // A map's own doodad or destructable data that can't be read may change a type's range: scales stay then.
             scalesKnown = !unread.some((p) => /\.w3[bd]\.json$/i.test(p));
@@ -5015,6 +5044,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const clipChanged = () => { renderer.farZ = viewClipping.current().farZ; redraw(); };
         const handle: TerrainEditorHandle = {
           terrain, editable, redraw, host: el, resizeMap, resizeRemovals,
+          restored: (group) => kept?.groups[group] ?? null,
           viewClip: () => viewClipping.current(),
           lookThroughClip: (c) => { viewClipping.lookThrough(c); clipChanged(); },
           path: doc.path, partial: !!partial, undo, redo,
@@ -6803,6 +6833,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (artMode() !== openedMode) void reopenForArt(doc.path);
 
         const editorApi = {
+          restoresOnOpen: editable,
+          restoreFailed,
+          backup: () => {
+            if (!editable || disposed || superseded) return null;
+            const groups: Record<string, string> = {};
+            for (const [id, g] of groupInsts) {
+              const text = g.backup?.();
+              if (text) groups[id] = text;
+            }
+            const snapshot: TerrainBackup = {
+              w3e: toBase64(writeW3e(terrain)),
+              // Objects not read yet: what was restored (still on its way in) is kept.
+              doodads: objectsTouched && dooFile ? placedText(dooFile.doc) : kept?.doodads ?? null,
+              units: objectsTouched && unitsFile ? placedText(unitsFile.doc) : kept?.units ?? null,
+              groups,
+              open: partial ? openState?.mask ?? "" : null,
+            };
+            return JSON.stringify(snapshot);
+          },
           undo,
           redo,
           reloadFile,
@@ -7034,6 +7083,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             renderer.dispose();
           },
         };
+        if (kept) {
+          // The restored changes are unsaved: no step of the history is the saved one.
+          mark.truncated(-1);
+          minimapStale.set();
+          shadowEditsSoon();
+          doc.setDirty(true);
+        }
         handed = true;
         return editorApi;
       },

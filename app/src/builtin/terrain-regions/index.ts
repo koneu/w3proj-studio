@@ -184,7 +184,14 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     // regions, as the editor's save writes them.
     doc.regions = regionsOnGrid(doc.regions) ?? doc.regions;
     names.saved(doc.regions);
+    // Hot exit: the unsaved regions this editor is restored from, in place of the file's.
+    const kept = ed.restored?.("regions");
+    if (kept && !restoredOnce) {
+      doc = JSON.parse(kept) as typeof doc;
+      restoredOnce = unsaved = true;
+    }
   };
+  let restoredOnce = false;
   const load = read().catch((e) => w3.window.showError(`Regions: ${(e as Error).message ?? e}`));
   /** The map's sounds (war3map.w3s), offered for the ambient sound. */
   const soundList = h("datalist", { id: `terrain-region-sounds-${Math.random().toString(36).slice(2)}` });
@@ -508,6 +515,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       else if (to && to !== r.name) update(r, { name: to });
       return null;
     },
+    backup: () => (unsaved ? JSON.stringify(doc) : null),
     async save() {
       if (!unsaved) return;
       const root = w3.workspace.project()!.root;

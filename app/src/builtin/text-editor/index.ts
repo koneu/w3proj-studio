@@ -288,6 +288,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           viewState: (): TextViewState => ({ anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, top: topLine }),
           undo: () => { undo(view); },
           redo: () => { redo(view); },
+          backup: () => (doc.readOnly ? null : view.state.sliceDoc()),
+          restoreBackup: (text: string) => { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); },
           async save() {
             if (doc.readOnly) return;
             const t = view.state.sliceDoc();

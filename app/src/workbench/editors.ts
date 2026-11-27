@@ -3,6 +3,8 @@ import { disposable, errorView, Emitter, globMatch, h } from "./dom";
 import { closeInOrder, tabsToClose, type CloseMode } from "./tabclose";
 import { graphicsModeReopens, keptView } from "./tabmemory";
 import type { Stamp } from "./workspace";
+import { backupName, backupText, readBackups, type Backup, type BackupStore } from "../lib/hotexit";
+import { joinPath } from "../lib/paths";
 import { PendingWork } from "../lib/settle";
 
 interface Tab {
@@ -29,6 +31,13 @@ interface Tab {
   /** The file's size, time and contents' hash when the editor read it or last wrote it; a save over anything
    *  else asks first. Undefined: not a file on disk, or not known. */
   stamp?: Stamp | null;
+  /** How often the editor said it has unsaved changes, and how often when the last snapshot was taken (hot exit). */
+  edits: number;
+  backedUp: number;
+  /** The snapshot file of its unsaved changes, when there is one. */
+  backupFile?: string;
+  /** The unsaved changes its next editor starts from (EditorDocument.restore). */
+  restoring?: string;
   /** The view state its next editor gets (remembered from the last session, or kept over a reopen in place). */
   view?: unknown;
 }
@@ -103,6 +112,12 @@ export class EditorService {
   /** Where the open tabs are remembered (per project; null: not remembered). `load` may wait (for the project's file
    *  list: a file not listed yet is no file that is gone). */
   memory: { load(): OpenEditors | null | Promise<OpenEditors | null>; store(state: OpenEditors): void } | null = null;
+  /** Where snapshots of unsaved changes are kept (hot exit); null: none are. */
+  backups: BackupStore | null = null;
+  /** Snapshots found when the project opened and not decided about yet: no tab's snapshot writes over them. */
+  private held = new Set<string>();
+  /** Snapshot writes and removals, one after the other. */
+  private backupQueue: Promise<unknown> = Promise.resolve();
   /** Off while tabs are closed for a project switch or restored. */
   private remembering = true;
   /** From startup, and whenever a project opens, until its tabs are restored: tabs closed
@@ -327,7 +342,7 @@ export class EditorService {
     const title = named?.label ?? (path.startsWith("w3:")
       ? (about ? `${about.split("/").pop()} (${editorTitle})` : editorTitle)
       : path.split(/[/:]/).pop()!);
-    const tab: Tab = { path, providerId: id, el, dirty: false, writing: 0, tabEl: h("div.tab", { title: named?.tooltip ?? path }) };
+    const tab: Tab = { path, providerId: id, el, dirty: false, writing: 0, edits: 0, backedUp: 0, tabEl: h("div.tab", { title: named?.tooltip ?? path }) };
     const closeBtn = h("span.tab-close", { onclick: (e: MouseEvent) => { e.stopPropagation(); this.close(tab); } }, "×");
     tab.tabEl.append(h("span.tab-label", {}, title), closeBtn);
     tab.tabEl.addEventListener("mousedown", (e) => {
@@ -363,9 +378,15 @@ export class EditorService {
       readBytes: () => this.io.readBytes(path),
       writeText: (text) => this.own(tab, () => this.io.writeText(path, text)),
       writeBytes: (bytes) => this.own(tab, () => this.io.writeBytes(path, bytes)),
-      setDirty: (d) => { tab.dirty = d; tab.tabEl.classList.toggle("dirty", d); },
+      setDirty: (d) => {
+        tab.dirty = d;
+        tab.tabEl.classList.toggle("dirty", d);
+        if (d) tab.edits++;
+        else this.dropBackup(tab);
+      },
       // Read when the editor is made: a reopen in place gives the state from just before.
       get viewState() { return tab.view; },
+      get restore() { return tab.restoring; },
     };
     tab.doc = doc;
     tab.provider = provider;
@@ -520,6 +541,16 @@ export class EditorService {
   async followGraphicsMode(): Promise<string[]> {
     const kept = await this.reopenCleanWhere((t) => graphicsModeReopens(this.contributions.find((c) => c.id === t.providerId), t.path));
     return [...new Set(kept)];
+  }
+
+  /** reopen for a restore: the tab is made anew from `tab.restoring`, and may be unsaved once it is there. */
+  private async reopenFrom(t: Tab) {
+    if (t.instance) t.view = this.viewOf(t);
+    t.conflict = undefined;
+    t.instance?.dispose?.();
+    t.instance = undefined;
+    t.el.replaceChildren();
+    await this.load(t);
   }
 
   /** Opens a tab's editor again in place (its file as it is now), where it was (its view state). */
@@ -704,6 +735,101 @@ export class EditorService {
     return n;
   }
 
+  // ---- hot exit (lib/hotexit.ts) --------------------------------------------------------------------------------
+
+  private queued(work: () => Promise<unknown>): Promise<void> {
+    const next = this.backupQueue.then(work).then(() => {}, (e) => console.error("keeping unsaved changes:", e));
+    this.backupQueue = next;
+    return next;
+  }
+
+  private dropBackup(t: Tab) {
+    const file = t.backupFile;
+    // An edit after this is kept anew.
+    t.backedUp = 0;
+    if (!file) return;
+    t.backupFile = undefined;
+    const store = this.backups;
+    if (store) void this.queued(() => store.remove(file));
+  }
+
+  /** Keeps a snapshot of every editor with unsaved changes that has edits since its last one (`EditorInstance.backup`).
+   *  Called every few seconds. */
+  backupUnsaved(): Promise<void> {
+    const store = this.backups, folder = store?.folder();
+    if (!store || !folder) return Promise.resolve();
+    for (const t of this.tabs) {
+      if (!t.dirty || t.loading || t.edits === t.backedUp || !t.instance?.backup || t.path.startsWith("w3:")) continue;
+      const file = joinPath(folder, backupName(t.providerId, t.path));
+      if (this.held.has(file)) continue;
+      let data: string | null;
+      try { data = t.instance.backup(); } catch (e) { console.error(`keeping the unsaved changes of ${t.path}:`, e); continue; }
+      if (data === null) continue;
+      const edits = t.edits;
+      const text = backupText({ path: t.path, editor: t.providerId, saved: t.stamp?.hash ?? null, time: Date.now(), data });
+      t.backedUp = edits;
+      t.backupFile = file;
+      // A save or close queued after this removes it again.
+      void this.queued(async () => {
+        try { await store.write(file, text); } catch (e) { t.backedUp = 0; throw e; }
+      });
+    }
+    return this.backupQueue.then(() => {});
+  }
+
+  /** The snapshots the open project has from before, held until `restoreBackups` or `discardBackups` decides. */
+  async leftBackups(): Promise<{ file: string; backup: Backup }[]> {
+    if (!this.backups) return [];
+    // What this session's tabs wrote isn't left over.
+    const own = new Set(this.tabs.map((t) => t.backupFile));
+    const found = (await readBackups(this.backups)).filter((b) => !own.has(b.file));
+    for (const b of found) this.held.add(b.file);
+    return found;
+  }
+
+  async discardBackups(found: readonly { file: string }[]): Promise<void> {
+    for (const { file } of found) {
+      this.held.delete(file);
+      const store = this.backups;
+      if (store) await this.queued(() => store.remove(file));
+    }
+  }
+
+  /** Opens each snapshot's editor and gives it the changes back. One that can't be keeps its snapshot; the reasons. */
+  async restoreBackups(found: readonly { file: string; backup: Backup }[]): Promise<string[]> {
+    const failed: string[] = [];
+    for (const { file, backup } of found) {
+      try {
+        await this.open(backup.path, backup.editor);
+        const tab = this.tabs.find((t) => t.path === backup.path && t.providerId === backup.editor);
+        if (!tab) throw new Error("its editor didn't open");
+        // A tab brought back with the project loads when shown, without anyone waiting for it.
+        for (let i = 0; i < 1200 && this.tabs.includes(tab) && !tab.instance && !tab.failed; i++) await new Promise((r) => setTimeout(r, 100));
+        if (!tab.instance) throw new Error("its editor didn't open");
+        if (!tab.instance.restoreBackup && !tab.instance.restoresOnOpen) throw new Error("its editor can't take unsaved changes back");
+        if (this.unsaved(tab)) throw new Error("it has unsaved changes already: save or close it, then open the project again");
+        const stamp = await this.stampOf(tab.path);
+        if (tab.instance.restoreBackup) await tab.instance.restoreBackup(backup.data);
+        else {
+          tab.restoring = backup.data;
+          try { await this.reopenFrom(tab); } finally { tab.restoring = undefined; }
+          const opened = tab.instance as EditorInstance | undefined;
+          if (!opened || opened.restoreFailed !== undefined) throw new Error(opened?.restoreFailed ?? "its editor didn't open");
+        }
+        this.held.delete(file);
+        // The tab's next snapshot goes into the same file; until then this one stays.
+        tab.backupFile = file;
+        tab.backedUp = 0;
+        // Nothing unsaved came of it (the files hold it already): not to be offered again.
+        if (!tab.dirty) this.dropBackup(tab);
+        if (!tab.instance.restoreMergesDisk && backup.saved !== null && stamp?.hash !== undefined && stamp.hash !== backup.saved) this.flagConflict(tab);
+      } catch (e) {
+        failed.push(`${backup.path}: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    return failed;
+  }
+
   /** Before switching projects: asks once about unsaved changes (save all, discard, cancel),
    *  then closes every editor. False when cancelled (nothing closed). */
   async closeAllAsking(): Promise<boolean> {
@@ -753,6 +879,8 @@ export class EditorService {
     // Closed by something else while the question was open: splice(-1) would take another tab.
     const i = this.tabs.indexOf(tab);
     if (i < 0) return true;
+    // Saved or given up: nothing of it is to come back.
+    this.dropBackup(tab);
     tab.instance?.dispose?.();
     tab.instance = undefined;
     tab.el.remove();

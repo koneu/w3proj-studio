@@ -135,7 +135,14 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     doc.cameras ??= [];
     for (const c of doc.cameras) nameDepthOfField(c);
     names.saved(doc.cameras);
+    // Hot exit: the unsaved cameras this editor is restored from, in place of the file's.
+    const kept = ed.restored?.("cameras");
+    if (kept && !restoredOnce) {
+      doc = JSON.parse(kept) as typeof doc;
+      restoredOnce = unsaved = true;
+    }
   };
+  let restoredOnce = false;
   const load = read().catch((e) => w3.window.showError(`Cameras: ${(e as Error).message ?? e}`));
 
   // ---- geometry ----------------------------------------------------------------------
@@ -579,6 +586,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       else if (to && to !== c.name) update(c, { name: to });
       return null;
     },
+    backup: () => (unsaved ? JSON.stringify(doc) : null),
     async save() {
       if (!unsaved) return;
       // Version 0 files (classic, or written empty) take the Reforged layout once they have cameras.

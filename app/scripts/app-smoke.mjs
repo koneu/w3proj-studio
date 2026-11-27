@@ -3899,6 +3899,103 @@ async function explorerRealFiles(page, found) {
   }
 }
 
+/** Hot exit: the unsaved changes of the text, object, trigger and terrain editors (a placed unit, a painted tile and a
+ *  new region) are kept in build/unsaved/ and, after Studio goes without closing them (here: the tabs are dropped past
+ *  the snapshots, as a crash leaves them), offered back, restored as unsaved changes and saved. A save or a close
+ *  leaves no snapshot behind. */
+async function hotExit(page, found) {
+  const fail = (what) => found.push(`hot exit: ${what}`);
+  const k = await heightKit(page, "HotExit");
+  const folder = join(k.root, "build", "unsaved");
+  const kept = () => (existsSync(folder) ? readdirSync(folder).filter((n) => n.endsWith(".json")) : []);
+  try {
+    const own = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Kept Guard" })).id;
+    await k.save();
+    writeFileSync(join(k.root, "notes.txt"), "saved line\n");
+    await page.evaluate(`w3.workspace.refresh()`);
+    await k.save();
+    if (kept().length) fail(`control: snapshots with everything saved: ${lit(kept())}`);
+    // The AI tools save what they place; the edits to keep are made by hand, in the terrain editor in front: a placed
+    // unit deleted, the ground's variations rolled anew, a region drawn.
+    await k.tool("place_objects", { objects: [{ id: "hpea", x: 256, y: 256, player: 1 }], ignoreRoom: true });
+    await k.save();
+    await k.tab("Select");
+    await k.look(256, 256, { id: "hpea", x: 256, y: 256 });
+    await k.focusMap();
+    await k.hands.key("Delete");
+    await k.run("w3.terrain.resetVariations");
+    await k.tab("Regions");
+    await k.look(-1024, -1024);
+    const c = await k.hands.where(".model-stage canvas");
+    await k.hands.drag({ x: c.x - 40, y: c.y - 30 }, { x: c.x + 40, y: c.y + 30 });
+    await settled(page);
+    // The text editor.
+    await page.evaluate(`w3.editors.open("notes.txt", "w3.textEditor")`);
+    const content = `[...document.querySelectorAll(".editor-pane:not([hidden]) .cm-content")][0]`;
+    await until("the text editor", () => page.evaluate(`!!(${content})`), 20000);
+    await page.evaluate(`(() => { (${content}).focus(); document.execCommand("insertText", false, "kept line "); })()`);
+    // The Object Editor.
+    await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(own)})`);
+    const input = `[...document.querySelectorAll(".obj-table tr")].find((r) => r.querySelector("td code")?.textContent === "uhpm")?.querySelector("input")`;
+    await until("the object's fields", () => page.evaluate(`!!(${input})`), 60000);
+    await page.evaluate(`(() => { const i = ${input}; i.focus(); i.value = "4321"; i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    // The Trigger Editor.
+    await page.evaluate(`w3.commands.execute("w3.triggers.open")`);
+    const addNew = `document.querySelector(".editor-pane:not([hidden]) select.trig-new")`;
+    await until("the Trigger Editor", () => page.evaluate(`!!(${addNew})`), 60000);
+    await page.evaluate(`(() => { const m = ${addNew}; m.value = "comment"; m.dispatchEvent(new Event("change")); })()`);
+    await page.evaluate(`document.activeElement?.blur()`);
+    await settled(page);
+    const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
+    if (unsaved.length !== 4) return fail(`control: four editors should be unsaved: ${lit(unsaved)}`);
+    await page.evaluate(`w3Workbench.editors.backupUnsaved()`);
+    if (kept().length !== 4) return fail(`snapshots of ${lit(unsaved)}: ${lit(kept())}`);
+    const disk = () => ({ units: k.units().length, hp: k.read("war3map.w3u.json").custom.find((o) => o.id === own), regions: k.read("war3map.w3r.json").regions.map((r) => r.name), notes: readDiskFile(join(k.root, "notes.txt"), "utf8"), comments: k.triggers().file.items.filter((i) => i.type === 16).length });
+    const before = disk();
+    if (before.regions.length || before.notes !== "saved line\n") fail(`control: something was saved already: ${lit([before.regions, before.notes])}`);
+    const ground = readTerrainText(k.root);
+    // Gone without closing: the tabs go while no snapshot can be touched.
+    await page.evaluate(`(async () => { const e = w3Workbench.editors, store = e.backups; e.backups = null; for (const t of [...e.tabs]) await e.close(t, true); await w3.workspace.close(); e.backups = store; })()`);
+    if (kept().length !== 4) return fail(`control: the snapshots went with the tabs: ${lit(kept())}`);
+    await page.evaluate(`w3.workspace.open(${lit(k.root)})`);
+    const offer = `[...document.querySelectorAll(".toast")].find((t) => t.textContent.includes("didn't close properly"))`;
+    if (!(await soon(() => page.evaluate(`!!(${offer})`), 30000))) return fail(`no offer to restore: ${lit(await k.toasts())}`);
+    await page.evaluate(`[...(${offer}).querySelectorAll("button")].find((b) => b.textContent === "Restore").click()`);
+    if (!(await soon(async () => (await page.evaluate(`w3.editors.unsavedPaths().length`)) === 4, 120000))) return fail(`restored: ${lit(await page.evaluate(`w3.editors.unsavedPaths()`))}, ${lit(await k.toasts())}`);
+    await settled(page);
+    if (lit(disk()) !== lit(before)) fail("restoring wrote files");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail(`the restored editors didn't save: ${lit(await page.evaluate(`w3.editors.unsavedPaths()`))}, ${lit(await k.toasts())}`);
+    const after = disk();
+    if (after.units !== before.units - 1) fail(`the deleted unit: ${before.units} units before, ${after.units} after`);
+    if (after.regions.length !== 1) fail(`the drawn region: ${lit(after.regions)}`);
+    if (!JSON.stringify(after.hp).includes("4321")) fail(`the hit points: ${lit(after.hp)}`);
+    if (!after.notes.includes("kept line ")) fail(`the text: ${lit(after.notes)}`);
+    if (after.comments !== before.comments + 1) fail(`the trigger comment: ${before.comments} before, ${after.comments} after`);
+    if (readTerrainText(k.root) === ground) fail("the ground's new variations");
+    if (!(await soon(async () => !kept().length, 10000))) fail(`snapshots left after saving: ${lit(kept())}`);
+    // Closed without saving: given up, nothing to offer.
+    await page.evaluate(`w3.editors.open("notes.txt", "w3.textEditor")`);
+    await until("the text editor again", () => page.evaluate(`!!(${content})`), 20000);
+    await page.evaluate(`(() => { (${content}).focus(); document.execCommand("insertText", false, "given up "); })()`);
+    await page.evaluate(`w3Workbench.editors.backupUnsaved()`);
+    if (kept().length !== 1) fail(`control: one snapshot expected: ${lit(kept())}`);
+    await page.evaluate(`(async () => { const e = w3Workbench.editors, ask = e.confirm; e.confirm = async () => "Don't Save"; await e.closeActive(); e.confirm = ask; })()`);
+    if (!(await soon(async () => !kept().length, 10000))) fail(`closing without saving left the snapshot: ${lit(kept())}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** The project's terrain files' text, flat or split. */
+function readTerrainText(root) {
+  const split = join(root, "map", "terrain");
+  if (!existsSync(split)) return readDiskFile(join(root, "map", "war3map.w3e.txt"), "utf8");
+  return readdirSync(split, { recursive: true }).map(String).filter((f) => f.endsWith("terrain.txt")).sort().map((f) => readDiskFile(join(split, f), "utf8")).join("");
+}
+
 /** The Object Editor takes another program's change of the object data (a Git pull) into its unsaved edits: at the
  *  window's focus and, unnoticed until then, at a save. Objects it didn't change come in, one changed on both sides
  *  keeps its edit and is marked, Take Theirs drops the edit, and the saved file holds both sides. */
@@ -19849,6 +19946,7 @@ async function run() {
         heightsLimits,
         heightsPreserve,
         heightsUniform,
+        hotExit,
         importArtReload,
         importedBlightWaterReload,
         importListCleanup,
@@ -20207,6 +20305,8 @@ async function checksB(page, found) {
   await leftOpen(page, "explorerRealFiles", found);
   await objectEditorMerge(page, found).catch((e) => found.push(`object editor merge: ${e.message}`));
   await leftOpen(page, "objectEditorMerge", found);
+  await hotExit(page, found).catch((e) => found.push(`hot exit: ${e.message}`));
+  await leftOpen(page, "hotExit", found);
   await unitEditRederives(page, found).catch((e) => found.push(`unit edit rederives: ${e.message}`));
   await leftOpen(page, "unitEditRederives", found);
   await triggerCodeWarning(page, found).catch((e) => found.push(`trigger code warning: ${e.message}`));

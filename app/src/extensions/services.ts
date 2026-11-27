@@ -158,6 +158,9 @@ export interface TerrainToolGroupInstance {
    *  files it makes afterwards (which can wait behind a rebuild). Without it, the save's derived files use filterPathing
    *  as it is when they're made. */
   pathingFilterNow?(): (cells: Uint8Array, width: number, height: number) => void;
+  /** The group's unsaved content, for the terrain editor's snapshot (EditorInstance.backup); null when it has none.
+   *  A group made with that content (TerrainEditorHandle.restored) starts from it, unsaved. */
+  backup?(): string | null;
   /** A file the group keeps was saved elsewhere: takes it in place. Without this, the editor reopens. */
   reloadFile?(path: string): Promise<boolean>;
   /** The camera objects as the group holds them, unsaved edits included: the Camera Objects layer draws these, not the saved war3map.w3c. */
@@ -189,6 +192,8 @@ export interface TerrainEditorHandle {
   /** The terrain being edited (live; see lib/terrain/w3e). */
   readonly terrain: import("../lib/terrain/w3e").Terrain;
   readonly editable: boolean;
+  /** The unsaved content the group `group` kept (its `backup()`) that this editor is restored from; null: none. */
+  restored?(group: string): string | null;
   /** The editor's document (the project's terrain: "map/war3map.w3e.txt"). */
   readonly path: string;
   /** Only some subterrains are open (Open Subterrains…): the ground tile and cliff lists, which are the whole map's,

@@ -166,6 +166,9 @@ export interface EditorDocument {
   writeText(text: string): Promise<void>;
   writeBytes(bytes: Uint8Array): Promise<void>;
   setDirty(dirty: boolean): void;
+  /** Hot exit, for an editor with `restoresOnOpen`: what its `backup()` gave, for this opening to start from instead
+   *  of the files, as unsaved changes. */
+  readonly restore?: string;
   /** What the editor's `viewState()` gave when this tab was last open (the project's last session, or before it
    *  was opened again in place), if anything: the editor checks it, since the file may have changed meanwhile. */
   readonly viewState?: unknown;
@@ -176,6 +179,20 @@ export interface EditorInstance {
    *  characters as JSON isn't kept): kept with the project's open tabs and given back as `EditorDocument.viewState`. */
   viewState?(): unknown;
   save?(): Promise<void>;
+  /** Hot exit: the unsaved changes as text, kept in the project (build/unsaved/) while the editor is unsaved and
+   *  offered back after Studio didn't close properly. Called after `doc.setDirty(true)`, a moment later at most; it
+   *  must not commit or change anything. Null: nothing can be kept right now. */
+  backup?(): string | null;
+  /** Puts what `backup` gave back, as unsaved changes of the editor as it opened now. Throws, nothing changed, when
+   *  it can't. */
+  restoreBackup?(data: string): void | Promise<void>;
+  /** Instead of `restoreBackup`, for an editor that is built from its state (the terrain editor): it is opened again
+   *  with `EditorDocument.restore`. When it can't start from that it opens from the files and says why here. */
+  restoresOnOpen?: boolean;
+  restoreFailed?: string;
+  /** `restoreBackup` takes in what changed on disk since the snapshot itself; without this the tab says its file
+   *  was saved by something else when it did. */
+  restoreMergesDisk?: boolean;
   /** For an editor that can take another program's change of its files into unsaved edits (the Object Editor after a
    *  Git pull): called when its file or a watched one changed on disk while it is unsaved, and before a save of a
    *  changed file. True: taken in, nothing is left to ask about. False, nothing changed: the workbench goes on as for
