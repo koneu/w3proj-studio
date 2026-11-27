@@ -18952,12 +18952,12 @@ async function editorExtras(page, found) {
       try { return ok(w3f()); } catch { return false; }
     }, timeout).then(() => true, () => false);
     if (!(await savedCampaign("one button saved", (f) => f.chapters.length === 1))) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
-    // Export: the chapter's project packed, as the CLI packs it.
+    // Export: the chapter's project packed as it is, as the CLI packs it with --keep-objects.
     const exported = join(dir, "exported.w3x"), byCli = join(dir, "by-cli-chapter.w3x");
     await answer("pickSaveFile", exported);
     const ex = await run("w3.campaign.exportMap", "One.w3x");
     if (ex.e) fail(`Export map: ${ex.e}`);
-    const packedByCli = spawnSync(cli, ["pack", join(camp, "maps", "One.w3x"), ...fixtureTriggerData(join(camp, "maps", "One.w3x")), "-o", byCli], { encoding: "utf8" });
+    const packedByCli = spawnSync(cli, ["pack", join(camp, "maps", "One.w3x"), "--keep-objects", ...fixtureTriggerData(join(camp, "maps", "One.w3x")), "-o", byCli], { encoding: "utf8" });
     if (packedByCli.status !== 0) fail(`the CLI can't pack the chapter: ${packedByCli.stderr}`);
     else if (!existsSync(exported) || hash(exported) !== hash(byCli)) fail("the exported chapter map isn't the CLI's pack of it");
     // Replace: the second map in its place; one undo puts the first back, redo the second.
