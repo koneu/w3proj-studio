@@ -368,7 +368,8 @@ export class WorkspaceService {
       if (left > 0) this.writing.set(at.key, left); else this.writing.delete(at.key);
     }
     if (this.info?.root !== root) return;
-    let listChanged = this.noteOwn(at, stamp ? known(stamp) : null, size, seq, root);
+    // A write that went into other files only is of a virtual one (FileInfo.virtual): listed as one if it is new.
+    let listChanged = this.noteOwn(at, stamp ? known(stamp) : null, size, seq, root, !!stamp?.also?.length);
     // The files the write went into besides (a split terrain's subterrain files, the trigger layout's files): ours
     // too, not another program's. One removed has size and time 0.
     for (const a of stamp?.also ?? []) {
@@ -379,7 +380,7 @@ export class WorkspaceService {
   }
   /** Notes a file written (or, with size and time 0, removed) by us (`trackedWrite`): its stamp as the write left it,
    *  its entry in the list. Whether the list got or lost an entry. */
-  private noteOwn(at: { rel: string; key: string }, stamp: Stamp | null, size: number, seq: number, root: string | undefined): boolean {
+  private noteOwn(at: { rel: string; key: string }, stamp: Stamp | null, size: number, seq: number, root: string | undefined, virtual = false): boolean {
     const known = this.ownWrites.get(at.key);
     if (known && known.seq > seq) return false;
     if (stamp && stamp.size === 0 && stamp.modified === 0) {
@@ -390,7 +391,7 @@ export class WorkspaceService {
       return true;
     }
     this.ownWrites.set(at.key, { stamp, seq });
-    const entry: FileInfo = { path: at.rel, size: stamp ? stamp.size : size, modified: stamp ? stamp.modified : Date.now() };
+    const entry: FileInfo = { path: at.rel, size: stamp ? stamp.size : size, modified: stamp ? stamp.modified : Date.now(), ...(virtual ? { virtual } : {}) };
     const i = this.listed.has(at.key) ? this.fileList.findIndex((f) => this.key(f.path, root) === at.key) : -1;
     if (i >= 0) {
       if (stamp) this.fileList[i] = { ...this.fileList[i], size: entry.size, modified: entry.modified };
