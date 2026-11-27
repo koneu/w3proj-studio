@@ -8,7 +8,7 @@ import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { rayBox, rayMesh } from "./meshpick";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, REACHED_ALPHA_GLSL, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, REACHED_ALPHA_GLSL, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3, type GroundShadow } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -667,6 +667,11 @@ export function inWaterDepth(b: Pick<ObjectBatch, "group" | "tint" | "followGrou
 export function castsSunShadow(b: Pick<ObjectBatch, "group" | "instances" | "tint" | "followGround">): boolean {
   return b.instances.length > 0 && !b.tint && !b.followGround && b.group !== "cliffs" && b.group !== "shoreline";
 }
+
+/** How high over a cliff level a cliff model's foot is lit as the ground (DrawOptions.cliffFoot). Both art sets'
+ *  straight cliffs rise to 17 and then 31 units before the face: in the classic ones that is all grass, in Reforged's
+ *  the rock already starts above 17 (compared with the World Editor, docs/testing/lighting-and-shadows.md). */
+export const CLIFF_FOOT = { classic: 40, hd: 17 };
 
 /** How a batch's models take the border's shade past the playable map (EdgeShade's mode). The World Editor (we-drive,
  *  game view on and off, branch border-shade-models, 2026-11-13; docs/testing/terrain-and-water.md "Border shade"): the cliffs and the special
@@ -1698,6 +1703,19 @@ export class TerrainRenderer {
   }
   private regionOutlines: Mesh | null = null;
 
+  /** The ground's shadows as the ground and what is part of it are drawn with them. */
+  private groundShadow(standIns: boolean): GroundShadow {
+    const shadowMap = this.showShadows ? this.shadowMap : null;
+    const width = (this.terrain.width - 1) * 128, height = (this.terrain.height - 1) * 128, look = this.shadowLook;
+    return {
+      texture: shadowMap ?? this.noShadow,
+      rect: [this.terrain.offsetX, this.terrain.offsetY, width, height],
+      shift: [look.stampShift[0] / width, look.stampShift[1] / height],
+      // The real shadows take the objects' shadow images' place (they stand in for them without a shadow map).
+      dark: [shadowMap ? look.baked : 0, shadowMap && standIns ? look.stamp : 0],
+    };
+  }
+
   /** The brush outline (editing tools); null hides it. */
   setBrush(b: Ring | null) {
     if (this.brush) this.freeVao(this.brush.vao);
@@ -1929,12 +1947,10 @@ export class TerrainRenderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, shadowMap ?? this.noShadow);
     gl.uniform1i(gl.getUniformLocation(this.groundProg, "uShadow"), 1);
-    const tr = this.terrain;
-    gl.uniform4f(gl.getUniformLocation(this.groundProg, "uShadowRect"), tr.offsetX, tr.offsetY, (tr.width - 1) * 128, (tr.height - 1) * 128);
-    const look = this.shadowLook;
-    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uStampShift"), look.stampShift[0] / ((tr.width - 1) * 128), look.stampShift[1] / ((tr.height - 1) * 128));
-    // The real shadows take the objects' shadow images' place (they stand in for them without a shadow map).
-    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uShadowDark"), shadowMap ? look.baked : 0, shadowMap && standIns ? look.stamp : 0);
+    const under = this.groundShadow(standIns);
+    gl.uniform4f(gl.getUniformLocation(this.groundProg, "uShadowRect"), ...under.rect);
+    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uStampShift"), ...under.shift);
+    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uShadowDark"), ...under.dark);
     gl.activeTexture(gl.TEXTURE0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -2047,7 +2063,9 @@ export class TerrainRenderer {
         if (b.tint && pass === "opaque") continue;
         const mode = edgeMode(b, this.tone);
         const shade = edge && (edges.get(mode) ?? edges.set(mode, { ...edge, mode }).get(mode));
-        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, paint: b.paint, tone: this.tone, sun, edge: shade });
+        // What is part of the ground (cliffs, special doodads) is lit and shadowed as the ground, a cliff's foot too.
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, paint: b.paint, tone: this.tone, sun, edge: shade,
+          groundShadow: b.followGround && textured ? under : null, cliffFoot: b.group === "cliffs" ? CLIFF_FOOT[this.tone === 2 ? "hd" : "classic"] : 0 });
       }
     }
     if (this.showEffects || this.showWeather) {

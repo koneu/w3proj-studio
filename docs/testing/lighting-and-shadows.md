@@ -160,3 +160,19 @@ same bytes; EW00, ET00, LRrk and the plateau match Studio's; EMt0 (ExteriorMainT
 more in Studio: row 95 (16 units south of the tower's centre), cells 24..26 and 38..39, the west and east rims of its
 footprint, which the editor leaves lit. A footprint-edge case of the doodad rule like the boxes' 8 edge cells above:
 not found.
+
+**Cliffs are lit and shadowed as the ground** (branch fix/cliff-shadows, 2026-11-27, SD and HD). Map
+`shadow-terrain` (make-shadow-probes.mjs) saved after the editor's Calculate Shadows; the cliff blocks one and two
+levels high seen from four sides (`--look X,Y,2200,304,70,R`, R 90, 0, 180, 270; game view off, View > Shadows on and
+off; Studio `--compare-ready lit` with the same cameras through `we:`). (1) **SD, baked shadows**: the editor darkens
+cliff faces and the cliff models' foot as the ground (a shaded face keeps 0.55 of its light, the ground 0.54 to 0.56);
+Studio darkened the flat ground alone. (2) **SD, the foot**: the classic cliff models' foot rises to 17 and 31 units
+with the face's tilted normals (CliffsCCAA0: (0.89, 0.28, 0.37) on a tile's one side, (0.78, −0.08, 0.61) on the
+other), which drew a dark block per tile, shadows off too; the editor shows it lit as flat ground. Studio takes the
+ground's normal up to 40 units over a cliff level where the model's own faces mostly up (n.z > 0.3); in HD up to 17
+(the rock starts above that: 40 lit a bright stripe along it). (3) **HD light**: the editor's HD view shows the same
+cliffs with Shadows on and off, and faces turned from the sun dark. Studio lit cliffs as units and trees are
+(`objectLight`, its fill); as the ground (`sunLight`) the two-level faces are (83, 66, 24), (92, 72, 27) and
+(20, 15, 3) at R 90, 0 and 180 against the editor's (76, 58, 21), (91, 71, 24) and (34, 25, 8); before, (98, 77, 30),
+(103, 81, 31) and (80, 64, 24). Ramps (`shadow-ramps`) show no new edge. Not matched: the editor's SD ground shadow is
+darker than Studio's (0.54, 0.56, 0.72 by channel against 0.65), for all ground.
