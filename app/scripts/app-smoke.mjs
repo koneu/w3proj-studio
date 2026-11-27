@@ -7470,8 +7470,8 @@ async function shadowLeftOut(page, found) {
 }
 
 /** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
- *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
- *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
+ *  1. The Pathing Editor never writes over pathing overrides it couldn't read (a subterrain's pathing.txt), unless the
+ *     user chose to start anew, and then a backup of them is kept (under a name no earlier backup has).
  *  2. fs_exists answers a path in a folder it may not look into with an error, not "not there" (not on Windows).
  *  3. On Linux two project files that differ only in case are two files: a write to one is neither the other's entry nor
  *     hides the other's outside change, and opening the project says they can't both go into the map archive.
@@ -7485,10 +7485,11 @@ async function dataSafety(page, found) {
   const k = await heightKit(page, "DataSafety");
   const { hands, root } = k;
   const pathing = join(root, ".w3proj", "pathing.json");
-  const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const txt = join(root, "map", "terrain", "main", "pathing.txt");
+  const read = (p) => (existsSync(p) ? readDiskFile(p, "utf8") : null);
   const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
   /** The terrain editor opened again: the Pathing Editor reads its file when the editor is made. Both callers leave a
-   *  pathing.json it has to say something about: that word is waited for (the check after it says if it's missing). */
+   *  pathing.txt it has to say something about: that word is waited for (the check after it says if it's missing). */
   const reopen = async () => {
     const heard = await page.evaluate(`window.__warned.length`);
     await page.evaluate(`w3.editors.closeAll()`);
@@ -7513,55 +7514,59 @@ async function dataSafety(page, found) {
   await page.evaluate(`(() => { window.__warned = []; window.__answer = undefined; window.__dataSafetyWarn = w3.window.showWarning; w3.window.showWarning = async (m, ...a) => { window.__warned.push(m); return window.__answer; }; })()`);
   const locked = join(work, "data-safety-locked");
   try {
-    // Part 1 is written for .w3proj/pathing.json on disk, the flat layout's file; a split project keeps the overrides in
-    // map/terrain/<subterrain>/pathing.txt. What fails of it is reported, and parts 2 to 4 still run.
+    // A project's overrides are in its subterrains' pathing.txt (the app reads and writes them as .w3proj/pathing.json).
+    // What fails of part 1 is reported, and parts 2 to 4 still run.
     let said;
     try {
-    // ---- 1a. A pathing.json that isn't JSON: said on opening, painting asks, Cancel writes nothing and leaves no undo step ----
-    mkdirSync(dirname(pathing), { recursive: true });
-    const broken = `{ "format": "w3proj.pathing/1", "width": 256, oops`;
-    writeFileSync(pathing, broken);
+    const overrides = () => page.evaluate(`w3.workspace.readText(".w3proj/pathing.json").then((t) => JSON.parse(t), (e) => String(e))`);
+    // ---- 1a. A pathing.txt that can't be read: said on opening, painting asks, Cancel writes nothing and leaves no undo step ----
+    mkdirSync(dirname(txt), { recursive: true });
+    const broken = "0 0 0a 02\ngarbage\n";
+    writeFileSync(txt, broken);
     await reopen();
     said = await warned();
-    if (!said.some((m) => m.includes("pathing.json is there, but it isn't valid JSON"))) fail(`opening with a broken pathing.json said ${lit(said)}`);
+    if (!said.some((m) => m.includes("pathing.json is there, but it can't be read") && m.includes("pathing.txt line 2"))) fail(`opening with a broken pathing.txt said ${lit(said)}`);
     const notice = await page.evaluate(`document.querySelector(".pathing-notice")?.textContent ?? null`);
     if (!/can't be read: painting is off/.test(notice ?? "")) fail(`the Pathing tab doesn't say painting is off: ${lit(notice)}`);
     await answer("Cancel");
     await stroke();
     said = await warned();
-    if (!said.some((m) => m.includes("Start a new file") || m.includes("start a new overrides file"))) fail(`painting over a broken pathing.json asked ${lit(said)}`);
-    if (read(pathing) !== broken) fail("a stroke after Cancel wrote over the broken pathing.json");
+    if (!said.some((m) => m.includes("Start a new file") || m.includes("start a new overrides file"))) fail(`painting over a broken pathing.txt asked ${lit(said)}`);
+    if (read(txt) !== broken) fail("a stroke after Cancel wrote over the broken pathing.txt");
     if (await dirty()) fail("a refused stroke left the terrain editor with unsaved changes");
-    // ---- 1b. Choosing a new file: the next stroke paints, the save keeps the old file as pathing.json.bak ----
+    // ---- 1b. Choosing a new file: the next stroke paints, the save keeps the old file's text in pathing.json.bak ----
     await answer("Start a new file");
     await stroke();
-    if (read(pathing) !== broken) fail("the stroke that asked painted too");
+    if (read(txt) !== broken) fail("the stroke that asked painted too");
     await stroke();
-    const fresh = JSON.parse(read(pathing) ?? "null");
-    if (!fresh || fresh.width !== 256 || !(fresh.cells?.length > 0)) fail(`after choosing a new file the save wrote ${lit(read(pathing))?.slice(0, 120)}`);
-    if (read(`${pathing}.bak`) !== broken) fail(`the broken pathing.json wasn't kept as pathing.json.bak (${lit(read(`${pathing}.bak`))})`);
-    // ---- 1c. A file for another map size: Cancel writes nothing; Replace backs it up under a name not yet taken ----
-    const otherSize = JSON.stringify({ format: "w3proj.pathing/1", width: 128, height: 128, note: "mine", cells: [[1, 1, 2, 0]] });
-    writeFileSync(pathing, otherSize);
+    const fresh = await overrides();
+    if (!fresh || fresh.width !== 256 || !(fresh.cells?.length > 0)) fail(`after choosing a new file the save wrote ${lit(fresh)?.slice(0, 120)} (pathing.txt: ${lit(read(txt))?.slice(0, 80)})`);
+    if (read(txt)?.includes("garbage")) fail("the new pathing.txt still holds the broken line");
+    const kept = (text) => `# map/terrain/main/pathing.txt\n${text}`;
+    if (read(`${pathing}.bak`) !== kept(broken)) fail(`the broken pathing.txt wasn't kept in pathing.json.bak (${lit(read(`${pathing}.bak`))})`);
+    if (existsSync(pathing)) fail("the save wrote .w3proj/pathing.json in a split project");
+    // ---- 1c. Broken once more: Cancel writes nothing; a new file backs it up under a name not yet taken ----
+    const brokenAgain = "nothing of this is a cell\n";
+    writeFileSync(txt, brokenAgain);
     await reopen();
     said = await warned();
-    if (!said.some((m) => m.includes("is for a 128×128 pathing map"))) fail(`opening with another size's pathing.json said ${lit(said)}`);
+    if (!said.some((m) => m.includes("pathing.txt line 1"))) fail(`opening with the second broken pathing.txt said ${lit(said)}`);
     await answer("Cancel");
     await stroke();
-    if (!(await warned()).some((m) => m.includes("Painting replaces them"))) fail("painting over another size's overrides asked nothing");
-    if (read(pathing) !== otherSize) fail("a stroke after Cancel wrote over another size's pathing.json");
-    await answer("Replace");
+    if (!(await warned()).some((m) => m.includes("Start a new file") || m.includes("start a new overrides file"))) fail("painting over the second broken pathing.txt asked nothing");
+    if (read(txt) !== brokenAgain) fail("a stroke after Cancel wrote over the second broken pathing.txt");
+    await answer("Start a new file");
     await stroke();
     await stroke();
-    const replaced = JSON.parse(read(pathing) ?? "null");
-    if (replaced?.width !== 256 || !(replaced.cells?.length > 0)) fail(`Replace wrote ${lit(read(pathing))?.slice(0, 120)}`);
-    if (read(`${pathing}.bak2`) !== otherSize) fail("another size's pathing.json wasn't kept as pathing.json.bak2");
-    if (read(`${pathing}.bak`) !== broken) fail("the second backup wrote over the first");
+    const replaced = await overrides();
+    if (replaced?.width !== 256 || !(replaced.cells?.length > 0)) fail(`the second new file is ${lit(replaced)?.slice(0, 120)}`);
+    if (read(`${pathing}.bak2`) !== kept(brokenAgain)) fail(`the second broken pathing.txt wasn't kept in pathing.json.bak2 (${lit(read(`${pathing}.bak2`))})`);
+    if (read(`${pathing}.bak`) !== kept(broken)) fail("the second backup wrote over the first");
     } catch (e) {
-      fail(`part 1 (pathing.json): ${e.message ?? e}`);
+      fail(`part 1 (pathing overrides): ${e.message ?? e}`);
     }
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
-    rmSync(join(root, ".w3proj", "pathing.json"), { force: true });
+    rmSync(txt, { force: true });
 
     if (process.platform === "win32") return;
     // ---- 2. A file in a folder that can't be looked into: an error, not "not there" ----

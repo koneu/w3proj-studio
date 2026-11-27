@@ -713,7 +713,11 @@ async fn fs_copy(from: String, to: String) -> CmdResult<()> {
         // A file of a split project that stands for others (backend::flatview: the Pathing tool's backup of its file)
         // is copied by its content.
         if backend::flatview::view_of(Path::new(&from))?.is_some() || backend::flatview::view_of(Path::new(&to))?.is_some() {
-            let bytes = backend::read_bytes(Path::new(&from)).map_err(|e| format!("{from} → {to}: {e}"))?;
+            // The Pathing tool's file that can't be assembled (a damaged pathing.txt) is copied as its files are stored.
+            let bytes = match backend::read_bytes(Path::new(&from)) {
+                Ok(bytes) => bytes,
+                Err(e) => backend::flatview::pathing_as_stored(Path::new(&from)).ok().flatten().ok_or_else(|| format!("{from} → {to}: {e}"))?,
+            };
             return backend::write_bytes(Path::new(&to), &bytes).map(|_| ());
         }
         if let Some(parent) = Path::new(&to).parent() {

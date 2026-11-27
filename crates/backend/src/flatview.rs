@@ -189,6 +189,26 @@ fn read_pathing(project: &Path) -> CmdResult<Vec<u8>> {
     layout::read_pathing(project).map_err(err)?.ok_or_else(|| not_found(&w3proj::terrain_pathing::json_path(project)))
 }
 
+/// The subterrains' `pathing.txt` of a split project as they are stored, one after the other under a line naming each
+/// (`# map/terrain/<subterrain>/pathing.txt`): what a backup of `.w3proj/pathing.json` keeps when the files can't be
+/// assembled (one is damaged), so that the Pathing tool can start anew without losing them. None for any other path and
+/// where no subterrain has a file.
+pub fn pathing_as_stored(path: &Path) -> CmdResult<Option<Vec<u8>>> {
+    let Some(project) = pathing_of(path)? else { return Ok(None) };
+    let map_dir = project.join(w3proj::project::MAP_DIR);
+    let mut out = Vec::new();
+    for rel in layout::pathing_files(&project).map_err(err)? {
+        let at = join_rel(&map_dir, &rel);
+        let bytes = std::fs::read(&at).map_err(|e| format!("{}: {e}", at.display()))?;
+        out.extend_from_slice(format!("# {}/{}\n", w3proj::project::MAP_DIR, rel.replace('\\', "/")).as_bytes());
+        out.extend_from_slice(&bytes);
+        if !bytes.ends_with(b"\n") {
+            out.push(b'\n');
+        }
+    }
+    Ok((!out.is_empty()).then_some(out))
+}
+
 /// Writes a split project's `.w3proj/pathing.json` into its subterrains' `pathing.txt`
 /// (`w3proj::terrain_layout::write_pathing`): the stamp, with every file written or removed in `also`.
 fn write_pathing(project: &Path, bytes: &[u8]) -> CmdResult<Stamp> {
@@ -1120,6 +1140,10 @@ mod tests {
         fs::write(txt("nw"), "3 1 08 00\ngarbage\n").unwrap();
         assert!(crate::exists(&json).unwrap());
         assert!(crate::read_bytes(&json).unwrap_err().contains("map/terrain/nw/pathing.txt line 2"));
+        // As stored, for a backup: every file under its name, the damaged one as it is. A write then starts anew.
+        let stored = String::from_utf8(pathing_as_stored(&json).unwrap().unwrap()).unwrap();
+        assert_eq!(stored, "# map/terrain/sw/pathing.txt\n7 1 0a 02\n# map/terrain/nw/pathing.txt\n3 1 08 00\ngarbage\n");
+        assert!(pathing_as_stored(&flat.join(".w3proj").join("pathing.json")).unwrap().is_none(), "control: a flat project's file");
         assert!(crate::read_bytes(&split.join("map").join("war3map.w3e.txt")).is_ok());
         // A real .w3proj/pathing.json beside them is in the way.
         fs::write(txt("nw"), "3 1 08 00\n").unwrap();
