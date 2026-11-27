@@ -13,9 +13,11 @@
 //   --no-queue     don't wait for another gate on this machine (or W3_GATE_QUEUE=0)
 //   --update-floor raise the coverage floors to what was measured
 //
-// Safe to start any number of times, also at once and from several worktrees: gates of one repository run one after
-// the other (a lock folder in the main checkout's target/, taken over when its gate is gone), since they share the
-// cores, the memory, app/dist and the target folders. A run leaves nothing a later run trips over: its logs have a
+// Safe to start any number of times, also at once and from several worktrees: the gates of one repository queue in
+// the main checkout's target/gate-queue (tests/gate-lib.mjs withGateQueue). Commit gates of different worktrees run
+// side by side, on one memory budget; a gate with any other step (the corpus tier: the app smoke test doesn't stand
+// another gate's load) runs alone, and so do two gates of one checkout (they share app/dist and the smoke tests'
+// folders). A run leaves nothing a later run trips over: its logs have a
 // folder of their own, its scratch folders are emptied before use, and what a killed run left is cleared by the next.
 //
 // Every step runs even after a failure, and the exit code is non-zero if any step failed or
@@ -46,7 +48,7 @@ import { availableParallelism, freemem } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
-import { assertInTable, checkFloors, installSignalHandlers, memoryBudget, missingDeps, runShell, withFileLock, withPrerequisites } from "./gate-lib.mjs";
+import { assertInTable, checkFloors, installSignalHandlers, memoryBudget, missingDeps, runShell, sharedBudget, withFileLock, withGateQueue, withPrerequisites } from "./gate-lib.mjs";
 import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
@@ -342,16 +344,16 @@ function skip(step, why) {
   show(step, log, false);
 }
 
-// One gate of this repository at a time on the machine, whichever worktree it is started in: the lock is in the main
-// checkout. Two at once share the cores and the memory (each would count the same free memory as its own), and in one
-// checkout also app/dist, the smoke tests' folders and the browser profiles.
-const queueLock = join(mainCheckout(), "target", "gate.lock");
+// The queue between the gates of this repository on the machine, whichever worktree each is started in: it is in the
+// main checkout. Commit gates run side by side (in different checkouts); a gate with any other step runs alone.
+const queueDir = join(mainCheckout(), "target", "gate-queue");
 const queued = !args.includes("--no-queue") && process.env.W3_GATE_QUEUE !== "0";
-let holdsQueue = false;
+const exclusive = chosen.some((s) => s.tier !== "commit");
+let queueEntry = null;
 
-// Ctrl-C, a kill of the gate or its terminal closing ends the steps' processes too, and gives the lock back.
+// Ctrl-C, a kill of the gate or its terminal closing ends the steps' processes too, and takes the gate out of the queue.
 installSignalHandlers(liveChildren, (code) => {
-  if (holdsQueue) rmSync(queueLock, { recursive: true, force: true });
+  if (queueEntry) rmSync(queueEntry, { force: true });
   process.exit(code);
 });
 
@@ -363,10 +365,12 @@ const readOrNull = (file) => {
   }
 };
 
-async function runSteps() {
+/** `beside`: this gate's turn in the queue (the gates running beside it, and where to say what it may use), or null. */
+async function runSteps(beside) {
   // The memory the running steps' estimates (`mem`) may add up to (tests/gate-lib.mjs memoryBudget). Read now, not
-  // while another gate still ran.
-  const budget = memoryBudget({ read: readOrNull, freemem });
+  // while this gate still waited; less what the gates beside this one may use.
+  const budget = sharedBudget(memoryBudget({ read: readOrNull, freemem }), beside?.others() ?? []);
+  beside?.claim(Math.min(budget.mb, chosen.reduce((n, s) => n + s.mem, 0)));
   console.log(`gate: memory budget ${budget.mb} MB (${budget.from}; set W3_GATE_MEM_MB to change)`);
   const onMemWait = (step, { used }) => console.log(`${clock()}  wait   ${step.name}: needs about ${step.mem} MB, ${used} of ${budget.mb} MB in use`);
   const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
@@ -375,14 +379,12 @@ async function runSteps() {
 
 let started = Date.now();
 if (queued) {
-  mkdirSync(dirname(queueLock), { recursive: true });
-  await withFileLock(queueLock, repo, (m) => console.log(`gate: ${m}`), () => {
-    holdsQueue = true;
+  await withGateQueue(queueDir, { repo, exclusive }, (m) => console.log(`gate: ${m}`), (beside) => {
     started = Date.now(); // the times count from the gate's own start, not from the wait
-    return runSteps().finally(() => { holdsQueue = false; });
-  });
+    return runSteps(beside);
+  }, { onEntry: (file) => { queueEntry = file; } });
 } else {
-  await runSteps();
+  await runSteps(null);
 }
 
 console.log(`\n--- gate: ${only ? `only ${chosen.map((s) => s.id).join(", ")} (not a tier: no gate result)` : tier}`);

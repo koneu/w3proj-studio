@@ -3,7 +3,7 @@
 // the step table.
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The pids below `root` (POSIX, from `ps`); empty when `ps` is unavailable. */
@@ -183,6 +183,99 @@ export async function withFileLock(dir, repo, say, body, { pollMs = 1000 } = {})
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** The gates in the queue folder that still run: each file's entry, with `file`. What a gate that is gone left is removed. */
+function queueEntries(dir) {
+  const entries = [];
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return entries;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const file = join(dir, name);
+    const entry = lockOwner(file);
+    // Half written files don't exist (entries arrive by rename): one that can't be read is left by something else.
+    if (entry && typeof entry.pid === "number" && holds(entry)) entries.push({ ...entry, file });
+    else if (entry || ageMs(file) > 10000) rmSync(file, { force: true });
+  }
+  return entries;
+}
+
+let queueIds = 0;
+
+/**
+ * The queue between gates on one machine, also from different worktrees: a folder with one file per gate that waits
+ * or runs. `me`: { repo (the checkout it runs in), exclusive }. Gates that are not `exclusive` (the commit tier) run
+ * side by side when they are in different checkouts; an exclusive one (anything with the corpus tier's steps: the app
+ * smoke test doesn't stand the load of another gate) runs alone. Two gates of one checkout never run together: they
+ * share app/dist and the smoke tests' folders. First come, first served among gates that can't run together: once an
+ * exclusive gate waits, gates that come later wait behind it instead of passing it for ever.
+ *
+ * `body({ others, claim })` runs while this gate has its turn: `others()` are the entries of the gates running beside
+ * it, `claim(mb)` writes into this gate's entry how much memory its steps may use, for the gates that start later.
+ * `say(text)` is told who is waited for, every 30 s. `onEntry(file)`: where this gate's entry is, to remove it when
+ * the process is ended (an entry left behind is removed by the next gate: its process is gone).
+ */
+export async function withGateQueue(dir, me, say, body, { pollMs = 1000, onEntry = () => {} } = {}) {
+  mkdirSync(dir, { recursive: true });
+  const id = `${process.pid}-${queueIds++}`;
+  const file = join(dir, `${id}.json`);
+  const mutex = `${dir}.mutex`;
+  const entry = { id, pid: process.pid, started: startedAt(process.pid), repo: me.repo, exclusive: Boolean(me.exclusive), state: "waiting", ticket: 0, claim: 0, since: new Date().toISOString() };
+  const write = () => {
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, JSON.stringify(entry));
+    renameSync(tmp, file);
+  };
+  /** One gate at a time reads the folder and writes its decision. */
+  const alone = (work) => withFileLock(mutex, me.repo, () => {}, async () => work(queueEntries(dir).filter((e) => e.id !== id)), { pollMs: 20 });
+  const clash = (other) => entry.exclusive || other.exclusive || other.repo === entry.repo;
+  onEntry(file);
+  try {
+    await alone((others) => {
+      entry.ticket = Math.max(0, ...others.map((e) => e.ticket ?? 0)) + 1;
+      write();
+    });
+    for (let told = 0; ; ) {
+      const blockers = await alone((others) => {
+        const inTheWay = others.filter((o) => clash(o) && (o.state === "holding" || o.ticket < entry.ticket));
+        if (inTheWay.length === 0) {
+          entry.state = "holding";
+          write();
+        }
+        return inTheWay;
+      });
+      if (blockers.length === 0) break;
+      if (Date.now() - told > 30000) {
+        say(`waiting for ${blockers.map((b) => `the gate of ${b.repo} (process ${b.pid}, ${b.state === "holding" ? "running" : "waiting"} since ${b.since})`).join(", ")}: ${dir}`);
+        told = Date.now();
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+    return await body({
+      others: () => queueEntries(dir).filter((e) => e.id !== id && e.state === "holding"),
+      claim(mb) {
+        entry.claim = mb;
+        write();
+      },
+    });
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
+
+/**
+ * The memory budget (MB) of a gate that runs beside others: what `own` (memoryBudget) found, less what the gates
+ * beside it said their steps may use (`claim`). Free memory already lacks what they use now, so this is on the
+ * careful side; never below 1 (the scheduler then runs one step at a time).
+ */
+export function sharedBudget(own, others) {
+  const taken = others.reduce((n, e) => n + (Number(e.claim) || 0), 0);
+  return taken === 0 ? own : { mb: Math.max(1, own.mb - taken), from: `${own.from}, less ${taken} MB for ${others.length} other gate${others.length === 1 ? "" : "s"}` };
 }
 
 /**

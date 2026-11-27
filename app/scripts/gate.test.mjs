@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, memAvailableMb, memoryBudget, missingDeps, runShell, withFileLock, withPrerequisites } from "../../tests/gate-lib.mjs";
+import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, memAvailableMb, memoryBudget, missingDeps, runShell, sharedBudget, withFileLock, withGateQueue, withPrerequisites } from "../../tests/gate-lib.mjs";
 
 // The tests run bundled elsewhere, so the repository is found from app/, where `npm test` starts.
 const repo = join(process.cwd(), "..");
@@ -241,6 +241,123 @@ test("the lock between gates, control: one held by a process that runs is not ta
   await holder;
   await waiter;
   assert.equal(entered, true);
+});
+
+// ---- the queue between gates ----
+
+/** Gates in one queue folder, each ended when the test says so. `enter(name, me)` starts one; `inside` lists who has its turn. */
+function gates(dir) {
+  const inside = [];
+  const leave = new Map();
+  const said = new Map();
+  const turns = new Map();
+  return {
+    inside,
+    said,
+    turns,
+    enter(name, me) {
+      said.set(name, []);
+      const p = withGateQueue(dir, me, (m) => said.get(name).push(m), (turn) => new Promise((r) => {
+        inside.push(name);
+        turns.set(name, turn);
+        leave.set(name, () => { inside.splice(inside.indexOf(name), 1); r(name); });
+      }), { pollMs: 20 });
+      return p;
+    },
+    leave: (name) => leave.get(name)(),
+  };
+}
+const pause = (ms = 250) => new Promise((r) => setTimeout(r, ms));
+
+test("the queue between gates: commit gates of different checkouts run side by side", async () => {
+  const dir = join(base, "queue-shared");
+  const g = gates(dir);
+  const a = g.enter("a", { repo: "/wt/a", exclusive: false });
+  const b = g.enter("b", { repo: "/wt/b", exclusive: false });
+  await until(() => g.inside.length === 2, "both gates to run");
+  g.leave("a");
+  g.leave("b");
+  assert.deepEqual([await a, await b], ["a", "b"]);
+  // Nothing is left of gates that are done.
+  assert.deepEqual(readdirSync(dir), []);
+});
+
+test("the queue between gates: two gates of one checkout take turns, and the second says whom it waits for", async () => {
+  const g = gates(join(base, "queue-same"));
+  const a = g.enter("a", { repo: "/wt/a", exclusive: false });
+  await until(() => g.inside.includes("a"), "the first gate");
+  const b = g.enter("b", { repo: "/wt/a", exclusive: false });
+  await until(() => g.said.get("b").length > 0, "the second gate to say it waits");
+  assert.deepEqual(g.inside, ["a"]);
+  assert.match(g.said.get("b")[0], /waiting for the gate of \/wt\/a \(process \d+, running since /);
+  g.leave("a");
+  await a;
+  await until(() => g.inside.includes("b"), "the second gate's turn");
+  g.leave("b");
+  await b;
+});
+
+test("the queue between gates: a gate with the corpus tier runs alone, and later commit gates don't pass it while it waits", async () => {
+  const g = gates(join(base, "queue-exclusive"));
+  const a = g.enter("commit-a", { repo: "/wt/a", exclusive: false });
+  await until(() => g.inside.includes("commit-a"), "the first commit gate");
+  const batch = g.enter("batch", { repo: "/wt/m", exclusive: true });
+  await until(() => g.said.get("batch").length > 0, "the batch gate to say it waits");
+  // A commit gate that comes now could run beside commit-a, but the batch gate was there first.
+  const b = g.enter("commit-b", { repo: "/wt/b", exclusive: false });
+  await until(() => g.said.get("commit-b").length > 0, "the later commit gate to say it waits");
+  assert.match(g.said.get("commit-b")[0], /the gate of \/wt\/m \(process \d+, waiting since /);
+  await pause();
+  assert.deepEqual(g.inside, ["commit-a"]);
+  g.leave("commit-a");
+  await a;
+  await until(() => g.inside.includes("batch"), "the batch gate's turn");
+  await pause();
+  assert.deepEqual(g.inside, ["batch"]);
+  g.leave("batch");
+  await batch;
+  await until(() => g.inside.includes("commit-b"), "the later commit gate's turn");
+  g.leave("commit-b");
+  await b;
+});
+
+test("the queue between gates: what a gate that is gone left in the folder holds nobody up", { skip: process.platform === "win32" && "no start times on Windows" }, async () => {
+  const dir = join(base, "queue-stale");
+  mkdirSync(dir, { recursive: true });
+  const gone = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  await new Promise((r) => gone.on("exit", r));
+  const left = { repo: "/wt/killed", exclusive: true, state: "holding", ticket: 1, claim: 0, since: "then" };
+  writeFileSync(join(dir, `${gone.pid}-0.json`), JSON.stringify({ ...left, id: `${gone.pid}-0`, pid: gone.pid, started: "1" }));
+  // Its process number in use again (this test's own process): the start time tells them apart.
+  writeFileSync(join(dir, `${process.pid}-999.json`), JSON.stringify({ ...left, id: `${process.pid}-999`, pid: process.pid, started: "1" }));
+  const g = gates(dir);
+  const a = g.enter("a", { repo: "/wt/a", exclusive: true });
+  await until(() => g.inside.includes("a"), "the gate to run");
+  assert.equal(readdirSync(dir).length, 1);
+  g.leave("a");
+  await a;
+});
+
+test("the queue between gates: a gate sees what the gates beside it may use, and its budget is less by that", async () => {
+  const g = gates(join(base, "queue-budget"));
+  const a = g.enter("a", { repo: "/wt/a", exclusive: false });
+  await until(() => g.inside.includes("a"), "the first gate");
+  assert.deepEqual(g.turns.get("a").others(), []);
+  g.turns.get("a").claim(11700);
+  const b = g.enter("b", { repo: "/wt/b", exclusive: false });
+  await until(() => g.inside.includes("b"), "the second gate");
+  const beside = g.turns.get("b").others();
+  assert.deepEqual(beside.map((e) => [e.repo, e.claim]), [["/wt/a", 11700]]);
+  const own = { mb: 30000, from: "80% of MemAvailable 37500 MB" };
+  assert.equal(sharedBudget(own, beside).mb, 18300);
+  assert.match(sharedBudget(own, beside).from, /less 11700 MB for 1 other gate$/);
+  // Control: alone, the budget is its own; and it never falls to nothing.
+  assert.deepEqual(sharedBudget(own, []), own);
+  assert.equal(sharedBudget({ mb: 5000, from: "x" }, beside).mb, 1);
+  g.leave("a");
+  g.leave("b");
+  await a;
+  await b;
 });
 
 test("missingDeps: a worktree without node_modules gets one line telling to run npm ci", () => {

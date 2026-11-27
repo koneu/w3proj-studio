@@ -20,12 +20,24 @@ takes, so they have `priority` in the step table: they start before other steps 
 them could start but for the cores or the memory, no step without priority starts, so what the running steps free
 adds up for it. (Before, short steps took the memory one after the other and a smoke part waited two minutes.)
 
-**One gate at a time.** Gates of this repository queue on the machine, whichever worktree each is started in: a
-lock folder in the main checkout (`target/gate.lock`, with the owner's process in it). A second gate prints
-`gate: waiting for the gate of <checkout> (process …)` every 30 s and starts when the first is done; its memory
-budget and its times count from then. A lock left by a gate that was killed is taken over (the process is gone, or
-on Linux its number belongs to a process started at another time). Ctrl-C, a kill or a closed terminal end the
-steps' processes and give the lock back. `--no-queue` (or `W3_GATE_QUEUE=0`) starts at once.
+**Gates at once.** The gates of this repository queue on the machine, whichever worktree each is started in: a
+folder in the main checkout (`target/gate-queue`, one file per gate that waits or runs, with its process in it).
+- **Commit gates of different worktrees run side by side.** They share one memory budget: each writes into its entry
+  what its steps may use, and a gate that starts beside others takes that off its own budget (`gate: memory budget …,
+  less … MB for 2 other gates`). With several running a late one may be left little and run its steps one at a time.
+- **A gate with any step outside the commit tier runs alone** (`corpus`, `batch`, `all`, `coverage`, or `--only` with
+  such a step): the app smoke test doesn't stand the load of another gate (2026-11-27: two parts timed out beside
+  another worktree's commit gate and passed alone), and the corpus step alone takes half the memory.
+- **Two gates of one checkout never run together:** they share `app/dist`, the smoke tests' folders and the browser
+  profiles.
+- **First come, first served** among gates that can't run together: once a batch gate waits, commit gates that come
+  later wait behind it instead of passing it for ever.
+
+A gate that waits prints `gate: waiting for the gate of <checkout> (process …, running since …)` every 30 s; its
+memory budget and its times count from its own start. What a killed gate left in the folder is removed by the next
+one (the process is gone, or on Linux its number belongs to a process started at another time). Ctrl-C, a kill or a
+closed terminal end the steps' processes and take the gate out of the queue. `--no-queue` (or `W3_GATE_QUEUE=0`)
+starts at once, beside whatever runs.
 
 **One step again.** `node tests/gate.mjs --only=appsmoke2` runs that step and what it comes after (the release CLI
 and the app's build, both quick when nothing changed), `--only=rust,clippy` those two. The ids are the ones in the

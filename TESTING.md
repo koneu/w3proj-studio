@@ -20,7 +20,7 @@ How this project is tested, why, and what to do before committing or releasing.
 | one piece | `cd app && npm test -- <file>`, `npm run check`, `node scripts/app-smoke.mjs --only=<check>`; `cargo test --workspace`; `cargo clippy --workspace --all-targets -- -D warnings` |
 | the real World Editor (Linux, local, not in the gate) | `node app/scripts/we-compare.mjs <spec.json…>`, see "The real World Editor" below |
 
-Gate options: `--serial`, `--jobs=<n>`, `--update-floor`, `--only=<step ids>` (those steps and what they need: to run a failed step again; not a gate result), `--no-queue`. Gates of this repository run one at a time on the machine, from whichever worktree: a second one waits and says for whom. Logs are in `target/gate-logs/<tier>-<pid>/`, the last line is
+Gate options: `--serial`, `--jobs=<n>`, `--update-floor`, `--only=<step ids>` (those steps and what they need: to run a failed step again; not a gate result), `--no-queue`. Gates of this repository queue on the machine, from whichever worktree: commit gates of different worktrees run side by side, a gate with the corpus tier runs alone, and one that waits says for whom. Logs are in `target/gate-logs/<tier>-<pid>/`, the last line is
 `GATE_EXIT=<code>`, and a check missing what it needs **fails**: green always means it ran. Steps start only while
 their memory estimates fit a budget (80% of free memory or of a cgroup limit such as `systemd-run -p MemoryMax=`,
 printed at the start); `W3_GATE_MEM_MB=<MB>` sets it ([details](docs/testing/gate-and-smoke.md)).
