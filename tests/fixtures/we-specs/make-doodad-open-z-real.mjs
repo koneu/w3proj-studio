@@ -45,7 +45,7 @@ try {
     for (const i of picks) doo.doodads[i].position[2] += 37.5;
     writeFileSync(file, JSON.stringify(doo, null, 1));
     // Heights don't change pathing, shadows or the minimap: the map's own are kept.
-    run("pack", dir, "-o", join(out, name), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, name), "--force-stale");
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });

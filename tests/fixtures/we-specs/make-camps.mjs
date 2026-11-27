@@ -85,7 +85,7 @@ try {
   writeFileSync(file, JSON.stringify(doc, null, 2));
   // the creeps by camp case, for the reader of the editor's minimap (read-camp-icons.py)
   if (grid2) writeFileSync(join(here, `camps-${args[0]}.layout.json`), JSON.stringify(CAMPS.map(([cx, cy, u]) => u.map(([, dx, dy]) => [cx + dx, cy + dy]))));
-  run("pack", dir, "-o", join(here, grid2 ? `camps-${args[0]}.w3x` : far ? `camps-far-${far.join("-")}.w3x` : second ? "camps-b.w3x" : "camps.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, grid2 ? `camps-${args[0]}.w3x` : far ? `camps-far-${far.join("-")}.w3x` : second ? "camps-b.w3x" : "camps.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

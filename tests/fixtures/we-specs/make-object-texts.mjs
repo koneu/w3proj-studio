@@ -74,7 +74,7 @@ for (const [name, files] of Object.entries(inputs)) {
     const dir = join(scratch, "map");
     run("unpack", join(here, "flat.w3x"), dir, "--game", game);
     for (const [f, text] of Object.entries(files)) writeFileSync(join(dir, "map", f), text);
-    run("pack", dir, "-o", join(out, name), "--force-stale", "--keep-unused-strings");
+    run("pack", "--keep-objects", dir, "-o", join(out, name), "--force-stale", "--keep-unused-strings");
     console.log(`made ${join(out, name)}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

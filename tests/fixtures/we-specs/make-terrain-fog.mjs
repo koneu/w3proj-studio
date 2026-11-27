@@ -51,7 +51,7 @@ for (const [name, c] of Object.entries(CASES)) {
     writeFileSync(path, JSON.stringify(info, null, 2));
     // No war3map.j: the editor's save makes its own, Studio's spec step its own (it keeps a script it didn't write).
     rmSync(join(dir, "map", "war3map.j"), { force: true });
-    run("pack", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

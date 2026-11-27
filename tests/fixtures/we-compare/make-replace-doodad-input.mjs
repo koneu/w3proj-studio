@@ -105,7 +105,7 @@ try {
   }
   writeFileSync(w3e, kept.join("\n"));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-  run("pack", dir, "-o", out);
+  run("pack", "--keep-objects", dir, "-o", out);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

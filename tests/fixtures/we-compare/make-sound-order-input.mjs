@@ -33,7 +33,7 @@ try {
   const dir = join(scratch, "p");
   run("unpack", join(here, "random-group.w3m"), dir, "--game", "none");
   writeFileSync(join(dir, "map", "war3map.w3s.json"), JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: SOUNDS.map(sound) }, null, 1));
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

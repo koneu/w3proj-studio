@@ -61,7 +61,7 @@ for (const [name, tiles] of Object.entries(LISTS)) {
       const row = Array.from({ length: 65 }, (_, x) => Math.min(tiles.length - 1, Math.floor(x / stripe)).toString(16)).join("");
       lines.splice(at, 1, "[texture]", ...Array.from({ length: 65 }, () => row));
       writeFileSync(file, lines.join("\n"));
-      run("pack", dir, "-o", join(here, `custom-tilesets-${name}-${flag}.w3x`), "--force-stale");
+      run("pack", "--keep-objects", dir, "-o", join(here, `custom-tilesets-${name}-${flag}.w3x`), "--force-stale");
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }

@@ -44,7 +44,7 @@ try {
     doc.units.push({ ...template, id, skinId: id, position: [x, y, z], player: 0, editorId: i + 1, trailer: [0, 0] });
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, "unit-heights.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "unit-heights.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

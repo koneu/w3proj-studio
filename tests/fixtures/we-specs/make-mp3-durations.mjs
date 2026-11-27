@@ -76,7 +76,7 @@ try {
   writeFileSync(join(map, "war3map.imp.json"), JSON.stringify({ format: "w3proj.imports/1", version: 1, files }, null, 1));
   rmSync(join(map, "war3map.j"), { force: true }); // the editor writes one, Studio's rebuild too
   mkdirSync(out, { recursive: true });
-  run("pack", dir, "-o", join(out, "mp3-durations.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(out, "mp3-durations.w3x"), "--force-stale");
   writeFileSync(join(out, "durations.json"), JSON.stringify(list, null, 1));
 } finally {
   rmSync(scratch, { recursive: true, force: true });

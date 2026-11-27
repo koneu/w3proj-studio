@@ -62,7 +62,7 @@ try {
   }
   writeFileSync(w3e, out.join("\n"));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-  run("pack", dir, "-o", join(here, diamond ? "diamond.w3x" : "plateau.w3x"));
+  run("pack", "--keep-objects", dir, "-o", join(here, diamond ? "diamond.w3x" : "plateau.w3x"));
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

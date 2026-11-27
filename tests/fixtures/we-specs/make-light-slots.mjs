@@ -115,7 +115,7 @@ for (const [variant, first, second] of [["both", 1, 1], ["first", 1, 0], ["secon
     const w3l = JSON.parse(readFileSync(m("war3map.w3l.json"), "utf8"));
     Object.assign(w3l, { terrainModel: SLOT1, unitModel: SLOT2, terrainEnabled: first, unitEnabled: second });
     writeFileSync(m("war3map.w3l.json"), JSON.stringify(w3l, null, 2));
-    run("pack", dir, "-o", join(out, `${base ? "light-base" : "light-slots"}-${variant}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `${base ? "light-base" : "light-slots"}-${variant}.w3x`), "--force-stale");
     console.log(`${variant}: slot 1 ${first ? "on" : "off"}, slot 2 ${second ? "on" : "off"} (${base ?? `${ground.join(" ")} / ${cliffs.join(" ")}`})`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

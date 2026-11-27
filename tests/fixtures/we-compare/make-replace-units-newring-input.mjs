@@ -43,7 +43,7 @@ try {
     ...template, id, skinId: id, position: [x, y, 0], player: 0, hp: -1, mana: -1, level: 1, targetAcquisition: -1, editorId: i + 1, trailer: [0, 0],
   }))];
   writeFileSync(unitsFile, JSON.stringify(units, null, 1));
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

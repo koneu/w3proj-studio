@@ -99,7 +99,7 @@ try {
   doo.specials = specials;
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-  run("pack", dir, "-o", join(here, outName), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, outName), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

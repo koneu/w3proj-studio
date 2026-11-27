@@ -40,7 +40,7 @@ try {
     ...(doc.version >= 7 ? { trailer: [0, 0] } : {}),
   }));
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, "region-outline.w3m"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "region-outline.w3m"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

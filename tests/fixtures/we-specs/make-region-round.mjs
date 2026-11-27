@@ -49,7 +49,7 @@ try {
     ...(regions.version >= 7 ? { trailer: [0, 0] } : {}),
   }));
   writeFileSync(regionsFile, JSON.stringify(regions, null, 2));
-  run("pack", dir, "-o", join(here, "region-round.w3m"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "region-round.w3m"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

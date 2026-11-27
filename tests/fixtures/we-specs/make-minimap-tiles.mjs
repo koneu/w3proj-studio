@@ -97,7 +97,7 @@ for (const [name, make] of Object.entries(MAPS)) {
     info.playableHeight = 64;
     info.cameraBounds = [-3584, -4096, 3584, 3584, -3584, 3584, 3584, -4096];
     writeFileSync(w3i, JSON.stringify(info, null, 2));
-    run("pack", dir, "-o", join(here, `minimap-tiles-${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, `minimap-tiles-${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

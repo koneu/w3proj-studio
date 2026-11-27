@@ -85,7 +85,7 @@ try {
   }));
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-  run("pack", dir, "-o", join(here, "ramp-float.w3x"));
+  run("pack", "--keep-objects", dir, "-o", join(here, "ramp-float.w3x"));
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

@@ -45,7 +45,7 @@ try {
   j = j.replace("    call InitCustomTriggers(  )", lines("    call InitCustomTriggers(  )", "    call ExecuteFunc(\"W3C_InjectedStart\")").trimEnd());
   if (!j.includes("W3C_InjectedStart\")")) throw new Error("the call was not injected");
   writeFileSync(file, j);
-  run("pack", dir, "-o", join(here, "injected-script.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "injected-script.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

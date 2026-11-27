@@ -47,7 +47,7 @@ try {
   // skin-fields-hidden.w3x: war3map.w3u has a name of its own ("Main Hero"), hidden by the Skin file's.
   for (const [name, mods] of [["skin-fields.w3x", []], ["skin-fields-hidden.w3x", [str("unam", "Main Hero")]]]) {
     writeFileSync(m("war3map.w3u.json"), file([{ base: "Hpal", id: "H001", mods: [...mods, { field: "uhpm", type: "int", value: 777 }] }]));
-    run("pack", dir, "-o", join(out, name), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, name), "--force-stale");
     console.log(`made ${join(out, name)}`);
   }
 } finally {

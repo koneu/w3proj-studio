@@ -58,7 +58,7 @@ try {
       for (const ext of ["w3a", "w3q"]) writeFileSync(join(dir, "map", `war3campaign.${ext}.json`), `${JSON.stringify(objects(2), null, 2)}\n`);
     }
     run("unpack", join(here, "flat.w3x"), join(dir, "maps", CHAPTER), "--game", game);
-    run("pack", dir, "-o", join(out, `tiny-${kind}.w3n`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `tiny-${kind}.w3n`), "--force-stale");
     console.log(`made ${join(out, `tiny-${kind}.w3n`)}`);
   }
 } finally {

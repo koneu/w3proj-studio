@@ -55,7 +55,7 @@ for (const [variant, v] of Object.entries(VARIANTS)) {
     const sloc = units.units[0];
     units.units = STARTS.slice(0, v.players.length).map(([x, y], i) => ({ ...sloc, player: i, editorId: i, position: [x, y, 0] }));
     writeFileSync(unitsFile, JSON.stringify(units, null, 2));
-    run("pack", dir, "-o", join(here, `plain-names-${variant}.w3m`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, `plain-names-${variant}.w3m`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

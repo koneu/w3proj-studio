@@ -97,7 +97,7 @@ try {
     for (let k = 0; k < 10; k++) put("NOal", 128 + 64 * k, -1536 + 64 * k, 0, 1.2);
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, angles ? "fence-angles.w3x" : exact ? "fence-exact.w3x" : ints ? "fence-ints.w3x" : neg ? "fence-neg.w3x" : dest ? "fence-dest.w3x" : "fence-wpm.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, angles ? "fence-angles.w3x" : exact ? "fence-exact.w3x" : ints ? "fence-ints.w3x" : neg ? "fence-neg.w3x" : dest ? "fence-dest.w3x" : "fence-wpm.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

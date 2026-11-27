@@ -51,7 +51,7 @@ try {
   section(lines, "water", () => Array.from({ length: 65 }, () => WATER).join(" "));
   section(lines, "flags", (y) => (wet(y) ? "4" : "0").repeat(65));
   writeFileSync(file, lines.join("\n"));
-  run("pack", dir, "-o", join(here, "ford.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "ford.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

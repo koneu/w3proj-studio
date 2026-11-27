@@ -118,7 +118,7 @@ function make(name) {
     }
     run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
     mkdirSync(out, { recursive: true });
-    run("pack", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

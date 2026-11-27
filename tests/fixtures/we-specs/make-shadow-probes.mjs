@@ -278,7 +278,7 @@ for (const [name, spotsOf] of Object.entries(maps)) {
       });
       writeFileSync(join(dir, "map", "war3map.w3d.json"), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom }, null, 2));
     }
-    run("pack", dir, "-o", join(outDir, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(outDir, `${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

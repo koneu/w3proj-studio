@@ -62,7 +62,7 @@ try {
   const made = addLookCameras(cameras, LOOKS.map((l, i) => resolveLook(parseLook(clip[i] ? l.split(",").slice(0, 3).join(",") : l), head)));
   clip.forEach((c, i) => { if (c) { made.cameras[i].farZ = c.far; made.cameras[i].nearZ = c.near; } });
   writeFileSync(camerasFile, `${JSON.stringify(made, null, 2)}\n`);
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

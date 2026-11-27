@@ -128,7 +128,7 @@ try {
   DESTRUCTABLES.forEach(([id], i) => { put(id, i, 1000, 0.4); put(id, i, -1000, 2.9); });
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, misc ? "doodad-snap-custom-misc.w3x" : alpha ? "doodad-snap-custom-alpha.w3x" : turn ? "doodad-turn.w3x" : grid ? "doodad-snap-grid.w3x" : colours ? "doodad-snap-custom-col.w3x" : tex4 ? "doodad-snap-custom-tex.w3x" : more ? "doodad-snap-custom-more.w3x" : "doodad-snap-custom.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, misc ? "doodad-snap-custom-misc.w3x" : alpha ? "doodad-snap-custom-alpha.w3x" : turn ? "doodad-turn.w3x" : grid ? "doodad-snap-grid.w3x" : colours ? "doodad-snap-custom-col.w3x" : tex4 ? "doodad-snap-custom-tex.w3x" : more ? "doodad-snap-custom-more.w3x" : "doodad-snap-custom.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

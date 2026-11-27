@@ -224,7 +224,7 @@ test("addCamerasToMap: the looks' cameras go first in war3map.w3c.json, a missin
           mkdirSync(join(project, "map"), { recursive: true });
           for (const [name, text] of Object.entries(files)) writeFileSync(join(project, "map", name), text);
         } else if (args[0] === "pack") {
-          assert.deepEqual(args, ["pack", project, "--output", copy]);
+          assert.deepEqual(args, ["pack", project, "--output", copy, "--keep-objects"]);
           packed = JSON.parse(readFileSync(join(project, "map", "war3map.w3c.json"), "utf8"));
         }
       };

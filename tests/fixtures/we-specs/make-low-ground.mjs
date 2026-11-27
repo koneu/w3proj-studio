@@ -48,7 +48,7 @@ for (const [name, stored, centre, level, centreLevel] of [["a", -7400], ["b", -8
     grid("height", stored, centre, " ");
     if (level !== undefined) grid("layer", level.toString(16), centreLevel.toString(16), "");
     writeFileSync(file, lines.join("\n"));
-    run("pack", dir, "-o", join(here, `low-ground-${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, `low-ground-${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

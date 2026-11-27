@@ -81,7 +81,7 @@ try {
     writeFileSync(join(map, "triggers", m.lua ? "header.lua" : "header.j"), m.header);
     // No script: the editor's save makes its own, Studio's "w3.script.generate" its own.
     rmSync(join(map, "war3map.j"), { force: true });
-    run("pack", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });

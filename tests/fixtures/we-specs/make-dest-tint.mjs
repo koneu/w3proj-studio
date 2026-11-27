@@ -91,12 +91,12 @@ try {
   // --unref: no trigger names the destructables (dest-tint-unref.w3x, a map whose script creates none of them: what flags
   // does the editor's save give them?)
   const unref = process.argv.includes("--unref");
-  if (unref) run("pack", dir, "-o", join(here, "dest-tint-unref.w3x"), "--force-stale");
+  if (unref) run("pack", "--keep-objects", dir, "-o", join(here, "dest-tint-unref.w3x"), "--force-stale");
   const names = unref ? [] : list.map((d, k) => `gg_dest_${d.id}_${String(k + 1).padStart(4, "0")}`);
   const body = names.map((n) => `    call SetDestructableLife(${n}, 1)`).join("\n");
   addScriptTrigger(dir, { name: "Names", description: "", isComment: 0, enabled: true, initiallyOff: false, runOnInit: false },
     `function InitTrig_Names takes nothing returns nothing\n${body}\nendfunction`);
-  if (!unref) run("pack", dir, "-o", join(here, "dest-tint.w3x"), "--force-stale");
+  if (!unref) run("pack", "--keep-objects", dir, "-o", join(here, "dest-tint.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

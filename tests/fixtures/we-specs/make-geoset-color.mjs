@@ -44,7 +44,7 @@ try {
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
   mkdirSync(out, { recursive: true });
-  run("pack", dir, "-o", join(out, "geoset-color.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(out, "geoset-color.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

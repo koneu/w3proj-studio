@@ -38,7 +38,7 @@ try {
     id: "LOch", variation: 0, position: [x + 13.5, 21.25, z], angle: 0, scale: [1, 1, 1], skinId: "LOch",
     preFlags: 4294967295, flags, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [i, 0, 0], extras: [] }));
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, "uniform-heights.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "uniform-heights.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

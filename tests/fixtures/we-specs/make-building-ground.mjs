@@ -122,7 +122,7 @@ function makeMap(out, heightOf, units, custom) {
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
   writeFileSync(join(dir, "map", "war3map.w3u.json"), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom }, null, 2));
-  run("pack", dir, "-o", join(here, out), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, out), "--force-stale");
 }
 
 const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));

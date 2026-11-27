@@ -90,7 +90,7 @@ function unpack(name, src) {
   if (existsSync(join(dir, "map", "terrain", "terrain.json"))) run("terrain", "merge", dir);
   return dir;
 }
-function pack(dir, name) { run("pack", dir, "-o", join(out, `${name}.w3x`), "--force-stale"); }
+function pack(dir, name) { run("pack", "--keep-objects", dir, "-o", join(out, `${name}.w3x`), "--force-stale"); }
 const want = (name) => !only || only.has(name);
 
 const MELEE_OFF = {

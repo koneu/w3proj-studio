@@ -119,7 +119,7 @@ try {
   writeFileSync(dooFile, JSON.stringify(doo, null, 2));
 
   mkdirSync(outDir, { recursive: true });
-  run("pack", dir, "-o", join(outDir, outName), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(outDir, outName), "--force-stale");
   console.log(`made ${join(outDir, outName)}`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });

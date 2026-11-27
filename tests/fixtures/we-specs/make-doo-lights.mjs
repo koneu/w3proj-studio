@@ -125,7 +125,7 @@ try {
   doo.doodads = ROW.map(([id, variation, more], k) => doodad(k, id, variation, X(8 + 3 * k) + 32, 32, more));
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-  run("pack", dir, "-o", join(out, "doo-lights.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(out, "doo-lights.w3x"), "--force-stale");
   rmSync(final, { recursive: true, force: true });
   renameSync(out, final);
   console.log(`made ${join(final, "doo-lights.w3x")}`);

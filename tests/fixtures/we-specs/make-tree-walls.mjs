@@ -92,7 +92,7 @@ try {
     const units = JSON.parse(readFileSync(unitsFile, "utf8"));
     units.units = [];
     writeFileSync(unitsFile, JSON.stringify(units, null, 2));
-    run("pack", dir, "-o", join(outDir, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(outDir, `${name}.w3x`), "--force-stale");
     console.log(`made ${join(outDir, `${name}.w3x`)}`);
   }
 } finally {

@@ -38,7 +38,7 @@ try {
   writeFileSync(join(dir, "map", "war3map.w3a.json"), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "Ahea", id: "A000", mods }] }, null, 2));
   mkdirSync(out, { recursive: true });
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-  run("pack", dir, "-o", join(out, "negative-reals.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(out, "negative-reals.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

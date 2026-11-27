@@ -37,7 +37,7 @@ for (const [name, [id, player]] of Object.entries(VARIANTS)) {
     if (!farm) throw new Error("edge-last-step.w3m has no farm");
     Object.assign(farm, { id, skinId: id, player, ...(id === "ngol" ? { gold: 12500 } : {}) });
     writeFileSync(file, JSON.stringify(doc, null, 1));
-    run("pack", dir, "-o", join(here, `building-turn-${name}.w3m`));
+    run("pack", "--keep-objects", dir, "-o", join(here, `building-turn-${name}.w3m`));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

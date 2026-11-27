@@ -49,7 +49,7 @@ run("rebuild", join(out, "rebuilt"), "--force");
 rmSync(join(out, "nolua", "map", "war3map.lua"));
 run("rebuild", join(out, "nolua"));
 rmSync(join(out, "nowts", "map", "war3map.wts"));
-for (const name of ["rebuilt", "nolua", "nowts", "plain"]) run("pack", join(out, name), "-o", join(out, `echo-${name}.w3x`));
+for (const name of ["rebuilt", "nolua", "nowts", "plain"]) run("pack", "--keep-objects", join(out, name), "-o", join(out, `echo-${name}.w3x`));
 cpSync(join(out, "base"), join(out, "zeromasks"), { recursive: true });
 const w3iPath = join(out, "zeromasks", "map", "war3map.w3i.json");
 const w3i = JSON.parse(readFileSync(w3iPath, "utf8"));

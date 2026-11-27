@@ -277,7 +277,7 @@ function make(name, spots) {
     if (spots.some((s) => s?.wpm)) editWpm(join(map, "war3map.wpm"), spots);
     mkdirSync(out, { recursive: true });
     const file = join(out, `start-preview-${name}.w3x`);
-    run("pack", dir, "-o", file, "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", file, "--force-stale");
     console.log(`made ${file}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

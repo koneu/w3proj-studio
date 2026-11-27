@@ -74,7 +74,7 @@ try {
   writeFileSync(join(dir, "map", "war3map.wpm"), wpm);
   writeFileSync(join(dir, "map", "war3map.shd"), Buffer.alloc(W * 4 * H * 4));
 
-  run("pack", dir, "-o", join(here, "odd-size.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "odd-size.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

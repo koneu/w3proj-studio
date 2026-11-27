@@ -140,7 +140,7 @@ for (const ch of TILESETS) {
     }
     writeFileSync(file, lines.join("\n"));
     const suffix = (cliffList ? `-${cliffList.join("-")}` : "") + (depthList ? `-${depthList.join("-")}` : "") + (reflectivity !== null ? `-r${reflectivity}` : "") + (tint ? `-t${tint.join("-")}` : "");
-    run("pack", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}${suffix}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}${suffix}.w3x`), "--force-stale");
     console.log(`${ch}: ${ground.join(" ")} / ${own.join(" ")}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

@@ -73,11 +73,11 @@ try {
     editorId: 4294967295, trailer: [k + 1, 0, 0], extras: [],
   }));
   writeFileSync(dooFile, JSON.stringify({ ...doo, version: 13, subversion: 11, doodads: placed }, null, 1));
-  run("pack", dir, "-o", join(here, "barricade-flags.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "barricade-flags.w3x"), "--force-stale");
   // Version 8 with skin ids, as AutumnLeaves has it: the creation number in editorId, no preFlags, trailer or extras.
   const v8 = placed.map(({ preFlags, trailer, extras, ...d }, k) => ({ ...d, editorId: k + 1 }));
   writeFileSync(dooFile, JSON.stringify({ ...doo, version: 8, subversion: 11, skinIds: true, doodads: v8 }, null, 1));
-  run("pack", dir, "-o", join(here, "barricade-flags-v8.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "barricade-flags-v8.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

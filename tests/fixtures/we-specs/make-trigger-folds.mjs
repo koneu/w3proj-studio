@@ -29,7 +29,7 @@ try {
   const init = readCategory(dir, "Initialization");
   if (init.type !== 4 || init.expanded !== 0) throw new Error("flat.w3x's Initialization category isn't as expected");
   addCategory(dir, "Other", "Initialization");
-  run("pack", dir, "-o", join(here, "trigger-folds.w3x"));
+  run("pack", "--keep-objects", dir, "-o", join(here, "trigger-folds.w3x"));
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

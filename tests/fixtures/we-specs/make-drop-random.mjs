@@ -53,7 +53,7 @@ try {
       unit("hfoo", 0, 0, { itemSets: sets, editorId: 1 }),
     ];
     writeFileSync(file, JSON.stringify(doo, null, 1));
-    run("pack", dir, "-o", join(out, name), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, name), "--force-stale");
     console.log(`made ${join(out, name)}`);
   }
 } finally {

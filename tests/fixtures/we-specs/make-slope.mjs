@@ -36,7 +36,7 @@ try {
   const row = Array.from({ length: 65 }, (_, x) => (x - 32) * 24).join(" ");
   lines.splice(at, end - at, "[height]", ...Array.from({ length: 65 }, () => row));
   writeFileSync(file, lines.join("\n"));
-  run("pack", dir, "-o", join(here, "slope.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "slope.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

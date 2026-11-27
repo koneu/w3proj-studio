@@ -53,7 +53,7 @@ try {
     const types = cliffType ? `[cliff-texture]\n${rows((x, y) => (cliffType(x, y) ? "1" : "f")).join("\n")}\n` : "[cliff-texture] all f\n";
     writeFileSync(w3e, text.replace("[layer] all 2\n", `[layer]\n${rows((x, y) => layer(x, y).toString(16)).join("\n")}\n`).replace("[cliff-texture] all f\n", types));
     run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
-    run("pack", dir, "-o", join(here, `${name}.w3x`));
+    run("pack", "--keep-objects", dir, "-o", join(here, `${name}.w3x`));
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });

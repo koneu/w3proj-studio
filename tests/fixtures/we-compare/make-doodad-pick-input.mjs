@@ -150,7 +150,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     cameras.cameras = [];
     const looks = views().map((v) => resolveLook(parseLook(`${v.x},${v.y},${DISTANCE}`), head));
     writeFileSync(camerasFile, `${JSON.stringify(addLookCameras(cameras, looks), null, 2)}\n`);
-    run("pack", dir, "-o", out, "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
     if (specOut) writeFileSync(specOut, `${JSON.stringify(buildSpec(), null, 1)}\n`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

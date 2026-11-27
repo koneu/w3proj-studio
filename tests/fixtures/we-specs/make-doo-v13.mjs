@@ -76,7 +76,7 @@ for (const [name, change] of Object.entries(variants)) {
   cpSync(join(out, "autumn"), join(out, name), { recursive: true });
   change(join(out, name));
   // The doodads' layout changed, not where they stand: the derived files are the map's own.
-  run("pack", join(out, name), "-o", join(out, `${name}.w3x`), "--force-stale");
+  run("pack", "--keep-objects", join(out, name), "-o", join(out, `${name}.w3x`), "--force-stale");
 }
 rmSync(final, { recursive: true, force: true });
 renameSync(out, final);

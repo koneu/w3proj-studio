@@ -42,7 +42,7 @@ try {
   addVariables(dir, picked.map(([name, type, initialValue]) => ({ name, type, unknown: 1, isArray: false, arraySize: 1, initialized: initialValue !== "", initialValue })));
   // No script: the editor makes its own when it saves, Studio's rebuild its own (it keeps a script it didn't write).
   rmSync(join(map, "war3map.j"), { force: true });
-  run("pack", dir, "-o", flag("--out") ? resolve(flag("--out")) : join(here, "var-code.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", flag("--out") ? resolve(flag("--out")) : join(here, "var-code.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

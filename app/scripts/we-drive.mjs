@@ -631,7 +631,7 @@ export function addCamerasToMap(cli, copy, project, looks) {
   if (existsSync(json)) doc = JSON.parse(readFileSync(json, "utf8"));
   else if (existsSync(raw)) throw new Error("the map's war3map.w3c can't be read by the cameras codec: not replacing it");
   writeFileSync(json, `${JSON.stringify(addLookCameras(doc, resolved, parks), null, 2)}\n`);
-  run(["pack", project, "--output", copy]);
+  run(["pack", project, "--output", copy, "--keep-objects"]);
   return { looks: resolved, parks };
 }
 

@@ -65,7 +65,7 @@ try {
   // The script of the empty map knows nothing of these objects: Studio makes it again (a script it didn't write is kept).
   rmSync(join(map, "war3map.j"), { force: true });
   run("rebuild", dir, "--only", "script", "--game", gamePath());
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

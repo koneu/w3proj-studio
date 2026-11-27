@@ -40,7 +40,7 @@ const make = (out, edit) => {
     const lines = readFileSync(file, "utf8").split("\n");
     edit(lines);
     writeFileSync(file, lines.join("\n"));
-    run("pack", dir, "-o", join(here, out), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, out), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

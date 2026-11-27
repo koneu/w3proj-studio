@@ -116,7 +116,7 @@ try {
     rmSync(join(map, "war3map.j"));
     run("rebuild", dir, "--only", "script", "--game", game);
   }
-  run("pack", dir, "-o", join(here, `format-${kind === "props" ? "doodad-props" : kind}.w3x`), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, `format-${kind === "props" ? "doodad-props" : kind}.w3x`), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

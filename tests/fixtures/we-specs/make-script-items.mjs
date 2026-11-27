@@ -179,7 +179,7 @@ for (const [out, m] of Object.entries(MAPS)) {
     if (existsSync(join(map, "triggers", "header.j"))) throw new Error("flat.w3x has a custom script header");
     if (m.header) setHeader(dir, m.header);
     rmSync(join(map, "war3map.j"), { force: true }); // Studio writes one from the triggers, the editor too
-    run("pack", dir, "-o", join(here, out), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, out), "--force-stale");
     console.log(`made ${join(here, out)}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

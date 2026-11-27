@@ -48,7 +48,7 @@ try {
     });
   }));
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, neg ? "neutral-facing-neg.w3x" : "neutral-facing.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, neg ? "neutral-facing-neg.w3x" : "neutral-facing.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

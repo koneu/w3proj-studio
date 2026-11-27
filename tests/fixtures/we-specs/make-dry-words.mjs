@@ -43,7 +43,7 @@ try {
   section("water", rows((x) => words[x % 8]).map((r) => r.join(" ")));
   section("layer", rows((x, y) => Math.floor(y / 5).toString(16)).map((r) => r.join("")));
   writeFileSync(file, lines.join("\n"));
-  run("pack", dir, "-o", join(here, "dry-words.w3x"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, "dry-words.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

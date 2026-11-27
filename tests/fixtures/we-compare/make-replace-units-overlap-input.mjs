@@ -55,7 +55,7 @@ try {
     flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [i, 0, 0], extras: [],
   }));
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

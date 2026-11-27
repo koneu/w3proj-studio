@@ -88,7 +88,7 @@ try {
     info.forces[0].name = "Plain force";
     writeFileSync(infoFile, JSON.stringify(info, null, 2));
   }
-  run("pack", dir, "-o", join(here, strings ? "resize-strings.w3m" : bounds ? "resize-bounds.w3m" : "resize-objects.w3m"), "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", join(here, strings ? "resize-strings.w3m" : bounds ? "resize-bounds.w3m" : "resize-objects.w3m"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

@@ -31,7 +31,7 @@ try {
   const template = units.units[0];
   units.units = [template, ...FOOTMEN.map(([x, y], i) => ({ ...template, id: "hfoo", skinId: "hfoo", position: [x, y, 0], player: 0, hp: -1, mana: -1, editorId: i + 1, trailer: [0, 0] }))];
   writeFileSync(unitsFile, JSON.stringify(units, null, 1));
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

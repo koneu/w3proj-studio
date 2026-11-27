@@ -45,7 +45,7 @@ try {
   const camerasFile = join(map, "war3map.w3c.json");
   const cameras = JSON.parse(readFileSync(camerasFile, "utf8"));
   writeFileSync(camerasFile, `${JSON.stringify(addLookCameras(cameras, [resolveLook(parseLook("3456,0,3000"), head)]), null, 2)}\n`);
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

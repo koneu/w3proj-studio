@@ -30,7 +30,7 @@ try {
     const doo = JSON.parse(readFileSync(file, "utf8"));
     doo.doodads = edit(doo.doodads);
     writeFileSync(file, JSON.stringify(doo, null, 2));
-    run("pack", dir, "-o", join(outDir, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(outDir, `${name}.w3x`), "--force-stale");
   };
   const doodad = (id, x, y, scale, flags, n) => ({
     id, variation: 0, position: [x, y, 0], angle: 0, scale, skinId: id, preFlags: 4294967295, flags,

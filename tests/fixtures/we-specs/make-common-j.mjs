@@ -111,7 +111,7 @@ function make(name) {
     if (vjass) writeFileSync(join(map, "war3mapExtra.txt"), JASSHELPER);
     addScriptTrigger(dir, { name: "UseExtra", description: "", isComment: 0, enabled: true, initiallyOff: false, runOnInit: false }, text);
     mkdirSync(out, { recursive: true });
-    run("pack", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(out, `${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

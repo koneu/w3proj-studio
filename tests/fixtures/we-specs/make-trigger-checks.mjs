@@ -56,7 +56,7 @@ try {
   ] });
   addScriptTrigger(dir, { ...plain, name: "Textual" },
     "function InitTrig_Textual takes nothing returns nothing\n    call CameraSetupApplyForPlayer(true, gg_cam_Bravo, Player(0), 0)\nendfunction\n");
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

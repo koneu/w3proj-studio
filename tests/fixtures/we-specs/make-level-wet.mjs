@@ -55,7 +55,7 @@ try {
     section("height", rows((x, y) => m.height(x, y)).map((r) => r.join(" ")));
     section("flags", rows(() => m.flags.toString(16)).map((r) => r.join("")));
     writeFileSync(file, lines.join("\n"));
-    run("pack", dir, "-o", join(here, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, `${name}.w3x`), "--force-stale");
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });

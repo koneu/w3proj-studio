@@ -177,7 +177,7 @@ for (const [name, m] of Object.entries(MAPS)) {
       json.doodads.push({ id, variation: 0, position: [x, y, 0], angle: angle ?? 4.712389, scale: [1, 1, 1], skinId: id, preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [n & 255, (n >> 8) & 255, 0], extras: [] });
     });
     writeFileSync(doo, JSON.stringify(json, null, 2));
-    run("pack", dir, "-o", join(here, `${name}.w3x`), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, `${name}.w3x`), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

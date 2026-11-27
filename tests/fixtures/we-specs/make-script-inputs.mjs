@@ -26,7 +26,7 @@ const make = (out, edit) => {
     const dir = join(scratch, "map");
     run("unpack", join(here, "flat.w3x"), dir, "--game", game);
     edit(join(dir, "map"));
-    run("pack", dir, "-o", join(here, out), "--force-stale");
+    run("pack", "--keep-objects", dir, "-o", join(here, out), "--force-stale");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

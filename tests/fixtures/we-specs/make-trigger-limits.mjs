@@ -42,7 +42,7 @@ try {
     eca(2, "SetPlayerHandicapBJ", [preset("Player00"), num("100")]),
     eca(2, "TriggerSleepAction", [num("3")]),
   ] });
-  run("pack", dir, "-o", out, "--force-stale");
+  run("pack", "--keep-objects", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
