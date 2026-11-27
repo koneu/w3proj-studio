@@ -31,7 +31,7 @@ The formats defined in code (no definition; each schema says what its codec in `
 | `terrain-doodads.schema.json` | `map/terrain/<folder>/doodads.json` | `terrain_objects.rs` |
 | `terrain-units.schema.json` | `map/terrain/<folder>/units.json` | `terrain_objects.rs` |
 | `terrain-regions.schema.json` | `map/terrain/<folder>/regions.json` | `terrain_objects.rs` |
-| `pathing.schema.json` | `.w3proj/pathing.json` | app `lib/terrain/resize.ts`, `terrain_pathing.rs`, tag `w3proj.pathing/1` |
+| `pathing.schema.json` | `.w3proj/pathing.json`, as the app reads the pathing overrides (on disk they are in `map/terrain/<folder>/pathing.txt`; the file itself only in a project still in the flat layout) | app `lib/terrain/resize.ts`, `terrain_pathing.rs`, tag `w3proj.pathing/1` |
 | `triggers.schema.json` | `map/triggers/triggers.json` | `trigger_layout.rs`, tag `w3proj.triggers/1` |
 | `trigger-category.schema.json` | `map/triggers/**/_category.json` | `trigger_layout.rs` |
 | `trigger-gui.schema.json` | `map/triggers/**/*.gui.json` | `trigger_layout.rs`, ECAs `wtg.rs` |

@@ -1,25 +1,23 @@
 # Spec: Split Terrain & Subterrains (`map/terrain/`)
 
-> **Decision 2026-11-26: the split layout becomes the only one**, even with one subterrain; the flat layout is dropped. Where this spec says "optional", "flat stays the default" or "Merge Subterrains goes back to the flat files", that is the state before the decision and goes as the stages below land.
+> **One layout (decided 2026-11-26):** `map/terrain/` is the only terrain layout Studio writes, even with one subterrain. The older flat layout (`map/war3map.w3e.txt` and the map-wide object and region files in `map/`) is still read, and converted the first time Studio touches it.
 >
-> - **Built (branch `terrain-split-default`):** an unpack into a new project writes `map/terrain/` with one subterrain `main` and puts the map's derived files into `.w3proj/derived/`; an unpack into a flat project converts it first (as `w3proj terrain split`); a map that came without shadows or a minimap packs back without them (`derived-from.json` lists them under `absent`, forgotten once the derived files are made anew); a new project's agent file describes the split layout.
-> - **Built (branch `terrain-twice-kept`):** creation numbers found twice in an imported map are kept as they came: `terrain.json` lists them per kind (`objects.<kind>.importedTwice`, section 4), a number found twice that isn't listed is still refused, so a merge's duplicates are still caught. wowr4.6 and FOE now unpack split.
-> - **Built (branch `terrain-split-app`):** New Map writes its terrain, objects and regions straight into `map/terrain/` (`terrain_create`, no flat file on disk), its derived files into `.w3proj/derived/`; opening a project in the app converts a flat terrain (its campaign's chapter maps too) and says so once, or says why it stayed flat (`terrain_convert_on_open`); "Split Terrain into Subterrains…" and "Merge Subterrains" are gone from the palette (Edit Terrain Layout cuts the one subterrain; its Split Terrain stays for a project that stayed flat, without an undo that merges back); `w3proj cat <project> <file>` prints a file as the app reads it.
-> - **Stays flat for now:** a terrain kept raw and a map without terrain (a campaign).
-> - **`w3proj terrain merge` stays, as a command for tools only** (decided 2026-11-27): about 70 test and comparison scripts unpack a map and edit its terrain and placed objects as single files (`war3map.w3e.txt`, `war3map.doo.json`, `war3mapUnits.doo.json`, `war3map.w3r.json`), and merge the unpack first. `w3proj pack` keeps reading such a project. Studio never writes one, the app has no command for it, and the next unpack into it splits it again.
-> - **Left:** this spec and the schemas' README rewritten for one layout.
-> - **Consequences that now reach every project:** the derived files are no longer in git, so a fresh clone can't be packed without the game (`w3proj rebuild`); and every file under `map/terrain/` counts as a source of the derived files, so a pack right after a hand edit of a region or unit is refused until `w3proj rebuild` (or `--force-stale`).
+> - **Unpack and New Map** write `map/terrain/` with one subterrain `main` over the whole map and put the derived files into `.w3proj/derived/`. A map that came without shadows or a minimap packs back without them (`derived-from.json` lists them under `absent`, forgotten once the derived files are made anew).
+> - **A flat project is converted** by an unpack into it and by opening it in the app (its campaign's chapter maps too), which says so once, or says why it stayed flat.
+> - **What stays flat:** a terrain kept raw, and a map without terrain (a campaign).
+> - **`w3proj terrain merge` is a command for tools only** (decided 2026-11-27): about 70 test and comparison scripts unpack a map and edit its terrain and placed objects as single files, and merge the unpack first. `w3proj pack` reads such a project. Studio never writes one, the app has no command for it, and the next unpack into it splits it again. `w3proj cat <project> <file>` prints a file as the app reads it, whatever the layout.
+> - **What this means for every project:** the derived files are not in git, so a fresh clone can't be packed without the game (`w3proj rebuild`); and every file under `map/terrain/` counts as a source of the derived files, so a pack right after a hand edit of a region or unit is refused until `w3proj rebuild` (or `--force-stale`).
 
 ## Goal & Motivation
 
-In today's unpacked map format (`map/war3map.w3e.txt`, `map/war3map.doo.json`, `map/war3mapUnits.doo.json`, `map/war3map.w3r.json`), the entire map's terrain and placed objects live in single map-wide files:
+In the flat layout (`map/war3map.w3e.txt`, `map/war3map.doo.json`, `map/war3mapUnits.doo.json`, `map/war3map.w3r.json`), the entire map's terrain and placed objects lived in single map-wide files:
 - In `war3map.w3e.txt`, Git merges edits to different rows (north/south) cleanly, but edits in the same rows across different columns (east/west) conflict because each line spans the entire width of the map.
 - Placed units, doodads, and regions share global arrays and sequential `creationNumber` (`editorId`) counters, so two people editing different areas of a large map on separate branches run into array-tail conflicts and duplicate `creationNumber` allocations.
 - Binary derived files (`war3map.wpm`, `war3map.shd`, `war3mapMap.blp`, `war3map.mmp`) change as a whole on every terrain save and conflict on every Git merge.
 
-The **Subterrain format** is an **optional** multi-file layout for `map/terrain/`:
-- **Small / single-author maps:** Keep the flat single-file layout (the default).
-- **Large / multi-author maps:** Can partition the map canvas into named **subterrains** (`1..n` folders, e.g. `elwynn_forest/`, `westfall/`, `dungeon_north/`) so multiple mappers can work on separate zones in parallel and merge via Git without conflicts, and each of them loads, sees and rebuilds only the zone they work on (section 6).
+The **Subterrain format** is the multi-file layout in `map/terrain/`:
+- **Small / single-author maps:** one subterrain `main` over the whole map, which behaves like a normal map and is ready to be cut.
+- **Large / multi-author maps:** partition the map canvas into named **subterrains** (`1..n` folders, e.g. `elwynn_forest/`, `westfall/`, `dungeon_north/`) so multiple mappers can work on separate zones in parallel and merge via Git without conflicts, and each of them loads, sees and rebuilds only the zone they work on (section 6).
 
 ---
 
@@ -219,7 +217,7 @@ Even with split subterrain files, committing `war3map.wpm` (pathing), `war3map.s
    - `w3proj pack` of a `map/terrain/` project uses the derived files in `.w3proj/` only when `derived-from.json` says they follow the sources (`derived.rs` `SOURCES` is extended to `map/terrain/**` so every subterrain file counts). If they are missing (`war3map.wpm`, `war3map.shd`, `war3mapMap.blp`, `war3map.mmp` or `war3map.mmp.json`) or not known to follow (stale, no record, unreadable record), `pack` **fails** with the reason and says to open/save in Studio or run it headless (`appctl` / `headless`) to rebuild them.
    - `--allow-terrain-only-derived` is the explicit way around the refusal: `pack` then uses the derived files as they are even when stale, or leaves them out when there are none (the pure-Rust crate cannot compute them: no terrain-only pathing is invented, since units would walk through trees and buildings), and the output says so. Whether the game and the World Editor accept a map without `war3map.wpm` / `.shd` / minimap is to be tried (open point); a release pack never uses the flag.
    - A fresh clone or CI without the game install therefore cannot make a release pack. That is intended; the derived cache can be shared between machines as a build artifact (CI cache), never committed.
-   - Flat-layout projects keep today's behaviour (derived files tracked in `map/`).
+   - A project still in the flat layout (not yet converted, or merged for a tool) has its derived files in `map/`, and `pack` takes them as they are.
    - **The map script is a derived file too, with its own group in the same record** ([trigger-folders-spec.md](trigger-folders-spec.md), section 5): placed units, destructables, items and regions go into `war3map.j` / `.lua`, so a terrain save makes the script stale, `SOURCES` for the script group includes `map/terrain/**`, a partial open leaves it stale for the closed part, and `pack` refuses it the same way (flag `--allow-stale-script`, separate from `--allow-terrain-only-derived`). Only for projects whose script is `"generated"`; a `"kept"` script is a normal tracked file and is not touched by terrain saves.
    - Tests that pack a split project without a prior unpack of a real map (which records fresh derived files) pass `--allow-terrain-only-derived`, or write fresh derived files and a fresh `derived-from.json` record first; the Windows CI has no game install and needs the same.
 
@@ -248,7 +246,7 @@ Goal: someone working on `westfall` loads, renders and rebuilds only `westfall`,
 
 The format above is fixed up front; the work lands in stages, each usable on its own and checked by the round-trip checker:
 
-1. Layout-aware reader/writer layer, `terrain.json`, `terrain.txt` per subterrain, objects and regions per subterrain, split/merge commands (lossless, flat stays default).
+1. Layout-aware reader/writer layer, `terrain.json`, `terrain.txt` per subterrain, objects and regions per subterrain, split/merge commands (lossless).
 2. `idRange` allocation and duplicate-ID detection.
 3. Derived files out of git: `derived.rs` over `map/terrain/**`, `pack` refusing stale files, `pathing.txt` replacing `.w3proj/pathing.json`.
 4. Partial load (open set, halo, masks, scoped derive), then measure on a large map.
@@ -260,10 +258,10 @@ The format above is fixed up front; the work lands in stages, each usable on its
 
 - **Subterrain Overlay in Terrain Viewer:**
   - Toggleable overlay drawing subterrain rectangles, names, and ownership boundaries on the terrain canvas.
-  - Ability to create, resize, rename, or merge subterrains in the UI (snapped to tile boundaries). The command that joins subterrains is called "Join Subterrains…", because "Merge Subterrains" already means converting back to the flat layout.
+  - Ability to create, resize, rename, or merge subterrains in the UI (snapped to tile boundaries). The command that joins subterrains is called "Join Subterrains…" ("merge" means converting back to the flat layout, `w3proj terrain merge`).
 - **Seam check:**
   - Disjoint files stop textual Git conflicts, not semantic ones: cliffs, ramps and water edges look ±2 corners across a seam, so two branches editing near the same seam can merge cleanly into an inconsistent seam. A command "Check Terrain Seams" (run automatically after a merge touching two subterrains and on pack) reloads the assembled grid, re-derives cliff/ramp/water rules along seams and reports any corner the rules would change. It never edits silently. The cliff, ramp and water rules are actions, not invariants, so the check tests three invariants instead: a cliff of more than 2 levels between neighbouring corners (error), a ramp run that doesn't climb one level in one direction (error) and water that steps within one tile (warning, because World Editor maps contain it). A cliff type missing from the map's cliff list is not checked: the World Editor's own maps have it. It runs on `pack` (an error stops the pack; `--allow-seam-issues` packs anyway) and on demand; an opt-in post-merge hook (`w3proj terrain merge-hook`) runs it when the two merged sides together changed two subterrain folders or `terrain.json`.
 - **Layouts and compatibility:**
-  - Two layouts, one reader: `map/war3map.w3e.txt` (flat, the default for new and existing projects) and `map/terrain/`. The reader accepts both; the writer keeps whichever the project has. Converting is the command "Split Terrain into Subterrains…" (and back: "Merge Subterrains"); both are lossless and checked by the round-trip checker.
-  - A `map/terrain/` project with one subterrain covering the canvas behaves like a normal map and is ready to grow. Flat-layout is not a second way to make a subterrain map, only the simple default.
+  - One layout written, two read: Studio writes `map/terrain/` only. The reader also accepts the flat layout (`map/war3map.w3e.txt`), which an unpack and the app's open convert (lossless, checked by the round-trip checker). The app has no command that goes back; `w3proj terrain merge` does, for tools.
+  - A project whose terrain couldn't be converted (kept raw) opens flat, and the Terrain Layout editor's Split Terrain is there for it.
 - **Migration scope:** the flat names appear in about 34 TS files and in `project.rs`, `names.rs`, `derived.rs`, the backend and the CLI tests. All file access goes through one layout-aware layer (read: assemble; write: slice and write only subterrains whose content hash changed); file watching covers `map/terrain/**`.
