@@ -104,6 +104,9 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
   el.append(top);
   const ctx = canvas.getContext("2d");
 
+  /** Whether a draft was drawn that only Apply (or Split Terrain) writes: a split project's rectangles differing from
+   *  disk, a flat project's cuts. */
+  const drafted = () => (state?.layout === "split" ? pending() : !!grid && grid.xs.length + grid.ys.length > 0);
   const warn = (m: string) => void w3.window.showWarning(m);
   /** Whether there is something to apply: a split project's draft differing from disk; a flat project always offers
    *  Split Terrain (no cuts: one subterrain main). */
@@ -653,8 +656,7 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
     w3.workspace.onDidChange(() => {
       if (disposed || busy) return;
       // A draft drawn is kept (it says the layout changed under it); without one the layout on disk is shown.
-      const drafted = state?.layout === "split" ? pending() : !!grid && grid.xs.length + grid.ys.length > 0;
-      if (drafted) { staleOnDisk = true; renderSide(); return; }
+      if (drafted()) { staleOnDisk = true; renderSide(); return; }
       void load();
     }),
   ];
@@ -662,6 +664,7 @@ export function layoutEditor(w3: W3Api, el: HTMLElement, ops: LayoutOps, onState
   void load();
   return {
     focus: () => stage.focus({ preventScroll: true }),
+    discardQuestion: () => (drafted() ? "The terrain layout draft isn't applied, and closing the editor drops it." : null),
     undo: () => void undoRedo(false),
     redo: () => void undoRedo(true),
     dispose() {

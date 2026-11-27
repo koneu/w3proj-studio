@@ -166,6 +166,23 @@ export class EditorService {
     try { t.instance?.flush?.(); } catch (e) { console.error(`flushing ${t.path}:`, e); }
   }
 
+  /** The question about work a close would lose that no save writes (EditorInstance.discardQuestion); null: none. */
+  private draftOf(t: Tab): string | null {
+    try { return t.instance?.discardQuestion?.() ?? null; } catch (e) { console.error(`asking ${t.path} about its draft:`, e); return null; }
+  }
+  /** Whether any tab holds such work. */
+  holdsDrafts(): boolean {
+    return this.tabs.some((t) => this.draftOf(t) !== null);
+  }
+  /** Asks about each tab's draft among `tabs`; false as soon as one is to be kept. */
+  private async mayDropDrafts(tabs: readonly Tab[]): Promise<boolean> {
+    for (const t of tabs) {
+      const question = this.draftOf(t);
+      if (question !== null && (await this.confirm(question, "Discard", "Cancel")) !== "Discard") return false;
+    }
+    return true;
+  }
+
   /** Before a save or a close only (it moves the focus, so never where unsaved changes are merely asked about): the text field
    *  with the focus in the tab commits what was typed into it, as leaving it would. Most editors take a field's text
    *  on its `change` event, which a key like Ctrl+S doesn't cause. The field loses the focus and gets it back with the
@@ -488,7 +505,7 @@ export class EditorService {
       // Closed while an earlier tab of this loop was opening again.
       if (!this.tabs.includes(t)) continue;
       if (t.loading) { t.missed?.add(this.key(t.path)); continue; }
-      if (this.unsaved(t)) { kept.push(t.path); continue; }
+      if (this.unsaved(t) || this.draftOf(t) !== null) { kept.push(t.path); continue; }
       await this.reopen(t);
     }
     return kept;
@@ -667,6 +684,8 @@ export class EditorService {
    *  then closes every editor. False when cancelled (nothing closed). */
   async closeAllAsking(): Promise<boolean> {
     for (const t of this.tabs) this.commitField(t);
+    // Drafts first: a Cancel there leaves everything as it is, nothing saved either.
+    if (!(await this.mayDropDrafts([...this.tabs]))) return false;
     const dirty = this.tabs.filter((t) => this.unsaved(t));
     if (dirty.length) {
       const names = dirty.map((t) => t.path.split(/[/:]/).pop()).join(", ");
@@ -701,6 +720,7 @@ export class EditorService {
     // A field still being typed in counts as a change: closing would drop it without asking (the focus leaving
     // doesn't matter here, the tab goes away).
     if (!force) this.commitField(tab);
+    if (!force && !(await this.mayDropDrafts([tab]))) return false;
     if (!force && this.unsaved(tab)) {
       const r = await this.confirm(`Save changes to ${tab.path}?`, "Save", "Don't Save");
       if (r === "Save" && tab.instance?.save) { if (!(await this.saveTab(tab))) return false; }

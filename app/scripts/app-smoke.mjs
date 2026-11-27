@@ -7491,8 +7491,31 @@ async function terrainLayoutEditor(page, found) {
     const differ = [...new Set([...before.keys(), ...back.keys()])].filter((k) => before.get(k) !== back.get(k));
     if (differ.length) fail(`after Undo these map/terrain/ files differ from before Apply: ${differ.join(", ")}`);
     e = await until("the editor after Undo", async () => { const s = await editor(); return s?.draft.length === 4 && s.canRedo ? s : null; }, 20000).catch(async () => { fail(`after Undo the editor says ${lit((await editor())?.draft)}`); return null; });
+
+    // A draft isn't lost without a word: no save writes it, and closing the tab, closing every editor (a project switch,
+    // quitting) asks first.
+    const holds = () => page.evaluate(`w3Workbench.editors.holdsDrafts()`);
+    if (await holds()) fail("without a draft the editors say they hold one (control)");
+    await hands.click('button[data-layout="cols+"]');
+    await until("a new draft", async () => !!(await editor())?.pending, 10000);
+    if (!(await holds())) fail("a drawn draft isn't told to the quit guard");
+    await page.evaluate(`(() => { window.__tleAsk = w3Workbench.editors.confirm; window.__tleAsked = []; window.__tleAnswer = "Cancel"; w3Workbench.editors.confirm = async (m, ...a) => { window.__tleAsked.push([m, a]); return window.__tleAnswer; }; })()`);
+    const asked = () => page.evaluate(`window.__tleAsked.splice(0)`);
+    const open = () => page.evaluate(`w3.editors.openPaths().includes("w3:terrain-layout")`);
+    const onDisk = snapshot(terrainDir);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if ((await asked()).length || !(await editor())?.pending || [...snapshot(terrainDir)].join() !== [...onDisk].join()) fail("Save All asked about, wrote or dropped the layout draft");
+    if ((await page.evaluate(`w3Workbench.editors.closeAllAsking()`)) !== false || !(await open())) fail("Cancel didn't keep the editors when closing them all");
+    const q = await asked();
+    if (q.length !== 1 || !/layout draft isn't applied/.test(q[0][0]) || lit(q[0][1]) !== lit(["Discard", "Cancel"])) fail(`closing them all asked ${lit(q)}`);
+    await page.evaluate(`w3Workbench.editors.closeActive()`);
+    if (!(await open()) || (await asked()).length !== 1 || !(await editor())?.pending) fail("Cancel didn't keep the tab and its draft");
+    await page.evaluate(`window.__tleAnswer = "Discard"; undefined`);
+    await page.evaluate(`w3Workbench.editors.closeActive()`);
+    if ((await open()) || (await asked()).length !== 1 || (await holds())) fail("Discard didn't close the tab");
   } finally {
-    await page.evaluate(`(() => { if (window.__tleKept) Object.assign(w3.window, window.__tleKept); delete window.__tleKept; })()`).catch(() => {});
+    await page.evaluate(`(() => { if (window.__tleKept) Object.assign(w3.window, window.__tleKept); delete window.__tleKept; if (window.__tleAsk) w3Workbench.editors.confirm = window.__tleAsk; delete window.__tleAsk; })()`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
 }

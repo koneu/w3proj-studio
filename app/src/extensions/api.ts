@@ -173,6 +173,10 @@ export interface EditorInstance {
    *  Without it, a save first has the focused text field in the editor commit its text (it loses the focus and gets
    *  it back, which fires its `change` if the text changed); an editor with it commits its fields itself. */
   flush?(): void;
+  /** What closing would lose that isn't a file's unsaved change, so no save writes it (the Terrain Layout editor's draft,
+   *  which only Apply writes), as the question to ask: "Discard" closes, anything else keeps the tab. Null: nothing.
+   *  Asked when the tab is closed and before every editor is (a project switch, quitting); Save and Save All leave it. */
+  discardQuestion?(): string | null;
   /** Whether the only unsaved change is view state the file keeps (the Trigger Editor's opened and closed categories):
    *  actions that refuse while anything is unsaved save such an editor first (`editors.saveViewOnly`). */
   viewOnlyUnsaved?(): boolean;

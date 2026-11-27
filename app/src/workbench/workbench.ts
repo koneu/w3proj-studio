@@ -123,7 +123,7 @@ export class Workbench {
     this.menuBar = new MenuBar(() => menuTree(this.commands.all().map((c) => ({ ...c, keybinding: this.keybindings.primaryKey(c.id) }))), (c) => this.run(c),
       (when) => this.blockedNow(when));
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
-    this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking(), () => this.editors.remember());
+    this.titleBar.guardClose(() => this.editors.unsavedPaths().length + (this.editors.holdsDrafts() ? 1 : 0), () => this.editors.closeAllAsking(), () => this.editors.remember());
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
     this.workspace.onDidChange.on(() => this.warnUnreadable());
     root.append(this.titleBar.root, main, this.statusBar.root);
