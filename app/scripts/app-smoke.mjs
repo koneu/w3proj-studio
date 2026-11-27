@@ -6665,7 +6665,8 @@ async function resizeUnreadable(page, found) {
       const before = state();
       const err = await tool("resize_map", { right: 32 }).then(() => null, (e) => String(e.message ?? e));
       if (!err) fail(`${label}: the resize by the tool wasn't refused`);
-      else if (!pattern.test(err) || !/Nothing was changed/.test(err)) fail(`${label}: the resize was refused with "${err}"`);
+      // (A regions file that isn't JSON stops the checkpoint before the resize: "Nothing changed: the checkpoint failed".)
+      else if (!pattern.test(err) || !/Nothing (was )?changed/.test(err)) fail(`${label}: the resize was refused with "${err}"`);
       await settled(page);
       const moved = differ(before, state());
       if (moved.length) fail(`${label}: the refused resize changed ${moved.join(", ")}`);
@@ -6855,7 +6856,9 @@ async function subterrains(page, found) {
       const want = [["ne", 32, 32, 33, 33], ["nw", 0, 32, 32, 33], ["se", 32, 0, 33, 32], ["sw", 0, 0, 32, 32]];
       if (lit(grid) !== lit(want)) fail(`the cut gave ${lit(grid)}, not ${lit(want)}`);
     }
-    // The editor the commands opened again is at rest with its minimap panel drawn (the reload showed it black).
+    // The editor the commands opened again is at rest with its minimap panel drawn (the reload showed it black). The
+    // panel as a new view has it (a check before may have left it off: plainGridView).
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
     await editorUp().catch(() => fail("the terrain editor isn't open again after the cut"));
     await settled(page);
     {
