@@ -26,7 +26,7 @@ import { CONDITION, parseTriggerData, type TriggerData } from "../../lib/trigger
 import type { Param } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import {
-  ALL, BUILD_EXPANSION, BUILD_UNIT, BUILD_UPGRADE, buildTotals, conditionUses, CREEPS, HERO_ORDERS, quantityText, RACES, removeCondition,
+  ALL, BUILD_EXPANSION, BUILD_UNIT, BUILD_UPGRADE, buildTotals, conditionUses, CREEPS, HERO_ORDERS, quantityMode, quantityText, RACES, removeCondition, setQuantityMode, type QuantityMode,
   removeGroup, SPECIAL_BUILDS, TARGETS, townChoices, townText, workersText,
 } from "./labels";
 
@@ -773,20 +773,14 @@ class AiView {
   private unitDetail() {
     const u = this.ai.groups[this.group]?.units[this.unit];
     if (!u) return null;
-    const all = (u.quantity | 0) === -1, upToAll = !all && (u.max | 0) === -1;
-    const mode = all ? "all" : upToAll ? "minAll" : u.quantity === u.max ? "fixed" : "range";
+    const mode = quantityMode(u.quantity, u.max);
     return h("div.ai-detail", {},
       this.field("Unit", this.objectButton(u.id, "Attack unit", ["w3u"], (id) => { u.id = id; }),
         h("span.muted", {}, " "), this.select(SPECIAL_BUILDS.some(([s]) => s === u.id) ? u.id : "", [["", "Specific unit"], ...SPECIAL_BUILDS.slice(0, 3)] as [string, string][],
           (v) => { if (v) u.id = v; })),
-      this.field("Quantity", this.select(mode, [["all", "All"], ["fixed", "Fixed Value"], ["minAll", "Range: Minimum - All"], ["range", "Range: Minimum - Maximum"]], (v) => {
-        const n = all ? 1 : u.quantity;
-        if (v === "all") { u.quantity = ALL; u.max = ALL; }
-        else if (v === "fixed") { u.quantity = n; u.max = n; }
-        else if (v === "minAll") { u.quantity = n; u.max = ALL; }
-        else { u.quantity = n; u.max = n + 1; }
-      }),
-      mode !== "all" ? this.num("Quantity", u.quantity, (v) => { u.quantity = v; if (mode === "fixed" || (mode === "range" && u.max < v)) u.max = v; }, { min: 0 }) : null,
+      this.field("Quantity", this.select(mode, [["all", "All"], ["allBut", "All but N"], ["fixed", "Fixed Value"], ["minAll", "Range: Minimum - All"], ["range", "Range: Minimum - Maximum"]], (v) => { setQuantityMode(u, v as QuantityMode); }),
+      mode === "allBut" ? this.num("Units kept back", u.max, (v) => { u.max = v; }, { min: 1 }) : null,
+      mode !== "all" && mode !== "allBut" ? this.num("Quantity", u.quantity, (v) => { u.quantity = v; if (mode === "fixed" || (mode === "range" && u.max < v)) u.max = v; }, { min: 0 }) : null,
       mode === "range" ? h("span", {}, " to ", this.num("Maximum quantity", u.max, (v) => { u.max = Math.max(v, u.quantity); }, { min: 0 })) : null),
       this.condEditor(u));
   }
