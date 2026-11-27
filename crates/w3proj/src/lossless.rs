@@ -89,6 +89,31 @@ mod tests {
         assert_eq!(decode(b"a\xFF"), "a\u{10FFFF}");
     }
 
+    /// tests/fixtures/codepage-samples.json: GBK, CP949 and Big5 texts, sequences those can't read among them, as
+    /// app/src/lib/formats/codepage.ts shows and stores them. Both sides read them alike, and the text the editor stores
+    /// for a typed one is written as the code page's bytes.
+    #[test]
+    fn code_page_samples_agree_with_the_editor() {
+        let samples: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/codepage-samples.json")).unwrap();
+        let read = samples["read"].as_array().unwrap();
+        let typed = samples["typed"].as_array().unwrap();
+        assert!(read.len() >= 6 && typed.len() >= 3, "control: the samples are there");
+        for s in read {
+            let bytes = unhex(s["bytes"].as_str().unwrap());
+            assert!(std::str::from_utf8(&bytes).is_err(), "control: {s} isn't UTF-8");
+            assert_eq!(decode(&bytes), s["lossless"].as_str().unwrap(), "{s}");
+            assert_eq!(encode(&decode(&bytes)), bytes, "{s}");
+        }
+        for s in typed {
+            assert_eq!(encode(s["stored"].as_str().unwrap()), unhex(s["bytes"].as_str().unwrap()), "{s}");
+        }
+    }
+
+    fn unhex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
     #[test]
     fn the_escapes_themselves_survive() {
         let real = "\u{10FF80}x\u{10FFFF}";

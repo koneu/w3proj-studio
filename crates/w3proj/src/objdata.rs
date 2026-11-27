@@ -497,6 +497,36 @@ mod tests {
         }
     }
 
+    /// The sample with its name's bytes as `name`.
+    fn named(name: &[u8]) -> Vec<u8> {
+        let bin = sample(2, false);
+        let at = bin.windows(16).position(|w| w == b"Footman Captain\0").unwrap();
+        [&bin[..at], name, &[0], &bin[at + 16..]].concat()
+    }
+
+    /// A name in GBK, CP949 or Big5 (tests/fixtures/codepage-samples.json, sequences those can't read among them):
+    /// unpacked and packed again, the same bytes; a name the editor stored for a typed text with a code page chosen
+    /// (app/src/lib/formats/codepage.ts) packs as that code page's bytes.
+    #[test]
+    fn code_page_names_pack_byte_for_byte() {
+        let samples: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/codepage-samples.json")).unwrap();
+        let unhex = |s: &str| -> Vec<u8> { (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect() };
+        for s in samples["read"].as_array().unwrap() {
+            let bin = named(&unhex(s["bytes"].as_str().unwrap()));
+            let json = to_json(&bin, false).unwrap();
+            let file: serde_json::Value = serde_json::from_slice(&json).unwrap();
+            assert_eq!(file["custom"][0]["mods"][0]["value"], s["lossless"], "{s}");
+            assert_eq!(from_json(&json, false).unwrap(), bin, "{s}");
+        }
+        for s in samples["typed"].as_array().unwrap() {
+            let mut file: serde_json::Value = serde_json::from_slice(&to_json(&sample(2, false), false).unwrap()).unwrap();
+            file["custom"][0]["mods"][0]["value"] = s["stored"].clone();
+            let packed = from_json(&serde_json::to_vec(&file).unwrap(), false).unwrap();
+            assert_eq!(packed, named(&unhex(s["bytes"].as_str().unwrap())), "{s}");
+        }
+    }
+
     #[test]
     fn string_values_still_write() {
         assert!(from_json(&with_value("string", "\"1e39\""), false).is_ok());

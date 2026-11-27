@@ -23,6 +23,12 @@ function sequence(b: Uint8Array, i: number): [number, number] | null {
   return overlong || (cp >= 0xd800 && cp < 0xe000) || cp > 0x10ffff ? null : [cp, n];
 }
 
+/** The character a byte that isn't UTF-8 stands as in a text from `decodeLossless`. */
+export const rawByteChar = (b: number): string => String.fromCodePoint(FIRST + (b & 0xff));
+
+/** The byte a character from `rawByteChar` stands for, or null for any other character (code point). */
+export const rawByteOf = (cp: number): number | null => (isEscape(cp) ? cp - FIRST : null);
+
 /** Whether a text from `decodeLossless` holds bytes that aren't UTF-8 (an old code page's). */
 export const hasRawBytes = (s: string): boolean => ESCAPES.test(s);
 
