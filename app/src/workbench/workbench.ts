@@ -142,6 +142,7 @@ export class Workbench {
     this.views.activate = fire;
     this.editors.activate = fire;
     this.views.run = (c) => this.run(c);
+    this.views.settingsTitle = () => { const key = this.keybindings.primaryKey("w3.settings.open"); return key ? `Open Settings (${keyLabel(key)})` : "Open Settings"; };
     this.editors.confirm = (m, ...a) => this.notifications.show("warning", m, a);
     this.editors.showMenu = (at, items) => showContextMenu(at, items);
     followGraphicsMode({ get: () => this.settings.get<string>("game.graphicsMode"), onDidChange: (l) => this.settings.onDidChange(l),

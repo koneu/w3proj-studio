@@ -70,6 +70,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .activity { width: 46px; height: 44px; border: none; border-left: 2px solid transparent; border-radius: 0; background: none; font-size: 20px; color: var(--fg-muted); padding: 0; }
 .activity:hover { color: var(--fg); background: none; }
 .activity.active { color: var(--fg); border-left-color: var(--accent); }
+.activity-settings { margin-top: auto; margin-bottom: 4px; flex: 0 0 auto; }
 .sidebar { width: 280px; min-width: 180px; max-width: 50vw; resize: horizontal; overflow: auto; background: var(--bg-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .sidebar-title { padding: 10px 14px; font-size: 11px; letter-spacing: 0.08em; color: var(--fg-muted); }
 .view-header { display: flex; align-items: center; gap: 4px; padding: 3px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; border-top: 1px solid var(--border); }

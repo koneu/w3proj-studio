@@ -20,6 +20,8 @@ export class ViewService {
   private active: string | null = null;
   activate: (event: string) => Promise<void> = async () => {};
   run: (command: string) => void = () => {};
+  /** The gear's tooltip: the command's title with the key it has now. */
+  settingsTitle: () => string = () => "Open Settings";
 
   contributeContainer(c: ViewContainerContribution) {
     this.containers.push(c);
@@ -102,6 +104,9 @@ export class ViewService {
   }
 
   private renderActivityBar() {
+    // At the bottom, as VS Code's gear: the Settings editor. Not a view: it never shows as the active one.
+    const gear = h("button.activity.activity-settings", { title: this.settingsTitle(), "aria-label": "Open Settings",
+      onmouseenter: () => { gear.title = this.settingsTitle(); }, onclick: () => this.run("w3.settings.open") }, "⚙");
     this.activityBar.replaceChildren(
       ...this.containers.map((c) =>
         h(
@@ -118,6 +123,7 @@ export class ViewService {
           c.icon,
         ),
       ),
+      gear,
     );
   }
 }
