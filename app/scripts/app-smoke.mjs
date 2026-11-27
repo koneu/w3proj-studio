@@ -3585,6 +3585,138 @@ async function codePageTextEditor(page, found) {
   }
 }
 
+/** Change Map Text Encoding (builtin/text-encoding, lib/formats/codepage.ts) on a map with GBK texts: the map's name in
+ *  war3map.wts, a unit's name in its object data, a trigger's comment. Without a choice they show as before (private-use
+ *  characters); with GBK chosen from the command, Map Properties, the Object Editor, the Trigger Editor and the string
+ *  table in the text editor show them readable, the status bar says GBK and the project setting holds it. A character GBK
+ *  can't write is refused with a word and changes nothing; edited texts are written as GBK bytes, every other byte of the
+ *  string table stays, and the packed map holds the GBK bytes of the edited and the untouched texts. UTF-8 again: as before. */
+async function codePageChoice(page, found) {
+  const fail = (what) => found.push(`map text encoding: ${what}`);
+  try {
+    const k = await heightKit(page, "CodePageChoice");
+    const wtsFile = join(k.root, "map", "war3map.wts");
+    const raw = (bytes) => bytes.map((b) => String.fromCodePoint(0x10ff00 + b)).join("");
+    // GBK: 中文地图 and a byte GBK can't read (FF); 步兵; 测试; 新名字. The last three hold no UTF-8 sequence, so their
+    // lossless text is one private-use character per byte (raw); 中文地图's C4 B5 is one (U+0135).
+    const MAP_NAME = [0xd6, 0xd0, 0xce, 0xc4, 0xb5, 0xd8, 0xcd, 0xbc, 0xff], UNIT = [0xb2, 0xbd, 0xb1, 0xf8], COMMENT = [0xb2, 0xe2, 0xca, 0xd4];
+    const TYPED_NAME = [0xd0, 0xc2, 0xc3, 0xfb, 0xd7, 0xd6];
+    // The map's name: a string of war3map.wts (string 900) holding the GBK bytes, as an old map has it.
+    const NUM = 900;
+    const before = existsSync(wtsFile) ? readFileSync(wtsFile) : Buffer.from("﻿");
+    const block = Buffer.concat([Buffer.from(`\r\nSTRING ${NUM}\r\n{\r\n`), Buffer.from(MAP_NAME), Buffer.from("\r\n}\r\n")]);
+    const wts = Buffer.concat([before, block]), textAt = before.length + block.indexOf("{\r\n") + 3;
+    await page.evaluate(`w3.workspace.writeBytes("map/war3map.wts", new Uint8Array(${lit([...wts])}))`);
+    const info = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...JSON.parse(info), name: `TRIGSTR_${NUM}` }, null, 2) + "\n")})`);
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: raw(UNIT) }] });
+    // A name is a Skin field: in war3mapSkin.w3u when the map has one.
+    const unitName = () => ["war3map.w3u.json", "war3mapSkin.w3u.json"].map((n) => { try { return k.read(n).custom.find((o) => o.id === unit)?.mods?.find((m) => m.field === "unam")?.value; } catch { return undefined; } }).find((v) => v !== undefined);
+    await page.evaluate(`(async () => {
+      const t = await w3.workspace.readTriggers();
+      const item = t?.file.items.find((i) => i.name === "Melee Initialization");
+      if (!item) throw new Error("no trigger Melee Initialization in map/triggers/");
+      item.description = ${lit(raw(COMMENT))};
+      for (const c of t.file.items) if (c.type === 4) c.expanded = 1;
+      await w3.workspace.writeTriggers({ file: t.file, custom: t.custom, stored: t.stored });
+    })()`);
+    await settled(page);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    const nameBox = `(() => { const l = [...document.querySelectorAll(".map-info label.form-row")].find((x) => x.querySelector(".form-label")?.textContent === "Name"); return l?.querySelector("input, textarea"); })()`;
+    const nameNow = () => page.evaluate(`${nameBox}?.value ?? null`);
+    const openName = async () => {
+      await page.evaluate(`w3.editors.closeAll()`);
+      await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "description")`);
+      await until("Map Properties' name box", async () => (await nameNow()) !== null, 20000);
+    };
+    const status = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEncoding.status"]')?.textContent ?? ""`);
+    // No choice: as before (the control).
+    await openName();
+    if ((await nameNow()) === "中文地图" + raw([0xff]) || !(await nameNow()).includes(raw([0xd6]))) fail(`with no choice the name shows ${lit(await nameNow())}, not its bytes as before`);
+    if ((await status()) !== "Texts: UTF-8") fail(`with no choice the status bar says ${lit(await status())}`);
+
+    // GBK, by the command.
+    const chosen = await k.run("w3.textEncoding.change", "gbk");
+    if (chosen) return fail(`Change Map Text Encoding: ${chosen}`);
+    const settingsFile = join(k.root, ".w3proj", "settings.json");
+    const setting = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, "utf8"))["map.textEncoding"] : undefined;
+    if (setting !== "gbk") fail(`the project's settings hold ${lit(setting)}, not gbk`);
+    if (!(await soon(async () => (await status()) === "Texts: GBK"))) fail(`with GBK chosen the status bar says ${lit(await status())}`);
+    // The open Map Properties opened again with it.
+    if (!(await soon(async () => (await nameNow()) === "中文地图" + raw([0xff]), 20000))) fail(`with GBK the open Map Properties shows the name ${lit(await nameNow())}`);
+
+    // A character GBK can't write: refused, said, nothing changed.
+    await page.evaluate(`(() => { const e = ${nameBox}; e.focus(); e.value = "한국"; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    const said = await page.evaluate(`${nameBox}.closest(".form-control").querySelector(".map-info-cut")?.textContent ?? ""`);
+    if (!/can't be written in GBK/.test(said)) fail(`Hangul typed in GBK says ${lit(said)}, not that GBK can't write it`);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3i.json")`)) fail("the refused text left Map Properties unsaved");
+    // A text GBK has: taken, saved as its GBK bytes; the table before it stays (the map's other plain texts become
+    // strings after it, as the World Editor's Map Properties does: map-info/textedit.ts).
+    await page.evaluate(`(() => { const e = ${nameBox}; e.value = "新名字"; e.dispatchEvent(new Event("input", { bubbles: true })); e.blur(); })()`);
+    await k.save();
+    const saved = readFileSync(wtsFile);
+    const want = Buffer.concat([wts.subarray(0, textAt), Buffer.from(TYPED_NAME), Buffer.from("\r\n}")]);
+    if (!saved.subarray(0, want.length).equals(want)) fail(`after the edit war3map.wts holds ${lit(saved.subarray(Math.max(0, textAt - 40), textAt + 40).toString("latin1"))} around the name, not its GBK bytes in an otherwise unchanged table`);
+
+    // The Object Editor: the unit's name readable; nothing edited, nothing changes.
+    const cell = ".obj-table .obj-value-cell", input = `${cell} input:not(.color-tools-picker)`;
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(unit)})`);
+    await until("the unit's fields", () => page.evaluate(`!!document.querySelector("input.obj-field-search") && document.querySelectorAll(${lit(cell)}).length >= 1`), 30000);
+    await retype(k.hands, "input.obj-field-search", "unam");
+    await until("the unam field", () => page.evaluate(`document.querySelectorAll(${lit(input)}).length === 1`), 5000);
+    const unitShown = await page.evaluate(`document.querySelector(${lit(input)})?.value ?? null`);
+    if (unitShown !== "步兵") fail(`with GBK the Object Editor shows the unit's name ${lit(unitShown)}`);
+    const listed = await page.evaluate(`[...document.querySelectorAll(".obj-list *")].some((e) => e.children.length === 0 && e.textContent.includes("步兵"))`);
+    if (!listed) fail("with GBK the object list doesn't show the unit's name readable");
+    await k.save();
+    if (unitName() !== raw(UNIT)) fail(`the untouched unit name is stored as ${lit(unitName())}`);
+
+    // The Trigger Editor: the comment readable; an edit is written in GBK.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await k.run("w3.triggers.open");
+    await until("the trigger tree", () => page.evaluate(`[...document.querySelectorAll(".trig-row.trig-gui")].some((r) => r.textContent.trim() === "Melee Initialization")`), 20000);
+    await k.hands.click(".trig-row.trig-gui", "Melee Initialization");
+    await until("the trigger's comment box", () => page.evaluate(`!!document.querySelector(".trig-desc-edit")`), 10000);
+    const comment = await page.evaluate(`document.querySelector(".trig-desc-edit").value`);
+    if (comment !== "测试") fail(`with GBK the trigger's comment shows ${lit(comment)}`);
+    await page.evaluate(`(() => { const e = document.querySelector(".trig-desc-edit"); e.value = "测试 ok"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await k.save();
+    const savedComment = k.triggers().file.items.find((i) => i.name === "Melee Initialization")?.description;
+    if (savedComment !== raw(COMMENT) + " ok") fail(`the edited comment is stored as ${lit(savedComment)}`);
+
+    // The string table in the text editor: readable, the status bar names the encoding.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`void w3.editors.open("map/war3map.wts", "w3.textEditor")`);
+    const lines = () => page.evaluate(`[...document.querySelectorAll(".cm-content .cm-line")].map((l) => l.textContent)`);
+    if (!(await soon(async () => (await lines()).includes("新名字"), 20000))) fail(`war3map.wts in the text editor shows ${lit((await lines()).slice(0, 12))}`);
+    const cursor = await page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEditor.cursor"]')?.textContent ?? ""`);
+    if (!cursor.includes("GBK")) fail(`the text editor's status says ${lit(cursor)}, not GBK`);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // Packed: the edited and the untouched texts as their GBK bytes.
+    const built = resolve(k.root, await page.evaluate(`w3.workspace.project().default_output`));
+    rmSync(built, { force: true });
+    await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+    await until("the build", () => existsSync(built), 60000).catch(() => fail("Pack Map wrote no map"));
+    await settled(page);
+    if (existsSync(built)) {
+      const cat = (name) => spawnSync(cli, ["cat", built, name], { maxBuffer: 1 << 28 }).stdout ?? Buffer.alloc(0);
+      if (!cat("war3map.wts").includes(Buffer.from(TYPED_NAME))) fail("the packed war3map.wts lacks the edited name's GBK bytes");
+      if (!Buffer.concat([cat("war3map.w3u"), cat("war3mapSkin.w3u")]).includes(Buffer.from(UNIT))) fail("the packed war3map.w3u and war3mapSkin.w3u lack the unit name's GBK bytes");
+      if (!cat("war3map.wtg").includes(Buffer.from([...COMMENT, ...Buffer.from(" ok")]))) fail("the packed war3map.wtg lacks the edited comment's GBK bytes");
+    }
+
+    // UTF-8 again: as before.
+    const back = await k.run("w3.textEncoding.change", "utf-8");
+    if (back) fail(`Change Map Text Encoding back: ${back}`);
+    await openName();
+    if ((await nameNow()) !== raw(TYPED_NAME)) fail(`UTF-8 again, the name shows ${lit(await nameNow())}, not its bytes`);
+    if ((await status()) !== "Texts: UTF-8") fail(`UTF-8 again, the status bar says ${lit(await status())}`);
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
  *  preview, a plain string's doesn't; the toolbar's colour lands in the value the dialog returns. */
 async function triggerParamColorTools(page, found) {
@@ -19628,6 +19760,7 @@ async function run() {
         classicRefusal,
         cliCheck,
         cliffTypeList,
+        codePageChoice,
         codePageStrings,
         codePageTextEditor,
         configSafety,
@@ -20002,6 +20135,8 @@ async function checksB(page, found) {
   await leftOpen(page, "codePageStrings", found);
   await codePageTextEditor(page, found).catch((e) => found.push(`code page text editor: ${e.message}`));
   await leftOpen(page, "codePageTextEditor", found);
+  await codePageChoice(page, found).catch((e) => found.push(`map text encoding: ${e.message}`));
+  await leftOpen(page, "codePageChoice", found);
   await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
   await leftOpen(page, "objectListSuffix", found);
   await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));

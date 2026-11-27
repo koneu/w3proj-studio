@@ -22,6 +22,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     /** The code editor for a trigger's custom text (`trigger`: it has a gg_trg_ global). */
     const render = (el: HTMLElement, t: TriggerItem, ed: TriggerEditorHandle, trigger: boolean) => {
       const lua = ed.language === "lua";
+      // The text as it was when shown: lines in an old code page show readable in the map's text encoding, and the
+      // lines typed are written in it while the others keep their bytes (lib/formats/codepage.ts).
+      const was = ed.customText(t) ?? "";
+      const shown = ed.text ? ed.text.show(was) : was;
+      const stored = (typed: string): string | null => {
+        if (!ed.text) return typed;
+        try {
+          return ed.text.store(typed, was);
+        } catch (e) {
+          void w3.window.showError((e as Error).message);
+          return null;
+        }
+      };
       const hint = h("p.muted.trig-hint", {}, trigger
         ? `Copied into war3map.${lua ? "lua" : "j"} as it is when the map script is generated.`
         : `Copied into the "Custom Script Code" section of war3map.${lua ? "lua" : "j"} (after the map header), in tree order.`);
@@ -49,17 +62,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return checkLua(text, names);
         };
         const editor = code.create(box, {
-          value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable, check,
+          value: shown, language: ed.language, readOnly: !ed.editable, check,
           symbols: lua ? async (text: string) => luaSymbols(await gameJassEnv((p) => w3.game.readText(p)), text) : map.symbols,
           openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
-          onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
+          onChange: (typed) => {
+            const v = stored(typed);
+            if (v !== null) ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true });
+          },
         });
         return { dispose: () => editor.dispose(), flush: () => editor.flush() };
       }
       const area = h("textarea.trig-code-edit", {
-        spellcheck: false, readOnly: !ed.editable, rows: 24, value: ed.customText(t) ?? "",
+        spellcheck: false, readOnly: !ed.editable, rows: 24, value: shown,
         // Also called by the host before a save (TriggerKind.render's flush): nothing when the text is unchanged.
-        onchange: () => { if (area.value !== (ed.customText(t) ?? "")) ed.edit("Edit script", () => ed.setCustomText(t, area.value)); },
+        onchange: () => {
+          const v = stored(area.value);
+          if (v !== null && v !== (ed.customText(t) ?? "")) ed.edit("Edit script", () => ed.setCustomText(t, v));
+        },
       });
       el.append(area, hint);
     };

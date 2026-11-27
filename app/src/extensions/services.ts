@@ -643,6 +643,9 @@ export interface TriggerEditorHandle {
   readonly editable: boolean;
   /** The map's script language (war3map.w3i scriptType). */
   readonly language: "jass" | "lua";
+  /** The map's text encoding as the editor shows texts (lib/formats/codepage.ts): a text in an old code page is shown
+   *  with `show` and what is typed over it stored with `store` (throws UnencodableError). None: texts as they are. */
+  readonly text?: import("../lib/formats/codepage").TextCodec;
   /** The trigger's custom script text (war3map.wct), or null. */
   customText(trigger: TriggerItem): string | null;
   setCustomText(trigger: TriggerItem, text: string | null): void;

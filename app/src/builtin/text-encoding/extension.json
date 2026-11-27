@@ -1,0 +1,25 @@
+{
+  "id": "w3.textEncoding",
+  "name": "Map Text Encoding",
+  "version": "0.1.0",
+  "description": "Old Chinese and Korean maps keep their texts in a code page (GBK, CP949, Big5), not UTF-8. Choose it for the open project and the editors show those texts readable and write edited ones in it; a text nobody edits keeps its bytes. Shown in the status bar.",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "commands": [
+      { "id": "w3.textEncoding.change", "when": "project", "title": "Change Map Text Encoding…", "category": "Project" }
+    ],
+    "configuration": {
+      "title": "Map Text Encoding",
+      "properties": {
+        "map.textEncoding": {
+          "type": "string",
+          "scope": "project",
+          "default": "utf-8",
+          "enum": ["utf-8", "gbk", "cp949", "big5"],
+          "enumDescriptions": ["UTF-8 (texts as they are)", "GBK (Simplified Chinese)", "CP949 (Korean)", "Big5 (Traditional Chinese)"],
+          "description": "The code page of the map's texts that aren't UTF-8 (old Chinese and Korean maps). The editors show them in it and write edited texts in it; untouched texts keep their bytes. Change Map Text Encoding sets it for the open project."
+        }
+      }
+    }
+  }
+}

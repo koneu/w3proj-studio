@@ -2,6 +2,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { withColorTools } from "../../extensions/colortools";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
+import { textCodec, UnencodableError } from "../../lib/formats/codepage";
 import { importStrings, readWts, StringTable, writeWts, wtsBytes, WtsCutError, wtsCutLines, wtsText } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
@@ -371,6 +372,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // the file as it is then (other editors may have saved strings meanwhile).
         let wtsBase = await readWts(w3.workspace, "map/war3map.wts").catch(() => null);
         const strings = wtsBase !== null ? new StringTable(wtsBase) : null;
+        // The map's text encoding as it is now (lib/formats/codepage.ts): texts in an old code page show readable, typed
+        // ones are written in it.
+        const codec = textCodec((k) => w3.settings.get(k));
         const v = info.version;
         // Start locations (war3mapUnits.doo, either project form): players without one can't be added.
         const root = w3.workspace.project()!.root;
@@ -420,7 +424,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const text = (get: () => string, set: (s: string) => void, opts: { multiline?: boolean; plain?: boolean; disabled?: string; cls?: string } = {}) => {
           const ref = StringTable.ref(get());
           const viaTable = ref !== null && strings?.has(ref);
-          const value = viaTable ? strings!.get(ref!)! : get();
+          const raw = viaTable ? strings!.get(ref!)! : get();
+          const value = codec.show(raw);
           // A one-line box drops line breaks from its value: a text that has some (a subtitle of two lines) gets a box
           // that keeps them, or the first key typed in it would join its lines.
           const input = opts.multiline || /[\r\n]/.test(value)
@@ -431,20 +436,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A "}" in a string table text: the game ends the text there (wtsCutLines), so the save refuses it; said here
           // as it is typed.
           const cut = h("small.form-error.map-info-cut");
+          // A character the map's text encoding can't write: the text keeps what it had, and this says why.
+          let refused = "";
           const showCut = () => {
             const lines = viaTable ? wtsCutLines(input.value) : [];
-            input.classList.toggle("invalid", lines.length > 0);
-            cut.textContent = lines.length
+            input.classList.toggle("invalid", lines.length > 0 || !!refused);
+            cut.textContent = refused || (lines.length
               ? `The game ends this text at its first "}" (line ${lines.join(", ")}) and drops the rest; it can't be saved so. Remove the "}" or use another character.`
-              : "";
-            cut.hidden = !lines.length;
+              : "");
+            cut.hidden = !cut.textContent;
           };
           showCut();
           // One undo step per visit of the field.
           let visit = {};
           input.addEventListener("input", () => {
-            if (viaTable) strings!.set(ref!, input.value);
-            else set(input.value);
+            let typed: string;
+            try {
+              typed = codec.store(input.value, raw);
+              refused = "";
+            } catch (e) {
+              if (!(e instanceof UnencodableError)) throw e;
+              refused = e.message;
+              showCut();
+              return;
+            }
+            if (viaTable) strings!.set(ref!, typed);
+            else set(typed);
             showCut();
             update(visit);
           });
@@ -703,7 +720,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             };
             // HUD Skin: only in files that have it (version 39 with player HUD skins).
             const skins = info.players.some((p) => p.hudSkin !== undefined);
-            const nameOf = (p: Player) => `${p.id + 1}. ${StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name}`;
+            const nameOf = (p: Player) => `${p.id + 1}. ${codec.show(StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name)}`;
             // Without "Modify ally priorities" the save works them out from the start locations, as the World Editor's
             // does: shown as they will be saved, and greyed.
             const auto = autoAllyPriorities(info.flags);
@@ -785,12 +802,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 row("Name", text(() => f.name, (s) => { f.name = s; })),
                 h("div.form-checks", {}, ...FORCE_FLAGS.map(([m, label]) => bit(() => f.flags, (n) => { f.flags = n >>> 0; }, m, label))),
                 h("div.form-checks", {}, h("span.muted", {}, "Members:"), ...info.players.map((p) =>
-                  bit(() => f.players, (n) => { f.players = n >>> 0; }, 1 << p.id, `${p.id + 1}. ${StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name}`))),
+                  bit(() => f.players, (n) => { f.players = n >>> 0; }, 1 << p.id, `${p.id + 1}. ${codec.show(StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name)}`))),
               )),
             ),
           ],
           techtree: () => renderTechtree(info as unknown as TechInfo, {
-            players: info.players.map((p) => ({ id: p.id, label: `Player ${p.id + 1}: ${StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name}` })),
+            players: info.players.map((p) => ({ id: p.id, label: `Player ${p.id + 1}: ${codec.show(StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name)}` })),
             pick: async (title, kinds) => (await (await w3.services.get<ObjectsService>(OBJECTS_SERVICE)).pick(el, { title, kinds }))?.id,
             name: async (id) => (await w3.services.get<ObjectsService>(OBJECTS_SERVICE)).name(id),
             changed: (rerender) => { update(); if (rerender) show(section); },

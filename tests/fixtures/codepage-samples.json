@@ -1,0 +1,16 @@
+{
+  "about": "Texts of old maps in their code page, for app/src/lib/formats/codepage.test.ts and crates/w3proj/src/lossless.rs. read: a string's bytes (hex), its lossless text (lossless.ts / lossless.rs) and what an editor shows with the code page chosen; a byte the code page can't read stays its private-use character (U+10FF00 + byte). typed: what a user typed, the lossless text the editor stores for it (codepage.ts storeText) and the bytes that text packs to.",
+  "read": [
+    { "codePage": "gbk", "bytes": "d6d0cec4", "lossless": "􏿖􏿐􏿎􏿄", "shown": "中文" },
+    { "codePage": "gbk", "bytes": "d6d0817fd6", "lossless": "􏿖Ё\u007f􏿖", "shown": "中􏾁\u007f􏿖" },
+    { "codePage": "cp949", "bytes": "c7d1b1b9", "lossless": "􏿇ѱ􏾹", "shown": "한국" },
+    { "codePage": "cp949", "bytes": "c730ff", "lossless": "􏿇0􏿿", "shown": "􏿇0􏿿" },
+    { "codePage": "big5", "bytes": "a4a4a4e5", "lossless": "􏾤􏾤􏾤􏿥", "shown": "中文" },
+    { "codePage": "big5", "bytes": "a480a4", "lossless": "􏾤􏾀􏾤", "shown": "􏾤􏾀􏾤" }
+  ],
+  "typed": [
+    { "codePage": "gbk", "typed": "中文!", "stored": "􏿖􏿐􏿎􏿄!", "bytes": "d6d0cec421" },
+    { "codePage": "cp949", "typed": "한국 Ork", "stored": "􏿇ѱ􏾹 Ork", "bytes": "c7d1b1b9204f726b" },
+    { "codePage": "big5", "typed": "中文", "stored": "􏾤􏾤􏾤􏿥", "bytes": "a4a4a4e5" }
+  ]
+}

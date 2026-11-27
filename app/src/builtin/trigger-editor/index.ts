@@ -7,6 +7,7 @@
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
+import { textCodec, UnencodableError, type TextCodec } from "../../lib/formats/codepage";
 import { checkStringIds, compactStringIds, readWts, renumberStringRefs, StringTable } from "../../lib/formats/wts";
 import { adjustStringTables, isLocaleWts, localeOnlyNumbers } from "../../lib/formats/localewts";
 import { readPrunedStrings, reservedStringIds } from "../../lib/formats/prunedstrings";
@@ -395,7 +396,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return names.get(id);
         };
-        const display: DisplayContext = { data, string: (v) => strings?.resolve(v) ?? v, objectName };
+        // Texts of parameters as the map's text encoding shows them (lib/formats/codepage.ts); the view's own codec is the
+        // same choice, taken now too.
+        const shownText = textCodec((k) => w3.settings.get(k)).show;
+        const display: DisplayContext = { data, string: (v) => shownText(strings?.resolve(v) ?? v), objectName };
         const lua = (await scriptLanguage(w3)) === "lua";
         el.replaceChildren();
         const code = await w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null);
@@ -792,6 +796,9 @@ class TriggerView {
   private savedToggles = 0;
   private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean; run?(action: "selectAll" | "clear" | "toggleFunction"): boolean; flush?(): void } | void = undefined;
   private handle: TriggerEditorHandle;
+  /** The map's text encoding as it was when the editor opened (lib/formats/codepage.ts): names, comments and script
+   *  in an old code page show readable, typed ones are written in it. */
+  private codec: TextCodec;
   private vars: VariableHost;
   private unsubscribe: () => void;
   /** Where the last click was: keys go to the trigger's contents or to the tree. */
@@ -824,8 +831,9 @@ class TriggerView {
     this.header = custom?.header ?? null;
     this.followExpanded();
     const view = this;
+    this.codec = textCodec((k) => w3.settings.get(k));
     this.handle = {
-      get file() { return view.file; }, data, display, editable, language,
+      get file() { return view.file; }, data, display, editable, language, text: this.codec,
       customText: (t) => this.texts.get(t) ?? null,
       setCustomText: (t, text) => { this.texts.set(t, text); },
       customFile: () => this.customFile(),
@@ -1505,6 +1513,17 @@ class TriggerView {
         ]);
       } }, "⋯"));
   }
+  /** What was typed into a box that showed `was`, as stored (the map's text encoding), or null with a word why when the
+   *  encoding can't write it. */
+  private stored(typed: string, was: string): string | null {
+    try {
+      return this.codec.store(typed, was);
+    } catch (e) {
+      if (!(e instanceof UnencodableError)) throw e;
+      void this.w3.window.showError(e.message);
+      return null;
+    }
+  }
   private run(command: string) { this.w3.commands.execute(command).catch((e) => this.w3.window.showError(String((e as Error).message ?? e))); }
   private convertCommand() { this.run("w3.triggers.convertToCustomText"); }
 
@@ -1521,7 +1540,7 @@ class TriggerView {
       ondblclick: () => { if (opts.toggle !== undefined) this.toggle(opts.toggle); },
       oncontextmenu: (e: MouseEvent) => this.menu(e, sel, opts.toggle),
       ...this.dragHandlers(sel),
-    }, caret, h("span.trig-label", {}, label));
+    }, caret, h("span.trig-label", {}, this.codec.show(label)));
   }
   /** Right-click in the tree: selects the row, then offers new items, moving and deleting. */
   private menu(e: MouseEvent, sel: Selection, category?: number) {
@@ -1670,18 +1689,25 @@ class TriggerView {
         const map = mapJass((p) => this.w3.game.readText(p), readScriptFile(this.w3.workspace, "map/war3map.j").catch(() => null), () => projectJassEnv(this.w3));
         const jass = this.handle.language === "jass";
         const check = jass ? async (text: string) => checkJass(text, await map.without(text)) : undefined;
+        const shownFrom = this.header ?? "";
         const ed = this.code.create(box, {
-          value: this.header ?? "", language: this.handle.language, readOnly: !editable, check, symbols: jass ? map.symbols : undefined,
+          value: this.codec.show(shownFrom), language: this.handle.language, readOnly: !editable, check, symbols: jass ? map.symbols : undefined,
           openLocation: (loc) => { if (loc.startsWith("trigger:")) this.handle.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
-          onChange: (v) => this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); }, { keepView: true }),
+          onChange: (typed) => {
+            const v = this.stored(typed, shownFrom);
+            if (v !== null) this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); }, { keepView: true });
+          },
         });
         this.body = { dispose: () => ed.dispose(), flush: () => ed.flush() };
         return;
       }
       const area = h("textarea.trig-code-edit", {
-        spellcheck: false, readOnly: !editable, rows: 16, value: this.header ?? "",
+        spellcheck: false, readOnly: !editable, rows: 16, value: this.codec.show(this.header ?? ""),
         placeholder: `Map-specific ${this.handle.language === "lua" ? "Lua" : "JASS"} code, placed in the map script before the triggers.`,
-        onchange: () => { if (area.value !== (this.header ?? "")) this.edit("Edit map script", () => { this.header = area.value || (this.header === null ? null : ""); }); },
+        onchange: () => {
+          const v = this.stored(area.value, this.header ?? "");
+          if (v !== null && v !== (this.header ?? "")) this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); });
+        },
       });
       this.detail.replaceChildren(h("h2", {}, "Map script header"),
         ...(this.custom?.comment ? [h("p.trig-desc", {}, this.custom.comment)] : []), area);
@@ -1690,7 +1716,10 @@ class TriggerView {
     if (s.kind === "variables") { this.detail.replaceChildren(h("h2", {}, "Variables"), variablesTable(this.w3, this.vars, this.file.variables)); return; }
     const it = this.find(s);
     if (!it) { this.detail.replaceChildren(h("p.muted", {}, "Nothing selected.")); return; }
-    const name = nameField(h("input.trig-name", { type: "text", value: it.name, readOnly: !editable }), () => it.name, (to) => this.rename(it, to));
+    const name = nameField(h("input.trig-name", { type: "text", value: this.codec.show(it.name), readOnly: !editable }), () => this.codec.show(it.name), (to) => {
+      const v = this.stored(to, it.name);
+      return v === null ? Promise.resolve(false) : this.rename(it, v);
+    });
     if (it.type === 64) {
       const v = this.file.variables.find((x) => x.id === it.id);
       this.detail.replaceChildren(h("h2", {}, "Variable"), v ? variablesTable(this.w3, this.vars, [v]) : h("p.muted", {}, "Variable not found."));
@@ -1706,8 +1735,11 @@ class TriggerView {
       return h("label.trig-flag", {}, box, label);
     };
     const desc = h("textarea.trig-desc-edit", {
-      rows: 2, value: it.description, readOnly: !editable, placeholder: it.type === 16 ? "Comment" : it.type === 32 ? "Script comment" : "Trigger comment",
-      onchange: () => { if (desc.value !== it.description) this.edit("Edit comment", () => { it.description = desc.value; }); },
+      rows: 2, value: this.codec.show(it.description), readOnly: !editable, placeholder: it.type === 16 ? "Comment" : it.type === 32 ? "Script comment" : "Trigger comment",
+      onchange: () => {
+        const v = this.stored(desc.value, it.description);
+        if (v !== null && v !== it.description) this.edit("Edit comment", () => { it.description = v; });
+      },
     });
     const head = h("div.trig-head", {}, name,
       ...(it.type === 16 ? [] : [
