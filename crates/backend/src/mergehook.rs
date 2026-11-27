@@ -1,5 +1,6 @@
 //! `w3proj terrain merge-hook`: the opt-in git hook that runs Check Terrain Seams (`w3proj terrain seams`) after a
-//! merge that touched two subterrains or `terrain.json` of a split project. Disjoint subterrain files stop textual
+//! merge that touched two subterrains or `terrain.json` of a split project, and Check Trigger Tree (`w3proj triggers
+//! --check`) after one that touched `map/triggers/`. Disjoint subterrain files stop textual
 //! conflicts, not semantic ones: two branches editing near one seam can merge cleanly into a cliff or ramp no brush
 //! would leave. The hook only reports (a post-merge hook can't undo the merge); nothing is changed.
 //!
@@ -43,7 +44,8 @@ pub fn hook_block(prefix: &str, w3proj: &str) -> String {
         "{BEGIN}\n\
          {MARK}\n\
          # Checks the terrain seams of a split W3Proj project after a merge that touched two of its subterrains (or\n\
-         # map/terrain/terrain.json): `w3proj terrain seams`. It only reports. Run `w3proj terrain merge-hook --remove`\n\
+         # map/terrain/terrain.json): `w3proj terrain seams`; and its trigger tree after a merge that touched\n\
+         # map/triggers/: `w3proj triggers --check`. It only reports. Run `w3proj terrain merge-hook --remove`\n\
          # (or delete this block) to stop it; the rest of this file isn't part of it.\n\
          (\n\
          project={project}\n\
@@ -52,6 +54,12 @@ pub fn hook_block(prefix: &str, w3proj: &str) -> String {
          # What both sides changed since they parted: the merged branch (HEAD's second parent; a fast-forward: HEAD).\n\
          theirs=$(git rev-parse -q --verify HEAD^2 2>/dev/null || git rev-parse HEAD)\n\
          base=$(git merge-base ORIG_HEAD \"$theirs\" 2>/dev/null) || exit 0\n\
+         # The trigger tree: disjoint files merge without a conflict into ids or variables held twice.\n\
+         triggers=$(git diff --name-only \"$base\" HEAD -- \"$top/${{project}}map/triggers\" 2>/dev/null) || triggers=\n\
+         if [ -n \"$triggers\" ]; then\n\
+         echo \"w3proj: the merged branches changed the trigger tree of ${{project:-.}}; checking it\"\n\
+         \"$w3proj\" triggers \"$top/${{project}}.\" --check || echo \"w3proj: the merge left trigger tree issues (above): W3Proj Studio's Problems view lists them with their fixes (or: w3proj triggers --check --fix all)\"\n\
+         fi\n\
          changed=$(git diff --name-only \"$base\" HEAD -- \"$top/${{project}}map/terrain\" 2>/dev/null) || exit 0\n\
          [ -n \"$changed\" ] || exit 0\n\
          # Which subterrain folders the two sides changed; terrain.json counts as all of them.\n\
@@ -239,7 +247,7 @@ pub fn run(project: &Path, remove: bool, program: &str) -> Result<Outcome, Strin
     write(&text)?;
     // `git lfs install` writes no hook over one that is there, so a project that gets LFS later has to be told how.
     let lfs = if existing.is_none() { ". If a later `git lfs install` says \"Hook already exists\": run `git lfs install --force`, then install this hook again (both then run)" } else { "" };
-    Ok(out(action, format!("{said} (it runs `w3proj terrain seams` after a merge that touched two subterrains; W3PROJ_BIN names another w3proj){lfs}")))
+    Ok(out(action, format!("{said} (it runs `w3proj terrain seams` after a merge that touched two subterrains and `w3proj triggers --check` after one that touched map/triggers/; W3PROJ_BIN names another w3proj){lfs}")))
 }
 
 #[cfg(test)]

@@ -173,6 +173,27 @@ export function renameBranchArgs(from: string, to: string): string[] {
   return ["branch", "-m", "--", from, to];
 }
 
+/** A commit's full or short hash, as the history lists it: nothing git could take for an option or another revision. */
+const isHash = (hash: string) => /^[0-9a-f]{7,64}$/.test(hash);
+
+/** `git revert` arguments: a new commit that undoes `hash`, with git's own message. */
+export function revertArgs(hash: string): string[] {
+  if (!isHash(hash)) throw new Error(`${hash || "(nothing)"} isn't a commit of the history.`);
+  return ["revert", "--no-edit", hash];
+}
+
+/** Whether a line of `git rev-list --parents -n 1` is a merge commit's (more than one parent): `git revert` needs to
+ *  be told which side to keep, so the history doesn't revert those. */
+export const isMergeLine = (line: string) => line.trim().split(/\s+/).length > 2;
+
+/** `git restore` arguments that put a file of the working copy back to what commit `hash` had: the working copy only,
+ *  so it shows as a change to commit or discard. The path goes after `--`. */
+export function takeVersionArgs(hash: string, path: string): string[] {
+  if (!isHash(hash)) throw new Error(`${hash || "(nothing)"} isn't a commit of the history.`);
+  if (!path) throw new Error("No file to take.");
+  return ["restore", `--source=${hash}`, "--worktree", "--", path];
+}
+
 /** Whether git refused `branch -d` because the branch has commits no other branch has. */
 export const notFullyMerged = (error: unknown) => /not fully merged/i.test(String(error instanceof Error ? error.message : error));
 

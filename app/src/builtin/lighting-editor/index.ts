@@ -6,7 +6,7 @@
 // UnitLights). The side bar shows both slots: customize (copy a game model into the map), turn
 // on/off, remove, and edit there with the terrain view beside it showing the light (session.ts).
 // The editor of a lighting model (any .mdl that is one, in a tab) has the same form (form.ts):
-// intensities, the colours over the day and the direction. Both write the text as the World Editor
+// intensities, the colours over the day and the direction (a sun angle, sunangle.ts). Both write the text as the World Editor
 // does (lib/model/dnclight) and export it (export.ts).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";

@@ -20,6 +20,7 @@ import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
 import { readWts, StringTable, writeWts, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
+import { textCodec, UnencodableError, type TextCodec } from "../../lib/formats/codepage";
 import { parseIni } from "../../lib/formats/text";
 import { imagePresetOf, parseImagePresets, parsePresets, presetOptions, type ImagePreset, type Preset } from "./presets";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -177,7 +178,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const info: CampaignInfo = JSON.parse(await w3.workspace.readText(FILE));
           const wts = await readWts(w3.workspace, WTS).catch(() => null);
           const strings = wts !== null ? new StringTable(wts) : null;
-          const text = (v: string) => strings?.resolve(v) ?? v;
+          const shown = textCodec((k) => w3.settings.get(k)).show;
+          const text = (v: string) => shown(strings?.resolve(v) ?? v);
           list.replaceChildren(...info.chapters.map((c, i) => row(`${text(c.chapter)}: ${text(c.title)}`, run(() => open("chapters", i)),
             h("button.icon-button.camp-side-open", { title: `Open ${c.map}`, onclick: (e: MouseEvent) => { e.stopPropagation(); run(() => openChapter(c.map))(); } }, "↗"),
             c.map)));
@@ -258,10 +260,13 @@ class CampaignView {
   private selected = -1;
   /** The game's presets once read; until then (or without them) the screen sections show the numbers. */
   private presets: PresetLists | null = null;
+  /** The map text encoding as chosen when this editor opened: texts that aren't UTF-8 are shown and typed in it. */
+  private codec: TextCodec;
 
   constructor(private w3: W3Api, private el: HTMLElement, public info: CampaignInfo, private strings: StringTable | null,
     private editable: boolean, private setDirty: (dirty: boolean) => void, private save: () => Promise<void>) {
     this.root = w3.workspace.project()?.root;
+    this.codec = textCodec((k) => w3.settings.get(k));
     el.classList.add("camp-editor");
     el.tabIndex = -1;
     addKeyContext(el, UNDO_CONTEXT);
@@ -363,19 +368,36 @@ class CampaignView {
   private text(get: () => string, set: (s: string) => void, opts: { multiline?: boolean } = {}) {
     const ref = StringTable.ref(get());
     const viaTable = ref !== null && !!this.strings?.has(ref);
-    const value = this.textOf(get());
+    // As stored (a text that isn't UTF-8 keeps its bytes) and as shown in the map's text encoding.
+    const raw = this.textOf(get());
+    const value = this.codec.show(raw);
     const input = opts.multiline
       ? h("textarea.form-input", { rows: 6, value, readOnly: !this.editable })
       : h("input.form-input", { value, readOnly: !this.editable });
+    // A character the map's text encoding can't write: the text keeps what it had, and this says why.
+    const refused = h("small.form-error.camp-refused", { hidden: true });
     let first = true;
     input.addEventListener("input", () => {
-      const v = input.value;
+      let v: string;
+      try {
+        v = this.codec.store(input.value, raw);
+      } catch (e) {
+        if (!(e instanceof UnencodableError)) throw e;
+        refused.textContent = e.message;
+        refused.hidden = false;
+        input.classList.add("invalid");
+        return;
+      }
+      refused.hidden = true;
+      input.classList.remove("invalid");
       const apply = () => { if (viaTable) this.texts.set(ref!, v); else set(v); };
       // The first keystroke records the undo step; later ones extend it.
       if (first) { first = false; this.change(apply, false); } else { apply(); this.setDirty(true); }
     });
     input.addEventListener("blur", () => { first = true; });
-    return viaTable ? h("div.form-stack", {}, input, h("small.muted", { title: "Stored in war3campaign.wts" }, `string table · ${get()}`)) : input;
+    // With no text encoding chosen nothing is refused: the box alone, as before.
+    if (!viaTable && !this.codec.cp) return input;
+    return h("div.form-stack", {}, input, refused, viaTable ? h("small.muted", { title: "Stored in war3campaign.wts" }, `string table · ${get()}`) : null);
   }
   /** `unset`: the value the World Editor stores for "not set" (shown empty; emptying the field stores it). */
   private num(label: string, value: number, set: (n: number) => void, opts: { int?: boolean; unset?: number } = {}) {
@@ -690,7 +712,7 @@ class CampaignView {
       h("tbody", {}, ...c.chapters.map((x, k) => {
         const missing = !maps.some((m) => m.name.toLowerCase() === x.map.toLowerCase());
         return h(`tr.camp-row${k === i ? ".active" : ""}`, { onclick: () => { this.selected = k; this.render(); }, ondblclick: run(() => this.openMap(x.map)) },
-          h("td", {}, String(k + 1)), h("td", {}, this.textOf(x.chapter)), h("td", {}, this.textOf(x.title)),
+          h("td", {}, String(k + 1)), h("td", {}, this.codec.show(this.textOf(x.chapter))), h("td", {}, this.codec.show(this.textOf(x.title))),
           h(`td${missing ? ".camp-missing" : ""}`, { title: missing ? "Not in the campaign" : "" }, x.map),
           h("td", {}, x.flags & 1 ? "from the start" : "later"));
       })));

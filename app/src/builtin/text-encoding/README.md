@@ -6,7 +6,8 @@ nothing is converted on open, save or pack (`lib/formats/codepage.ts`).
 
 ## Data
 Writes the project setting `map.textEncoding` (`.w3proj/settings.json`). Reads no map files itself: the editors (Map
-Properties, Object Editor, Trigger Editor, the text editor's string tables and map script) read the choice through
+Properties, Object Editor, Trigger Editor, Sound Editor, Campaign Editor, the text editor's string tables and map script, and the
+Source Control diff, which only shows) read the choice through
 `textCodec` when they open, and this extension opens them again when the choice changes.
 
 ## Contributes

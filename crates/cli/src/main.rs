@@ -801,7 +801,8 @@ enum TerrainCmd {
         json: bool,
     },
     /// Install the opt-in git hook (post-merge, in the repository holding PROJECT) that runs `w3proj terrain seams`
-    /// after a merge that changed two subterrains or terrain.json of the split project: it only reports. A post-merge
+    /// after a merge that changed two subterrains or terrain.json of the split project, and `w3proj triggers --check`
+    /// after one that changed map/triggers/: it only reports. A post-merge
     /// hook that isn't this one is never replaced (the line to add to it is printed); installing again updates this one.
     #[command(name = "merge-hook")]
     MergeHook {

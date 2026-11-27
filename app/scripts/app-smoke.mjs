@@ -895,6 +895,88 @@ async function sourceControlHistory(page, found) {
   if (e4 || git("branch", "--show-current").stdout.trim() !== "trunk") fail(`renaming the current branch: ${e4}, now ${git("branch", "--show-current").stdout.trim()}`);
   await until("the status bar to show the new name", () => page.evaluate(`document.body.textContent.includes("⎇ trunk")`), 10000)
     .catch(() => fail("the status bar doesn't show the renamed current branch"));
+
+  // The history's Revert Commit and Take This Version (the questions are answered by __answer, as above).
+  git("config", "user.name", "Smoke");
+  git("config", "user.email", "smoke@example.invalid");
+  const histFile = join(root, "hist.txt");
+  const commits = () => git("rev-list", "--count", "HEAD").stdout.trim();
+  const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  const clearToasts = () => page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+  const openRow = async (subject) => {
+    await until(`the commit ${subject} listed`, async () => (await subjects())[0] === subject, 10000);
+    // A commit that is open already stays open (a click would fold it).
+    await page.evaluate(`(() => { const r = document.querySelector(".scm-log-row"); if (!r.querySelector(".scm-log-revert")) r.click(); })()`);
+    await until(`the files of ${subject}`, () => page.evaluate(`!!document.querySelector(".scm-log-file") && !!document.querySelector(".scm-log-revert")`), 10000);
+  };
+  const was = commits();
+  await search("needle");
+  await openRow("the needle");
+  // Cancel: nothing happens (control).
+  await page.evaluate(`(() => { window.__asked = []; window.__answer = "Cancel"; document.querySelector(".scm-log-take").click(); })()`);
+  await until("the Take This Version question", () => page.evaluate(`window.__asked.length === 1`), 10000).catch(() => fail("Take This Version asked nothing"));
+  await settled(page);
+  if (readFileSync(histFile, "utf8") !== "259\n") fail("Take This Version answered Cancel changed the file");
+  // Taken: the working copy holds the old version, as a change; no commit is made.
+  await page.evaluate(`(() => { window.__answer = "Take This Version"; document.querySelector(".scm-log-take").click(); })()`);
+  await until("the old version of hist.txt", () => readFileSync(histFile, "utf8") === "123\n", 15000).catch(async () => fail(`Take This Version left hist.txt as ${lit(readFileSync(histFile, "utf8"))}; ${await toasts()}`));
+  if (git("status", "--porcelain", "--", "hist.txt").stdout !== " M hist.txt\n" || commits() !== was) fail(`after Take This Version git says ${lit(git("status", "--porcelain", "--", "hist.txt").stdout)}, ${commits()} commits`);
+  git("checkout", "-q", "--", "hist.txt");
+  await settled(page);
+  // A commit later ones built on: not reverted, said, nothing changed and no revert left half done.
+  await clearToasts();
+  await search("needle");
+  await openRow("the needle");
+  await page.evaluate(`(() => { window.__answer = "Revert"; document.querySelector(".scm-log-revert").click(); })()`);
+  await until("the refusal", async () => /can't be reverted by itself/.test(await toasts()), 15000).catch(async () => fail(`reverting a commit that later ones changed says ${lit(await toasts())}`));
+  await settled(page);
+  if (commits() !== was || readFileSync(histFile, "utf8") !== "259\n" || git("status", "--porcelain", "--", "hist.txt").stdout !== "" || git("rev-parse", "-q", "--verify", "REVERT_HEAD").status === 0) fail("the refused revert left something changed");
+  await clearToasts();
+  // The last commit: reverted in a new commit.
+  await search("");
+  await openRow("tiny commit 259");
+  await page.evaluate(`document.querySelector(".scm-log-revert").click()`);
+  await until("the revert's commit", () => commits() === String(Number(was) + 1), 15000).catch(async () => fail(`Revert Commit made no commit: ${await toasts()}`));
+  if (readFileSync(histFile, "utf8") !== "258\n") fail(`after the revert hist.txt holds ${lit(readFileSync(histFile, "utf8"))}`);
+  await until("the revert in the history", async () => /^Revert "tiny commit 259"/.test((await subjects())[0] ?? ""), 10000).catch(async () => fail(`the history's first commit is ${lit((await subjects())[0])} after the revert`));
+  await clearToasts();
+
+  // Merge Branch runs Check Trigger Tree when the merge changed map/triggers/, and only then.
+  const trigDir = join(root, "map", "triggers");
+  const trigFile = existsSync(trigDir) ? ["header.j", ...readdirSync(trigDir)].map((n) => join(trigDir, n)).find((f) => existsSync(f) && statSync(f).isFile()) : undefined;
+  if (!trigFile) fail("the new map has no file in map/triggers/ to merge a change of");
+  else {
+    const here = git("branch", "--show-current").stdout.trim();
+    const mergeIn = async (branch) => {
+      await clearToasts();
+      await page.evaluate(`(() => { w3.window.quickPick = async (items) => items.find((i) => i.value === ${lit(branch)}); })()`);
+      const e = await run("w3.scm.merge");
+      if (e) fail(`merging ${branch}: ${e}`);
+      await settled(page);
+      return toasts();
+    };
+    git("add", "--", "map/triggers");
+    git("commit", "-q", "-m", "the trigger tree");
+    // A branch that changes another file only (control): merged, nothing said about the trigger tree.
+    git("switch", "-q", "-c", "plain");
+    writeFileSync(histFile, "plain\n");
+    git("commit", "-q", "-am", "plain");
+    git("switch", "-q", here);
+    const plain = await mergeIn("plain");
+    if (!/Merged plain/.test(plain) || /trigger tree/.test(plain)) fail(`merging a branch that left map/triggers/ alone says ${lit(plain)}`);
+    // A branch that leaves a conflict's markers in a trigger file: the merge says what the check found.
+    const trigWas = readFileSync(trigFile, "utf8");
+    git("switch", "-q", "-c", "marked");
+    writeFileSync(trigFile, `<<<<<<< ours\n${trigWas}\n=======\n>>>>>>> theirs\n`);
+    git("commit", "-q", "-am", "markers");
+    git("switch", "-q", here);
+    const marked = await mergeIn("marked");
+    if (!/Check Trigger Tree found \d+ problem/.test(marked)) fail(`merging a branch that broke a trigger file says ${lit(marked)}, not what Check Trigger Tree found`);
+    await until("the Problems view on the finding", () => page.evaluate(`document.body.textContent.includes("unresolved merge conflict")`), 15000).catch(() => fail("the Problems view doesn't show the trigger tree's finding after the merge"));
+    writeFileSync(trigFile, trigWas);
+    git("commit", "-q", "-am", "markers out");
+    await clearToasts();
+  }
   } finally {
     await restoreWindow(page);
   }
@@ -3715,6 +3797,133 @@ async function codePageChoice(page, found) {
     if ((await nameNow()) !== raw(TYPED_NAME)) fail(`UTF-8 again, the name shows ${lit(await nameNow())}, not its bytes`);
     if ((await status()) !== "Texts: UTF-8") fail(`UTF-8 again, the status bar says ${lit(await status())}`);
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
+/** The map text encoding in the Sound Editor, the Source Control diff and the Campaign Editor (lib/formats/codepage.ts):
+ *  with GBK chosen a dialogue's speaker name and text, both sides of a string table's diff and a campaign's texts show
+ *  readable; a character GBK can't write is refused with a word and changes nothing; an edited text is written as GBK
+ *  bytes and every other byte of the string table stays. */
+async function codePageOtherEditors(page, found) {
+  const fail = (what) => found.push(`map text encoding, other editors: ${what}`);
+  const camp = join(work, "code-page-campaign");
+  try {
+    const k = await heightKit(page, "CodePageOthers");
+    const raw = (bytes) => bytes.map((b) => String.fromCodePoint(0x10ff00 + b)).join("");
+    // GBK: 步兵, 测试, 中文 (each byte pair no UTF-8 sequence: one private-use character per byte as lossless text).
+    const UNIT = [0xb2, 0xbd, 0xb1, 0xf8], TEXT = [0xb2, 0xe2, 0xca, 0xd4], NAME = [0xd6, 0xd0, 0xce, 0xc4];
+    const block = (n, bytes) => Buffer.concat([Buffer.from(`STRING ${n}\r\n{\r\n`), Buffer.from(bytes), Buffer.from("\r\n}\r\n\r\n")]);
+    const status = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.textEncoding.status"]')?.textContent ?? ""`);
+    const chooseGbk = async () => {
+      const said = await k.run("w3.textEncoding.change", "gbk");
+      if (said) throw new Error(`Change Map Text Encoding: ${said}`);
+      await until("the status bar on GBK", async () => (await status()) === "Texts: GBK", 10000);
+    };
+
+    // ---- the Sound Editor: a dialogue sound whose speaker name and text are GBK strings of war3map.wts.
+    const w3s = "map/war3map.w3s.json", wtsFile = join(k.root, "map", "war3map.wts");
+    const before = existsSync(wtsFile) ? readFileSync(wtsFile) : Buffer.from("﻿");
+    const wts = Buffer.concat([before, Buffer.from("\r\n"), block(901, UNIT), block(902, TEXT)]);
+    const sound = {
+      name: "gg_snd_Spoken", file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_Spoken", assetLabel: "", assetFile: "", dialogueTextKey: 902, dialogueText: "", speakerNameKey: 901, speakerName: "", unknown1: 0,
+      speakerUnitType: "hfoo", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(async () => {
+      await w3.workspace.writeBytes("map/war3map.wts", new Uint8Array(${lit([...wts])}));
+      await w3.workspace.writeText(${lit(w3s)}, ${lit(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [sound] }))});
+      await w3.workspace.refresh();
+    })()`);
+    await settled(page);
+    // A repository with the files as they are now, for the diff below.
+    const env = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(k.root) };
+    const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "-c", "core.autocrlf=false", ...args], { cwd: k.root, encoding: "utf8", env });
+    const repo = git("init", "-q").status === 0 && git("add", "-A").status === 0 && git("commit", "-q", "-m", "start").status === 0;
+    if (!repo) fail("the scratch repository wasn't made");
+    const fields = () => page.evaluate(`[document.querySelector("input.snd-speaker-name")?.value ?? null, document.querySelector("textarea.snd-dialogue-text")?.value ?? null]`);
+    const openSound = async () => {
+      await page.evaluate(`w3.editors.closeAll()`);
+      await page.evaluate(`w3.editors.open(${lit(w3s)})`);
+      await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 1`), 20000);
+      await k.hands.click("tr.snd-row:nth-child(1)");
+      await until("the dialogue fields", () => page.evaluate(`!!document.querySelector("textarea.snd-dialogue-text")`), 10000);
+    };
+    const typeText = (value) => page.evaluate(`(() => { const t = document.querySelector("textarea.snd-dialogue-text"); t.value = ${lit(value)}; t.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    // No choice: the bytes as before (the control).
+    await openSound();
+    if ((await fields()).join("|") !== `${raw(UNIT)}|${raw(TEXT)}`) fail(`with no choice the Sound Editor shows ${lit(await fields())}, not the texts' bytes`);
+    await chooseGbk();
+    await openSound();
+    if ((await fields()).join("|") !== "步兵|测试") fail(`with GBK the Sound Editor shows ${lit(await fields())}, not 步兵 and 测试`);
+    // A character GBK can't write: refused, said, nothing changed.
+    await k.clearToasts();
+    await typeText("한국");
+    await settled(page);
+    if (!/can't be written in GBK/.test(await k.toasts())) fail(`Hangul typed as a dialogue text says ${lit(await k.toasts())}, not that GBK can't write it`);
+    if (await page.evaluate(`w3.editors.isDirty(${lit(w3s)})`)) fail("the refused dialogue text left the Sound Editor unsaved");
+    await k.clearToasts();
+    // Nothing edited, saved: the string table as it was.
+    await k.save();
+    if (!readFileSync(wtsFile).equals(wts)) fail("a save of the Sound Editor without a change changed war3map.wts");
+    // An edit: written as GBK bytes, every other byte stays.
+    await typeText("测试 ok");
+    await k.save();
+    const want = Buffer.concat([before, Buffer.from("\r\n"), block(901, UNIT), block(902, [...TEXT, ...Buffer.from(" ok")])]);
+    const saved = readFileSync(wtsFile);
+    if (!saved.equals(want)) fail(`after the dialogue edit war3map.wts ends ${lit(saved.subarray(-60).toString("latin1"))}, not with the text's GBK bytes in an otherwise unchanged table`);
+
+    // ---- the diff of the string table: both sides readable, one change.
+    if (repo) {
+      await page.evaluate(`w3.editors.closeAll()`);
+      await page.evaluate(`void w3.editors.open("w3:diff:map/war3map.wts")`);
+      const diffLines = () => page.evaluate(`[...document.querySelectorAll(".diff-pane .cm-line")].map((l) => l.textContent)`);
+      const has = async (...texts) => { const l = await diffLines(); return texts.every((t) => l.includes(t)); };
+      if (!(await soon(() => has("步兵", "测试", "测试 ok"), 20000))) fail(`with GBK the diff of war3map.wts shows ${lit((await diffLines()).slice(-14))}, not its texts readable`);
+      const head = await page.evaluate(`document.querySelector(".diff-pane .diff-head")?.textContent ?? ""`);
+      if (!/\b1 change\b/.test(head)) fail(`the diff of war3map.wts says ${lit(head)}, not one change`);
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
+    const back = await k.run("w3.textEncoding.change", "utf-8");
+    if (back) fail(`Change Map Text Encoding back: ${back}`);
+
+    // ---- the Campaign Editor: the name in the campaign's string table, the author in the campaign file itself.
+    rmSync(camp, { recursive: true, force: true });
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${lit(camp)}, name: "Code Page Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${lit(camp)}`), 20000);
+    const campFile = join(camp, "map", "war3campaign.w3f.json"), campWtsFile = join(camp, "map", "war3campaign.wts");
+    const campWts = block(1, NAME);
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+      const info = { ...JSON.parse(await w3.workspace.readText(path)), name: "TRIGSTR_001", author: ${lit(raw(UNIT))} };
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: JSON.stringify(info) }));
+      await w3.workspace.writeBytes("map/war3campaign.wts", new Uint8Array(${lit([...campWts])}));
+      await w3.workspace.refresh();
+    })()`);
+    await chooseGbk();
+    const campBox = (label) => `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === ${lit(label)})?.querySelector("input.form-input, textarea.form-input")`;
+    const campValue = (label) => page.evaluate(`${campBox(label)}?.value ?? null`);
+    const campType = (label, value) => page.evaluate(`(() => { const e = ${campBox(label)}; e.focus(); e.value = ${lit(value)}; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "general")`);
+    await until("the Campaign Editor", async () => (await campValue("Name")) !== null, 20000);
+    if ((await campValue("Name")) !== "中文" || (await campValue("Author")) !== "步兵") fail(`with GBK the Campaign Editor shows the name ${lit(await campValue("Name"))} and the author ${lit(await campValue("Author"))}, not 中文 and 步兵`);
+    await campType("Author", "한국");
+    const refused = await page.evaluate(`${campBox("Author")}.closest(".form-control").querySelector(".camp-refused")?.textContent ?? ""`);
+    if (!/can't be written in GBK/.test(refused)) fail(`Hangul typed as the campaign's author says ${lit(refused)}, not that GBK can't write it`);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3campaign.w3f.json")`)) fail("the refused author left the Campaign Editor unsaved");
+    await campType("Author", "步兵 ok");
+    await k.save();
+    const author = JSON.parse(readFileSync(campFile, "utf8")).author;
+    if (author !== raw(UNIT) + " ok") fail(`the edited author is stored as ${lit(author)}, not its GBK bytes`);
+    if (!readFileSync(campWtsFile).equals(campWts)) fail("a save of the Campaign Editor without a change to the name changed war3campaign.wts");
+  } catch (e) { fail(e.message); } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await page.evaluate(`w3.workspace.close()`).catch(() => {});
+    rmSync(camp, { recursive: true, force: true });
+    await restoreWindow(page);
+  }
 }
 
 /** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
@@ -17450,6 +17659,17 @@ async function aiDocTools(page, found) {
     if (got.name !== "Smoke Turtle" || got.options.heroesFlee !== false || got.initialDelay !== 90) fail(`get_ai reads ${lit([got.name, got.options?.heroesFlee, got.initialDelay])}`);
     await k.tool("undo_last_edit");
     if (json(await k.tool("get_ai", { file: "map/Smoke.wai" })).name !== "Smoke Rush") fail("undo_last_edit didn't put the AI file's name back");
+    // Harvest and target priorities, attack groups and waves through the tool, read back from the file.
+    const waved = json(await k.tool("set_ai", { file: "map/Smoke.wai", harvest: [{ resource: "gold", workers: 5 }, { resource: "wood", town: "any", workers: "All NA" }],
+      targets: [{ target: "Creep Camp", creepLevels: [1, 4], flyers: true }, { target: "Enemy - Any Town" }],
+      groups: [{ name: "Smoke Squad", units: [{ id: "hfoo", quantity: 4 }, { id: "1HIA" }] }], waves: [{ group: "Smoke Squad", delay: 45 }], minimumForces: "Smoke Squad" }));
+    const read = json(await k.tool("get_ai", { file: "map/Smoke.wai" }));
+    const wantAi = { harvest: [{ resource: "gold", town: "Main", workers: "5" }, { resource: "wood", town: "Any", workers: "All NA" }],
+      targets: [{ target: "Creep Camp", creepLevels: [1, 4], flyers: true }, { target: "Enemy - Any Town" }],
+      groups: [{ name: "Smoke Squad", units: [{ id: "hfoo", quantity: "4" }, { id: "1HIA", quantity: "All" }] }], waves: [{ group: "Smoke Squad", delay: 45 }], minimumForces: "Smoke Squad" };
+    if (!waved.changed || Object.keys(wantAi).some((key) => lit(read[key]) !== lit(wantAi[key]))) fail(`set_ai with harvest, targets, groups and waves left ${lit(Object.fromEntries(Object.keys(wantAi).map((key) => [key, read[key]])))}`);
+    const noWave = await refused("set_ai", { file: "map/Smoke.wai", groups: [{ name: "Other", units: [] }] });
+    if (!noWave || !/give waves too/.test(noWave)) fail(`replacing a group its wave uses wasn't refused: ${lit(noWave)}`);
     await page.evaluate(`w3.editors.close("map/Smoke.wai")`);
 
     // Reserved areas: doodads keep off, units are placed and named in the answer; reserving is undone as an edit.
@@ -17630,6 +17850,26 @@ async function lightSideBar(page, found) {
     if (green === noon) fail("a changed colour isn't drawn in the terrain view");
     await until("the change saved to the light's file", async () => (await body()) !== before, 10000).catch((e) => fail(e.message));
     if ((await page.evaluate(`w3.editors.unsavedPaths().length`)) !== 0) fail("a side bar change left something unsaved");
+    // The direction as a sun angle: typed as direction and height, drawn from there and stored as the key's rotation.
+    const sunBox = (i) => `${session}.querySelectorAll(".lighting-sun tbody tr:first-child input")[${i}]`;
+    const typeSun = (i, v) => page.evaluate(`(() => { const b = ${sunBox(i)}; b.value = ${lit(String(v))}; b.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    const sunDir = async () => JSON.parse(await lit_()).terrain?.dir ?? null;
+    if (!(await page.evaluate(`!!${sunBox(1)}`))) fail("the light's form has no sun angle boxes");
+    else {
+      const saved = await body();
+      await typeSun(0, 90);
+      await typeSun(1, 30);
+      await settled(page);
+      const dir = await sunDir();
+      const want = [0, Math.cos(Math.PI / 6), 0.5];
+      if (!dir || dir.some((v, i) => Math.abs(v - want[i]) > 1e-3)) fail(`sun direction 90, height 30 lights the view from ${lit(dir)}, not from the north, 30° up`);
+      const shown = await page.evaluate(`[0, 1].map((i) => ${session}.querySelectorAll(".lighting-sun tbody tr:first-child input")[i].value)`);
+      if (shown.join() !== "90,30") fail(`the sun angle boxes show ${shown.join(", ")} after 90, 30 was typed`);
+      await until("the sun angle saved as the light's rotation", async () => { const t = await body(); return t !== saved && /Rotation \d+ \{[\s\S]*?\{ -0\.5, 0, 0, 0\.866025 \}/.test(t); }, 10000).catch((e) => fail(e.message));
+      await typeSun(1, 120);
+      await settled(page);
+      if ((await page.evaluate(`${sunBox(1)}.value`)) !== "30") fail("a sun height of 120 was taken");
+    }
     for (const ext of ["mdx", "mdl"]) {
       const out = join(work, `light-side.${ext}`);
       rmSync(out, { force: true });
@@ -19917,6 +20157,7 @@ async function run() {
         cliCheck,
         cliffTypeList,
         codePageChoice,
+        codePageOtherEditors,
         codePageStrings,
         codePageTextEditor,
         configSafety,
@@ -20295,6 +20536,8 @@ async function checksB(page, found) {
   await leftOpen(page, "codePageTextEditor", found);
   await codePageChoice(page, found).catch((e) => found.push(`map text encoding: ${e.message}`));
   await leftOpen(page, "codePageChoice", found);
+  await codePageOtherEditors(page, found).catch((e) => found.push(`map text encoding, other editors: ${e.message}`));
+  await leftOpen(page, "codePageOtherEditors", found);
   await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
   await leftOpen(page, "objectListSuffix", found);
   await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));

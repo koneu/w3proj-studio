@@ -56,6 +56,80 @@ test("what the AI Editor wouldn't take is refused", () => {
   assert.throws(() => setAi(cond, { build: [{ id: "htow" }] }), /have conditions.*AI Editor/);
 });
 
+test("set_ai changes harvest and target priorities, attack groups, waves and the minimum forces", () => {
+  const ai = newWai();
+  assert.equal(setAi(ai, {
+    harvest: [{ resource: "gold", workers: 5 }, { resource: "wood", town: "any", workers: "All NA" }, { resource: "gold", town: 1, workers: "all" }, { resource: "gold", town: "Mine 1", workers: 3 }],
+    targets: [{ target: "Enemy - Major Assault" }, { target: "creep camp", creepLevels: [2, 6], flyers: true }, { target: "Creep Camp" }],
+    groups: [
+      { name: "Rush", units: [{ id: "hfoo", quantity: 4 }, { id: "1HIA" }, { id: "hrif", quantity: "All but 2" }, { id: "hkni", quantity: "2 - All" }, { id: "hmpr", quantity: "1 - 3" }] },
+      { name: "All Units", units: [{ id: "hfoo", quantity: "All" }] },
+    ],
+    waves: [{ group: "Rush", delay: 60 }, { group: "All Units" }, { group: "Rush", delay: 30 }],
+    minimumForces: "Rush", repeatWaves: 2,
+  }), true);
+  // Written and read again, as the AI Editor would open it.
+  const read = parseWai(writeWai(ai), () => 0);
+  const back = describeAi(read);
+  assert.deepEqual(back.harvest, [{ resource: "gold", town: "Main", workers: "5" }, { resource: "wood", town: "Any", workers: "All NA" }, { resource: "gold", town: "Exp 1", workers: "All" },
+    { resource: "gold", town: "Mine 1", workers: "3" }]);
+  assert.deepEqual(back.targets, [{ target: "Enemy - Major Assault" }, { target: "Creep Camp", creepLevels: [2, 6], flyers: true }, { target: "Creep Camp", creepLevels: [0, 9], flyers: false }]);
+  assert.deepEqual(back.groups, [
+    { name: "Rush", units: [{ id: "hfoo", quantity: "4" }, { id: "1HIA", quantity: "All" }, { id: "hrif", quantity: "All but 2" }, { id: "hkni", quantity: "2 - All" }, { id: "hmpr", quantity: "1 - 3" }] },
+    { name: "All Units", units: [{ id: "hfoo", quantity: "All" }] },
+  ]);
+  assert.deepEqual([back.waves, back.minimumForces, back.repeatWaves], [[{ group: "Rush", delay: 60 }, { group: "All Units", delay: 0 }, { group: "Rush", delay: 30 }], "Rush", 2]);
+  // The entries as the AI Editor makes them.
+  assert.deepEqual([read.harvest[0].type, read.targets[0].type, read.targets[0].creep, read.groups.map((g) => g.index)], [1, 2, undefined, [0, 1]]);
+  // What get_ai shows goes back in unchanged.
+  assert.equal(setAi(ai, { harvest: back.harvest.map((p) => ({ ...p, workers: /^\d+$/.test(p.workers) ? Number(p.workers) : p.workers })), targets: back.targets, groups: back.groups, waves: back.waves, minimumForces: back.minimumForces }), false);
+
+  // New groups: the waves and the minimum forces follow the names that stay.
+  assert.equal(setAi(ai, { groups: [{ name: "All Units", units: [] }, { name: "Rush", units: [{ id: "hfoo", quantity: 2 }] }, { name: "Late", units: [] }] }), true);
+  const moved = describeAi(ai);
+  assert.deepEqual([moved.waves.map((w) => w.group), moved.minimumForces, ai.waves.map((w) => w.group), ai.minForces], [["Rush", "All Units", "Rush"], "Rush", [1, 0, 1], 1]);
+  // A group that waves use can't just go; with the waves given it can, and minimum forces fall back.
+  assert.throws(() => setAi(structuredClone(ai), { groups: [{ name: "Late", units: [] }] }), /attack waves use the group Rush.*give waves too/);
+  assert.throws(() => setAi(structuredClone(ai), { groups: [{ name: "Late", units: [] }], waves: [{ group: "Late" }] }), /Repeat Waves is 2, more than the 1 attack wave/);
+  assert.equal(setAi(ai, { groups: [{ name: "Late", units: [] }], waves: [{ group: "Late", delay: 5 }], repeatWaves: 1 }), true);
+  assert.deepEqual([describeAi(ai).waves, describeAi(ai).minimumForces], [[{ group: "Late", delay: 5 }], "First Hero Only"]);
+});
+
+test("harvest, targets, groups and waves the AI Editor wouldn't take are refused, and so are lists with conditions", () => {
+  const ai = newWai();
+  const refuses = (args: Record<string, unknown>, why: RegExp) => assert.throws(() => setAi(structuredClone(ai), args), why);
+  refuses({ harvest: {} }, /harvest must be a list/);
+  refuses({ harvest: [{ resource: "oil", workers: 1 }] }, /resource must be gold or wood/);
+  refuses({ harvest: [{ resource: "gold" }] }, /workers must be a number from 1 to 100, "All" or "All NA"/);
+  refuses({ harvest: [{ resource: "gold", workers: 0 }] }, /harvest\[0\].workers must be a whole number from 1 to 100/);
+  refuses({ harvest: [{ resource: "gold", workers: 5, count: 1 }] }, /takes resource, town and workers, not count/);
+  refuses({ targets: [{ target: "Enemy" }] }, /target must be one of: Common Alliance Target; /);
+  refuses({ targets: [{ target: "Enemy - Any Town", flyers: true }] }, /belong to a Creep Camp target only/);
+  refuses({ targets: [{ target: "Creep Camp", creepLevels: [5, 2] }] }, /maximum 2 is below the minimum 5/);
+  refuses({ targets: [{ target: "Creep Camp", creepLevels: [1] }] }, /two numbers/);
+  refuses({ groups: [{ name: "", units: [] }] }, /name must be text/);
+  refuses({ groups: [{ name: "A", units: [] }, { name: "A", units: [] }], waves: [] , repeatWaves: 0 }, /two groups called A/);
+  refuses({ groups: [{ name: "All Units", units: [{ id: "footman" }] }] }, /units\[0\].id must be an object id of four characters/);
+  refuses({ groups: [{ name: "All Units", units: [{ id: "hfoo", quantity: "many" }] }] }, /quantity must be a number or one of "All"/);
+  refuses({ groups: [{ name: "All Units", units: [{ id: "hfoo", quantity: "All but 0" }] }] }, /units kept back/);
+  refuses({ groups: [{ name: "All Units", units: [{ id: "hfoo", quantity: "5 - 2" }] }] }, /maximum 2 is below the minimum 5/);
+  refuses({ waves: [{ group: "Nobody" }] }, /waves\[0\].group must be the name of an attack group: All Units/);
+  refuses({ waves: [{ group: "All Units", delay: -1 }] }, /waves\[0\].delay must be a whole number from 0/);
+  refuses({ waves: [] }, /Repeat Waves is 1, more than the 0 attack waves/);
+  refuses({ minimumForces: "Nobody" }, /minimumForces must be "First Hero Only" or the name of an attack group: All Units/);
+  for (const [list, args, why] of [
+    ["harvest", { harvest: [{ resource: "gold", workers: 5 }] }, /harvest priorities of this AI have conditions/],
+    ["targets", { targets: [{ target: "Enemy - Any Town" }] }, /target priorities of this AI have conditions/],
+  ] as const) {
+    const cond = newWai();
+    cond[list][0].condIndex = 0;
+    assert.throws(() => setAi(cond, args), why);
+  }
+  const cond = newWai();
+  cond.groups[0].units[0].condIndex = 0;
+  assert.throws(() => setAi(cond, { groups: [{ name: "All Units", units: [] }] }), /attack groups' units of this AI have conditions/);
+});
+
 test("a .wai file goes through the edit list as text and comes back byte for byte", () => {
   const bytes = writeWai(newWai());
   const text = waiToText(bytes);

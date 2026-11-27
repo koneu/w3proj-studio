@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { addPage, branchProblem, chunks, commitPaths, deleteBranchArgs, diffTarget, discardPlan, lfsSize, logArgs, LOG_FORMAT, noFilter, notFullyMerged, PAGE, parseBranches, parseCounts, parseFilter, parseLog, parseNameStatus, renameBranchArgs, takeSide, type Change, type Commit, type Side } from "./git";
+import { dirname, join } from "node:path";
+import { addPage, isMergeLine, revertArgs, takeVersionArgs, branchProblem, chunks, commitPaths, deleteBranchArgs, diffTarget, discardPlan, lfsSize, logArgs, LOG_FORMAT, noFilter, notFullyMerged, PAGE, parseBranches, parseCounts, parseFilter, parseLog, parseNameStatus, renameBranchArgs, takeSide, type Change, type Commit, type Side } from "./git";
 
 test("LFS pointers give the file's real size", () => {
   const pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 271253\n";
@@ -160,6 +160,47 @@ test("branch commands: names are checked and go after --", () => {
   assert.deepEqual(renameBranchArgs("a", "x;rm"), ["branch", "-m", "--", "a", "x;rm"]);
   assert.equal(notFullyMerged(new Error("error: the branch 'x' is not fully merged.")), true);
   assert.equal(notFullyMerged(new Error("error: branch 'x' not found")), false);
+});
+
+test("revert and take-a-version arguments: a hash of the history only, the path after --", () => {
+  const hash = "0123456789abcdef0123456789abcdef01234567";
+  assert.deepEqual(revertArgs(hash), ["revert", "--no-edit", hash]);
+  assert.deepEqual(takeVersionArgs("0123abc", "map/war3map.j"), ["restore", "--source=0123abc", "--worktree", "--", "map/war3map.j"]);
+  // A path that looks like an option is data after "--".
+  assert.deepEqual(takeVersionArgs("0123abc", "--staged"), ["restore", "--source=0123abc", "--worktree", "--", "--staged"]);
+  for (const bad of ["", "HEAD", "--abort", "-n", "main", "0123abc^", "0123abc..HEAD", "0123ABC", "abc"]) {
+    assert.throws(() => revertArgs(bad), `revert ${JSON.stringify(bad)}`);
+    assert.throws(() => takeVersionArgs(bad, "a.txt"), `take from ${JSON.stringify(bad)}`);
+  }
+  assert.throws(() => takeVersionArgs(hash, ""));
+  assert.equal(isMergeLine(`${hash} ${hash}`), false);
+  assert.equal(isMergeLine(`${hash}\n`), false);
+  assert.equal(isMergeLine(`${hash} ${hash} ${hash}\n`), true);
+});
+
+test("revert makes a commit that undoes one; take a version changes the working copy only", { skip: !hasGit }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "w3-scm-revert-"));
+  try {
+    const sh = (args: string[]) => spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.invalid", ...args], { cwd: dir, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(dir) } });
+    const commit = (text: string, file = "a.txt") => { writeFileSync(join(dir, file), text); sh(["add", "-A"]); sh(["commit", "-q", "-m", text.trim()]); return sh(["rev-parse", "HEAD"]).stdout.trim(); };
+    sh(["init", "-q"]);
+    const one = commit("one\n");
+    const other = commit("other\n", "b.txt");
+    commit("two\n");
+    assert.equal(isMergeLine(sh(["rev-list", "--parents", "-n", "1", other]).stdout), false);
+    // Take a.txt as the first commit had it: the working copy only, nothing staged, no commit.
+    assert.equal(sh(takeVersionArgs(one, "a.txt")).status, 0);
+    assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "one\n");
+    assert.equal(sh(["status", "--porcelain"]).stdout, " M a.txt\n");
+    assert.equal(sh(["rev-list", "--count", "HEAD"]).stdout.trim(), "3");
+    sh(["checkout", "-q", "--", "a.txt"]);
+    // Revert the commit that added b.txt: a fourth commit, b.txt gone, a.txt as it is.
+    assert.equal(sh(revertArgs(other)).status, 0);
+    assert.equal(sh(["rev-list", "--count", "HEAD"]).stdout.trim(), "4");
+    assert.equal(existsSync(join(dir, "b.txt")), false);
+    assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "two\n");
+    assert.equal(sh(["status", "--porcelain"]).stdout, "");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("the branch rules agree with git check-ref-format", { skip: !hasGit }, () => {

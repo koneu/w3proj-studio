@@ -22,6 +22,7 @@ import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { readWts, StringTable, writeWts, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
+import { textCodec, UnencodableError, type TextCodec } from "../../lib/formats/codepage";
 import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { Listeners } from "../../lib/listeners";
@@ -416,12 +417,15 @@ class SoundEditor {
   private open = new Set<string>();
   private tab: "game" | "map" = "game";
   private imported: string[] = [];
+  /** The map text encoding as chosen when this editor opened: dialogue texts that aren't UTF-8 are shown and typed in it. */
+  private codec: TextCodec;
 
   constructor(private w3: W3Api, el: HTMLElement, private doc: SoundsDoc, private changed: () => void, private editable: boolean,
     /** The dialogue texts (war3map.wts); null with the reason when it can't be read. */
     private strings: DialogueStrings | null, private stringsError: string | null,
     /** The TRIGSTR numbers the map's files refer to (null: read-only, or no string table). */
     private otherRefs: Promise<Set<number>> | null) {
+    this.codec = textCodec((k) => w3.settings.get(k));
     el.classList.add("snd-editor");
     el.append(h("div.snd-left", {}, this.browser), h("div.snd-right", {}, this.list, this.detail));
     this.imported = this.importedFiles();
@@ -790,22 +794,36 @@ class SoundEditor {
       const apply = (refs: Iterable<number>) => {
         // Closed, or the sound gone (undo), while the map's references were read: nothing is done.
         if (this.disposed || !this.doc.sounds.includes(s)) return;
-        if (!setDialogueString(s, which, control.value, strings, this.doc.sounds, refs)) return;
+        if (!setDialogueString(s, which, typed, strings, this.doc.sounds, refs)) return;
         this.changed();
         this.renderDetail();
       };
+      /** What the box holds, as the text to store (the map's text encoding: a line nobody changed keeps its bytes). */
+      let typed = "";
       const onchange = () => {
+        try {
+          typed = this.codec.store(control.value, stored);
+        } catch (e) {
+          if (!(e instanceof UnencodableError)) throw e;
+          // What was typed stays in the box to be corrected; the text keeps what it had.
+          control.classList.add("invalid");
+          void this.w3.window.showError(e.message);
+          return;
+        }
+        control.classList.remove("invalid");
         // Keys are only made for a sound without them; then after every TRIGSTR number the map's files refer to.
-        if ((key() ?? -1) >= 0 || control.value === "") { apply([]); return; }
+        if ((key() ?? -1) >= 0 || typed === "") { apply([]); return; }
         if (!this.otherRefs) return;
         this.otherRefs.then(apply, (e) => void this.w3.window.showError(
           `No dialogue strings were made: the TRIGSTR references in the map's files couldn't be read (${errorText(e)}). Reopen the Sound Editor once they can be.`));
       };
       // A sound without a key shows the w3s file's own text until the first edit makes the keys.
-      const shown = () => (key() ?? -1) < 0 ? (which === "text" ? s.dialogueText : s.speakerName) ?? "" : strings.text(key());
+      // As stored (line ends as a box has them), and as shown in the map's text encoding.
+      const stored = ((key() ?? -1) < 0 ? (which === "text" ? s.dialogueText : s.speakerName) ?? "" : strings.text(key())).replace(/\r\n/g, "\n");
+      const shown = this.codec.show(stored);
       const control: HTMLInputElement | HTMLTextAreaElement = which === "text"
-        ? h("textarea.snd-dialogue-text", { value: shown(), readOnly: ro, rows: 3, onchange })
-        : h("input.snd-speaker-name", { type: "text", value: shown(), readOnly: ro, onchange });
+        ? h("textarea.snd-dialogue-text", { value: shown, readOnly: ro, rows: 3, onchange })
+        : h("input.snd-speaker-name", { type: "text", value: shown, readOnly: ro, onchange });
       // The dialogue text and the speaker name are shown to the player (subtitles): colour tools, committed on each use.
       return h("div.form-stack", {}, ro ? control : withColorTools(control, { commit: true }), keyNote(key()));
     };

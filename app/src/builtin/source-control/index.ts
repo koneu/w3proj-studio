@@ -5,11 +5,12 @@
 // backend (git_status, git_show, git_size; tool_run for init/add/commit).
 
 import { goToNextChunk, goToPreviousChunk, MergeView, getChunks } from "@codemirror/merge";
-import { addPage, BRANCH_FORMAT, branchProblem, chunks, commitPaths, deleteBranchArgs, diffTarget, discardPlan, lfsSize, logArgs, noFilter, notFullyMerged, PAGE, parseBranches, parseCounts, parseFilter, parseLog, parseNameStatus, renameBranchArgs, takeSide, type Branch, type Side, type Change, type Commit, type CommitFile } from "./git";
+import { addPage, isMergeLine, revertArgs, takeVersionArgs, BRANCH_FORMAT, branchProblem, chunks, commitPaths, deleteBranchArgs, diffTarget, discardPlan, lfsSize, logArgs, noFilter, notFullyMerged, PAGE, parseBranches, parseCounts, parseFilter, parseLog, parseNameStatus, renameBranchArgs, takeSide, type Branch, type Side, type Change, type Commit, type CommitFile } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { isFullPath } from "../../lib/paths";
 import { isLosslessPath, readTextFile } from "../../lib/formats/wts";
+import { textCodec } from "../../lib/formats/codepage";
 import { keyOf } from "../../lib/keys";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
@@ -136,6 +137,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!status || !selected.length) return;
     const msg = message.trim() || await w3.window.inputBox({ prompt: "Commit message", placeholder: "What changed" });
     if (!msg?.trim()) return;
+    // A merge that needed decisions is finished by this commit: its trigger tree is checked after it.
+    const mergedFrom = merging ? await headNow() : "";
     busy = true;
     w3.views.refresh("w3.scm.changes");
     try {
@@ -154,6 +157,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       message = "";
       unticked.clear();
       void w3.window.showInfo(`Committed ${selected.length} change${selected.length === 1 ? "" : "s"}.`);
+      if (mergedFrom) await checkTriggersAfter(mergedFrom).catch(() => {});
     } finally {
       busy = false;
       await refresh();
@@ -220,10 +224,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (pick?.value) await mergeRef(pick.value);
   };
 
+  /** After a merge or pull that moved the branch from commit `before`: when it changed map/triggers/, Check Trigger
+   *  Tree runs (disjoint files merge without a conflict into ids or variables held twice) and says what it found; with
+   *  findings the Problems view shows them with their fixes. */
+  const checkTriggersAfter = async (before: string) => {
+    const r = root();
+    if (!r || !before) return;
+    const changed = (await git("diff", "--name-only", before, "HEAD", "--", "map/triggers").catch(() => "")).trim();
+    if (!changed) return;
+    let found: unknown[];
+    try {
+      found = await w3.backend.invoke<unknown[]>("triggers_check", { root: r });
+    } catch (e) {
+      void w3.window.showWarning(`The merge changed the trigger tree, and Check Trigger Tree couldn't run: ${errorText(e)}`);
+      return;
+    }
+    if (!found.length) { void w3.window.showInfo("The merge changed the trigger tree: Check Trigger Tree found nothing wrong."); return; }
+    void w3.window.showWarning(`The merge changed the trigger tree: Check Trigger Tree found ${found.length} problem${found.length === 1 ? "" : "s"}. The Problems view lists ${found.length === 1 ? "it" : "them"} with the fixes.`);
+    await w3.commands.execute("w3.problems.checkTriggerTree").catch(() => {});
+  };
+  const headNow = () => git("rev-parse", "-q", "--verify", "HEAD").then((s) => s.trim(), () => "");
+
   const mergeRef = (ref: string) => withClosedEditors(async () => {
+    const before = await headNow();
     try {
       await git("merge", "--no-edit", ref);
       void w3.window.showInfo(`Merged ${ref}.`);
+      // The files are as merged now: the check reads them from disk.
+      await checkTriggersAfter(before);
     } catch (e) {
       await refresh();
       // Conflicts are left for the user: the files show them, Abort Merge goes back.
@@ -258,9 +286,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // Only fast-forward: a real merge goes through Merge Branch, with its conflicts in view.
     let diverged = false;
     await withClosedEditors(async () => {
+      const before = await headNow();
       await w3.window.withProgress(`Pulling ${current.name}`, () => git("pull", "--ff-only")).then(
         () => void w3.window.showInfo(`Pulled ${current.name}.`),
         (e) => { if (/fast-forward|divergent/i.test(String(e))) diverged = true; else throw e; });
+      if (!diverged) await checkTriggersAfter(before);
     });
     if (!diverged) return;
     // Both sides have commits: the normal case with two people on a map.
@@ -306,6 +336,46 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     void w3.window.showInfo(`Renamed ${from} to ${to}.`);
   };
 
+  /** Revert Commit: a new commit that undoes one of the history. A commit whose changes conflict with later ones isn't
+   *  reverted (the revert is taken back and said); a merge commit isn't either. */
+  const revertCommit = async (c: Commit) => {
+    const args = revertArgs(c.hash);
+    if (isMergeLine(await git("rev-list", "--parents", "-n", "1", c.hash))) {
+      throw new Error(`${c.short} is a merge commit: reverting it needs a choice of which side to keep, which the history can't make. Revert the commits it brought in instead.`);
+    }
+    if (merging) throw new Error("A merge is in progress: finish or abort it first.");
+    const answer = await w3.window.showWarning(`Revert "${c.subject}" (${c.short})? A new commit is made that undoes its changes; the commit itself stays in the history.`, "Revert", "Cancel");
+    if (answer !== "Revert") return;
+    let done = false;
+    await withClosedEditors(async () => {
+      try {
+        await git(...args);
+        done = true;
+      } catch (e) {
+        // Stopped at a conflict: back to how it was, nothing half done.
+        if ((await git("rev-parse", "-q", "--verify", "REVERT_HEAD").catch(() => "")).trim()) {
+          await git("revert", "--abort");
+          throw new Error(`${c.short} can't be reverted by itself: later commits changed the same places. Nothing was changed.`);
+        }
+        throw e;
+      }
+    });
+    if (done) void w3.window.showInfo(`Reverted "${c.subject}" in a new commit.`);
+  };
+
+  /** Take This Version: a file of the working copy as a commit of the history had it; it then shows under Changes, to
+   *  commit or discard. What the file holds now exists nowhere else when it has changes: a checkpoint keeps it. */
+  const takeVersion = async (c: Commit, f: CommitFile) => {
+    const args = takeVersionArgs(c.hash, f.path);
+    if (f.status === "D") throw new Error(`${c.short} deleted ${f.path}: there's no version of it in that commit.`);
+    const answer = await w3.window.showWarning(`Replace ${f.path} with its version from "${c.subject}" (${c.short})? What it holds now is replaced; a checkpoint is made first, where they're enabled.`, "Take This Version", "Cancel");
+    if (answer !== "Take This Version") return;
+    if (!(await checkpointBefore(w3, `Take ${f.path} from ${c.short}`))) return;
+    await w3.editors.close(f.path);
+    try { await git(...args); } finally { await w3.workspace.refresh(); await refresh(); }
+    void w3.window.showInfo(`${f.path} is as in ${c.short} now: it shows under Changes.`);
+  };
+
   const toggleCommit = async (hash: string) => {
     if (openCommit === hash) { openCommit = null; openFiles = []; }
     else {
@@ -324,11 +394,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return;
     }
     el.replaceChildren(h("div.tree", {}, ...log.flatMap((c) => [
-      h("div.scm-log-row", { title: `${c.hash}\n${c.author}, ${c.date}\n${c.subject}`, onclick: () => void toggleCommit(c.hash).catch(failed) },
-        h("span.tree-icon", {}, openCommit === c.hash ? "▾" : "▸"), h("span.scm-log-subject", {}, c.subject), h("small.muted", {}, c.date)),
+      h("div.scm-log-row", { title: `${c.hash}\n${c.author}, ${c.date}\n${c.subject}`, onclick: () => void toggleCommit(c.hash).catch(failed),
+        oncontextmenu: (e: MouseEvent) => {
+          e.preventDefault();
+          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [{ label: "Revert Commit…", run: () => void revertCommit(c).catch(failed) }]);
+        } },
+        h("span.tree-icon", {}, openCommit === c.hash ? "▾" : "▸"), h("span.scm-log-subject", {}, c.subject), h("small.muted", {}, c.date),
+        openCommit === c.hash ? h("button.icon-button.scm-log-revert", { title: "Revert this commit: a new commit that undoes its changes",
+          onclick: (e: MouseEvent) => { e.stopPropagation(); void revertCommit(c).catch(failed); } }, "↩") : null),
       ...(openCommit === c.hash ? openFiles.map((f) => h("div.scm-log-file", { title: f.from ? `${f.from} → ${f.path}` : f.path,
-        onclick: () => void w3.editors.open(`${DIFF}@${c.hash}:${f.path}`, "w3.diff").catch(failed) },
-        h("span.scm-status", {}, f.status), h("span", {}, f.path.split("/").pop() ?? f.path))) : []),
+        onclick: () => void w3.editors.open(`${DIFF}@${c.hash}:${f.path}`, "w3.diff").catch(failed),
+        oncontextmenu: (e: MouseEvent) => {
+          e.preventDefault();
+          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
+            { label: "Open Changes", run: () => void w3.editors.open(`${DIFF}@${c.hash}:${f.path}`, "w3.diff").catch(failed) },
+            { label: "Take This Version…", disabled: f.status === "D", run: () => void takeVersion(c, f).catch(failed) },
+          ]);
+        } },
+        h("span.scm-status", {}, f.status), h("span.scm-log-name", {}, f.path.split("/").pop() ?? f.path),
+        f.status === "D" ? null : h("button.icon-button.scm-log-take", { title: "Take this version: the file in the working copy becomes what this commit had",
+          onclick: (e: MouseEvent) => { e.stopPropagation(); void takeVersion(c, f).catch(failed); } }, "⤓"))) : []),
     ])), ...(moreLog ? [h("div.camp-side-actions", {}, h("button.scm-log-more", {
       disabled: loadingMore, title: `Shows the next ${PAGE} commits`, onclick: () => void loadMore().catch(failed),
     }, loadingMore ? "Loading…" : "Load more"))] : []));
@@ -500,7 +585,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const a = before.text ?? "", b = after.text ?? "";
           const box = h("div.diff-view");
           const ro = diffExtensions(path);
-          view = new MergeView({ a: { doc: a, extensions: ro }, b: { doc: b, extensions: ro }, parent: box, collapseUnchanged: { margin: 3, minSize: 6 }, gutter: true });
+          // Lines in an old code page show readable in the map's text encoding (lib/formats/codepage.ts); the view is
+          // read-only, and what is compared are the texts as stored.
+          const codec = textCodec((k) => w3.settings.get(k));
+          view = new MergeView({ a: { doc: codec.show(a), extensions: ro }, b: { doc: codec.show(b), extensions: ro }, parent: box, collapseUnchanged: { margin: 3, minSize: 6 }, gutter: true });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const lines = (s: string) => (s ? s.split(/\r\n|\r|\n/).length : 0);
           const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };
@@ -510,7 +598,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Previous change", onclick: step(goToPreviousChunk) }, "↑"),
               h("button", { title: "Next change", onclick: step(goToNextChunk) }, "↓"),
               missing(after) ? null : h("button", { onclick: () => w3.editors.open(path).catch(failed) }, "Open File")));
-          el.replaceChildren(head, ...(OBJECT_FILE.test(path) || objectFileOf(path) ? [objectSummary(w3, path, a, b)] : []), box);
+          el.replaceChildren(head, ...(OBJECT_FILE.test(path) || objectFileOf(path) ? [objectSummary(w3, path, a, b, codec.show)] : []), box);
         };
         await render();
         // Saved again (here or outside the app): redraw.
@@ -534,7 +622,7 @@ const MAX_OBJECTS = 200;
 
 /** Changed objects of an object data file, with their changed fields (labels and names from the
  *  game's data, filled in when loaded); an object opens in the Object Editor. */
-function objectSummary(w3: W3Api, path: string, before: string, after: string): HTMLElement {
+function objectSummary(w3: W3Api, path: string, before: string, after: string, shownText: (stored: string) => string): HTMLElement {
   const one = objectFileOf(path);
   const kind = one ? one.ext : OBJECT_FILE.exec(path)![1].toLowerCase();
   const read = (text: string) => (one ? flatOfObjectFile(one.section, text) : text ? JSON.parse(text) : null);
@@ -549,7 +637,7 @@ function objectSummary(w3: W3Api, path: string, before: string, after: string): 
   if (!changes.length) return el;
   const show = (v: unknown) => {
     // Quoted, line breaks visible; paths keep single backslashes.
-    const s = typeof v === "string" ? `"${v.replace(/\r?\n/g, "\\n")}"` : String(v);
+    const s = typeof v === "string" ? `"${shownText(v).replace(/\r?\n/g, "\\n")}"` : String(v);
     return s.length > 80 ? `${s.slice(0, 77)}…` : s;
   };
   const counts = (["added", "changed", "removed"] as const).map((w) => [w, changes.filter((c) => c.what === w).length] as const).filter(([, n]) => n);

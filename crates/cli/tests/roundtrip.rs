@@ -1556,6 +1556,25 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
     assert!(said.contains("w3proj: the merged branches changed 3 subterrain(s)") && said.contains("cliff-height") && said.contains("seam issues"), "{said}");
     assert!(said.contains("lfs-style post-merge ran"), "both hooks run on the merge: {said}");
 
+    // A merge that touches the trigger tree runs Check Trigger Tree: silent about a tree that is fine but for the
+    // line that it ran, and telling what it finds (here a file left with a conflict's markers).
+    let header = project.join("map/triggers/header.j");
+    let was = fs::read_to_string(&header).unwrap();
+    git(&["checkout", "-q", "-b", "fine"]);
+    fs::write(&header, format!("{was}// a comment\n")).unwrap();
+    git(&["commit", "-q", "-am", "header"]);
+    git(&["checkout", "-q", "main"]);
+    let said = text(&git(&["merge", "--no-edit", "-q", "fine"]));
+    assert!(said.contains("w3proj: the merged branches changed the trigger tree of maps/My Map/") && !said.contains("trigger tree issues"), "{said}");
+    assert!(!said.contains("subterrain(s)"), "no terrain changed: the seams aren't checked: {said}");
+    git(&["checkout", "-q", "-b", "marked"]);
+    fs::write(&header, format!("<<<<<<< ours\n{was}=======\n>>>>>>> theirs\n")).unwrap();
+    git(&["commit", "-q", "-am", "markers"]);
+    git(&["checkout", "-q", "main"]);
+    let said = text(&git(&["merge", "--no-edit", "-q", "marked"]));
+    assert!(said.contains("unresolved merge conflict") && said.contains("w3proj: the merge left trigger tree issues"), "{said}");
+    assert!(said.contains("lfs-style post-merge ran"), "both hooks run on the merge: {said}");
+
     // --remove takes out only the block: the LFS hook is as it was, and removing it again is refused.
     assert!(ok(&["terrain", "merge-hook", s(&project), "--remove"]).contains("the rest of it is left"));
     assert_eq!(fs::read_to_string(&hook).unwrap(), lfs);

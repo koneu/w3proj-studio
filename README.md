@@ -369,7 +369,9 @@ subterrain and changes nothing. `w3proj pack` of a split project runs it first a
 can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so. To run it after every git merge that
 brought together changes of two subterrains (or of `terrain.json`), install the opt-in hook once per clone:
 `w3proj terrain merge-hook MyMap/` writes `post-merge` into the repository's hooks folder (worktrees and
-`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. A `post-merge` sh script that is
+`core.hooksPath` followed; Git for Windows runs it with its sh); it only reports. The same hook runs Check Trigger
+Tree (`w3proj triggers MyMap/ --check`) after a merge that changed `map/triggers/`; a Merge Branch or Pull in the app
+runs that check by itself and shows what it finds in the Problems view. A `post-merge` sh script that is
 already there (Git LFS writes one for a project with LFS rules) keeps all its text: this hook goes in as a marked block
 after its `#!` line and both run. One that isn't an sh script is left alone (the line to add to it is printed).
 `--remove` takes out only this hook's block.
@@ -616,7 +618,7 @@ w3proj terrain seams MyMap/         # a split terrain's seams checked with the b
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
                                     # new set of subterrains (joined, renamed, resized, new); the map stays the same
-w3proj terrain merge-hook MyMap/    # opt-in git post-merge hook: `terrain seams` after merges of two subterrains
+w3proj terrain merge-hook MyMap/    # opt-in git post-merge hook: `terrain seams` after merges of two subterrains, `triggers --check` after merges of map/triggers/
 w3proj terrain fix-ids MyMap/ --renumber   # creation numbers found twice (flat or split): the plan; --apply writes
                                     # it; --delete-copies removes exact copies only (those that differ stay)
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the

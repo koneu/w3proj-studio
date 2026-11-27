@@ -416,6 +416,8 @@ textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .form-num { max-width: 160px; }
 .form-stack { display: flex; flex-direction: column; gap: 2px; }
 .map-info-cut { color: var(--error); max-width: 640px; }
+.camp-refused { color: var(--error); max-width: 640px; }
+.snd-field .invalid { outline: 1px solid var(--error); }
 .form-inline { display: flex; gap: 8px; align-items: center; }
 .form-inline .form-num { width: 80px; }
 .form-checks { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 4px 0; }
@@ -1097,6 +1099,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .scm-log-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .scm-log-file { padding: 1px 14px 1px 30px; cursor: pointer; display: flex; gap: 6px; white-space: nowrap; }
 .scm-log-file:hover { background: var(--bg-hover); }
+.scm-log-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .scm-commit { display: flex; flex-direction: column; gap: 4px; padding: 6px 14px; }
 .scm-message { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
 .scm-row { display: flex; align-items: baseline; gap: 2px; padding: 2px 8px 2px 14px; cursor: pointer; white-space: nowrap; overflow: hidden; }
@@ -1137,6 +1140,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .lighting-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lighting-head { margin-bottom: 12px; }
 .lighting-keys { width: auto; margin-bottom: 4px; }
+.lighting-rotation > summary { cursor: pointer; color: var(--fg-muted); margin: 2px 0; }
 .form-table .form-num.lighting-num, .lighting-num { width: 80px; }
 .lighting-gradient { height: 14px; max-width: 480px; border: 1px solid var(--border); border-radius: 2px; margin: 2px 0 6px; }
 .form-input.invalid { outline: 1px solid var(--error); }

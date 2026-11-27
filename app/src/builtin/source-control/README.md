@@ -1,6 +1,6 @@
 # Source Control
 
-Extension `w3.sourceControl`. Git for the open project: changes, side-by-side diff, commit, discard, history, branches, push and pull.
+Extension `w3.sourceControl`. Git for the open project: changes, side-by-side diff, commit, discard, history (with Revert Commit and Take This Version of a file), branches, push and pull. A merge or pull that changed map/triggers/ runs Check Trigger Tree and says what it found.
 
 ## Data
 Reads the project's git repository and working files for diffs (JSON, text, blob changes); writes through git commands (commit, checkout, merge, push, pull).

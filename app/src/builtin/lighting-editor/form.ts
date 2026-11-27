@@ -4,6 +4,10 @@
 import type { Key, Light, LightModel, Prop, Track } from "../../lib/model/dnclight";
 import { h } from "../../workbench/dom";
 import { lightNumber } from "./numbers";
+import { rotationOf, sunAngleOf } from "./sunangle";
+
+/** Whether the rotation's own numbers are unfolded: kept over the form's redraws. */
+let rotationOpen = false;
 
 export interface FormHost {
   /** The model as it is now (an undo puts another one in its place). */
@@ -90,6 +94,27 @@ export function lightForms(host: FormHost, redraw: () => void): HTMLElement[] {
     ? trackEditor(p.track, 1, (k) => num("Value", () => k.value[0], (v) => { k.value = [v]; }), true, redraw)
     : num("Value", () => p.value[0], (v) => { p.value = [v]; }));
 
+  /** Where the light comes from, per key: as a sun angle, and (folded away) as the rotation the file stores. Typing an
+   *  angle writes that key's rotation (sunangle.ts); a key nobody types into keeps its rotation as it is. */
+  const directionEditor = (t: Track, redraw: () => void) => {
+    const angle = (k: Key, part: "direction" | "height") => num(part === "direction" ? "Sun direction" : "Sun height",
+      () => sunAngleOf(k.value)[part],
+      (v) => { k.value = rotationOf({ ...sunAngleOf(k.value), [part]: v }); redraw(); },
+      "1", part === "direction" ? { min: 0, max: 360 } : { min: -90, max: 90 });
+    const hourOf = (k: Key) => h("td.muted", {}, `${Number(toHour(k.time).toFixed(2))} h`);
+    const raw = h("details.lighting-rotation", { open: rotationOpen, ontoggle: () => { rotationOpen = raw.open; } },
+      h("summary", {}, "As a rotation (quaternion x, y, z, w)"),
+      h("table.form-table.lighting-keys", {}, h("tbody", {}, ...t.keys.map((k) => h("tr", {},
+        hourOf(k),
+        ...[0, 1, 2, 3].map((c) => h("td", {}, num(`Rotation ${"xyzw"[c]}`, () => k.value[c], (v) => { k.value[c] = v; redraw(); }, "0.01"))))))));
+    return h("div", {},
+      h("small.muted", {}, "Where the sun stands: direction in degrees (0 east, 90 north, 180 west, 270 south) and height above the horizon (90 straight above)."),
+      h("table.form-table.lighting-keys.lighting-sun", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Hour"), h("th", {}, "Direction °"), h("th", {}, "Height °"))),
+        h("tbody", {}, ...t.keys.map((k) => h("tr", {}, hourOf(k), h("td", {}, angle(k, "direction")), h("td", {}, angle(k, "height")))))),
+      raw);
+  };
+
   const lightForm = (l: Light, redraw: () => void) => h("section.form-section", {},
     h("h3", {}, `${l.name} (${["omnidirectional", "directional", "ambient"][l.type] ?? "light"})`),
     row("Intensity", numberProp(l.intensity, redraw)),
@@ -97,11 +122,7 @@ export function lightForms(host: FormHost, redraw: () => void): HTMLElement[] {
     row("Ambient intensity", numberProp(l.ambIntensity, redraw)),
     row("Ambient colour", colorProp(l.ambColor, redraw)),
     row("Shadow intensity", num("Shadow intensity", () => l.shadowIntensity, (v) => { l.shadowIntensity = v; })),
-    l.rotation ? row("Direction", h("div", {},
-      h("small.muted", {}, "Rotation of the light as a quaternion (x, y, z, w) per key."),
-      h("table.form-table.lighting-keys", {}, h("tbody", {}, ...l.rotation.keys.map((k) => h("tr", {},
-        h("td.muted", {}, `${Number(toHour(k.time).toFixed(2))} h`),
-        ...[0, 1, 2, 3].map((c) => h("td", {}, num(`Rotation ${"xyzw"[c]}`, () => k.value[c], (v) => { k.value[c] = v; }, "0.01"))))))))) : null,
+    l.rotation ? row("Direction", directionEditor(l.rotation, redraw)) : null,
   );
 
   return model.lights.map((l) => lightForm(l, redraw));
