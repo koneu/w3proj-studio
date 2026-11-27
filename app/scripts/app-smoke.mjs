@@ -3620,6 +3620,49 @@ async function triggerValueLimits(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
 }
 
+/** The parameter dialog's Value tab warns about an object code that nothing in the game or the map has, and keeps it all
+ *  the same on a second OK (a quick OK shows the warning first); a game unit and the map's own unit pass at once. */
+async function triggerCodeWarning(page, found) {
+  const fail = (what) => found.push(`trigger code warning: ${what}`);
+  const k = await heightKit(page, "CodeWarning");
+  try {
+    const own = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Code Warning Guard" })).id;
+    await k.save();
+    // The pickers (and with them the warning) come with the Trigger Editor.
+    await page.evaluate(`w3.commands.execute("w3.triggers.open")`);
+    await until("the Trigger Editor's pickers", () => page.evaluate(`w3.services.get("w3.triggers.gui").then((g) => g.forType("unitcode").length > 0)`), 60000);
+    await page.evaluate(`(async () => {
+      const gui = await w3.services.get("w3.triggers.gui");
+      const data = { functions: [new Map(), new Map(), new Map(), new Map()], find: () => undefined, categories: new Map(), presets: new Map(),
+        types: new Map([["unitcode", { name: "Unit-Type", base: "integer", global: false }]]) };
+      window.__codeDialog = () => { window.__codeResult = undefined; gui.editParam({ data, display: { data }, type: "unitcode", current: { type: 3, value: "hfoo" } }).then((p) => { window.__codeResult = p ?? null; }); };
+    })()`);
+    const box = `document.querySelector(".trig-dialog-body input.picker-search")`;
+    const note = () => page.evaluate(`(() => { const n = document.querySelector(".trig-value-note"); return n ? { text: n.textContent, warns: n.classList.contains("warning") } : null; })()`);
+    const typeAndOk = async (typed) => {
+      await page.evaluate(`window.__codeDialog()`);
+      await until("the value dialog", () => page.evaluate(`!!${box}`), 20000);
+      // OK in the same turn as the typing: before any lookup can have answered.
+      await page.evaluate(`(() => { const e = ${box}; e.value = ${lit(typed)}; e.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector(".trig-dialog-body .primary").click(); })()`);
+    };
+    const got = () => page.evaluate(`window.__codeResult?.value ?? null`);
+    for (const code of ["hfoo", own]) {
+      await typeAndOk(code);
+      if (!(await soon(async () => (await got()) === code, 20000))) fail(`${code} wasn't taken at once: ${lit(await note())}`);
+      await page.evaluate(`document.querySelector(".picker-overlay")?.remove()`);
+    }
+    await typeAndOk("zzzz");
+    if (!(await soon(async () => (await note())?.warns === true, 20000))) return fail(`zzzz gave no warning: ${lit(await note())}, result ${lit(await got())}`);
+    if (!/No unit type "zzzz"/.test((await note()).text)) fail(`the warning says ${lit((await note()).text)}`);
+    if ((await page.evaluate(`window.__codeResult === undefined`)) !== true) fail("zzzz was taken before the warning was seen");
+    await page.evaluate(`document.querySelector(".trig-dialog-body .primary").click()`);
+    if (!(await soon(async () => (await got()) === "zzzz", 20000))) fail(`a second OK didn't keep zzzz: ${lit(await got())}`);
+  } finally {
+    await page.evaluate(`(() => { document.querySelector(".picker-overlay")?.remove(); w3.editors.closeAll(); })()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -19267,6 +19310,7 @@ async function run() {
         tileTemplate,
         toggleGroups,
         toolbarNarrow,
+        triggerCodeWarning,
         triggerFolders,
         triggerMultiSelect,
         triggerParamColorTools,
@@ -19504,6 +19548,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectPickerSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
+  await triggerCodeWarning(page, found).catch((e) => found.push(`trigger code warning: ${e.message}`));
+  await leftOpen(page, "triggerCodeWarning", found);
   await triggerValueLimits(page, found).catch((e) => found.push(`trigger value limits: ${e.message}`));
   await leftOpen(page, "triggerValueLimits", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));

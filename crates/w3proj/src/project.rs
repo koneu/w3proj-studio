@@ -1655,15 +1655,17 @@ fn import_entries(bytes: &[u8]) -> Vec<(u8, String)> {
     out
 }
 
-/// The kinds of swap the World Editor's save was seen to drop: a sound listed under another sound extension, and the
-/// preview image (`war3mapPreview.*`). Not others: Blizzard's own maps list `.mdl` models held as `.mdx` and a `.tga`
-/// held as `.dds` (ForgottenHollow, SilverpineSprint, Dalaran), which looks like the editor's own conversion, and the
-/// map's own files (war3mapMap.blp listed as war3mapmap.tga) are written by its save whatever the list says.
+/// The kinds of swap the World Editor's save was seen to drop: a sound listed under another sound extension, the
+/// preview image (`war3mapPreview.*`), and a model listed as `.mdl` and held as `.mdx` (Blizzard's maps do that:
+/// ForgottenHollow, SilverpineSprint; its save drops those files, a doodad using the model or not, and keeps the
+/// entry: hidden World Editor, 2026-11-27). Not others: a `.tga` held as `.dds` isn't measured, and the map's own files
+/// (war3mapMap.blp listed as war3mapmap.tga) are written by its save whatever the list says.
 fn measured_swap(entry: &str, held: &str) -> bool {
     let ext = |p: &str| p.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     let sound = |p: &str| matches!(ext(p).as_str(), "flac" | "ogg" | "mp3" | "wav");
     let preview = |p: &str| !p.contains('\\') && p.to_ascii_lowercase().starts_with("war3mappreview.");
-    (sound(entry) && sound(held)) || (preview(entry) && preview(held))
+    let model = ext(entry) == "mdl" && ext(held) == "mdx";
+    (sound(entry) && sound(held)) || (preview(entry) && preview(held)) || model
 }
 
 /// Import list entries whose file the archive (`encoded`: archive name → bytes) holds only under another extension
@@ -1686,18 +1688,23 @@ fn imports_under_other_extension(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<Str
     let mut out = Vec::new();
     for (list, folder) in [("war3map.imp", "war3mapImported"), ("war3campaign.imp", "war3campImported")] {
         let Some(bytes) = lower.get(list).map(|k| &encoded[*k]) else { continue };
-        for (flags, path) in import_entries(bytes) {
-            if path.is_empty() {
-                continue;
-            }
-            let path = path.replace('/', "\\");
-            let forms = if matches!(flags, 5 | 8) { vec![format!("{folder}\\{path}"), path.clone()] } else { vec![path.clone()] };
-            let forms: Vec<String> = forms.iter().map(|f| f.to_ascii_lowercase()).collect();
+        let entries: Vec<(u8, String)> = import_entries(bytes).into_iter().filter(|(_, p)| !p.is_empty()).map(|(f, p)| (f, p.replace('/', "\\"))).collect();
+        // The archive names an entry can mean, lowercase.
+        let forms_of = |flags: u8, path: &str| -> Vec<String> {
+            let forms = if matches!(flags, 5 | 8) { vec![format!("{folder}\\{path}"), path.to_string()] } else { vec![path.to_string()] };
+            forms.iter().map(|f| f.to_ascii_lowercase()).collect()
+        };
+        // A file an entry names as it is stays in the editor's save, whatever else lists it under another extension.
+        let named: std::collections::BTreeSet<String> = entries.iter().flat_map(|(f, p)| forms_of(*f, p)).collect();
+        for (flags, path) in &entries {
+            let forms = forms_of(*flags, path);
             if forms.iter().any(|f| lower.contains_key(f)) {
                 continue;
             }
-            let held = forms.iter().filter(|f| *f != &stem(f)).find_map(|f| by_stem.get(&stem(f)).and_then(|v| v.first()));
-            if let Some(held) = held.filter(|held| measured_swap(&path, held)) {
+            // Every file of the name: a model and its texture often share one.
+            let held = forms.iter().filter(|f| *f != &stem(f)).filter_map(|f| by_stem.get(&stem(f))).flatten()
+                .find(|held| measured_swap(path, held) && !named.contains(&held.to_ascii_lowercase()));
+            if let Some(held) = held {
                 out.push(format!(
                     "{MAP_DIR}/{list} lists {path}, but the map holds it as {held}: this pack keeps the file, the World \
                      Editor's save drops it without a warning"

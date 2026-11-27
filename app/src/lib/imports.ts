@@ -95,12 +95,14 @@ export function unlistedFiles(projectFiles: readonly string[], entries: readonly
 /** The extension of an archive or project path (".ogg"), "" for none. */
 const extensionAt = (p: string) => { const i = p.lastIndexOf("."); return i > p.lastIndexOf("/") && i > p.lastIndexOf("\\") ? i : -1; };
 
-/** The kinds of swap the World Editor's save was seen to drop: a sound listed under another sound extension, and the
- *  preview image (war3mapPreview.*). Not others: Blizzard's own maps list .mdl models held as .mdx and a .tga held as
- *  .dds (ForgottenHollow, SilverpineSprint, Dalaran), which looks like the editor's own conversion, and the map's own
- *  files (war3mapMap.blp listed as war3mapmap.tga) are written by its save whatever the list says. */
+/** The kinds of swap the World Editor's save was seen to drop: a sound listed under another sound extension, the
+ *  preview image (war3mapPreview.*), and a model listed as .mdl and held as .mdx (Blizzard's maps do that:
+ *  ForgottenHollow, SilverpineSprint; its save drops those files, a doodad using the model or not, and keeps the entry:
+ *  hidden World Editor, 2026-11-27). Not others: a .tga held as .dds isn't measured, and the map's own files
+ *  (war3mapMap.blp listed as war3mapmap.tga) are written by its save whatever the list says. */
 const PREVIEW = /^war3mapPreview\.[^\\/]+$/i;
-const measuredSwap = (entry: string, held: string) => (SOUND.test(entry) && SOUND.test(held)) || (PREVIEW.test(entry) && PREVIEW.test(held));
+const measuredSwap = (entry: string, held: string) => (SOUND.test(entry) && SOUND.test(held)) || (PREVIEW.test(entry) && PREVIEW.test(held))
+  || (/\.mdl$/i.test(entry) && /\.mdx$/i.test(held));
 
 /** The entries of the import list whose file the project holds only under another extension (`projectFiles`: project
  *  paths, "map/…"), of the kinds measuredSwap names: (12)WormWar lists war3mapPreview.tga and nine sounds as .flac and
@@ -111,19 +113,26 @@ const measuredSwap = (entry: string, held: string) => (SOUND.test(entry) && SOUN
 export function otherExtensionImports(projectFiles: readonly string[], entries: readonly ImportEntry[], folder: string): { entry: string; file: string }[] {
   const inMap = projectFiles.map((p) => p.replace(/\\/g, "/")).filter((p) => p.toLowerCase().startsWith("map/"));
   const lower = new Set(inMap.map((p) => p.toLowerCase()));
-  const byStem = new Map<string, string>();
+  // Every file of a name: a model and its texture often share one.
+  const byStem = new Map<string, string[]>();
   for (const p of inMap) {
     const i = extensionAt(p);
-    if (i >= 0 && !byStem.has(p.slice(0, i).toLowerCase())) byStem.set(p.slice(0, i).toLowerCase(), p);
+    if (i < 0) continue;
+    const stem = p.slice(0, i).toLowerCase();
+    byStem.set(stem, [...(byStem.get(stem) ?? []), p]);
   }
-  const out: { entry: string; file: string }[] = [];
-  for (const e of entries) {
-    if (!e.path) continue;
+  const listed = entries.filter((e) => e.path).map((e) => {
     const path = e.path.replace(/\//g, "\\");
-    const forms = (STANDARD_FLAGS.includes(e.flags) ? [`${folder}\\${path}`, path] : [path]).map((f) => projectPath(f).toLowerCase());
+    return { path, forms: (STANDARD_FLAGS.includes(e.flags) ? [`${folder}\\${path}`, path] : [path]).map((f) => projectPath(f).toLowerCase()) };
+  });
+  // A file an entry names as it is stays in the editor's save, whatever else lists it under another extension.
+  const named = new Set(listed.flatMap((e) => e.forms));
+  const out: { entry: string; file: string }[] = [];
+  for (const { path, forms } of listed) {
     if (forms.some((f) => lower.has(f))) continue;
-    const file = forms.map((f) => { const i = extensionAt(f); return i >= 0 ? byStem.get(f.slice(0, i)) : undefined; }).find((f) => f !== undefined);
-    if (file && measuredSwap(path, archivePath(file))) out.push({ entry: path, file });
+    const file = forms.flatMap((f) => { const i = extensionAt(f); return i >= 0 ? byStem.get(f.slice(0, i)) ?? [] : []; })
+      .find((f) => !named.has(f.toLowerCase()) && measuredSwap(path, archivePath(f)));
+    if (file) out.push({ entry: path, file });
   }
   return out;
 }

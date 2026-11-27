@@ -870,6 +870,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .editor-pane.text-with-problems > .cm-editor { flex: 1; min-height: 0; height: auto !important; }
 .trig-value-note { min-height: 1.2em; margin: 4px 0; color: var(--fg-muted); font-size: 12px; }
 .trig-value-note.error { color: #f14c4c; }
+.trig-value-note.warning { color: #cca700; }
 .trig-search { margin: 4px 6px 0; width: calc(100% - 12px); box-sizing: border-box; font: inherit; padding: 2px 6px; }
 .cm-symbol-tip { padding: 4px 8px; max-width: 640px; font-size: 12px; }
 .cm-symbol-tip code { font-family: var(--mono); white-space: pre-wrap; }

@@ -15,6 +15,9 @@ const KINDS: [string[], string, string][] = [
   [["techcode", "upgradecode"], "w3q", "Upgrade"],
 ];
 
+/** The kinds a code of a type may be of where that is more than the picker's: a tech is an upgrade or a unit. */
+const ALSO: Record<string, string[]> = { techcode: ["w3u"] };
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   void Promise.all([w3.services.get<TriggerGuiService>(TRIGGER_GUI_SERVICE), w3.services.get<ObjectsService>(OBJECTS_SERVICE)]).then(([gui, objects]) => {
     for (const [types, kind, label] of KINDS) {
@@ -22,6 +25,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         id: `objects.${kind}`,
         title: `${label}…`,
         types,
+        // The World Editor's Value dialog takes only a code it finds; Studio keeps any, and says so.
+        async warn({ type, value }) {
+          const found = await objects.name(value, [kind, ...(ALSO[type] ?? [])]);
+          const what = type === "techcode" ? "upgrade or unit type" : label.toLowerCase();
+          return found === undefined ? `No ${what} "${value}" in the game or this map. The World Editor doesn't take such a code; OK keeps it all the same.` : undefined;
+        },
         async edit() {
           const o = await objects.pick(document.body, { title: `Choose a ${label.toLowerCase()}`, kinds: [kind] });
           return o ? { type: 3, value: o.id } : undefined;

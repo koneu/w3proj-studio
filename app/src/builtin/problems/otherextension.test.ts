@@ -55,8 +55,21 @@ test("an entry whose file is stored under another extension is a warning, one pe
   assert.ok(found.every((p) => p.severity === "warning" && p.location === "war3map.imp" && !p.fixes));
 });
 
-// Blizzard's own maps list .mdl models held as .mdx and war3mapMap.blp as war3mapmap.tga (ForgottenHollow,
-// SilverpineSprint, Dalaran): not the swaps the editor's save was seen to drop, so no warning.
+// A model listed as .mdl and held as .mdx (Blizzard's ForgottenHollow does that): the editor's save drops the .mdx and
+// keeps the entry (hidden World Editor, 2026-11-27). A texture of the same name beside it doesn't hide that.
+test("a model listed as .mdl and held as .mdx is a warning, also beside a texture of its name", async () => {
+  const found = await fake({
+    "map/war3mapImported/Rock.blp": "", "map/war3mapImported/Rock.mdx": "", "map/war3mapImported/Tree.mdx": "",
+    "map/war3map.imp.json": imp([13, "war3mapImported\\Rock.mdl"], [13, "war3mapImported\\Rock.blp"], [8, "Tree.mdl"]),
+  }).run();
+  assert.deepEqual(found.map((p) => p.message.split(":")[0]), [
+    "war3mapImported\\Rock.mdl is listed, but the map holds it as war3mapImported\\Rock.mdx",
+    "Tree.mdl is listed, but the map holds it as war3mapImported\\Tree.mdx",
+  ]);
+});
+
+// war3mapMap.blp listed as war3mapmap.tga (Dalaran) isn't a swap the editor's save was seen to drop, and a file that is
+// also listed under its own name (Fine.mdx beside Fine.mdl) stays.
 test("the control: files under their own names (any case, a / path, the standard path's folder), none at all, no list, unmeasured swaps", async () => {
   const found = await fake({
     ...WORMWAR,

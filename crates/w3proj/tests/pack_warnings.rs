@@ -117,8 +117,8 @@ fn an_import_listed_under_another_extension_is_kept_with_a_warning() {
     fs::write(project.join("map/war3mapPreview.dds"), b"DDS ").unwrap();
     let codecs = Registry::default();
     // Control: every entry has its file under its own name (Tune.wav by the standard path flags 8, in the import
-    // folder; readme.txt listed with a `/`), one has none at all, a model listed as .mdl is held as .mdx (Blizzard's
-    // maps do that; not a swap the editor was seen to drop): no warning of this kind.
+    // folder; readme.txt listed with a `/`), one has none at all, and Fine.mdx, also listed as .mdl, is listed under
+    // its own name too, so it stays: no warning of this kind.
     let control = imp(&[(13, "war3mapImported\\Fine.mdx"), (8, "Tune.wav"), (13, "war3mapImported/readme.txt"), (13, "war3mapImported\\Gone.mdx"), (13, "war3mapImported\\Fine.mdl")]);
     fs::write(project.join("map/war3map.imp"), control).unwrap();
     let r = w3proj::pack(&project, Some(&dir.join("control.w3x")), &codecs).unwrap();
@@ -137,6 +137,13 @@ fn an_import_listed_under_another_extension_is_kept_with_a_warning() {
     for n in ["war3mapimported\\song.ogg", "war3mappreview.dds", "war3mapimported\\tune.wav"] {
         assert!(packed.contains(&n.to_string()), "{n} in {packed:?}");
     }
+    // A model listed as .mdl only is dropped by the editor's save, a texture of its name beside it or not.
+    fs::write(imported.join("Rock.mdx"), b"MDLX").unwrap();
+    fs::write(imported.join("Rock.blp"), b"BLP1").unwrap();
+    fs::write(project.join("map/war3map.imp"), imp(&[(13, "war3mapImported\\Rock.mdl"), (13, "war3mapImported\\Rock.blp")])).unwrap();
+    let r = w3proj::pack(&project, Some(&dir.join("model.w3x")), &codecs).unwrap();
+    assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+    assert!(r.warnings[0].contains("lists war3mapImported\\Rock.mdl, but the map holds it as war3mapImported\\Rock.mdx"), "{:?}", r.warnings);
     // A damaged list (its count past the entries) is read as far as it goes and doesn't stop the pack.
     let mut cut = imp(&[(13, "war3mapImported\\Song.flac")]);
     cut[4] = 0xff;

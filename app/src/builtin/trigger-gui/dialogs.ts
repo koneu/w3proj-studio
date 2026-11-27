@@ -140,24 +140,59 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
         ? `Allowed: ${limits[0] ?? "…"} to ${limits[1] ?? "…"}` : "");
       // An empty number box is 0 to the World Editor's dialog (measured: Wait typed empty is 0.00); a code isn't a number.
       const typed = () => (base === "integer" || base === "real") && !/code$/.test(type) && input.value.trim() === "" ? "0" : input.value;
-      const take = () => {
+      const allowed = note.textContent;
+      // A doubt about a typed code (no such object): shown while typing, and always before the value is taken, so a
+      // quick Enter can't pass it by. Taken all the same on the next OK.
+      let seen: string | null = null;
+      const warning = async (v: string) => {
+        if (!isTypedCode(type, v)) return undefined;
+        for (const x of extra) {
+          const w = await x.warn?.({ type, value: v.trim() }).catch(() => undefined);
+          if (w) return w;
+        }
+        return undefined;
+      };
+      const showWarning = async () => {
+        const v = input.value;
+        const w = await warning(v);
+        if (input.value !== v || note.classList.contains("error")) return;
+        note.textContent = w ?? allowed;
+        note.classList.toggle("warning", !!w);
+        if (w) seen = v;
+      };
+      let taking = false;
+      const take = async () => {
         const v = typed();
         const err = problem(v);
+        note.classList.remove("warning");
         if (err) { note.textContent = err; note.classList.add("error"); input.focus(); return; }
+        if (isTypedCode(type, v) && seen !== v) {
+          if (taking) return;
+          taking = true;
+          const w = await warning(v);
+          taking = false;
+          // Closed or typed on meanwhile.
+          if (!input.isConnected || input.value !== v) return;
+          if (w) { note.textContent = w; note.classList.remove("error"); note.classList.add("warning"); seen = v; input.focus(); return; }
+        }
         // A typed number is kept as the World Editor keeps it (literals.ts typedTriggerNumber); a code as typed.
         const n = base === "integer" || base === "real" ? typedTriggerNumber(base, v) : null;
         const kept = n && "value" in n && n.value !== null && !isTypedCode(type, v) ? limitTriggerNumber(base as "integer" | "real", n.value, limits ?? [null, null]) : null;
         done({ type: VALUE, value: kept ?? (base === "integer" || base === "real" ? v.trim() : v) });
       };
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
-        onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") take(); },
+        onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") void take(); },
         oninput: () => {
-          note.classList.remove("error");
+          note.classList.remove("error", "warning");
+          note.textContent = allowed;
           const f = /code$/.test(type) ? input.value : filterTriggerTyping(base, input.value);
           if (f !== input.value) input.value = f;
+          void showWarning();
         } });
+      // A value already there that is doubtful says so when the tab opens.
+      void showWarning();
       // A message the game shows gets the colour tools (the preview starts white, as the game's message text).
-      return [isMessageType(data, type) ? withColorTools(input, { defaultColor: "FFFFFF" }) : input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: take }, "OK"))];
+      return [isMessageType(data, type) ? withColorTools(input, { defaultColor: "FFFFFF" }) : input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: () => void take() }, "OK"))];
     } });
     const body = h("div.trig-dialog-body");
     const bar = h("div.picker-tabs");

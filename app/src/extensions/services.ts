@@ -770,6 +770,9 @@ export interface TriggerParamEditor {
     Promise<import("../lib/triggers/wtg").Param | undefined>;
   /** Or: choices shown as a tab of the parameter dialog (searchable list; `group` adds filter chips). */
   list?(opts: { type: string; editor: TriggerEditorHandle }): Promise<TriggerParamChoice[]>;
+  /** What is doubtful about a value typed on the Value tab, shown there; the user may keep it all the same. Undefined:
+   *  nothing to say. */
+  warn?(opts: { type: string; value: string }): Promise<string | undefined>;
 }
 
 export interface TriggerParamChoice {
