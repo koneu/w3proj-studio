@@ -4,7 +4,7 @@
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
-import { matchCliffTypes, MAX_CLIFF_TYPES, toggleRamp } from "../../lib/terrain/cliffs";
+import { dryIfAbove, matchCliffTypes, MAX_CLIFF_TYPES, toggleRamp } from "../../lib/terrain/cliffs";
 import { specialsAfterCliffs, type SpecialTexture } from "../../lib/terrain/specialfit";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { defaultCliffToAdd, weDefaultCliffType, type CliffLook } from "./cliffs";
@@ -195,7 +195,12 @@ export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?
     dropRamp(t, i, changed);
     changed.push(i);
   }
-  if (changed.length) return withCliffTypes(t, changed, kinds, cliffTile, own);
+  if (changed.length) {
+    const all = withCliffTypes(t, changed, kinds, cliffTile, own);
+    // Ground raised over its water dries, as with the cliff brushes (dryAboveWater).
+    for (const i of changed) dryIfAbove(t, i, () => {});
+    return all;
+  }
   return cliffTile === undefined ? changed : setCliffType(t, area, shape, cliffTile, kinds, own);
 }
 

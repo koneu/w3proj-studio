@@ -108,6 +108,16 @@ export function cliffTypeStencil(radius: number, square = false): [number, numbe
 /** The side of the blocks the World Editor checks the water flags of after a cliff brush stamp, in tiles. */
 export const WATER_CHECK_BLOCK = 4;
 
+/** A wet corner whose ground (a ramp's lift with it) is at or above its water surface turns dry, as the World Editor
+ *  does after a cliff change. Whether it did; `touch` sees the corner first. */
+export function dryIfAbove(t: Terrain, i: number, touch: (i: number) => void): boolean {
+  const c = t.corners[i];
+  if (!c.hasWater || c.water > c.height + rampLift(t, i % t.width, Math.floor(i / t.width))) return false;
+  touch(i);
+  c.hasWater = false;
+  return true;
+}
+
 /** After one cliff brush stamp centred on corner (cx, cy): the World Editor checks the water flag again in blocks of
  *  4 × 4 tiles round it, and a wet corner there whose ground (with its cliff level, a ramp's middle corner with its
  *  lift: rampLift) isn't below its water surface turns dry; a dry corner stays dry, under the surface or not. The
@@ -140,11 +150,7 @@ export function dryAboveWater(t: Terrain, cx: number, cy: number, radius: number
         const i = y * t.width + x;
         if (seen.has(i)) continue;
         seen.add(i);
-        const c = t.corners[i];
-        if (!c.hasWater || c.water > c.height + rampLift(t, x, y)) continue;
-        touch(i);
-        c.hasWater = false;
-        dried.push(i);
+        if (dryIfAbove(t, i, touch)) dried.push(i);
       }
     }
   }

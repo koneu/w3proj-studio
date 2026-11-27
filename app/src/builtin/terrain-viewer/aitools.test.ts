@@ -644,3 +644,18 @@ test("setWater ford and lake are idempotent when run again over the same line or
     assert.deepEqual(snap(tArea), snapArea);
   }
 });
+
+test("set_cliff_level dries water the raised ground covers, as the cliff brush does, and keeps water still above it", () => {
+  const corner = () => ({ height: 0, rawHeight: 0x2000, rawWater: 0x2000, water: 40, hasWater: true, layer: 2, ramp: false, cliffTexture: 15, groundTexture: 0, boundary: false });
+  const t = { width: 9, height: 9, offsetX: 0, offsetY: 0, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: ["CLdi"], corners: Array.from({ length: 81 }, corner) } as unknown as Terrain;
+  const area = { left: 128, bottom: 128, right: 384, top: 384 };
+  aitools.setCliffs(t, area, "box", { level: 3 }, [{ cliffID: "CLdi", groundTile: "Ldrt" }]);
+  const raised = t.corners[2 * 9 + 2], beside = t.corners[7 * 9 + 7];
+  assert.equal(raised.layer, 3, "control: the area went up");
+  assert.equal(raised.hasWater, false, "ground 128 up, over a surface at 40: dry");
+  assert.equal(beside.hasWater, true, "control: outside the area the water stays");
+  // Lowered ground stays wet.
+  for (const c of t.corners) c.hasWater = true;
+  aitools.setCliffs(t, area, "box", { level: 1 }, [{ cliffID: "CLdi", groundTile: "Ldrt" }]);
+  assert.equal(t.corners[2 * 9 + 2].hasWater, true);
+});

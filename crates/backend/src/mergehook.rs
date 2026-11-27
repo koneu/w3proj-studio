@@ -237,7 +237,9 @@ pub fn run(project: &Path, remove: bool, program: &str) -> Result<Outcome, Strin
         std::fs::create_dir_all(dir).map_err(|e| format!("making {}: {e}", dir.display()))?;
     }
     write(&text)?;
-    Ok(out(action, format!("{said} (it runs `w3proj terrain seams` after a merge that touched two subterrains; W3PROJ_BIN names another w3proj)")))
+    // `git lfs install` writes no hook over one that is there, so a project that gets LFS later has to be told how.
+    let lfs = if existing.is_none() { ". If a later `git lfs install` says \"Hook already exists\": run `git lfs install --force`, then install this hook again (both then run)" } else { "" };
+    Ok(out(action, format!("{said} (it runs `w3proj terrain seams` after a merge that touched two subterrains; W3PROJ_BIN names another w3proj){lfs}")))
 }
 
 #[cfg(test)]
