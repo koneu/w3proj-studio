@@ -14818,6 +14818,36 @@ async function placerAndCampaign(page, found) {
     if (!(await soon(async () => (await k.setting("terrain.placement.scatter")) === true, 5000))) fail("Scatter isn't kept as a setting");
     await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
     await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);
+    // The forest brush: Scatter's packed circle of size 3 places trees as the World Editor's multiple placement does
+    // (15, in rows of 1, 4, 5, 4, 1; lib/terrain/forest), a second click adds none, and one undo takes them all.
+    const trees = () => k.doodads().filter((d) => d.id === "LTlt");
+    await k.tool("place_objects", { objects: [{ id: "LTlt", x: -1408, y: 896 }], ignoreRoom: true });
+    await k.save();
+    await k.look(-1408, 896, { id: "LTlt", x: -1408, y: 896 });
+    await k.run("w3.terrain.selectInPalette");
+    await soon(() => page.evaluate(`/Placing .*LTlt/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000);
+    const alone = trees().length;
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    if (!(await set(".terrain-place-pattern", "circle")) || !(await set(".terrain-place-forest", "3"))) fail("Scatter shows no Pattern and packed Size");
+    await settled(page);
+    await click(-640, 768);
+    await k.save();
+    const forest = trees().filter((d) => Math.abs(d.position[0] + 640) < 400 && Math.abs(d.position[1] - 768) < 400);
+    const middle = (i) => (Math.min(...forest.map((d) => d.position[i])) + Math.max(...forest.map((d) => d.position[i]))) / 2;
+    const rows = [...new Set(forest.map((d) => d.position[1]))].sort((a, b) => b - a)
+      .map((y) => [y - middle(1), forest.filter((d) => d.position[1] === y).map((d) => d.position[0] - middle(0)).sort((a, b) => a - b)]);
+    const wanted = [[256, [0]], [128, [-192, -64, 64, 192]], [0, [-256, -128, 0, 128, 256]], [-128, [-192, -64, 64, 192]], [-256, [0]]];
+    if (lit(rows) !== lit(wanted) || middle(0) % 64 || middle(1) % 64) fail(`a packed circle of size 3 placed ${forest.length} trees as ${lit(rows)} round ${middle(0)},${middle(1)} (${await k.toasts()})`);
+    await click(-640, 768);
+    await k.save();
+    if (trees().length !== alone + 15) fail(`filling the same spot again left ${trees().length - alone} trees, not 15`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    if (trees().length !== alone) fail(`one undo after the packed brush left ${trees().length - alone} of its trees`);
+    await set(".terrain-place-pattern", "random");
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);
+    await k.clearToasts();
     // Place… names a doodad's tilesets, finds by them, and opens again on the tab and search it was left with.
     const openPlace = async () => {
       await k.hands.click(".terrain-group-tools button", "Place…");
