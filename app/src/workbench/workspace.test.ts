@@ -152,6 +152,16 @@ test("a write doesn't hide what someone else changed meanwhile", async () => {
   assert.deepEqual([...(await ws.externalChanges())], ["by-git.txt"]);
 });
 
+test("the generated files' record, rewritten by the backend, isn't an outside change; another file beside it is", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  for (const path of [".w3proj/derived-from.json", "maps/One.w3x/.w3proj/derived-from.json", ".w3proj/settings.json"]) {
+    backend.get(A)!.push({ path, size: 5, modified: 3 });
+  }
+  assert.deepEqual([...(await ws.externalChanges())], [ws.key(".w3proj/settings.json")]);
+});
+
 test("files outside the project, or in folders the list never has, aren't listed", async () => {
   reset();
   const { ws } = make();

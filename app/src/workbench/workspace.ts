@@ -50,6 +50,11 @@ const TRIGGERS_ROOT_FILE = "map/triggers/";
 import { timeLimit } from "./timelimit";
 import { validateSetting } from "./settingsvalidate";
 
+/** The record of what the generated files were made from (w3proj::derived), a campaign's chapters' too. Studio's
+ *  backend rewrites it a while after a save, past the workspace's own writes; git ignores it and nobody edits it. So its
+ *  change is none from outside. */
+const DERIVED_RECORD = /(^|\/)\.w3proj\/derived-from\.json$/i;
+
 /** What tells two recent projects apart: as `fileKey`, case counts only off a Windows root, so on Linux
  *  `/home/u/Map` and `/home/u/map` are two projects, both listed. A `\` is a separator only on Windows. */
 export const recentKey = (root: string) => (isWindowsPath(root) ? root.replace(/\//g, "\\").toLowerCase() : root);
@@ -279,6 +284,7 @@ export class WorkspaceService {
       if ((!b || b.size !== f.size || b.modified !== f.modified) && !isOwn(k, f)) changed.add(k);
     }
     for (const k of before.keys()) if (!isOwn(k)) changed.add(k);
+    for (const k of changed) if (DERIVED_RECORD.test(k)) changed.delete(k);
     if (!baseline) changed.clear();
     this.setList(this.keepNoticed(after, listedBefore, ownBefore));
     const unreadableChanged = unreadable.map((u) => u.path).join("\n") !== this.unreadableList.map((u) => u.path).join("\n");
