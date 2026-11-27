@@ -3,6 +3,7 @@ import { keyOf } from "../../lib/keys";
 import { joinPath } from "../../lib/paths";
 import { clickSelection } from "../../lib/selection";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
+import { openTarget, realFiles, virtualOver } from "../../lib/projectview";
 import { formatBytes, h } from "../../workbench/dom";
 import { planMoves, takenOnDisk } from "./moves";
 
@@ -77,11 +78,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  A clicked file opens, and its editor takes the focus. */
   let refocus = false;
   const fail = (e: unknown) => void w3.window.showError(String(e instanceof Error ? e.message : e));
-  /** The files at or under `path` (a file, or a folder of the tree). */
+  /** The files on disk at or under `path` (a file, or a folder of the tree). */
   const filesUnder = (path: string) => {
     const p = path.toLowerCase();
-    return w3.workspace.files().map((f) => f.path).filter((f) => f.toLowerCase() === p || f.toLowerCase().startsWith(p + "/"));
+    return realFiles(w3.workspace.files()).map((f) => f.path).filter((f) => f.toLowerCase() === p || f.toLowerCase().startsWith(p + "/"));
   };
+  /** What changing `paths` touches that an editor may be on: their files, and the virtual ones made from them (the
+   *  terrain editor works on one). */
+  const touched = (paths: readonly string[]) => [...new Set(paths.flatMap((p) => [...filesUnder(p), ...virtualOver(p, w3.workspace.files())]))];
   const unsaved = (files: string[]) => files.filter((f) => w3.editors.isDirty(f));
 
   /** The project asked about (`root`), once its whole file list is read: "already exists" is told from it, and a
@@ -128,7 +132,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const taken = await takenOnDisk(moves, (p) => w3.workspace.exists(p));
     if (taken) throw new Error(taken);
     const files = moves.flatMap(([from]) => filesUnder(from));
-    const busy = unsaved(files);
+    const edited = touched(moves.map(([from]) => from));
+    const busy = unsaved(edited);
     if (busy.length) throw new Error(`Save or close ${busy.join(", ")} first.`);
     // A file's place in map/ is its path inside the map: what refers to it doesn't follow.
     if (moves.some(([from, to]) => /^map\//i.test(from) || /^map\//i.test(to))) {
@@ -136,7 +141,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (c !== "Move") return;
     }
     const reopen = files.filter((f) => w3.editors.activePath() === f);
-    for (const f of files) await w3.editors.close(f);
+    for (const f of edited) await w3.editors.close(f);
     for (const [from, to] of moves) await w3.workspace.rename(from, to);
     if (folder) expanded.add(folder);
     selected = new Set(moves.map(([, to]) => to));
@@ -149,7 +154,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   const rename = async (path: string, isDir: boolean) => {
     const files = filesUnder(path);
-    const busy = unsaved(files);
+    const edited = touched([path]);
+    const busy = unsaved(edited);
     if (busy.length) throw new Error(`Save or close ${busy.join(", ")} first.`);
     // An empty folder has no files to carry it along.
     const empty = isDir && !files.length;
@@ -163,6 +169,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // Only the case changes: through a temporary name (the file system sees the same file).
     const caseOnly = to.toLowerCase() === path.toLowerCase();
     const reopen = files.filter((f) => w3.editors.activePath() === f);
+    for (const f of edited) if (!files.includes(f)) await w3.editors.close(f);
     for (const f of files) {
       await w3.editors.close(f);
       if (caseOnly) await w3.workspace.rename(f, `${f}.renaming`);
@@ -177,11 +184,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const remove = async (paths: string[]) => {
     const roots = paths.filter((p) => !paths.some((q) => q !== p && p.toLowerCase().startsWith(`${q.toLowerCase()}/`)));
     const files = roots.flatMap(filesUnder);
-    const busy = unsaved(files);
+    const edited = touched(roots);
+    const busy = unsaved(edited);
     const only = roots.length === 1 ? roots[0] : null;
     const what = only ? (isFolder(only) ? `the folder ${only} (${files.length} file${files.length === 1 ? "" : "s"})` : only) : `${roots.length} items (${files.length} file${files.length === 1 ? "" : "s"})`;
     if (!(await w3.window.askDelete(`Delete ${what}?${busy.length ? ` Unsaved changes in ${busy.join(", ")} are lost.` : ""} Use git to get deleted files back.`, "Delete"))) return;
-    for (const f of files) await w3.editors.close(f);
+    for (const f of edited) await w3.editors.close(f);
     const { error } = await w3.workspace.deleteMany(files);
     if (error) throw new Error(error);
     // Folders that are left: empty ones, deepest first.
@@ -204,7 +212,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const act = (f: () => Promise<unknown>) => () => { f().catch(fail); };
     w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
       ...(isDir ? [] : [
-        { label: "Open", run: act(() => w3.editors.open(path)) },
+        { label: "Open", run: act(() => w3.editors.open(openTarget(path, w3.workspace.files()))) },
         { label: "Open With…", run: act(async () => { await w3.editors.open(path); await w3.commands.execute("workbench.reopenWith"); }) },
         "-" as const,
       ]),
@@ -235,6 +243,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return isFile ? (sel.includes("/") ? sel.slice(0, sel.lastIndexOf("/")) : "") : sel;
   };
 
+  /** build/'s files, which the project's list leaves out, as last read for a project (setting explorer.showBuild). */
+  let built: { root: string; files: FileInfo[] } | null = null;
+  let reading: string | null = null;
+  const readBuild = async (root: string) => {
+    if (reading === root) return;
+    reading = root;
+    // Not there (nothing built yet), or a backend without the listing: no files.
+    const names = await w3.backend.invoke<string[]>("fs_list_tree", { path: joinPath(root, "build") }).catch(() => []);
+    reading = null;
+    if (w3.workspace.project()?.root !== root) return;
+    // A size below 0: not known, so the tooltip says none.
+    built = { root, files: names.map((n) => ({ path: `build/${n}`, size: -1, modified: 0 })) };
+    w3.views.refresh("w3.explorer.files");
+  };
+
   const render = (el: HTMLElement) => {
     const project = w3.workspace.project();
     if (!project) {
@@ -257,16 +280,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       for (let i = parts.length - 1; i > 0; i--) {
         if (files.has(`${parts.slice(0, i).join("/")}/w3proj.toml`.toLowerCase())) { inner = i; break; }
       }
-      if (inner < 0) return w3.editors.open(path);
+      if (inner < 0) return w3.editors.open(openTarget(path, w3.workspace.files()));
       const dir = parts.slice(0, inner).join("/");
       const c = await w3.window.showWarning(`${parts.slice(inner).join("/")} belongs to the map project ${dir}. Its editors (terrain objects, object data, triggers…) need that project open.`,
         "Open map project", "Open here anyway", "Cancel");
       if (c === "Open here anyway") return w3.editors.open(path);
       if (c !== "Open map project") return;
       await w3.commands.execute("w3.project.open", joinPath(w3.workspace.project()!.root, dir));
-      await w3.editors.open(parts.slice(inner).join("/"));
+      await w3.editors.open(openTarget(parts.slice(inner).join("/"), w3.workspace.files()));
     };
-    const tree = buildTree(w3.workspace.files(), w3.workspace.folders());
+    const withBuild = w3.settings.get<boolean>("explorer.showBuild") === true;
+    if (withBuild && built?.root !== project.root) void readBuild(project.root);
+    const extra = withBuild && built?.root === project.root ? built.files : [];
+    const tree = buildTree([...realFiles(w3.workspace.files()), ...extra], w3.workspace.folders());
     shown = [];
     const clearDrop = () => { for (const x of list.querySelectorAll(".drop-target")) x.classList.remove("drop-target"); list.classList.remove("drop-target"); };
     const drop = (e: DragEvent, folder: string) => {
@@ -295,7 +321,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           `div.tree-row${selected.has(child.path) ? ".selected" : ""}`,
           {
             style: { paddingLeft: `${8 + depth * 12}px` },
-            title: child.file ? `${child.path} — ${formatBytes(child.file.size)}` : child.path,
+            title: !child.file || child.file.size < 0 ? child.path : `${child.path} — ${formatBytes(child.file.size)}${/(^|\/)map\/terrain\/terrain\.json$/i.test(child.path) ? " · opens the terrain editor (Open With… shows the file)" : ""}`,
             draggable: true,
             ondragstart: (e: DragEvent) => {
               if (!selected.has(child.path)) selectOnly(child.path);
@@ -353,10 +379,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         { icon: "+", title: "New File…", command: "w3.explorer.newFile" },
         { icon: "▣", title: "New Folder…", command: "w3.explorer.newFolder" },
         { icon: "⊟", title: "Collapse All", command: "w3.explorer.collapseAll" },
+        { icon: "◫", title: "Show or Hide build/", command: "w3.explorer.toggleBuild" },
       ],
     }),
-    w3.workspace.onDidChange(() => w3.views.refresh("w3.explorer.files")),
-    w3.commands.register("w3.explorer.refresh", () => w3.workspace.refresh()),
+    w3.workspace.onDidChange(() => { built = null; w3.views.refresh("w3.explorer.files"); }),
+    w3.settings.onDidChange(() => w3.views.refresh("w3.explorer.files")),
+    w3.commands.register("w3.explorer.refresh", async () => { built = null; await w3.workspace.refresh(); w3.views.refresh("w3.explorer.files"); }),
+    w3.commands.register("w3.explorer.toggleBuild", async () => {
+      built = null;
+      await w3.settings.set("explorer.showBuild", w3.settings.get<boolean>("explorer.showBuild") !== true);
+      w3.views.refresh("w3.explorer.files");
+    }),
     // In the selected folder (or the selected file's), else the project's top level.
     w3.commands.register("w3.explorer.newFile", () => {
       if (!w3.workspace.project()) throw new Error("Open a project first.");

@@ -208,7 +208,7 @@ pub fn list(root: &Path, files: &mut Vec<FileInfo>) {
                 size += f.size;
                 modified = modified.max(f.modified);
             }
-            more.push(FileInfo { path, size, modified });
+            more.push(FileInfo { path, size, modified, is_virtual: true });
         }
     }
     if !more.is_empty() {
