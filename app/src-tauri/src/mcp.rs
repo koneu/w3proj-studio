@@ -36,26 +36,14 @@ struct Shared {
 #[derive(Default, Clone)]
 pub struct Mcp(Arc<Shared>);
 
-/// Hands one request to the webview and waits for the answer; a late answer is dropped. What the webview says on the
-/// way (a long tool's progress, one line each) goes to `out` as it comes, but only for a bridge that reads more than
-/// one line: it marks such a request with `w3progress` (an older bridge takes the first line for the answer). A note
-/// doesn't move the time limit: the webview's clock sends them, whether or not the tool gets anywhere.
-async fn ask<W: tokio::io::AsyncWrite + Unpin>(app: &AppHandle, mcp: &Mcp, line: &str, out: &mut W) -> String {
+/// Waits for the webview's answer until `until`; None when none came. Its notes on the way go to `out`, a line each,
+/// when the bridge reads them (`streams`); a note never holds the answer back, and one with a line break in it (which
+/// the bridge would take for two lines) is dropped.
+async fn relay<W: tokio::io::AsyncWrite + Unpin>(wait: &mut mpsc::UnboundedReceiver<Said>, until: tokio::time::Instant, streams: bool, out: &mut W) -> Option<String> {
     use tokio::io::AsyncWriteExt;
-    let request: Value = serde_json::from_str(line).unwrap_or(Value::Null);
-    let limit = if request["method"] == "tools/call" { CALL_LIMIT } else { QUICK_LIMIT };
-    let streams = request["w3progress"] == true;
-    let key = mcp.0.next.fetch_add(1, Ordering::Relaxed);
-    let (said, mut wait) = mpsc::unbounded_channel();
-    mcp.0.waiting.lock().unwrap().insert(key, said);
-    let sent = app.emit("w3://mcp-request", json!({ "key": key, "message": line }));
-    let until = tokio::time::Instant::now() + limit;
-    let reply = loop {
-        if sent.is_err() {
-            break None;
-        }
+    loop {
         match tokio::time::timeout_at(until, wait.recv()).await {
-            Ok(Some(Said::Reply(reply))) => break Some(reply),
+            Ok(Some(Said::Reply(reply))) => return Some(reply),
             Ok(Some(Said::Note(note))) => {
                 // A client that hung up misses the answer too; the tool still ends its work.
                 if streams && !note.contains('\n') {
@@ -64,9 +52,25 @@ async fn ask<W: tokio::io::AsyncWrite + Unpin>(app: &AppHandle, mcp: &Mcp, line:
                     let _ = out.flush().await;
                 }
             }
-            _ => break None,
+            _ => return None,
         }
-    };
+    }
+}
+
+/// Hands one request to the webview and waits for the answer; a late answer is dropped. What the webview says on the
+/// way (a long tool's progress, one line each) goes to `out` as it comes, but only for a bridge that reads more than
+/// one line: it marks such a request with `w3progress` (an older bridge takes the first line for the answer). A note
+/// doesn't move the time limit: the webview's clock sends them, whether or not the tool gets anywhere.
+async fn ask<W: tokio::io::AsyncWrite + Unpin>(app: &AppHandle, mcp: &Mcp, line: &str, out: &mut W) -> String {
+    let request: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+    let limit = if request["method"] == "tools/call" { CALL_LIMIT } else { QUICK_LIMIT };
+    let streams = request["w3progress"] == true;
+    let key = mcp.0.next.fetch_add(1, Ordering::Relaxed);
+    let (said, mut wait) = mpsc::unbounded_channel();
+    mcp.0.waiting.lock().unwrap().insert(key, said);
+    let sent = app.emit("w3://mcp-request", json!({ "key": key, "message": line }));
+    let until = tokio::time::Instant::now() + limit;
+    let reply = if sent.is_ok() { relay(&mut wait, until, streams, out).await } else { None };
     mcp.0.waiting.lock().unwrap().remove(&key);
     reply.unwrap_or_else(|| {
         let error = json!({ "code": -32000, "message": "W3Proj Studio didn't answer in time." });
@@ -93,6 +97,37 @@ async fn connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite>(app: AppHan
     // Closing now could cut off a big answer (a screenshot): the client hangs up first.
     let _ = tokio::time::timeout(Duration::from_secs(30), read.read_u8()).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod relay_tests {
+    use super::*;
+
+    fn run(said: Vec<Said>, streams: bool, wait_ms: u64) -> (Option<String>, String) {
+        tauri::async_runtime::block_on(async {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            for s in said {
+                tx.send(s).unwrap();
+            }
+            let mut out = Vec::new();
+            let until = tokio::time::Instant::now() + Duration::from_millis(wait_ms);
+            let reply = relay(&mut rx, until, streams, &mut out).await;
+            (reply, String::from_utf8(out).unwrap())
+        })
+    }
+
+    #[test]
+    fn a_tools_progress_goes_out_before_its_answer_to_a_bridge_that_reads_it() {
+        let said = || vec![Said::Note("one".into()), Said::Note("two\nlines".into()), Said::Note("three".into()), Said::Reply("done".into())];
+        assert_eq!(run(said(), true, 1000), (Some("done".into()), "one\nthree\n".into()));
+        // An older bridge takes the first line for the answer: it gets the answer alone.
+        assert_eq!(run(said(), false, 1000), (Some("done".into()), String::new()));
+    }
+
+    #[test]
+    fn progress_doesnt_stand_for_an_answer_that_never_comes() {
+        assert_eq!(run(vec![Said::Note("still working".into())], true, 50), (None, "still working\n".into()));
+    }
 }
 
 #[cfg(windows)]
