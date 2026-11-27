@@ -87,8 +87,8 @@ const GRAPHICS_DLLS: [(&str, &str); 8] = [
 
 /// The WINEDLLOVERRIDES for the graphics libraries the prefix has from this Proton build. Proton sets them while it
 /// updates the prefix (`setup_prefix`), which `runinprefix` skips; without them Wine loads its own Direct3D beside
-/// the prefix's files, and the game's built-in browser can't start its GPU process, so the Battle.net login page
-/// stays blank (2026-11-26: "Failed to launch GPU process" in BlizzardBrowser's log, only for Studio's launches).
+/// the prefix's files. This did not cure the blank Battle.net login page of a game Studio starts (2026-11-26,
+/// "Failed to launch GPU process" in BlizzardBrowser's log; tried with these set): that is still unexplained.
 /// Only a library whose file in the prefix is the build's own is named (a prefix set up for wined3d gets none), and
 /// one that `inherited` (the user's own WINEDLLOVERRIDES) already names stays as the user set it. None: nothing to
 /// add. Proton appends its own overrides to what it is given.
