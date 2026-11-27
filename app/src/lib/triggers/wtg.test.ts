@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseTriggerData } from "./triggerdata";
-import { parseWct, parseWtg, textTriggers, writeWct, writeWtg, type Call, type CustomTextFile, type Eca, type TriggerFile } from "./wtg";
+import { compiledTexts, parseWct, parseWtg, textTriggers, writeWct, writeWtg, type Call, type CustomTextFile, type Eca, type TriggerFile } from "./wtg";
 
 /** Just the functions the samples use, in TriggerData.txt's own form. */
 const data = parseTriggerData(`
@@ -154,4 +154,13 @@ test("custom script, classic: with and without a header", () => {
   assert.deepEqual(parseWct(writeWct(v1), 2), v1);
   const v0: CustomTextFile = { reforged: false, version: 0, comment: "", header: null, texts: ["a", "b"] };
   assert.deepEqual(parseWct(writeWct(v0), 2), v0);
+});
+
+test("compiledTexts ends each custom text at its first zero byte, as the World Editor's script does, and changes nothing else", () => {
+  const custom = { reforged: true, version: 1, comment: "c\0d", header: "head\u{10FF00}gone", texts: ["library A\r\nendlibrary \0\0", "kept\r\n", null, "", "// before\0after\r\nfunction Lost takes nothing returns nothing\r\nendfunction\r\n"] };
+  const was = structuredClone(custom);
+  const made = compiledTexts(custom);
+  assert.equal(made.header, "head");
+  assert.deepEqual(made.texts, ["library A\r\nendlibrary ", "kept\r\n", null, "", "// before"]);
+  assert.deepEqual(custom, was, "the stored texts keep what follows the zero");
 });

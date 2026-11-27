@@ -335,3 +335,16 @@ export function writeWct(f: CustomTextFile): Uint8Array {
 export function textTriggers(f: TriggerFile): TriggerItem[] {
   return f.items.filter((i): i is TriggerItem => i.type === 8 || i.type === 32);
 }
+
+/** A zero byte of a text, as it is in memory (war3map.wct) or comes from a trigger folder's file (lib/formats/lossless
+ *  writes it U+10FF00). */
+const ZERO_BYTE = /[\0\u{10FF00}]/u;
+
+/** The custom texts as the World Editor's map script has them: each up to its first zero byte. Its stored texts keep
+ *  what follows (a map's `endlibrary` can have two zeros after it, which JassHelper doesn't read as endlibrary), and so
+ *  do Studio's: only what is generated from is cut (hidden World Editor, 2026-11-27: a zero in the middle of a text
+ *  left the rest of it out of the saved script). */
+export function compiledTexts(c: CustomTextFile): CustomTextFile {
+  const cut = (t: string) => { const z = t.search(ZERO_BYTE); return z < 0 ? t : t.slice(0, z); };
+  return { ...c, header: c.header === null ? null : cut(c.header), texts: c.texts.map((t) => (t === null ? null : cut(t))) };
+}

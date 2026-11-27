@@ -11,7 +11,7 @@
 //     "//library <name>:" and "//library <name> ends" and other comments (the marks too) stayed in place. The text
 //     is found by the library's name or the marks, and the line in it by what the line says.
 
-import { textTriggers, type CustomTextFile, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
+import { compiledTexts, textTriggers, type CustomTextFile, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
 
 const MARK = "//w3proj-check";
 
@@ -30,6 +30,8 @@ export interface MarkedTexts {
  *  `nonce`: part of the marks, so that nothing in a text can look like one. Nothing given is changed. */
 export function markTexts(triggers: TriggerFile, custom: CustomTextFile, item: TriggerItem, nonce: string): MarkedTexts {
   const items = textTriggers(triggers);
+  // Cut as the script is made before the marks go round a text: a zero byte would cut its end mark off.
+  const own = compiledTexts(custom);
   const mark = (text: string | null, k: number) => {
     // A text of line breaks only holds no code to report on: left as it is.
     if (text === null || !/[^\r\n]/.test(text)) return text;
@@ -38,7 +40,7 @@ export function markTexts(triggers: TriggerFile, custom: CustomTextFile, item: T
   };
   return {
     triggers: { ...triggers, items: triggers.items.map((i) => (i === item ? { ...item, enabled: true, isComment: 0 } : i)) },
-    custom: { ...custom, header: mark(custom.header, 0), texts: items.map((_, k) => mark(custom.texts[k] ?? null, k + 1)) },
+    custom: { ...custom, header: mark(own.header, 0), texts: items.map((_, k) => mark(own.texts[k] ?? null, k + 1)) },
     names: ["the map header", ...items.map((i) => `"${i.name}"`)],
     own: items.indexOf(item) + 1,
   };

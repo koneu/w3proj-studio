@@ -560,7 +560,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return files;
     }, async () => {
       // Doodads block pathing and cast shadows. With no editor open the ground is the project's, as the rebuild finds it.
-      if (key === "doodads") rebuildSoon(() => ({ doodads: before }));
+      if (key === "doodads") return rebuildSoon(() => ({ doodads: before }));
+      // Units are on the minimap (start locations, gold mines) and their file is one the record of the derived files
+      // names, so `w3proj pack` takes the files for outdated until they are made again. The doodads stay as they are.
+      // Doodads that can't be read: no rebuild, as it couldn't tell the shadows' change.
+      const doodads = await loadPlacedFile(w3, "war3map.doo", "doodads").then((f) => f?.list ?? [], () => null);
+      if (doodads) rebuildSoon(() => ({ doodads }));
     });
   };
 

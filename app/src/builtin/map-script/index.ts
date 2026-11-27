@@ -36,7 +36,7 @@ import { MELEE_MAP, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeFiles, savedMelee } from "../../lib/terrain/meleesave";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { parseWct, parseWtg, textTriggers, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
+import { compiledTexts, parseWct, parseWtg, textTriggers, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
 import { WCT_RAW, WTG_RAW } from "../../lib/triggers/project";
 
 /** Hash of the script this app wrote last: a script that still has it holds nothing but what the
@@ -213,6 +213,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         custom = triggers && wct ? parseWct(wct, textTriggers(triggers).length) : null;
       }
     }
+    // What the script is made from ends where a text's first zero byte is (compiledTexts).
+    if (custom) custom = compiledTexts(custom);
     // A language extension compiles maps written in it (JASS maps only); vJASS without one isn't
     // regenerated (the uncompiled text would break the map).
     const textList = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")];

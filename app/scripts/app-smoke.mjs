@@ -3663,6 +3663,27 @@ async function triggerCodeWarning(page, found) {
   }
 }
 
+/** A unit placed by the AI tools alone has pathing, shadows and the minimap made again: a gold mine gets its minimap icon,
+ *  and the record of what they were made from takes in the units' file, so a command-line pack doesn't call them stale. */
+async function unitEditRederives(page, found) {
+  const fail = (what) => found.push(`unit edit rederives: ${what}`);
+  const k = await heightKit(page, "UnitRederive");
+  try {
+    await k.save();
+    await settled(page);
+    const derived = join(k.root, "build", "derived", "war3map.mmp.json"), record = join(k.root, "build", "derived-from.json");
+    const icons = () => JSON.parse(readDiskFile(derived, "utf8")).icons.length;
+    const had = icons(), was = readDiskFile(record, "utf8");
+    await k.tool("place_objects", { objects: [{ id: "ngol", x: 1024, y: 1024, player: 28 }], ignoreRoom: true });
+    // No save and no other edit after it: the rebuild comes by itself.
+    if (!(await soon(async () => icons() === had + 1, 60000))) fail(`the minimap has ${icons()} icons after the gold mine, ${had} before`);
+    else if (!(await soon(async () => readDiskFile(record, "utf8") !== was, 60000))) fail("the record of the derived files didn't change");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -19320,6 +19341,7 @@ async function run() {
         truncatedChapter,
         turtleCliffSave,
         typedFieldSave,
+        unitEditRederives,
         unitProperties,
         unreadableChapter,
         verify3Steps,
@@ -19548,6 +19570,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectPickerSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
+  await unitEditRederives(page, found).catch((e) => found.push(`unit edit rederives: ${e.message}`));
+  await leftOpen(page, "unitEditRederives", found);
   await triggerCodeWarning(page, found).catch((e) => found.push(`trigger code warning: ${e.message}`));
   await leftOpen(page, "triggerCodeWarning", found);
   await triggerValueLimits(page, found).catch((e) => found.push(`trigger value limits: ${e.message}`));
