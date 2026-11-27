@@ -12,6 +12,7 @@ import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { FILTERS, nextSort, passes, sortRows, totals, typeOptions, type FilterValues, type RowFacts, type Sort, type SortKey } from "./view";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, modeMove, newEntryFlags, pathForUse, projectPath, rowEntries, rowMoves, samePath, sidePathOf, SIDES, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type Side, type UseIn } from "../../lib/imports";
 import { bringsTextures, followingTextures, modelTextures, shownEntry, SIDE_NAME, SIDE_PREFER, versionsToAdd, versionToAdd } from "./versions";
 import type { FileInfo } from "../../extensions/api";
@@ -248,6 +249,9 @@ class ImportView {
   /** The rows as shown (selection ranges, Ctrl+A). */
   private shown: ImportRow[] = [];
   private query = "";
+  /** The list's sort and filters: what is shown only (view.ts), never the saved list or its order. */
+  private sort: Sort | null = null;
+  private filters: FilterValues = {};
   /** "Use in" for the next imports of models and textures (lib/imports.ts UseIn). */
   private useIn: UseIn = "both";
   /** The image last previewed (the list redraws often; decoding it each time would be slow). */
@@ -860,7 +864,12 @@ class ImportView {
   render() {
     const files = this.files();
     const q = this.query.trim().toLowerCase();
-    const listed = this.rows(files).filter((r) => !q || rowEntries(r).some((e) => e.path.toLowerCase().includes(q)) || r.path.toLowerCase().includes(q));
+    const allRows = this.rows(files);
+    const sizeOfRow = (r: ImportRow) => rowEntries(r).reduce((n, e) => n + (this.fileOf(e, files)?.size ?? 0), 0);
+    const matching = allRows.filter((r) => !q || rowEntries(r).some((e) => e.path.toLowerCase().includes(q)) || r.path.toLowerCase().includes(q))
+      .map((row): RowFacts => ({ row, size: sizeOfRow(row) })).filter((f) => passes(f, this.filters));
+    const listedFacts = sortRows(matching, this.sort);
+    const listed = listedFacts.map((f) => f.row);
     // Files in the map folder that the list doesn't register (and that aren't the map's own); the Problems view warns
     // of each (the same rule: lib/imports.ts unlistedFiles).
     const unlisted = unlistedFiles([...files.values()].map((f) => f.path), this.list.files, this.folder).map(archivePath)
@@ -893,7 +902,10 @@ class ImportView {
       ...(this.editable ? [h("button.primary", { onclick: () => this.importFiles() }, "Import files…"), h("button", { onclick: () => this.importFolder() }, "Import folder…"),
         h("button.imp-cleanup", { title: "Removes entries without a name or without a file, and lists the map's files that aren't listed: previewed first, Ctrl+Z takes it back", onclick: () => void this.cleanUp() }, "Clean up list…"),
         h("label.imp-use-label", {}, "Use in", useIn)] : []),
-      search, h("span.muted", {}, `${this.list.files.length} imported · ${formatBytes(total)}`));
+      search, ...this.filterBoxes(allRows),
+      h("span.muted.imp-count", { title: "Entries and size shown, out of all imported" },
+        matching.length === allRows.length ? `${this.list.files.length} imported · ${formatBytes(total)}`
+          : `${totals(listedFacts).entries} of ${this.list.files.length} imported · ${formatBytes(totals(listedFacts).size)} of ${formatBytes(total)}`));
 
     const rows = listed.map((r) => {
       const found = rowEntries(r).map((e) => this.fileOf(e, files));
@@ -913,7 +925,7 @@ class ImportView {
       }, h("td.imp-path", {}, r.classic ? this.shownPath(r.classic, found[0]) : r.path, ...this.badges(r)), h("td", {}, kindOf(r.path)),
       h("td.imp-size", {}, found.every((x) => !x) ? "missing" : formatBytes(size)), h("td.muted", {}, rowEntries(r).map((e) => String(e.flags)).join(" / ")));
     });
-    const table = h("table.imp-table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Path in the map"), h("th", {}, "Type"), h("th", {}, "Size"), h("th", { title: "Import flags (war3map.imp)" }, "Flags"))),
+    const table = h("table.imp-table", {}, h("thead", {}, h("tr", {}, this.sortHeader("path", "Path in the map"), this.sortHeader("type", "Type"), this.sortHeader("size", "Size"), h("th", { title: "Import flags (war3map.imp)" }, "Flags"))),
       h("tbody", {}, ...rows));
 
     const sel = listed.filter((r) => this.selected.has(r.key));
@@ -922,12 +934,30 @@ class ImportView {
       : h("p.muted", {}, "Select a file to change its path, open, export or remove it. Ctrl and Shift select several.");
 
     this.el.replaceChildren(h("div.imp-main", {}, toolbar,
-      listed.length ? table : h("p.muted", {}, q ? "No imported file matches." : "No imported files yet."),
+      listed.length ? table : h("p.muted", {}, q || Object.values(this.filters).some(Boolean) ? "No imported file matches." : "No imported files yet."),
       ...(unlisted.length ? [h("h3", {}, `Files in the map that aren't listed (${unlisted.length})`),
         h("p.muted", {}, "They are packed into the map, but the World Editor's Import Manager doesn't show them."),
         h("div.imp-unlisted", {}, ...unlisted.map((p) => h("div.imp-unlisted-row", {}, h("span.imp-path", {}, p),
           ...(this.editable ? [h("button", { onclick: () => this.register(p) }, "Add to list")] : []))))] : [])),
     h("div.imp-detail", {}, detail));
+  }
+
+  /** A column header that sorts by its column; clicking it again reverses. */
+  private sortHeader(key: SortKey, label: string): HTMLElement {
+    const on = this.sort?.key === key;
+    return h("th.imp-sort", { title: "Sort by this column; click again to reverse", "aria-sort": on ? (this.sort!.dir === 1 ? "ascending" : "descending") : "none",
+      onclick: () => { this.sort = nextSort(this.sort, key); this.render(); } }, label, on ? (this.sort!.dir === 1 ? " ▲" : " ▼") : "");
+  }
+  /** One choice list per filter (view.ts FILTERS); the types are those the list holds. */
+  private filterBoxes(rows: ImportRow[]): HTMLElement[] {
+    return FILTERS.map((f) => {
+      const options = f.id === "type" ? [f.options[0], ...typeOptions(rows).map((t) => ({ value: t, label: t }))] : f.options;
+      const cur = this.filters[f.id] ?? "";
+      const box = h(`select.imp-filter.imp-filter-${f.id}`, { title: `Filter by ${f.label.toLowerCase()}`,
+        onchange: () => { this.filters = { ...this.filters, [f.id]: box.value }; this.render(); } },
+      ...options.map((o) => h("option", { value: o.value, title: (o as { title?: string }).title ?? "", selected: o.value === cur }, o.label))) as HTMLSelectElement;
+      return box;
+    });
   }
 
   private detail(row: ImportRow, files: Map<string, FileInfo>): HTMLElement {

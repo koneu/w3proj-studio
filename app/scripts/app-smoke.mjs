@@ -4785,6 +4785,74 @@ async function importPathTab(page, found) {
   }
 }
 
+/** The Import Manager sorts by a column (click again reverses) and filters by mode and type, with the count out of all,
+ *  without touching the saved list; PNG and JPEG imports open in the Texture Viewer with their size. */
+async function importSortImages(page, found) {
+  try {
+  const fail = (what) => found.push(`import sort and images: ${what}`);
+  const k = await heightKit(page, "ImportSortImages");
+  const files = { png: "map/war3mapImported/Pic.png", jpg: "map/war3mapImported/Photo.jpg", big: "map/war3mapImported/Big.txt", small: "map/war3mapImported/Small.txt", hd: "map/_HD.w3mod/war3mapImported/Small.txt" };
+  const entries = ["war3mapImported\\Pic.png", "war3mapImported\\Photo.jpg", "war3mapImported\\Big.txt", "war3mapImported\\Small.txt", "_HD.w3mod\\war3mapImported\\Small.txt"].map((path) => ({ flags: 21, path }));
+  const listText = JSON.stringify({ format: "w3proj.imports/1", version: 1, files: entries });
+  await page.evaluate(`(async () => {
+    const make = async (type) => {
+      const c = document.createElement("canvas"); c.width = 4; c.height = 3;
+      const g = c.getContext("2d"); g.fillStyle = "#c33"; g.fillRect(0, 0, 4, 3);
+      return new Uint8Array(await (await new Promise((r) => c.toBlob(r, type))).arrayBuffer());
+    };
+    await w3.workspace.writeBytes(${lit(files.png)}, await make("image/png"));
+    await w3.workspace.writeBytes(${lit(files.jpg)}, await make("image/jpeg"));
+    await w3.workspace.writeText(${lit(files.big)}, "x".repeat(100000));
+    await w3.workspace.writeText(${lit(files.small)}, "y".repeat(10));
+    await w3.workspace.writeText(${lit(files.hd)}, "z".repeat(20));
+    await w3.workspace.writeText("map/war3map.imp.json", ${lit(listText)});
+    await w3.workspace.refresh();
+  })()`);
+  // PNG and JPEG open in the Texture Viewer with their format and size.
+  for (const [f, fmt] of [[files.png, "PNG"], [files.jpg, "JPEG"]]) {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.editors.open(${lit(f)})`);
+    const bar = () => page.evaluate(`document.querySelector(".tex-toolbar")?.textContent ?? ""`);
+    if (!(await soon(async () => (await bar()).includes(fmt), 20000))) { fail(`${f} doesn't open in the Texture Viewer (toolbar "${await bar()}")`); continue; }
+    if (!/4×3 · 1 mip · /.test(await bar())) fail(`${f}: the toolbar shows "${await bar()}", not its size`);
+    if (!(await page.evaluate(`document.querySelector(".tex-canvas")?.width === 4`))) fail(`${f}: the canvas isn't the image`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+  await settled(page);
+  const rows = () => page.evaluate(`[...document.querySelectorAll(".imp-row .imp-path")].map((t) => t.firstChild.textContent.trim())`);
+  if (!(await soon(async () => (await rows()).length === 4, 20000))) return fail(`the list shows ${lit(await rows())}, not 4 rows`);
+  const listOnDisk = () => k.read("war3map.imp.json");
+  const before = JSON.stringify(await listOnDisk());
+  const click = (n) => page.evaluate(`document.querySelectorAll(".imp-sort")[${n}].click()`);
+  const names = async () => (await rows()).map((r) => r.split("\\").pop());
+  await click(2);
+  let got = (await names()).join();
+  if ((await names())[3] !== "Big.txt") fail(`sorted by size: ${got}`);
+  await click(2);
+  if ((await names())[0] !== "Big.txt") fail(`size sorted again doesn't reverse: ${(await names()).join()}`);
+  await click(0);
+  if ((await names()).join() !== ["Big.txt", "Photo.jpg", "Pic.png", "Small.txt"].join()) fail(`sorted by path: ${(await names()).join()}`);
+  await click(1);
+  if (!/\.txt$/.test((await names())[3]) || !/\.(png|jpg)$/.test((await names())[0])) fail(`sorted by type: ${(await names()).join()}`);
+  const choose = (cls, v) => page.evaluate(`(() => { const s = document.querySelector(${lit(cls)}); s.value = ${lit(v)}; s.dispatchEvent(new Event("change")); })()`);
+  await choose(".imp-filter-mode", "reforged");
+  if ((await names()).join() !== "Small.txt") fail(`the HD filter shows ${(await names()).join()}`);
+  const count = () => page.evaluate(`document.querySelector(".imp-count")?.textContent ?? ""`);
+  if (!/^2 of 5 imported · .* of /.test(await count())) fail(`the count line is "${await count()}"`);
+  await choose(".imp-filter-mode", "");
+  await choose(".imp-filter-type", "Image");
+  if ((await rows()).length !== 2 || !/^2 of 5 /.test(await count())) fail(`the Image filter shows ${(await rows()).length} rows, count "${await count()}"`);
+  await choose(".imp-filter-type", "");
+  if (/ of /.test(await count())) fail(`without a filter the count line is "${await count()}"`);
+  if (JSON.stringify(await listOnDisk()) !== before) fail("sorting and filtering changed the saved list");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await k.save();
+  if (JSON.stringify(await listOnDisk()) !== before) fail("the list on disk changed after a save");
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Import Manager's list writes, one at a time: two "Add to list" clicks whose writes would overlap (the list's
  *  canonicalize held back, the later one let through first) end with the file holding both entries in click order, and
  *  the tab stays dirty after the first write lands while the second entry isn't written yet. */
@@ -5604,6 +5672,57 @@ async function destructableFlags(page, found) {
     .catch(() => fail(`with no terrain editor open the named tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 0`));
   await k.verify(fail);
   } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Setting pack.attributes (off by default): Pack Release .w3x writes no (attributes) and the archive `w3proj pack` writes
+ *  for the project; on, the archive `w3proj pack --attributes` writes, byte for byte, with its (attributes). */
+async function packAttributes(page, found) {
+  try {
+  const fail = (what) => found.push(`pack attributes: ${what}`);
+  const k = await heightKit(page, "PackAttributes");
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const built = resolve(k.root, await page.evaluate(`w3.workspace.project().default_output`));
+  /** Pack Release .w3x, as the user runs it; the map it wrote. */
+  const appPack = async () => {
+    rmSync(built, { force: true });
+    await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+    await until("the build", () => existsSync(built), 60000);
+    await settled(page);
+    return readFileSync(built);
+  };
+  /** The CLI on the same project as the app left it: the strings the app pruned already, its script as it is. */
+  const cliPack = (name, extra) => {
+    const out = join(work, name);
+    const r = spawnSync(cli, ["pack", k.root, "-o", out, "--keep-unused-strings", "--keep-script", "--game", "none", ...extra], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`w3proj pack ${extra.join(" ")}: ${(r.stdout + r.stderr).slice(-300)}`);
+    return readFileSync(out);
+  };
+  const attributesOf = (map) => {
+    const r = spawnSync(cli, ["cat", map, "(attributes)"], { maxBuffer: 1 << 26 });
+    return r.status === 0 ? r.stdout : null;
+  };
+  if ((await k.setting("pack.attributes")) !== false) fail(`pack.attributes isn't off by default: ${lit(await k.setting("pack.attributes"))}`);
+  const off = await appPack();
+  if (!off.equals(cliPack("pack-attributes-cli-off.w3x", []))) fail("with the setting off, the app's pack isn't the archive `w3proj pack` writes");
+  if (attributesOf(built)) fail("with the setting off, the app's pack has an (attributes)");
+
+  await page.evaluate(`w3.settings.set("pack.attributes", true)`);
+  const on = await appPack();
+  const cliOn = cliPack("pack-attributes-cli-on.w3x", ["--attributes"]);
+  if (on.equals(off)) fail("with the setting on, the app's pack is the one without (control)");
+  if (!on.equals(cliOn)) fail(`with the setting on, the app's pack (${on.length} bytes) isn't the archive \`w3proj pack --attributes\` writes (${cliOn.length} bytes)`);
+  const own = attributesOf(built), theirs = attributesOf(join(work, "pack-attributes-cli-on.w3x"));
+  if (!own) fail("with the setting on, the app's pack has no (attributes)");
+  else if (!theirs || !own.equals(theirs)) fail("the app's (attributes) isn't the CLI's");
+  const verify = spawnSync(cli, ["verify", "-q", built, "--game", "none"], { encoding: "utf8" });
+  if (verify.status !== 0) fail(`the app's pack with (attributes) doesn't verify: ${(verify.stdout + verify.stderr).slice(-300)}`);
+  } finally {
+    await page.evaluate(`w3.settings.set("pack.attributes", undefined)`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     await restoreWindow(page);
   }
@@ -17226,6 +17345,70 @@ async function lightSideBar(page, found) {
   } catch (e) { found.push(`Lighting side bar: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** The AI Editor sets an attack group unit to "All but N" (app/src/builtin/ai-editor/labels.ts setQuantityMode): the choice is
+ *  offered, its number is edited, and the saved .wai holds quantity 0xffffffff then N for that unit (as the game's files do). */
+async function aiAllBut(page, found) {
+  try {
+  const fail = (what) => found.push(`AI Editor all but N: ${what}`);
+  const k = await heightKit(page, "AiAllBut");
+  const wai = join(k.root, "..", "AllBut Raider.wai");
+  rmSync(wai, { force: true });
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(async () => { window.__allButSave = w3.window.pickSaveFile; w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+  try {
+    await until("the attack units", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "Attacking"); b?.click(); return !!b && !!document.querySelector("tr.ai-row"); })()`), 20000);
+    await page.evaluate(`document.querySelector("tr.ai-row").click()`);
+    const select = `[...document.querySelectorAll(".ai-detail select")].find((s) => [...s.options].some((o) => o.textContent === "All but N"))`;
+    await until("the quantity choice", () => page.evaluate(`!!(${select})`), 20000);
+    if (await page.evaluate(`[...(${select}).options].map((o) => o.textContent).join("|")`) !== "All|All but N|Fixed Value|Range: Minimum - All|Range: Minimum - Maximum") fail("the quantity choices aren't All, All but N, Fixed, Range");
+    await page.evaluate(`(() => { const s = ${select}; s.selectedIndex = 1; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await settled(page);
+    const kept = `[...document.querySelectorAll(".ai-detail input.ai-num")].find((e) => e.getAttribute("aria-label") === "Units kept back" || e.title === "Units kept back") ?? document.querySelector(".ai-detail input.ai-num")`;
+    await until("the number of units kept back", () => page.evaluate(`!!(${kept})`), 20000);
+    await typeInto(page, kept, "3");
+    await settled(page);
+    const cell = await page.evaluate(`document.querySelector("tr.ai-row.active td:nth-child(2)")?.textContent`);
+    if (cell !== "All but 3") fail(`the unit's quantity reads "${cell}", not "All but 3"`);
+    await k.save();
+    const bytes = existsSync(wai) ? readFileSync(wai) : Buffer.alloc(0);
+    if (!bytes.includes(Buffer.from("ffffffff03000000", "hex"))) fail("the saved .wai has no quantity all with maximum 3");
+  } finally {
+    await page.evaluate(`(() => { if (window.__allButSave) w3.window.pickSaveFile = window.__allButSave; delete window.__allButSave; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`AI Editor all but N: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The Lighting Editor edits the in and out tangents of a Hermite key (form.ts tangent): a typed tangent marks the model
+ *  changed and, saved, is in the .mdl as the key's InTan / OutTan. */
+async function lightTangents(page, found) {
+  try {
+  const fail = (what) => found.push(`Lighting Editor tangents: ${what}`);
+  const k = await heightKit(page, "LightTangent");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(() => { window.__tanQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
+  try {
+    await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+    await until("the light's form in the side bar", () => page.evaluate(`!!document.querySelector(".lighting-session input.lighting-num")`), 30000);
+    await page.evaluate(`(async () => { const b = [...document.querySelectorAll(".lighting-session button")].find((x) => x.textContent === "Done"); b.click(); await new Promise((r) => setTimeout(r, 500)); await w3.editors.open(w3.workspace.files().map((f) => f.path).find((p) => /^map\\/[0-9a-f-]{36}\\.mdl$/i.test(p)), "w3.lightingEditor"); })()`);
+    await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector(".lighting-editor.form-body input.lighting-num")`), 30000);
+    const path = await page.evaluate(`w3.editors.activePath()`);
+    const field = `document.querySelector(".lighting-editor td.lighting-tangent input.lighting-num")`;
+    if (!(await page.evaluate(`!!${field}`))) { fail("no Hermite key shows tangent boxes"); return; }
+    if (await page.evaluate(`w3.editors.isDirty(${lit(path)})`)) fail("the model counts as changed before an edit");
+    await typeInto(page, field, "0.625");
+    await settled(page);
+    if (!(await page.evaluate(`w3.editors.isDirty(${lit(path)})`))) fail("a typed tangent didn't mark the model changed");
+    await k.save();
+    const text = readFileSync(join(k.root, path), "utf8");
+    if (!/InTan \{[^}]*0\.625/.test(text) && !/OutTan \{[^}]*0\.625/.test(text)) fail("the saved model has no tangent 0.625");
+  } finally {
+    await page.evaluate(`(() => { if (window.__tanQuick) w3.window.quickPick = window.__tanQuick; delete window.__tanQuick; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Lighting Editor tangents: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Lighting Editor refuses numbers a lighting model's float can't hold (app/src/builtin/lighting-editor/numbers.ts): a
  *  value typed as 1e39 or an hour past the day is refused with why, the box shows the value kept, the model isn't
  *  changed; 0.31 is taken (control, one change). */
@@ -19402,6 +19585,7 @@ async function run() {
       // different lines and merge without conflicts.
       const onlyChecks = {
         addPathReady,
+        aiAllBut,
         aiClientSetup,
         aiDocTools,
         aiNumbersRefused,
@@ -19453,6 +19637,7 @@ async function run() {
         importListCleanup,
         importListWriteFail,
         importPathTab,
+        importSortImages,
         importWarnings,
         importWriteOrder,
         itemDrops,
@@ -19461,6 +19646,7 @@ async function run() {
         keyChords,
         lightNumbersRefused,
         lightSideBar,
+        lightTangents,
         luaNames,
         mapInfoColorTools,
         mapInfoUndoKept,
@@ -19495,6 +19681,7 @@ async function run() {
         objectsWhileOpening,
         objectValueRange,
         oldLocalFiles,
+        packAttributes,
         paletteMouse,
         pasteWaitsForSizes,
         pathingImport,
@@ -19746,6 +19933,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
   await leftOpen(page, "wholeMapGround", found);
+  await packAttributes(page, found).catch((e) => found.push(`pack attributes: ${e.message}`));
+  await leftOpen(page, "packAttributes", found);
   await destructableFlags(page, found).catch((e) => found.push(`destructable flags: ${e.message}`));
   await leftOpen(page, "destructableFlags", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
@@ -19883,6 +20072,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
   await leftOpen(page, "importPathTab", found);
+  await importSortImages(page, found).catch((e) => found.push(`import sort and images: ${e.message}`));
+  await leftOpen(page, "importSortImages", found);
   await importWriteOrder(page, found).catch((e) => found.push(`import write order: ${e.message}`));
   await leftOpen(page, "importWriteOrder", found);
   await importListCleanup(page, found).catch((e) => found.push(`import list cleanup: ${e.message}`));
@@ -19915,10 +20106,14 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "typedFieldSave", found);
   await aiNumbersRefused(page, found);
   await leftOpen(page, "aiNumbersRefused", found);
+  await aiAllBut(page, found);
+  await leftOpen(page, "aiAllBut", found);
   await aiClientSetup(page, found);
   await leftOpen(page, "aiClientSetup", found);
   await lightNumbersRefused(page, found);
   await leftOpen(page, "lightNumbersRefused", found);
+  await lightTangents(page, found);
+  await leftOpen(page, "lightTangents", found);
   await lightSideBar(page, found).catch((e) => found.push(`Lighting side bar: ${e.message}`));
   await leftOpen(page, "lightSideBar", found);
   await aiTestRun(page, found).catch((e) => found.push(`Test AI: ${e.message}`));
