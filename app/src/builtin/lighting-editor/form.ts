@@ -1,7 +1,7 @@
 // The form over a day/night lighting model, used by the editor of a lighting model (a tab) and by the Lighting side
 // bar: per light its intensities, colours over the day and direction.
 
-import type { Light, LightModel, Prop, Track } from "../../lib/model/dnclight";
+import type { Key, Light, LightModel, Prop, Track } from "../../lib/model/dnclight";
 import { h } from "../../workbench/dom";
 import { lightNumber } from "./numbers";
 
@@ -42,6 +42,12 @@ export function lightForms(host: FormHost, redraw: () => void): HTMLElement[] {
   const unhex = (s: string) => [5, 3, 1].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
   const row = (label: string, ...control: (Node | string)[]) => h("div.form-row", {}, h("span.form-label", {}, label), h("div.form-control", {}, ...control));
 
+  /** The in or out tangent of a Hermite/Bezier key: one number per component of the value. */
+  const tangent = (k: Key, side: "inTan" | "outTan", width: number) => {
+    const v = (k[side] ??= new Array(width).fill(0));
+    return h("span", {}, ...v.map((_, c) => num(`${side === "inTan" ? "In" : "Out"} tangent${width > 1 ? " " + "xyzw"[c] : ""}`, () => v[c], (x) => { v[c] = x; }, "0.05")));
+  };
+
   /** Keyframe table of a track: hour (for day tracks), value editor, remove; plus "Add key". */
   const trackEditor = (t: Track, width: number, value: (k: { value: number[] }) => Node, dayTime: boolean, redraw: () => void) => {
     const body = h("tbody", {}, ...t.keys.map((k, i) => h("tr", {},
@@ -49,6 +55,7 @@ export function lightForms(host: FormHost, redraw: () => void): HTMLElement[] {
         ? num("Hour", () => toHour(k.time), (v) => { k.time = toTime(v); t.keys.sort((a, b) => a.time - b.time); redraw(); }, "0.25", { min: 0, max: 24 })
         : h("span.muted", {}, String(k.time))),
       h("td", {}, value(k)),
+      ...(t.interp > 1 ? (["inTan", "outTan"] as const).map((side) => h("td.lighting-tangent", {}, tangent(k, side, width))) : []),
       h("td", {}, t.keys.length > 1 ? h("button.icon-button", { title: "Remove this key", onclick: () => { t.keys.splice(i, 1); changed(); redraw(); } }, "×") : null))));
     const add = h("button", { onclick: () => {
       // A new key halfway between the last two (or after the only one), same value as before it.
@@ -62,7 +69,7 @@ export function lightForms(host: FormHost, redraw: () => void): HTMLElement[] {
       redraw();
     } }, "Add key");
     return h("div", {}, h("table.form-table.lighting-keys", {},
-      h("thead", {}, h("tr", {}, h("th", {}, dayTime ? "Hour" : "Time"), h("th", {}, "Value"), h("th", {}))), body), add);
+      h("thead", {}, h("tr", {}, h("th", {}, dayTime ? "Hour" : "Time"), h("th", {}, "Value"), ...(t.interp > 1 ? [h("th", { title: "Hermite/Bezier: the slope arriving at the key" }, "In tangent"), h("th", { title: "The slope leaving the key" }, "Out tangent")] : []), h("th", {}))), body), add);
   };
 
   /** A colour over the day: gradient preview and keys, or one colour. */
