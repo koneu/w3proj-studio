@@ -17718,6 +17718,54 @@ async function objectManagerLive(page, found) {
 /** Object data values past what the file stores are refused, never wrapped or overflowed: an int past 32 bits
  *  (99999999999) and a real past a 32-bit float (1e39, which would be stored as infinity), from set_object_fields and
  *  typed into the Object Editor, with a warning; the unit's object file stays byte for byte what it was. */
+/** One file per object (map/objects/, docs/object-folders-spec.md): changing one unit in the Object Editor and saving
+ *  changes that unit's file only, for a field of the main object file and for one of the Skin file (the name), and a
+ *  first change of a standard unit adds its file only. */
+async function objectOneFile(page, found) {
+  const fail = (what) => found.push(`object one file: ${what}`);
+  const k = await heightKit(page, "OneFile");
+  try {
+    const make = async (name) => JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name })).id;
+    const unit = await make("One File A"), other = await make("One File B");
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "uhpm", value: 500 }] });
+    await k.tool("set_object_fields", { kind: "units", id: other, changes: [{ field: "uhpm", value: 600 }] });
+    await k.save();
+    const dir = join(k.root, "map", "objects");
+    const files = () => new Map(readdirSync(dir, { recursive: true }).map((f) => String(f).replaceAll("\\", "/"))
+      .filter((f) => statSync(join(dir, f)).isFile()).map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const idOf = (text) => { try { const o = JSON.parse(text); return o.id ?? o.base ?? null; } catch { return null; } };
+    const first = files();
+    if ([...first.keys()].filter((f) => f.startsWith("units/custom/")).length !== 2) fail(`control: the two units made ${lit([...first.keys()])}`);
+    // Edits `field` of `id` in the Object Editor, saves, and gives what changed in map/objects/.
+    const edit = async (id, field, value) => {
+      const was = files();
+      await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(id)})`);
+      await until(`${id}'s fields`, () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`
+        + ` || !!document.querySelector("input.obj-field-search")`), 30000);
+      await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = ${lit(field)}; s.dispatchEvent(new Event("input")); })()`);
+      await until(`the field ${field}`, () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
+      await page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)"); i.value = ${lit(value)}; i.dispatchEvent(new Event("change")); })()`);
+      await k.save();
+      const now = files();
+      return [...new Set([...was.keys(), ...now.keys()])].filter((f) => was.get(f) !== now.get(f))
+        .map((f) => ({ f, how: !was.has(f) ? "added" : !now.has(f) ? "removed" : "changed", id: idOf(now.get(f) ?? ""), text: now.get(f) ?? "" }));
+    };
+    const only = (what, changes, how, id, holds) => {
+      if (changes.length !== 1 || changes[0].how !== how || changes[0].id !== id || !changes[0].text.includes(holds)) {
+        fail(`${what} should have ${how} ${id}'s file alone: ${lit(changes.map((c) => `${c.how} ${c.f}`))}`);
+      }
+    };
+    only("hit points", await edit(unit, "uhpm", "777"), "changed", unit, "777");
+    only("the name", await edit(unit, "unam", "One File Renamed"), "changed", unit, "One File Renamed");
+    only("a standard unit's first change", await edit("hfoo", "uhpm", "888"), "added", "hfoo", "888");
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 async function objectValueRange(page, found) {
   const fail = (what) => found.push(`object value range: ${what}`);
   const k = await heightKit(page, "ValueRange");
@@ -19072,6 +19120,7 @@ async function run() {
         objectListSuffix,
         objectManagerLive,
         objectManagerSkin,
+        objectOneFile,
         objectPickerSuffix,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectStandardList: (p, f) => objectStandardList(p, f, project),
@@ -19473,6 +19522,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectEditorRawSkin", found);
   await objectManagerSkin(page, found).catch((e) => found.push(`object manager skin: ${e.message}`));
   await leftOpen(page, "objectManagerSkin", found);
+  await objectOneFile(page, found).catch((e) => found.push(`object one file: ${e.message}`));
+  await leftOpen(page, "objectOneFile", found);
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
   await leftOpen(page, "niceToHaves", found);
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
