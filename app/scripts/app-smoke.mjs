@@ -18472,8 +18472,8 @@ async function objectOneFile(page, found) {
     only("hit points", await edit(unit, "uhpm", "777"), "changed", unit, "777");
     only("the name", await edit(unit, "unam", "One File Renamed"), "changed", unit, "One File Renamed");
     only("a standard unit's first change", await edit("hfoo", "uhpm", "888"), "added", "hfoo", "888");
-    // Another unit's file changed outside (a pull) while the editor has an unsaved change: the save asks first, and
-    // Cancel leaves both files as they are on disk.
+    // Another unit's file changed outside (a pull) while the editor has an unsaved change: the save takes it in
+    // without asking, writes the editor's own unit alone and leaves the pulled file as it is.
     await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(unit)})`);
     await until(`${unit}'s fields`, () => page.evaluate(`!!document.querySelector("input.obj-field-search")`), 30000);
     await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = "uhpm"; s.dispatchEvent(new Event("input")); })()`);
@@ -18486,11 +18486,12 @@ async function objectOneFile(page, found) {
       w3Workbench.editors.confirm = async (m) => { window.__ofAsked.push(String(m)); return "Cancel"; }; })()`);
     await k.save();
     const asked = await page.evaluate(`window.__ofAsked`);
-    if (!asked.some((m) => /changed on disk since this editor read it/.test(m))) fail(`saving over another unit's outside change asked ${lit(asked)}`);
-    if (lit([...files()]) !== lit([...pulled])) fail("the cancelled save changed map/objects/");
-    // Overwritten after all, so the editor closes clean.
-    await page.evaluate(`w3Workbench.editors.confirm = async () => "Overwrite"`);
-    await k.save();
+    if (asked.length) fail(`saving over another unit's outside change asked ${lit(asked)}`);
+    await page.evaluate(`w3Workbench.editors.confirm = window.__ofConfirm`);
+    const after = files();
+    const touched = [...new Set([...pulled.keys(), ...after.keys()])].filter((f) => pulled.get(f) !== after.get(f));
+    if (touched.length !== 1 || idOf(after.get(touched[0]) ?? "") !== unit || !after.get(touched[0]).includes("999")) fail(`the save after a pull should have written ${unit}'s file alone: ${lit(touched)}`);
+    if (!after.get(theirs)?.includes("650")) fail("the save lost the pulled hit points");
     // Check Objects: a merge conflict left in an object file is listed at its file and line.
     await page.evaluate(`w3.editors.closeAll()`);
     const clean = await page.evaluate(`w3.commands.execute("w3.problems.checkObjects")`);
