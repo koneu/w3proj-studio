@@ -16,6 +16,7 @@ import { importedPathFor } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { PATH_KIND, pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
+import { textCodec, UnencodableError } from "../../lib/formats/codepage";
 import { readWts, StringTable, writeWts, WtsCutError } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
@@ -293,6 +294,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return n !== null && wts.table.has(n) ? n : null;
         };
         const resolveStr = (v: unknown) => trigstrText(wts.table, v);
+        // The map's text encoding as it is now (lib/formats/codepage.ts): texts in an old code page show readable, typed
+        // ones are written in it.
+        const codec = textCodec((k) => w3.settings.get(k));
 
         // Game knowledge; until it loads (or without a game install) the
         // editor shows only the modifications, with raw ids.
@@ -303,7 +307,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const nameOf = (o: Obj) => {
           for (const { mods } of modLists(o)) {
             const m = mods.find((m) => /nam$/.test(m.field) && m.type === "string");
-            if (m) return stripColors(resolveStr(m.value) ?? (kd ? kd.westring(String(m.value)) : String(m.value)));
+            if (m) return codec.show(stripColors(resolveStr(m.value) ?? (kd ? kd.westring(String(m.value)) : String(m.value))));
           }
           return stripColors(baseName(o));
         };
@@ -331,7 +335,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const campaignName = (o: Obj) => {
           for (const { mods } of modLists(o)) {
             const m = mods.find((m) => /nam$/.test(m.field) && m.type === "string");
-            if (m) return stripColors(campaignStr(m.value) ?? String(m.value));
+            if (m) return codec.show(stripColors(campaignStr(m.value) ?? String(m.value)));
           }
           return stripColors(baseName(o));
         };
@@ -890,6 +894,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!label) { void w3.window.showInfo("This field has no sound to play."); return; }
             await sounds.play(label).catch((e) => w3.window.showWarning(String((e as Error).message ?? e)));
           } }, "▶"));
+        /** What was typed into a text box that showed `stored`, as stored (the map's text encoding); null, with the box
+         *  marked and a word why, when the encoding can't write it. */
+        const encoded = (input: HTMLInputElement, stored: string): string | null => {
+          try {
+            return codec.store(input.value, stored);
+          } catch (e) {
+            if (!(e instanceof UnencodableError)) throw e;
+            input.classList.add("invalid");
+            void w3.window.showWarning(e.message);
+            return null;
+          }
+        };
         /** Editor for one field value. `mixed`: the differing values of a multi-selection, and
          *  how to change each object's own one (flags and lists tick per object). */
         const valueEditor = (type: ValueType, metaType: string, current: number | string, inherited: boolean, onCommit: (v: number | string) => void, mixed?: string[], each?: MixedValues["each"]) => {
@@ -903,8 +919,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (ref !== null) {
             const text = wts.table.get(ref) ?? "";
             const input = h(`input.obj-value${inherited ? ".inherited" : ""}`, {
-              value: text, title: `Text of TRIGSTR_${ref} in ${wtsName} (every use of this string changes)`,
-              onchange: () => { wts.set(ref, input.value); markDirty(); renderDetail(); },
+              value: codec.show(text), title: `Text of TRIGSTR_${ref} in ${wtsName} (every use of this string changes)`,
+              onchange: () => {
+                const typed = encoded(input, text);
+                if (typed === null) return;
+                wts.set(ref, typed); markDirty(); renderDetail();
+              },
             });
             return h("div.obj-value-cell", {}, withColorTools(input, { commit: true, defaultColor: "FFFFFF" }), h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
           }
@@ -920,9 +940,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return play ? h("div.obj-sound-cell", {}, editor, play) : editor;
           }
           const resolved = mixed ? null : resolveStr(current) ?? (typeof current === "string" && kd && /^WESTRING_/i.test(current) && kd.westring(current) !== current ? kd.westring(current) : null);
-          const shown = mixed && [...new Set(mixed)].map((v) => stripColors(resolveStr(v) ?? v) || "(empty)");
+          const shown = mixed && [...new Set(mixed)].map((v) => codec.show(stripColors(resolveStr(v) ?? v)) || "(empty)");
           const input = h(`input.obj-value${inherited ? ".inherited" : ""}${mixed ? ".mixed" : ""}`, {
-            value: mixed ? "" : String(current),
+            value: mixed ? "" : type === "string" ? codec.show(String(current)) : String(current),
             placeholder: shown ? `mixed: ${shown.slice(0, 4).join(" / ")}${shown.length > 4 ? " / …" : ""}` : "",
             title: shown ? shown.join("\n") : (resolved ?? ""),
             onchange: () => {
@@ -930,7 +950,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // The World Editor's Modify Selected Field takes a typed negative for a real of the game's unsigned kind as 0
               // (Cast Range 350, -7 typed: 0.000), where it asks for none (docs/testing/branch-rounds.md "Negative reals").
               if (clampsToZero(type, input.value, allowNegative)) input.value = "0";
-              const v = parseValue(type, input.value, allowNegative);
+              // A text as stored: a field that showed a text in an old code page keeps its bytes where it wasn't changed.
+              const text = type === "string" ? encoded(input, mixed ? "" : String(current)) : input.value;
+              if (text === null) return;
+              const v = parseValue(type, text, allowNegative);
               if (v === null) {
                 input.classList.add("invalid");
                 const n = Number(input.value);
@@ -942,7 +965,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onCommit(v);
             },
           });
-          return h("div.obj-value-cell", {}, type === "string" && metaType === "string" && !mixed ? withColorTools(input, { commit: true }) : input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null,
+          return h("div.obj-value-cell", {}, type === "string" && metaType === "string" && !mixed ? withColorTools(input, { commit: true }) : input, resolved ? h("div.obj-resolved", {}, codec.show(stripColors(resolved))) : null,
             browseButton(metaType, mixed ? "" : String(current), onCommit), labelButton(metaType, mixed ? "" : String(current), onCommit),
             mixed ? null : playButton(metaType, String(current)),
             mixed ? null : artPreview(metaType, String(current)));

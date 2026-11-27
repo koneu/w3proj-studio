@@ -178,9 +178,21 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
         // A typed number is kept as the World Editor keeps it (literals.ts typedTriggerNumber); a code as typed.
         const n = base === "integer" || base === "real" ? typedTriggerNumber(base, v) : null;
         const kept = n && "value" in n && n.value !== null && !isTypedCode(type, v) ? limitTriggerNumber(base as "integer" | "real", n.value, limits ?? [null, null]) : null;
+        if (kept === null && base !== "integer" && base !== "real" && ed.text) {
+          // A text as the map's text encoding stores it (lib/formats/codepage.ts): its bytes where it wasn't changed.
+          try {
+            done({ type: VALUE, value: ed.text.store(v, wasValue) });
+          } catch (e) {
+            note.textContent = (e as Error).message;
+            note.classList.add("error");
+            input.focus();
+          }
+          return;
+        }
         done({ type: VALUE, value: kept ?? (base === "integer" || base === "real" ? v.trim() : v) });
       };
-      const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
+      const wasValue = current.type === VALUE ? current.value : "";
+      const input = h("input.picker-search", { type: "text", value: ed.text && base !== "integer" && base !== "real" ? ed.text.show(wasValue) : wasValue,
         onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") void take(); },
         oninput: () => {
           note.classList.remove("error", "warning");
