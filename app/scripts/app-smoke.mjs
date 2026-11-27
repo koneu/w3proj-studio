@@ -17155,6 +17155,70 @@ async function lightSideBar(page, found) {
   } catch (e) { found.push(`Lighting side bar: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** The AI Editor sets an attack group unit to "All but N" (app/src/builtin/ai-editor/labels.ts setQuantityMode): the choice is
+ *  offered, its number is edited, and the saved .wai holds quantity 0xffffffff then N for that unit (as the game's files do). */
+async function aiAllBut(page, found) {
+  try {
+  const fail = (what) => found.push(`AI Editor all but N: ${what}`);
+  const k = await heightKit(page, "AiAllBut");
+  const wai = join(k.root, "..", "AllBut Raider.wai");
+  rmSync(wai, { force: true });
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(async () => { window.__allButSave = w3.window.pickSaveFile; w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+  try {
+    await until("the attack units", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "Attacking"); b?.click(); return !!b && !!document.querySelector("tr.ai-row"); })()`), 20000);
+    await page.evaluate(`document.querySelector("tr.ai-row").click()`);
+    const select = `[...document.querySelectorAll(".ai-detail select")].find((s) => [...s.options].some((o) => o.textContent === "All but N"))`;
+    await until("the quantity choice", () => page.evaluate(`!!(${select})`), 20000);
+    if (await page.evaluate(`[...(${select}).options].map((o) => o.textContent).join("|")`) !== "All|All but N|Fixed Value|Range: Minimum - All|Range: Minimum - Maximum") fail("the quantity choices aren't All, All but N, Fixed, Range");
+    await page.evaluate(`(() => { const s = ${select}; s.selectedIndex = 1; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await settled(page);
+    const kept = `[...document.querySelectorAll(".ai-detail input.ai-num")].find((e) => e.getAttribute("aria-label") === "Units kept back" || e.title === "Units kept back") ?? document.querySelector(".ai-detail input.ai-num")`;
+    await until("the number of units kept back", () => page.evaluate(`!!(${kept})`), 20000);
+    await typeInto(page, kept, "3");
+    await settled(page);
+    const cell = await page.evaluate(`document.querySelector("tr.ai-row.active td:nth-child(2)")?.textContent`);
+    if (cell !== "All but 3") fail(`the unit's quantity reads "${cell}", not "All but 3"`);
+    await k.save();
+    const bytes = existsSync(wai) ? readFileSync(wai) : Buffer.alloc(0);
+    if (!bytes.includes(Buffer.from("ffffffff03000000", "hex"))) fail("the saved .wai has no quantity all with maximum 3");
+  } finally {
+    await page.evaluate(`(() => { if (window.__allButSave) w3.window.pickSaveFile = window.__allButSave; delete window.__allButSave; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`AI Editor all but N: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The Lighting Editor edits the in and out tangents of a Hermite key (form.ts tangent): a typed tangent marks the model
+ *  changed and, saved, is in the .mdl as the key's InTan / OutTan. */
+async function lightTangents(page, found) {
+  try {
+  const fail = (what) => found.push(`Lighting Editor tangents: ${what}`);
+  const k = await heightKit(page, "LightTangent");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(() => { window.__tanQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
+  try {
+    await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+    await until("the light's form in the side bar", () => page.evaluate(`!!document.querySelector(".lighting-session input.lighting-num")`), 30000);
+    await page.evaluate(`(async () => { const b = [...document.querySelectorAll(".lighting-session button")].find((x) => x.textContent === "Done"); b.click(); await new Promise((r) => setTimeout(r, 500)); await w3.editors.open(w3.workspace.files().map((f) => f.path).find((p) => /^map\\/[0-9a-f-]{36}\\.mdl$/i.test(p)), "w3.lightingEditor"); })()`);
+    await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector(".lighting-editor.form-body input.lighting-num")`), 30000);
+    const path = await page.evaluate(`w3.editors.activePath()`);
+    const field = `document.querySelector(".lighting-editor td.lighting-tangent input.lighting-num")`;
+    if (!(await page.evaluate(`!!${field}`))) { fail("no Hermite key shows tangent boxes"); return; }
+    if (await page.evaluate(`w3.editors.isDirty(${lit(path)})`)) fail("the model counts as changed before an edit");
+    await typeInto(page, field, "0.625");
+    await settled(page);
+    if (!(await page.evaluate(`w3.editors.isDirty(${lit(path)})`))) fail("a typed tangent didn't mark the model changed");
+    await k.save();
+    const text = readFileSync(join(k.root, path), "utf8");
+    if (!/InTan \{[^}]*0\.625/.test(text) && !/OutTan \{[^}]*0\.625/.test(text)) fail("the saved model has no tangent 0.625");
+  } finally {
+    await page.evaluate(`(() => { if (window.__tanQuick) w3.window.quickPick = window.__tanQuick; delete window.__tanQuick; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Lighting Editor tangents: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Lighting Editor refuses numbers a lighting model's float can't hold (app/src/builtin/lighting-editor/numbers.ts): a
  *  value typed as 1e39 or an hour past the day is refused with why, the box shows the value kept, the model isn't
  *  changed; 0.31 is taken (control, one change). */
@@ -19331,6 +19395,7 @@ async function run() {
       // different lines and merge without conflicts.
       const onlyChecks = {
         addPathReady,
+        aiAllBut,
         aiClientSetup,
         aiNumbersRefused,
         aiTestRun,
@@ -19390,6 +19455,7 @@ async function run() {
         keyChords,
         lightNumbersRefused,
         lightSideBar,
+        lightTangents,
         luaNames,
         mapInfoColorTools,
         mapInfoUndoKept,
@@ -19846,10 +19912,14 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "typedFieldSave", found);
   await aiNumbersRefused(page, found);
   await leftOpen(page, "aiNumbersRefused", found);
+  await aiAllBut(page, found);
+  await leftOpen(page, "aiAllBut", found);
   await aiClientSetup(page, found);
   await leftOpen(page, "aiClientSetup", found);
   await lightNumbersRefused(page, found);
   await leftOpen(page, "lightNumbersRefused", found);
+  await lightTangents(page, found);
+  await leftOpen(page, "lightTangents", found);
   await lightSideBar(page, found).catch((e) => found.push(`Lighting side bar: ${e.message}`));
   await leftOpen(page, "lightSideBar", found);
   await aiTestRun(page, found).catch((e) => found.push(`Test AI: ${e.message}`));
