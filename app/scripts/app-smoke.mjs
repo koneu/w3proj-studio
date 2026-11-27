@@ -16961,7 +16961,7 @@ async function aiDocTools(page, found) {
     await settled(page);
     if (cams().map((c) => `${c.name}:${c.targetX}:${c.distance}`).join() !== "Smoke Cam:256:2000") fail(`set_camera wrote ${lit(cams())}`);
     await k.tab("Cameras");
-    await until("the new camera in the Cameras tab", () => page.evaluate(`[...document.querySelectorAll(".model-side option, .model-side li, .model-side .tree-row")].some((e) => e.textContent.includes("Smoke Cam"))`), 10000)
+    await until("the new camera in the Cameras tab", () => page.evaluate(`[...document.querySelectorAll('select[title="Go to a camera"] option')].some((e) => e.textContent.includes("Smoke Cam"))`), 10000)
       .catch(() => fail("the open terrain editor's Cameras tab doesn't show the camera set_camera made"));
     const far = await refused("set_camera", { name: "Smoke Cam", fieldOfView: 170 });
     if (!far || !/Field of view must be from 5 to 120/.test(far)) fail(`a field of view of 170 wasn't refused: ${lit(far)}`);
@@ -16972,9 +16972,11 @@ async function aiDocTools(page, found) {
     await k.tab("Terrain");
 
     // Sounds: a game sound added while the Sound Editor is open, which then lists it; removed again.
-    const soundFile = await page.evaluate(`w3.game.list().then((l) => l.find((p) => /^War3\.w3mod:Sound\/Ambient\/[^/]+\.flac$/i.test(p))?.replace(/^War3\.w3mod:/i, "").replace(/\//g, "\\\\") ?? null)`);
-    if (!soundFile) fail("the game lists no ambient sound to add (control)");
-    else {
+    const soundFile = await page.evaluate(`w3.game.list().then((l) => { const bs = String.fromCharCode(92);
+      for (const x of l) { const low = x.toLowerCase().split(bs).join("/"); if (!low.startsWith("war3.w3mod:sound/") || low.indexOf(":", 11) >= 0 || !["flac", "wav", "mp3", "ogg"].includes(low.split(".").pop())) continue; return x.slice(11).split("/").join(bs); }
+      return "none of " + l.length + ": " + l.slice(0, 3).join(" | "); })`);
+    if (soundFile?.startsWith("none of ")) fail(`no game sound found (control): ${soundFile}`);
+    if (soundFile && !soundFile.startsWith("none of ")) {
       await page.evaluate(`w3.commands.execute("w3.sounds.open")`);
       await until("the Sound Editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3s.json"`), 20000);
       const made = json(await k.tool("set_sound", { name: "SmokeTool", file: soundFile, volume: 80 }));
@@ -17058,7 +17060,7 @@ async function aiDocTools(page, found) {
     await page.evaluate(`(async () => {
       const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
       await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${lit(JSON.stringify(campInfo))} }));
-      await w3.workspace.writeText("map/war3campaign.wts", "STRING 1\r\n{\r\nTool Campaign\r\n}\r\n");
+      await w3.workspace.writeText("map/war3campaign.wts", ${lit("STRING 1\r\n{\r\nTool Campaign\r\n}\r\n")});
       await w3.workspace.refresh();
     })()`);
     await page.evaluate(`w3.commands.execute("w3.campaign.open", "general")`);
