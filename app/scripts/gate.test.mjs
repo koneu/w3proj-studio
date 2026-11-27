@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, memAvailableMb, memoryBudget, missingDeps, runShell } from "../../tests/gate-lib.mjs";
+import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, memAvailableMb, memoryBudget, missingDeps, runShell, withFileLock, withPrerequisites } from "../../tests/gate-lib.mjs";
 
 // The tests run bundled elsewhere, so the repository is found from app/, where `npm test` starts.
 const repo = join(process.cwd(), "..");
@@ -162,6 +162,85 @@ test("every step of the gate has a memory estimate (mem, MB) for the scheduler's
   const lines = [...src.matchAll(/^\s*\{ id: "([a-z0-9]+)".*$/gm)];
   assert.ok(lines.length > 10);
   for (const [line, id] of lines) assert.match(line, /\bmem: \d+,/, `step ${id} has no mem`);
+});
+
+test("every lock a gate step names is a cargo profile's or app/dist's (a new name would be a lock of its own)", () => {
+  const src = readFileSync(join(repo, "tests", "gate.mjs"), "utf8");
+  const names = new Set([...src.matchAll(/\[\"([a-z-]+)\", \"[rw]\"\]/g)].map((m) => m[1]));
+  for (const m of src.matchAll(/locks\.hold\(\"([a-z-]+)\"/g)) names.add(m[1]);
+  assert.deepEqual([...names].sort(), ["cargo-debug", "cargo-release", "dist"]);
+});
+
+test("--only: the steps named and all they come after, in the gate's order; nothing else", () => {
+  const steps = [
+    { id: "cli" },
+    { id: "appbuild" },
+    { id: "appsmoke2", after: ["cli", "appbuild"] },
+    { id: "ui", after: ["appbuild#built"] },
+    { id: "seeds", after: ["cli"] },
+    { id: "tsc" },
+  ];
+  const ids = (list) => list.map((s) => s.id);
+  assert.deepEqual(ids(withPrerequisites(steps, ["appsmoke2"])), ["cli", "appbuild", "appsmoke2"]);
+  assert.deepEqual(ids(withPrerequisites(steps, ["tsc", "seeds"])), ["cli", "seeds", "tsc"]);
+  // "step#event" names the step too.
+  assert.deepEqual(ids(withPrerequisites(steps, ["ui"])), ["appbuild", "ui"]);
+  // Control: a step that comes after nothing brings nothing along.
+  assert.deepEqual(ids(withPrerequisites(steps, ["tsc"])), ["tsc"]);
+});
+
+test("the lock between gates: a second gate waits for the first, says whom it waits for, and the folder is gone after", async () => {
+  const dir = join(base, "queue.lock");
+  const order = [];
+  const said = [];
+  let release;
+  const first = withFileLock(dir, "/first", () => {}, () => new Promise((r) => { order.push("first in"); release = () => { order.push("first out"); r("a"); }; }));
+  await until(() => existsSync(join(dir, "owner.json")), "the first gate to hold the lock");
+  const second = withFileLock(dir, "/second", (m) => said.push(m), async () => { order.push("second in"); return "b"; }, { pollMs: 20 });
+  await until(() => said.length > 0, "the second gate to say it waits");
+  assert.deepEqual(order, ["first in"]);
+  assert.match(said[0], /waiting for the gate of \/first \(process \d+/);
+  release();
+  assert.equal(await first, "a");
+  assert.equal(await second, "b");
+  assert.deepEqual(order, ["first in", "first out", "second in"]);
+  assert.equal(existsSync(dir), false);
+});
+
+test("the lock between gates: one left by a gate that is gone is taken over, also when its process number is in use again", { skip: process.platform === "win32" && "no SIGKILL, and no start times, on Windows" }, async () => {
+  // A gate that was killed: the lock names a process that ended.
+  const gone = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  await new Promise((r) => gone.on("exit", r));
+  const dir = join(base, "stale.lock");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: gone.pid, started: "1", repo: "/killed", since: "then" }));
+  const said = [];
+  assert.equal(await withFileLock(dir, "/next", (m) => said.push(m), async () => "ran", { pollMs: 20 }), "ran");
+  assert.match(said.join("\n"), /took over the lock of \/killed/);
+  assert.equal(existsSync(dir), false);
+  // Its number given to another process since (this test's own, which runs): only the start time tells them apart.
+  if (process.platform === "linux") {
+    mkdirSync(dir);
+    writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: process.pid, started: "1", repo: "/killed-long-ago", since: "then" }));
+    said.length = 0;
+    assert.equal(await withFileLock(dir, "/next", (m) => said.push(m), async () => "ran again", { pollMs: 20 }), "ran again");
+    assert.match(said.join("\n"), /took over the lock of \/killed-long-ago/);
+  }
+});
+
+test("the lock between gates, control: one held by a process that runs is not taken over", async () => {
+  const dir = join(base, "held.lock");
+  let release;
+  const holder = withFileLock(dir, "/holder", () => {}, () => new Promise((r) => { release = r; }));
+  await until(() => existsSync(join(dir, "owner.json")), "the holder");
+  let entered = false;
+  const waiter = withFileLock(dir, "/waiter", () => {}, async () => { entered = true; }, { pollMs: 20 });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(entered, false);
+  release();
+  await holder;
+  await waiter;
+  assert.equal(entered, true);
 });
 
 test("missingDeps: a worktree without node_modules gets one line telling to run npm ci", () => {

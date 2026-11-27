@@ -68,6 +68,11 @@ export class Locks {
  * step starts only while the running steps' sum stays within `memBudget`. A step bigger than the
  * budget still runs, alone: nothing else running always fits, so the gate never waits for ever.
  * `onMemWait(step, { used, budget })` is told once per step that could start but for memory.
+ *
+ * Priority: a step's `priority` (default 0) puts it ahead of the ready steps with a lower one, whenever they became
+ * ready. While it could start but for the cores or the memory, no step of a lower priority starts: what the running
+ * steps free adds up for it, instead of going to smaller steps one after the other (that kept the gate's longest
+ * steps, the app smoke parts, waiting for minutes behind short ones). Among steps of one priority nothing changes.
  */
 export function schedule({ steps, locks, serial = false, jobs, memBudget = Infinity, defaultMem = 1000, onMemWait = () => {}, launch, skip: onSkip, done = new Map(), now = Date.now }) {
   const waiting = [...steps];
@@ -80,6 +85,7 @@ export function schedule({ steps, locks, serial = false, jobs, memBudget = Infin
   /** The memory estimates of the steps that run, summed (MB). */
   let memUsed = 0;
   const memOf = (step) => step.mem ?? defaultMem;
+  const priorityOf = (step) => step.priority ?? 0;
   /** The steps already said to wait for memory. */
   const toldMem = new Set();
   return new Promise((finish) => {
@@ -102,11 +108,17 @@ export function schedule({ steps, locks, serial = false, jobs, memBudget = Infin
           if (!ticket.has(step)) ticket.set(step, nextTicket++);
         }
       }
-      const queue = waiting.filter((s) => ticket.has(s)).sort((a, b) => ticket.get(a) - ticket.get(b));
+      const queue = waiting.filter((s) => ticket.has(s)).sort((a, b) => priorityOf(b) - priorityOf(a) || ticket.get(a) - ticket.get(b));
       /** The locks wanted by steps ahead in the queue that didn't start. */
       const ahead = [];
+      /** The priority of a step ahead that waits for cores or memory alone: lower ones leave it what gets free. */
+      let saving = -Infinity;
       for (const step of queue) {
         const wants = step.locks ?? [];
+        if (priorityOf(step) < saving) {
+          ahead.push(...wants);
+          continue;
+        }
         const behind = wants.some(([name, mode]) => ahead.some(([n, m]) => n === name && (mode === "w" || m === "w")));
         const fits = running === 0 || (!serial && busy + step.weight <= jobs);
         const memFits = running === 0 || memUsed + memOf(step) <= memBudget;
@@ -116,6 +128,7 @@ export function schedule({ steps, locks, serial = false, jobs, memBudget = Infin
             toldMem.add(step);
             onMemWait(step, { used: memUsed, budget: memBudget });
           }
+          if (!behind && free) saving = Math.max(saving, priorityOf(step));
           ahead.push(...wants);
           continue;
         }

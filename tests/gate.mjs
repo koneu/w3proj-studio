@@ -8,21 +8,31 @@
 //
 //   --serial       one step at a time, in the order of the table (to compare, or to read one log)
 //   --jobs=<n>     how many cores' worth of steps run together (default: twice the cores)
+//   --only=<ids>   only these steps (ids as in the table below, comma separated) and the steps they come after:
+//                  to run a failed step again without the rest. Not a gate result: the tiers are.
+//   --no-queue     don't wait for another gate on this machine (or W3_GATE_QUEUE=0)
 //   --update-floor raise the coverage floors to what was measured
+//
+// Safe to start any number of times, also at once and from several worktrees: gates of one repository run one after
+// the other (a lock folder in the main checkout's target/, taken over when its gate is gone), since they share the
+// cores, the memory, app/dist and the target folders. A run leaves nothing a later run trips over: its logs have a
+// folder of their own, its scratch folders are emptied before use, and what a killed run left is cleared by the next.
 //
 // Every step runs even after a failure, and the exit code is non-zero if any step failed or
 // couldn't run. A check that is missing what it needs FAILS: a green result always means it ran.
 // The last line is GATE_EXIT=<code>, also when the output went through a pipe.
 //
 // Steps that don't need each other run side by side. What one needs from another is written down
-// as `after` (the release CLI before everything that runs it) and as locks, held for the whole
-// step: "cargo" (one cargo command in the target folder at a time), "dist" (app/dist is read by
-// every build of the Tauri crate, and rebuilt by the smoke tests: they take turns; part 1 of the app
-// smoke test only needs it for its first minute, the build, and says so in its log; part 2 starts then,
-// on that build, without the lock). Steps queue for a
+// as `after` (the release CLI before everything that runs it, the app's build before the smoke parts
+// that run it) and as locks, held for the whole step: "cargo-debug" and "cargo-release" (one cargo
+// command in a profile's folder of target/ at a time; the two profiles don't wait for each other, as
+// in cargo itself), "dist" (app/dist is read by every build of the Tauri crate, and rebuilt by the
+// app's build and the UI smoke test: they take turns). Steps queue for a
 // lock in the order they became ready, so a step waiting for "dist" alone isn't passed by later
 // readers (tests/gate-scheduler.mjs, tested in app/scripts/gate-scheduler.test.mjs). A
-// step whose `after` step failed fails without running. Each step writes its output to its own
+// step whose `after` step failed fails without running. The app's build and its smoke parts are the
+// longest chain, so they have `priority`: they start before others that are ready, and what gets free
+// is kept for them while they wait. Each step writes its output to its own
 // log under target/gate-logs/<tier>-<pid>/ and the gate prints it, or its tail, when the step ends.
 //
 // Needs for `coverage`: cargo-llvm-cov and the llvm-tools component.
@@ -31,12 +41,12 @@
 // tests/gamepath.mjs).
 
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, freemem } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
-import { assertInTable, checkFloors, installSignalHandlers, killTree, memoryBudget, missingDeps, runShell } from "./gate-lib.mjs";
+import { assertInTable, checkFloors, installSignalHandlers, memoryBudget, missingDeps, runShell, withFileLock, withPrerequisites } from "./gate-lib.mjs";
 import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
@@ -70,86 +80,10 @@ function mainCheckout() {
 const corpus = process.env.W3PROJ_CORPUS ?? join(mainCheckout(), "smoketest_maps");
 const game = gamePath(repo);
 
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-
 // ---- locks -----------------------------------------------------------------------------------
 
 /** The locks between this gate's steps (tests/gate-scheduler.mjs). */
 const locks = new Locks();
-
-/** The owner written into a lock folder, or null while there is none (being made, or left half made). */
-function lockOwner(file) {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === "EPERM";
-  }
-}
-
-function ageMs(path) {
-  try {
-    return Date.now() - statSync(path).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * A lock between gates running at once, also from different worktrees: a folder that exists while
- * it is held, with the owner's process in it. A folder left by a process that is gone is taken over.
- */
-async function withFileLock(dir, say, body) {
-  const owner = join(dir, "owner.json");
-  let told = 0;
-  for (;;) {
-    try {
-      mkdirSync(dir);
-      writeFileSync(owner, JSON.stringify({ pid: process.pid, repo, since: new Date().toISOString() }));
-      break;
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-      const held = lockOwner(owner);
-      // Stale: its process is gone, or it never got an owner (a gate killed between the two
-      // steps above) and is older than a moment.
-      const stale = held ? !alive(held.pid) : ageMs(dir) > 10000;
-      if (stale) {
-        // Taken over by renaming it away first: of two gates that both see it stale only one can
-        // rename it, and a gate that took the lock in between isn't swept away (its owner is checked
-        // once more right before the rename).
-        const again = lockOwner(owner);
-        if (again ? alive(again.pid) || again.pid !== held?.pid : held || ageMs(dir) <= 10000) continue;
-        const gone = `${dir}.stale-${process.pid}-${Date.now()}`;
-        try {
-          renameSync(dir, gone);
-        } catch {
-          continue;
-        }
-        say(held ? `took over the lock of ${held.repo} (process ${held.pid} is gone)` : `took over a lock without an owner: ${dir}`);
-        rmSync(gone, { recursive: true, force: true });
-        continue;
-      }
-      if (Date.now() - told > 30000) {
-        say(`waiting for ${held ? `the gate of ${held.repo} (process ${held.pid}, since ${held.since})` : "another gate"}: ${dir}`);
-        told = Date.now();
-      }
-      await sleep(1000);
-    }
-  }
-  try {
-    return await body();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
 
 // ---- running commands ------------------------------------------------------------------------
 
@@ -198,7 +132,7 @@ const covTarget = process.env.W3PROJ_COV_TARGET_DIR ?? join(mainCheckout(), "tar
 async function rustCoverage(ctx) {
   const out = join(repo, "target", "cov-rust.json");
   mkdirSync(dirname(covTarget), { recursive: true });
-  const measured = await withFileLock(`${covTarget}.lock`, (m) => { ctx.say(m); console.log(`   Rust coverage: ${m}`); }, () =>
+  const measured = await withFileLock(`${covTarget}.lock`, repo, (m) => { ctx.say(m); console.log(`   Rust coverage: ${m}`); }, () =>
     ctx.sh(`cargo llvm-cov --workspace --locked --json --summary-only --output-path "${out}"`, { env: { CARGO_TARGET_DIR: covTarget } }),
   );
   if (!measured) return false;
@@ -227,7 +161,7 @@ async function rustCoverage(ctx) {
 async function hostileRounds(ctx) {
   const list = join(dirname(ctx.log), "robustness-build.json");
   mkdirSync(dirname(list), { recursive: true });
-  const built = await locks.hold("cargo", "w", () => ctx.sh("cargo test --release -p w3proj --test robustness --locked --no-run --message-format=json", { stdout: list }));
+  const built = await locks.hold("cargo-release", "w", () => ctx.sh("cargo test --release -p w3proj --test robustness --locked --no-run --message-format=json", { stdout: list }));
   if (!built) {
     // The compiler's own messages, as cargo would have printed them, and anything else it said.
     for (const line of readFileSync(list, "utf8").split("\n")) {
@@ -264,6 +198,8 @@ const bin = join(repo, "target", "release", `w3proj${exe}`);
 const smokeId = process.env.W3_SMOKE_ID ?? `dev.w3proj.studio.smoke.${basename(repo).replace(/[^A-Za-z0-9-]+/g, "-")}`;
 const smokeEnv = { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId };
 const hasGame = join(game, ".build.info");
+/** One of the app smoke test's three parts, on the build of `appbuild`. */
+const smokePart = (n) => shell(`node scripts/app-smoke.mjs --part=${n}/3 --no-build`, { cwd: app, env: smokeEnv });
 const update = args.includes("--update-floor") ? " --update-floor" : "";
 
 // Steps, in the order they are started when they can be. `weight`: about how many cores it keeps
@@ -271,49 +207,44 @@ const update = args.includes("--update-floor") ? " --update-floor" : "";
 // in a batch gate on 2026-11-25, cold caches; the scheduler's budget, docs/testing/gate-and-smoke.md).
 // `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
 const steps = [
-  { id: "cli", name: "release CLI", tier: "corpus", weight: 6, mem: 1000, locks: [["cargo", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
-  // The real app's smoke test in two halves, two apps of one build side by side (app-smoke.mjs --part): part 1 builds
-  // it, part 2 starts once that build is done and runs what part 1 built.
-  { id: "appsmoke1", name: "the real app on a scratch project (part 1/2)", tier: "corpus", weight: 4, mem: 5000, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs --part=1/2", { cwd: app, env: smokeEnv }) },
-  { id: "appsmoke2", name: "the real app on a scratch project (part 2/2)", tier: "corpus", weight: 4, mem: 6500, after: ["cli", "appsmoke1#built"], run: async (ctx) => {
-    // "#built" only orders (it is done also when part 1 failed before its build): without a build there is
-    // nothing of this tree's to run.
-    if (!done.get("appsmoke1#built")?.ok) {
-      ctx.say("not run: part 1's build of the app failed");
-      return false;
-    }
-    return ctx.sh("node scripts/app-smoke.mjs --part=2/2 --no-build", { cwd: app, env: smokeEnv });
-  } },
+  { id: "cli", name: "release CLI", tier: "corpus", weight: 6, mem: 1000, priority: 1, locks: [["cargo-release", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
+  // The real app's smoke test: one build (the debug profile, so it runs beside the release CLI's), then three apps of
+  // it side by side (app-smoke.mjs --part), each a third of the checks. The longest chain of the gate: `priority`.
+  // appbuild's mem: not measured alone (the old part 1, build and app together, peaked at 5000).
+  { id: "appbuild", name: "the real app's build", tier: "corpus", weight: 6, mem: 5000, priority: 1, locks: [["cargo-debug", "w"], ["dist", "w"]], run: shell("node scripts/app-smoke.mjs --build-only", { cwd: app, env: smokeEnv }) },
+  { id: "appsmoke1", name: "the real app on a scratch project (part 1/3)", tier: "corpus", weight: 4, mem: 5000, priority: 1, after: ["cli", "appbuild"], run: smokePart(1) },
+  { id: "appsmoke2", name: "the real app on a scratch project (part 2/3)", tier: "corpus", weight: 4, mem: 6500, priority: 1, after: ["cli", "appbuild"], run: smokePart(2) },
+  { id: "appsmoke3", name: "the real app on a scratch project (part 3/3)", tier: "corpus", weight: 4, mem: 6500, priority: 1, after: ["cli", "appbuild"], run: smokePart(3) },
   // `w3proj verify` checks the maps on all cores, so its memory grows with them: alone under a 20 GB limit.
   { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, mem: 17000, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
   { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, mem: 1500, run: hostileRounds },
   { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, mem: 1000, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   { id: "script", name: "generated scripts against the World Editor's", tier: "corpus", weight: 8, mem: 3500, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/script-check/run.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   // The first run extracts every .wts of the corpus and the game (2.5 min, then cached in target/wts-corpus), so it
-  // weighs as much as an app smoke half.
+  // weighs as much as an app smoke part.
   { id: "wts", name: "string tables against the frozen reading on every .wts", tier: "corpus", weight: 4, mem: 4000, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/wts-corpus.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3PROJ_CORPUS: corpus } })) },
   { id: "twin", name: "Rust and TypeScript codecs agree", tier: "corpus", weight: 2, mem: 1500, after: ["cli"], run: needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
-  // [Refactored] Start `ui` before `rust` and `clippy` and release `["dist", "w"]` as soon as Vite prints "built in" (~1.5 s),
-  // so `ui` no longer queues behind sequential `rust` + `clippy` in `commit` tier and overlaps its Chrome phase with them.
-  { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, mem: 1500, after: ["appsmoke1#built"], locks: [["dist", "w"]], built: "built in", run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
+  // Before `rust` and `clippy`, and done with app/dist as soon as Vite prints "built in" (~1.5 s): its browser phase
+  // overlaps them instead of queueing behind both. (It only reads app/dist from then on, as they do.)
+  { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, mem: 1500, locks: [["dist", "w"]], built: "built in", run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
   // rustcov and tscov: not measured; as their test steps and a bit more.
-  { id: "rustcov", name: "Rust coverage floors", tier: "coverage", weight: 8, mem: 4500, after: ["appsmoke1#built"], locks: [["dist", "r"]], run: rustCoverage },
-  { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, mem: 3500, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
-  { id: "clippy", name: "clippy", tier: "commit", weight: 4, mem: 1500, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
+  { id: "rustcov", name: "Rust coverage floors", tier: "coverage", weight: 8, mem: 4500, locks: [["dist", "r"]], run: rustCoverage },
+  { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, mem: 3500, locks: [["cargo-debug", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
+  { id: "clippy", name: "clippy", tier: "commit", weight: 4, mem: 1500, locks: [["cargo-debug", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
   // The web demo (docs/web-demo.md): its own build folder (app/dist-demo), so no "dist" lock. A missing browser FAILS, as in ui-smoke.
   { id: "demo", name: "web demo build and check (headless)", tier: "commit", weight: 2, mem: 1500, run: shell("node scripts/demo-check.mjs --build", { cwd: app }) },
   { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 4, mem: 700, run: shell("npm run --silent check", { cwd: app }) },
-  // [Refactored] Fast commit-tier unit tests skip slow CASC game-file reads (W3PROJ_GAME=""); `tstestcorpus` runs them with W3PROJ_REQUIRE_CORPUS=1.
+  // Without the game (W3PROJ_GAME=""): the tests that read its files are slow, and `tstestcorpus` runs them with W3PROJ_REQUIRE_CORPUS=1.
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 4, mem: 3000, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_GAME: "" } }) },
   // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
   // The CLI's Rust tests that read the game (rebuild.rs) skip without it; here they fail instead. They find it by W3PROJ_GAME, else `.game-path`; every other CLI test
   // switches the game off for the binary it starts (crates/cli/tests/common), as their fixtures are made up.
-  { id: "rustcorpus", name: "Rust CLI tests on the corpus (nothing skipped)", tier: "corpus", weight: 4, mem: 3500, after: ["cli"], locks: [["cargo", "w"]], run: needs(hasGame, "the game", shell("cargo test --release --locked -p w3proj-cli --quiet", { env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus } })) },
+  { id: "rustcorpus", name: "Rust CLI tests on the corpus (nothing skipped)", tier: "corpus", weight: 4, mem: 3500, after: ["cli"], locks: [["cargo-release", "w"]], run: needs(hasGame, "the game", shell("cargo test --release --locked -p w3proj-cli --quiet", { env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus } })) },
   { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, mem: 9000, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, mem: 4000, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "wts", "twin", "appsmoke1", "appsmoke2", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "wts", "twin", "appbuild", "appsmoke1", "appsmoke2", "appsmoke3", "script"];
 
 const tiers = {
   commit: ["commit"],
@@ -323,14 +254,21 @@ const tiers = {
   batch: ["commit", "corpus"],
   all: ["commit", "coverage", "corpus"],
 };
-const tier = args.find((a) => !a.startsWith("--")) ?? "commit";
-if (!tiers[tier]) {
-  console.error(`no tier "${tier}": ${Object.keys(tiers).join(", ")}`);
+const tierArg = args.find((a) => !a.startsWith("--"));
+const only = args.find((a) => a.startsWith("--only="))?.slice(7).split(",").filter(Boolean);
+const tier = only ? "only" : (tierArg ?? "commit");
+if (only ? tierArg !== undefined : !tiers[tier]) {
+  console.error(only ? `--only names its steps: not with a tier ("${tierArg}")` : `no tier "${tier}": ${Object.keys(tiers).join(", ")}`);
   process.exit(2);
 }
 // A step missing from the table would be run but left out of the result.
 assertInTable(steps, table);
-const chosen = steps.filter((s) => tiers[tier].includes(s.tier));
+const unknown = (only ?? []).filter((id) => !steps.some((s) => s.id === id));
+if (unknown.length || only?.length === 0) {
+  console.error(`--only: no step ${unknown.map((id) => `"${id}"`).join(", ") || "named"}; the steps: ${table.join(", ")}`);
+  process.exit(2);
+}
+const chosen = only ? withPrerequisites(steps, only) : steps.filter((s) => tiers[tier].includes(s.tier));
 // The `corpus` tier alone also needs nothing from the others; the `commit` tier needs the
 // release CLI for nothing. A step's `after` that isn't part of the tier is simply not waited for.
 const serial = args.includes("--serial");
@@ -345,12 +283,13 @@ for (const old of readdirSync(logRoot)) {
   if (Date.now() - statSync(path).mtimeMs > 24 * 3600 * 1000) rmSync(path, { recursive: true, force: true });
 }
 const logDir = join(logRoot, `${tier}-${process.pid}`);
+// A run of the last day with this process id (they come round again) left its logs here: not this run's.
+rmSync(logDir, { recursive: true, force: true });
 mkdirSync(logDir, { recursive: true });
 
 // ---- scheduling ------------------------------------------------------------------------------
 
 const done = new Map();
-const started = Date.now();
 const clock = () => `${String(Math.round((Date.now() - started) / 1000)).padStart(4)}s`;
 
 /** What a step printed: all of it if short, else the end of it and where the rest is. */
@@ -403,10 +342,19 @@ function skip(step, why) {
   show(step, log, false);
 }
 
-// Ctrl-C or a kill of the gate ends the steps' processes too.
-installSignalHandlers(liveChildren);
+// One gate of this repository at a time on the machine, whichever worktree it is started in: the lock is in the main
+// checkout. Two at once share the cores and the memory (each would count the same free memory as its own), and in one
+// checkout also app/dist, the smoke tests' folders and the browser profiles.
+const queueLock = join(mainCheckout(), "target", "gate.lock");
+const queued = !args.includes("--no-queue") && process.env.W3_GATE_QUEUE !== "0";
+let holdsQueue = false;
 
-// The memory the running steps' estimates (`mem`) may add up to (tests/gate-lib.mjs memoryBudget).
+// Ctrl-C, a kill of the gate or its terminal closing ends the steps' processes too, and gives the lock back.
+installSignalHandlers(liveChildren, (code) => {
+  if (holdsQueue) rmSync(queueLock, { recursive: true, force: true });
+  process.exit(code);
+});
+
 const readOrNull = (file) => {
   try {
     return readFileSync(file, "utf8");
@@ -414,14 +362,30 @@ const readOrNull = (file) => {
     return null;
   }
 };
-const budget = memoryBudget({ read: readOrNull, freemem });
-console.log(`gate: memory budget ${budget.mb} MB (${budget.from}; set W3_GATE_MEM_MB to change)`);
-const onMemWait = (step, { used }) => console.log(`${clock()}  wait   ${step.name}: needs about ${step.mem} MB, ${used} of ${budget.mb} MB in use`);
 
-const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
-await schedule({ steps: order, locks, serial, jobs, memBudget: budget.mb, onMemWait, launch, skip, done });
+async function runSteps() {
+  // The memory the running steps' estimates (`mem`) may add up to (tests/gate-lib.mjs memoryBudget). Read now, not
+  // while another gate still ran.
+  const budget = memoryBudget({ read: readOrNull, freemem });
+  console.log(`gate: memory budget ${budget.mb} MB (${budget.from}; set W3_GATE_MEM_MB to change)`);
+  const onMemWait = (step, { used }) => console.log(`${clock()}  wait   ${step.name}: needs about ${step.mem} MB, ${used} of ${budget.mb} MB in use`);
+  const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
+  await schedule({ steps: order, locks, serial, jobs, memBudget: budget.mb, onMemWait, launch, skip, done });
+}
 
-console.log(`\n--- gate: ${tier}`);
+let started = Date.now();
+if (queued) {
+  mkdirSync(dirname(queueLock), { recursive: true });
+  await withFileLock(queueLock, repo, (m) => console.log(`gate: ${m}`), () => {
+    holdsQueue = true;
+    started = Date.now(); // the times count from the gate's own start, not from the wait
+    return runSteps().finally(() => { holdsQueue = false; });
+  });
+} else {
+  await runSteps();
+}
+
+console.log(`\n--- gate: ${only ? `only ${chosen.map((s) => s.id).join(", ")} (not a tier: no gate result)` : tier}`);
 for (const s of chosen) if (!done.has(s.id)) done.set(s.id, { ok: false, seconds: 0 }); // never ran: a failure, not a gap
 const results = table.filter((id) => done.has(id)).map((id) => ({ name: steps.find((s) => s.id === id).name, ...done.get(id) }));
 for (const r of results) console.log(`${r.ok ? "pass" : "FAIL"}  ${String(r.seconds).padStart(4)}s  ${r.name}`);

@@ -14,16 +14,18 @@
 //   W3_APP_BIN=<app> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>   runs a prebuilt app (verify-build.mjs)
 //   node scripts/app-smoke.mjs --break    breaks a file on purpose: this run has to fail
 //   node scripts/app-smoke.mjs --only=placerAndCampaign --break-autocycle   Auto Cycle Random Groups stays off: that check alone fails
-//   node scripts/app-smoke.mjs --part=1/2 the project checks and the first half of the full run's checks
-//   node scripts/app-smoke.mjs --part=2/2 the second half (with --no-build while part 1 builds: they run side by side)
+//   node scripts/app-smoke.mjs --build-only   builds the app and stops (the gate's step before the parts)
+//   node scripts/app-smoke.mjs --part=1/3 the project checks and the first third of the full run's checks
+//   node scripts/app-smoke.mjs --part=2/3 the second third, --part=3/3 the last (with --no-build on one build: side by side)
 //   --verbose shows what each editor put on screen
 //
-// The two parts are two apps of one build at once: each has its own folder (target/app-smoke-part<n>, or W3_SMOKE_DIR
-// with -part<n>), its settings in it (W3PROJ_CONFIG_DIR: the build's identifier is the same), its own Xvfb display and
-// WebDriver ports on Linux (webdriver.mjs) or DevTools port and WebView2 folder on Windows. The full run is
-// firstHalf, then secondHalf (part 1 runs the project checks and firstHalf, part 2 secondHalf): each keeps the checks'
+// The three parts are three apps of one build at once: each has its own folder (target/app-smoke-part<n>, or
+// W3_SMOKE_DIR with -part<n>), its settings in it (W3PROJ_CONFIG_DIR: the build's identifier is the same), its own Xvfb
+// display and WebDriver ports on Linux (webdriver.mjs) or DevTools port and WebView2 folder on Windows. The full run is
+// checksA, checksB, checksC, and each part runs one of them (part 1 after the project checks): each keeps the checks'
 // order, so a check that relies on what an earlier one left (testMapWithoutGame on the map objectsWhileOpening left
-// open) stays behind it.
+// open) stays behind it. The checks take as long in three apps as in two (2026-11-27, an idle machine: 1654 s in all
+// against 1736 s), so a third app ends the run sooner.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -36,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
 import { ensureCli, smokeId } from "./appctl.mjs";
-import { checkFresh, staleAllowed } from "../../tests/binfresh.mjs";
+import { checkFresh, sourceFingerprint, staleAllowed, writeStamp } from "../../tests/binfresh.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 import { lit } from "./jslit.mjs";
 import { wineserverReport } from "../../tests/wineservers.mjs";
@@ -45,11 +47,18 @@ const LINUX = process.platform === "linux";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
-// --part=<n>/2: one half of the full run (null: all of it).
+// --part=<n>/3: one third of the full run (null: all of it).
+const PARTS = 3;
 const partArg = process.argv.find((x) => x.startsWith("--part="))?.slice(7);
-const part = partArg === undefined ? null : ({ "1/2": 1, "2/2": 2 })[partArg];
+const part = partArg === undefined ? null : ({ "1/3": 1, "2/3": 2, "3/3": 3 })[partArg];
 if (part === undefined || (part && process.argv.some((x) => x.startsWith("--only=")))) {
-  console.error(`FAIL --part takes 1/2 or 2/2, and not with --only: ${process.argv.slice(2).join(" ")}`);
+  console.error(`FAIL --part takes 1/3, 2/3 or 3/3, and not with --only: ${process.argv.slice(2).join(" ")}`);
+  process.exit(2);
+}
+// --build-only: the build and nothing else, for parts started with --no-build afterwards.
+const buildOnly = process.argv.includes("--build-only");
+if (buildOnly && (part || process.argv.includes("--no-build") || process.env.W3_APP_BIN)) {
+  console.error(`FAIL --build-only builds for the runs after it: not with --part, --no-build or W3_APP_BIN`);
   process.exit(2);
 }
 // W3_SMOKE_DIR: another folder, when this one has a project someone opened to try out.
@@ -130,6 +139,9 @@ function build() {
   writeFileSync(patch, JSON.stringify({ identifier: IDENTIFIER, app: { windows }, build: { beforeBuildCommand: "npm run build" } }));
   const r = spawnSync(`npx tauri build --debug --no-bundle --config "${patch}"`, { cwd: app, shell: true, stdio: "inherit" });
   if (r.status !== 0) throw new Error("the build failed");
+  // Which sources it was built from: a run with --no-build after it accepts the app also when cargo had nothing to
+  // link again and a source file's time is newer (tests/binfresh.mjs).
+  writeStamp(exe, "app", sourceFingerprint(repo, "app"));
 }
 
 /** The AI client setup of the app writes the path of the `w3proj` next to the app into the client's settings (and asks it
@@ -143,8 +155,20 @@ function placeBridge() {
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) return;
   if (process.argv.includes("--break-bridge")) { rmSync(dest, { force: true }); return; }
   if (resolve(dest) === resolve(cli)) return;
-  copyFileSync(cli, dest);
-  chmodSync(dest, 0o755);
+  // The parts run side by side and each comes here: a copy that is there already stays (another part may be running
+  // it), and a new one arrives whole, under its name in one step.
+  const wanted = readDiskFile(cli);
+  if (existsSync(dest) && statSync(dest).size === wanted.length && readDiskFile(dest).equals(wanted)) return;
+  const tmp = `${dest}.${process.pid}.tmp`;
+  writeFileSync(tmp, wanted, { mode: 0o755 });
+  try {
+    renameSync(tmp, dest);
+  } catch (e) {
+    // Windows refuses the rename while another part runs the copy: theirs is this one if it has these bytes.
+    const same = existsSync(dest) && readDiskFile(dest).equals(wanted);
+    rmSync(tmp, { force: true });
+    if (!same) throw e;
+  }
 }
 
 function freePort() {
@@ -19162,6 +19186,7 @@ async function run() {
   mkdirSync(work, { recursive: true });
   if (!process.argv.includes("--no-build") && !prebuilt) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
+  if (buildOnly) return null;
   if (process.argv.includes("--no-build") || prebuilt) checkFresh(exe, { kind: "app", allowStale: staleAllowed() });
   // The release CLI is built when it isn't there (unless W3PROJ_BIN names another).
   cli = ensureCli();
@@ -19444,9 +19469,9 @@ async function run() {
       return found;
     }
 
-    // Part 2 has no project checks: they and the first half of the checks are part 1's.
+    // Parts 2 and 3 have no project checks: they and the first third of the checks are part 1's.
     let summary = null;
-    if (part !== 2) {
+    if (part === null || part === 1) {
       const { info, onDisk, opened } = await projectChecks(page, found, { project, before, wanted, packed });
       if (process.argv.includes("--only=graphics")) {
         await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
@@ -19456,21 +19481,22 @@ async function run() {
       }
       console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start, build and the project checks`);
       checkEnded = Date.now();
-      const made = await firstHalf(page, found);
+      const made = await checksA(page, found);
       summary = `${info.files.length} files in "${info.name}", ${onDisk.length} opened, ${made} new maps`;
       if (process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${lit(r)}`);
     } else {
-      console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start (part 2 of 2)`);
+      console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start (part ${part} of ${PARTS})`);
       checkEnded = Date.now();
     }
-    if (part !== 1) await secondHalf(page, found, project);
+    if (part === null || part === 2) await checksB(page, found);
+    if (part === null || part === 3) await checksC(page, found, project);
     found.push(...problems(page.events));
     if (exited() !== null) found.push(`the app exited with ${exited()}`);
 
     const shot = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     if (shot) writeFileSync(join(work, "screen.png"), Buffer.from(shot.data, "base64"));
     page.ws.close();
-    console.log(summary ?? `part ${part} of 2: the project checks and the first half are part 1's`);
+    console.log(summary ?? `part ${part} of ${PARTS}: the project checks and the first third are part 1's`);
     return found;
   } finally {
     await stop();
@@ -19557,9 +19583,9 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   return { info, onDisk, opened };
 }
 
-/** The full run's checks, part 1 of 2 (after the project checks); returns how many new maps newMaps made. Split from
- *  part 2 by the measured times: about 6 of the full run's 13 minutes on each side once part 1 has built. */
-async function firstHalf(page, found) {
+/** The full run's first checks (after the project checks), which rely on each other's order: part 1 of 3. Returns how
+ *  many new maps newMaps made. */
+async function checksA(page, found) {
   const made = await newMaps(page, found);
   await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
   await leftOpen(page, "terrainWiring", found);
@@ -19624,8 +19650,6 @@ async function firstHalf(page, found) {
   await leftOpen(page, "toggleGroups", found);
   await toolbarNarrow(page, found).catch((e) => found.push(`toolbar narrow: ${e.message}`));
   await leftOpen(page, "toolbarNarrow", found);
-  // Here rather than in part 2, which starts only after part 1's build: the two halves end about together (batch run
-  // 2026-11-12: part 1 327 s, part 2 271 s from ~136 s on; unitProperties ~37 s).
   await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
   await leftOpen(page, "unitProperties", found);
   // Last: it makes a map of its own, which the checks above would find open.
@@ -19634,9 +19658,11 @@ async function firstHalf(page, found) {
   return made;
 }
 
-/** The full run's checks, part 2 of 2: from itemTablesAccess on, in a second app when the run is split. None of them
- *  needs what part 1 left: each runs alone with --only too, and they keep their order. */
-async function secondHalf(page, found, project) {
+/** The full run's checks from itemTablesAccess to niceToHaves: part 2 of 3, in a second app when the run is split. From
+ *  here on no check needs what an earlier one left (each runs alone with --only too), so the cut between this and
+ *  checksC can be anywhere: it is where the parts take about as long (`took X s: <check>`; 2026-11-27: 522, 565 and
+ *  564 s; move checks across it when one part grows). */
+async function checksB(page, found) {
   await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
   await leftOpen(page, "itemTablesAccess", found);
   await mapInfoColorTools(page, found).catch((e) => found.push(`Map Properties colour tools: ${e.message}`));
@@ -19765,6 +19791,10 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "oldLocalFiles", found);
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
   await leftOpen(page, "niceToHaves", found);
+}
+
+/** The full run's checks from byHand on: part 3 of 3, in a third app when the run is split. */
+async function checksC(page, found, project) {
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
   await leftOpen(page, "byHand", found);
   await soundEditorKeys(page, found).catch((e) => found.push(`sound editor keys: ${e.message}`));
@@ -20320,6 +20350,10 @@ async function startDeleteUndoRound(page, map, stray, found) {
 
 try {
   const found = await run();
+  if (found === null) {
+    console.log("app build ok");
+    process.exit(0);
+  }
   for (const p of found) console.error(`FAIL ${p}`);
   console.log(found.length ? `${found.length} problems` : "app smoke ok");
   // Wine servers left running from this repository (reported, never killed: the prefix may be the user's).

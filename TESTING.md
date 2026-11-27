@@ -16,11 +16,11 @@ How this project is tested, why, and what to do before committing or releasing.
 | I want | Run |
 |---|---|
 | everything automatic, before a commit | `node tests/gate.mjs`: types, TypeScript unit tests, Rust tests, clippy, headless UI smoke (what GitHub CI runs too) |
-| everything including real maps and the game, before a merge or release | `node tests/gate.mjs batch` (commit + corpus: release CLI, the real app's smoke test in two parts, corpus round trip and codec baseline, hostile input, codecs agreeing, TypeScript tests with nothing skipped, generated scripts against the World Editor's). `node tests/gate.mjs all` adds the coverage floors (needs `cargo-llvm-cov` and the llvm-tools component) |
+| everything including real maps and the game, before a merge or release | `node tests/gate.mjs batch` (commit + corpus: release CLI, the real app's build and its smoke test in three parts, corpus round trip and codec baseline, hostile input, codecs agreeing, TypeScript tests with nothing skipped, generated scripts against the World Editor's). `node tests/gate.mjs all` adds the coverage floors (needs `cargo-llvm-cov` and the llvm-tools component) |
 | one piece | `cd app && npm test -- <file>`, `npm run check`, `node scripts/app-smoke.mjs --only=<check>`; `cargo test --workspace`; `cargo clippy --workspace --all-targets -- -D warnings` |
 | the real World Editor (Linux, local, not in the gate) | `node app/scripts/we-compare.mjs <spec.json…>`, see "The real World Editor" below |
 
-Gate options: `--serial`, `--jobs=<n>`, `--update-floor`. Logs are in `target/gate-logs/<tier>-<pid>/`, the last line is
+Gate options: `--serial`, `--jobs=<n>`, `--update-floor`, `--only=<step ids>` (those steps and what they need: to run a failed step again; not a gate result), `--no-queue`. Gates of this repository run one at a time on the machine, from whichever worktree: a second one waits and says for whom. Logs are in `target/gate-logs/<tier>-<pid>/`, the last line is
 `GATE_EXIT=<code>`, and a check missing what it needs **fails**: green always means it ran. Steps start only while
 their memory estimates fit a budget (80% of free memory or of a cgroup limit such as `systemd-run -p MemoryMax=`,
 printed at the start); `W3_GATE_MEM_MB=<MB>` sets it ([details](docs/testing/gate-and-smoke.md)).
@@ -77,7 +77,7 @@ real maps and game files can't go into the repository.
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
 node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov; scripts/setup-linux.sh --with-coverage-tools)
-node tests/gate.mjs corpus     # real maps and the game: about 8 minutes (the app smoke test's two halves set the pace)
+node tests/gate.mjs corpus     # real maps and the game: the app's build and then the app smoke test's three parts set the pace
 node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
 ```
@@ -92,7 +92,7 @@ Parts of it: `npm test`, `cargo test`, `npm run coverage`, `npm run ui-smoke`. R
 hostile-input tests are set with `W3PROJ_ROBUSTNESS_ROUNDS`. The corpus tier finds its maps with
 `W3PROJ_CORPUS` and the game with `W3PROJ_GAME`.
 
-How the gate schedules its steps, the real-app smoke test's two halves (`--part=1/2`, `--part=2/2`), the page-call time
+How the gate schedules its steps, the real-app smoke test's three parts (`--part=1/3` to `--part=3/3`), the queue between gates, the page-call time
 limit (`W3_SMOKE_CALL_TIMEOUT`), the logs in `target/gate-logs/`, the shared coverage folder, the hostile-input watchdog
 and `w3proj verify` over a folder: [docs/testing/gate-and-smoke.md](docs/testing/gate-and-smoke.md).
 
@@ -109,7 +109,7 @@ falls short, rather than copying their insides into a scratch file.
 | compare two pictures | `node scripts/pic-compare.mjs a.png b.png` (in `app/`): mean colour per region in both, their difference, the mean absolute difference of the pixels; `--region [name=]x,y,w,h`, `--sample` (whole and a 3x3 grid), `--diff d.png`, `--tolerance T` (exit 1 when a region's difference is above it, 2 when the pictures can't be compared). Plain JavaScript, no Pillow |
 | measure how much light a shadow keeps | `node scripts/shadow-keep.mjs ON[,ON…] OFF[,OFF…] --region [name=]x,y,w,h` (in `app/`): pictures of one view with Shadows on and off (several frames each are averaged: waves and animations move), per channel in linear light the sum over the shadow's core (blurred ratio under `--threshold`, default 0.8) on over off; a region without a shadow gives `kept: null` |
 | measure shadows on HD water against the World Editor | `node scripts/water-shadows.mjs [--steps maps,we,studio,measure] [--pairs 8:70,…] [--out DIR]` (in `app/`, Linux, local: runs we-drive): lakes of six pairs of depths with a scaled tree in each (make-water-shadows.mjs), four frames with View > Shadows on and off in the editor and in Studio, shadow-keep over each tree's shadow, a table of green and blue by depth (renderer.ts `waterShadowKeep`) |
-| run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too; `--part=1/2` / `--part=2/2` runs one half (see "Running it") |
+| run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too; `--part=1/3`, `2/3` or `3/3` runs one part, `--build-only` only builds (see "Running it") |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
 | measure what opening only some subterrains saves | `node scripts/measure-subterrains.mjs [--map M.w3x \| --project DIR] [--scenarios all,one] [--one NAME] [--out F.json]` (in `app/`): makes a large split project once (the corpus's largest canvas, grown to `--size` 256 tiles by the app's Resize Map, filled with doodads, creeps and plateaus by the AI tools, split `--grid` 4×4 by `w3proj terrain split`; kept in `target/measure-subterrains/source`), then per scenario (all open, one open via `.w3proj/open-subterrains.json`) the hidden app's time to the first frame and to rest, RSS (JS heap where the webview has it: not WebKitGTK), bytes read, the flat files' read, what the renderer holds (ground quads, water triangles, doodads, units, cliffs), an edit's and a save's time with their derived-file rebuilds. Xvfb's software GL says nothing about GPU frame times; bytes read are all the app's processes read (`/proc/<pid>/io` on Linux, `Win32_Process` on Windows) |
 | make a project's pathing, shadows, minimap and script as the app does, without it | `w3proj rebuild <project> [--only=wpm,shd,minimap,script] [--force]` (`--force` also replaces a script Studio didn't write last): the app's own code in Node (`app/src/headless`); app-smoke's `rebuildCli` holds its bytes against the app's |

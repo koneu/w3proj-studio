@@ -1,8 +1,9 @@
 // The parts of tests/gate.mjs that are worth testing alone (app/scripts/gate.test.mjs): running
-// a command with a timeout, ending its tree, the signal handlers, the coverage floors, the step table.
+// a command with a timeout, ending its tree, the signal handlers, the lock between gates, the coverage floors,
+// the step table.
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The pids below `root` (POSIX, from `ps`); empty when `ps` is unavailable. */
@@ -82,13 +83,105 @@ export function runShell(command, { cwd, env = {}, stdout, fd, write, timeoutMs,
   });
 }
 
-/** Ctrl-C or a kill of the gate ends the steps' processes too. */
+/** Ctrl-C, a kill of the gate or its terminal closing ends the steps' processes too. */
 export function installSignalHandlers(live, exit = (code) => process.exit(code)) {
-  for (const sig of ["SIGINT", "SIGTERM"]) {
+  for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) {
     process.on(sig, () => {
       for (const c of live) killTree(c);
-      exit(sig === "SIGINT" ? 130 : 143);
+      exit(code);
     });
+  }
+}
+
+/** The owner written into a lock folder, or null while there is none (being made, or left half made). */
+function lockOwner(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+
+/** When a process started, as the system counts it (Linux: field 22 of /proc/<pid>/stat), or null where that isn't known. */
+function startedAt(pid) {
+  if (process.platform !== "linux") return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the process that wrote `owner` still runs: its number alone can be another process's by now. */
+function holds(owner) {
+  if (!alive(owner.pid)) return false;
+  return owner.started == null || startedAt(owner.pid) === owner.started;
+}
+
+function ageMs(path) {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A lock between gates running at once, also from different worktrees: a folder that exists while
+ * it is held, with the owner's process in it (`repo`: the checkout it runs in, for the others' messages). A folder
+ * left by a process that is gone is taken over. `say(text)` is told who is waited for, every 30 s.
+ */
+export async function withFileLock(dir, repo, say, body, { pollMs = 1000 } = {}) {
+  const owner = join(dir, "owner.json");
+  let told = 0;
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      writeFileSync(owner, JSON.stringify({ pid: process.pid, started: startedAt(process.pid), repo, since: new Date().toISOString() }));
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      const held = lockOwner(owner);
+      // Stale: its process is gone, or it never got an owner (a gate killed between the two
+      // steps above) and is older than a moment.
+      const stale = held ? !holds(held) : ageMs(dir) > 10000;
+      if (stale) {
+        // Taken over by renaming it away first: of two gates that both see it stale only one can
+        // rename it, and a gate that took the lock in between isn't swept away (its owner is checked
+        // once more right before the rename).
+        const again = lockOwner(owner);
+        if (again ? holds(again) || again.pid !== held?.pid : held || ageMs(dir) <= 10000) continue;
+        const gone = `${dir}.stale-${process.pid}-${Date.now()}`;
+        try {
+          renameSync(dir, gone);
+        } catch {
+          continue;
+        }
+        say(held ? `took over the lock of ${held.repo} (process ${held.pid} is gone)` : `took over a lock without an owner: ${dir}`);
+        rmSync(gone, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() - told > 30000) {
+        say(`waiting for ${held ? `the gate of ${held.repo} (process ${held.pid}, since ${held.since})` : "another gate"}: ${dir}`);
+        told = Date.now();
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+  }
+  try {
+    return await body();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -177,6 +270,23 @@ export function memoryBudget({ env = process.env, platform = process.platform, r
 /** A step missing from the table would be run but left out of the result. */
 export function assertInTable(steps, table) {
   for (const s of steps) if (!table.includes(s.id)) throw new Error(`gate: step "${s.id}" is not in the table`);
+}
+
+/**
+ * The steps named by `ids` and all they come `after` (and what those come after), in the order of `steps`:
+ * what `--only` runs, so a step finds what it needs built by this tree.
+ */
+export function withPrerequisites(steps, ids) {
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const wanted = new Set();
+  const stack = [...ids];
+  while (stack.length) {
+    const id = stack.pop().split("#")[0];
+    if (wanted.has(id) || !byId.has(id)) continue;
+    wanted.add(id);
+    stack.push(...(byId.get(id).after ?? []));
+  }
+  return steps.filter((s) => wanted.has(s.id));
 }
 
 /** What a missing or half-installed app/node_modules looks like: one line to say, or null when it's complete enough. */

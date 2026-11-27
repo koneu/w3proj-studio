@@ -285,6 +285,88 @@ test("memory: a step waiting for cores or a lock isn't said to wait for memory",
   await h.result;
 });
 
+// The gate's long chain: the smoke parts become ready late (after the app's build) and need much memory.
+const chainSteps = () => [
+  { id: "build", weight: 1, mem: 2000, priority: 1 },
+  { id: "part1", weight: 1, mem: 6000, priority: 1, after: ["build"] },
+  { id: "part2", weight: 1, mem: 6000, priority: 1, after: ["build"] },
+  { id: "corpus", weight: 1, mem: 9000 },
+  { id: "tests", weight: 1, mem: 5000 },
+  { id: "small", weight: 1, mem: 3000 },
+];
+
+test("priority: while a step with priority waits for memory, what gets free is kept for it", async () => {
+  const h = harness(chainSteps(), { memBudget: 14000 });
+  await h.settle();
+  // build 2000 + corpus 9000 + small 3000; tests (5000) doesn't fit.
+  assert.deepEqual(h.running(), ["build", "corpus", "small"]);
+  await h.end("build");
+  // 12000 in use: neither part fits, and `tests`, ready long before them, doesn't take the 2000 that got free
+  // (nor would it fit); nothing starts.
+  assert.deepEqual(h.running(), ["corpus", "small"]);
+  await h.end("small");
+  // 9000 in use, 5000 free: `tests` would fit, but the parts are saved for.
+  assert.deepEqual(h.running(), ["corpus"]);
+  await h.end("corpus");
+  // Both parts (12000) start; `tests` waits for one of them.
+  assert.deepEqual(h.running(), ["part1", "part2"]);
+  await h.end("part1");
+  assert.deepEqual(h.running(), ["part2", "tests"]);
+  await h.end("part2");
+  await h.end("tests");
+  await h.result;
+  assert.deepEqual(h.started, ["build", "corpus", "small", "part1", "part2", "tests"]);
+  assert.equal(h.skipped.size, 0);
+});
+
+test("priority, control: the same steps without priority let the smaller step pass the parts", async () => {
+  const h = harness(chainSteps().map(({ priority, ...s }) => s), { memBudget: 14000 });
+  await h.settle();
+  await h.end("build");
+  await h.end("small");
+  assert.deepEqual(h.running(), ["corpus", "tests"]);
+  for (const id of ["corpus", "tests", "part1", "part2"]) await h.end(id);
+  await h.result;
+});
+
+test("priority: a step with priority starts before ready steps without, also for the cores and a lock", async () => {
+  const h = harness(
+    [
+      { id: "ui", weight: 2, locks: [["dist", "w"]] },
+      { id: "tests", weight: 2 },
+      { id: "appbuild", weight: 2, priority: 1, locks: [["dist", "w"]] },
+    ],
+    { jobs: 2 },
+  );
+  await h.settle();
+  assert.deepEqual(h.running(), ["appbuild"]);
+  await h.end("appbuild");
+  assert.deepEqual(h.running(), ["ui"]);
+  await h.end("ui");
+  await h.end("tests");
+  await h.result;
+});
+
+test("priority: a step with priority that waits for a lock or a prerequisite holds nobody back", async () => {
+  const h = harness(
+    [
+      { id: "holder", weight: 1, mem: 1000, locks: [["dist", "w"]] },
+      { id: "first", weight: 1, mem: 1000, priority: 1, after: ["holder"] },
+      { id: "locked", weight: 1, mem: 1000, priority: 1, locks: [["dist", "w"]] },
+      { id: "other", weight: 1, mem: 1000 },
+    ],
+    { memBudget: 10000 },
+  );
+  await h.settle();
+  // `locked` (priority) is first in the queue and takes the lock; `holder` waits for it, `first` for `holder`.
+  assert.deepEqual(h.running(), ["locked", "other"]);
+  await h.end("locked");
+  assert.deepEqual(h.running(), ["other", "holder"]);
+  for (const id of ["other", "holder", "first"]) await h.end(id);
+  await h.result;
+  assert.equal(h.skipped.size, 0);
+});
+
 test("a step waiting for a lock inside its run is served when the lock is freed", async () => {
   // As the hostile-input step builds under "cargo" while it runs.
   const h = harness([
