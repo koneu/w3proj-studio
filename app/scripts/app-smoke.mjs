@@ -8195,8 +8195,10 @@ async function toggleGroups(page, found) {
     const shape = () => page.evaluate(`(() => Object.fromEntries([...document.querySelectorAll(".model-toggle-group")].map((g) => [g.dataset.group,
       { open: g.querySelector(".model-toggle-group-title").getAttribute("aria-expanded"), shown: [...g.querySelectorAll(".model-toggle")].filter((l) => l.getBoundingClientRect().width > 0).length, x: g.getBoundingClientRect().x, y: g.getBoundingClientRect().y }])))()`);
     const press = (name) => page.evaluate(`document.querySelector(${lit(`.model-toggle-group[data-group="${name}"] > .model-toggle-group-title`)}).click()`);
+    // Earlier checks of the run may have left some open (kept per user): fold those first.
+    await page.evaluate(`document.querySelectorAll(".model-toggle-group:not(.closed) > .model-toggle-group-title").forEach((b) => b.click())`);
     const folded = await shape();
-    if (Object.values(folded).some((g) => g.open !== "false" || g.shown)) fail(`the groups don't start folded: ${lit(folded)}`);
+    if (Object.values(folded).some((g) => g.open !== "false" || g.shown)) fail(`the groups don't fold: ${lit(folded)}`);
     await press("View");
     const one = await shape();
     if (one.View.open !== "true" || one.View.shown !== WANT.View.length || one.Overlays.shown) fail(`after View's name: ${lit(one)}`);
