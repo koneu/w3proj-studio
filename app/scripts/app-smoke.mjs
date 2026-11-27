@@ -3684,6 +3684,65 @@ async function unitEditRederives(page, found) {
   }
 }
 
+/** The Explorer and Go to File show what is on disk: none of the virtual map/ files; terrain.json opens the terrain editor
+ *  (its tab says Terrain); deleting map/terrain/ counts the terrain editor's unsaved changes; build/ is shown on request,
+ *  its files where they are. */
+async function explorerRealFiles(page, found) {
+  const fail = (what) => found.push(`explorer real files: ${what}`);
+  const k = await heightKit(page, "RealFiles");
+  try {
+    await k.save();
+    await settled(page);
+    const rows = () => page.evaluate(`[...document.querySelectorAll(".sidebar .tree-row")].map((r) => r.title.split(" — ")[0])`);
+    const click = (path, ctrl = false) => page.evaluate(`(() => { const r = [...document.querySelectorAll(".sidebar .tree-row")].find((x) => x.title.split(" — ")[0] === ${lit(path)}); r?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: ${ctrl} })); return !!r; })()`);
+    if (!(await rows()).includes("map")) await page.evaluate(`document.querySelectorAll("button.activity")[0].click()`);
+    await until("the Explorer", async () => (await rows()).includes("map/terrain"), 10000);
+    await click("map/terrain");
+    await until("map/terrain opened", async () => (await rows()).includes("map/terrain/terrain.json"), 10000);
+    // Every row is something on disk.
+    const shown = await rows();
+    const missing = shown.filter((p) => !existsSync(join(k.root, p)));
+    if (missing.length) fail(`listed but not on disk: ${lit(missing)}`);
+    if (!shown.includes("map/war3map.w3i.json")) fail(`control: the map's own files are missing: ${lit(shown)}`);
+    if (shown.some((p) => p === "build" || p.startsWith("build/"))) fail("build/ is shown without being asked for");
+    // The app's own list still has the virtual ones: its editors read and save through them.
+    if (!(await page.evaluate(`w3.workspace.files().some((f) => f.path === "map/war3map.w3e.txt" && f.virtual)`))) fail("the app's file list has no virtual terrain file");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await click("map/terrain/terrain.json");
+    await until("the terrain editor from terrain.json", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".terrain-tab")`), 30000);
+    const label = await page.evaluate(`document.querySelector(".tab.active .tab-label")?.textContent ?? null`);
+    if (label !== "Terrain") fail(`the terrain editor's tab says ${lit(label)}`);
+    // Go to File: real files only.
+    await page.evaluate(`(() => { window.__realPick = w3Workbench.quickInput.pick; window.__items = null; w3Workbench.quickInput.pick = async (items) => { window.__items = items.map((i) => i.value); return undefined; }; })()`);
+    await page.evaluate(`w3.commands.execute("workbench.quickOpen")`);
+    const items = (await page.evaluate(`window.__items`)) ?? [];
+    const gone = items.filter((p) => !existsSync(join(k.root, p)));
+    if (!items.includes("map/terrain/terrain.json") || gone.length) fail(`Go to File offers ${lit(gone)} that aren't on disk, of ${items.length}`);
+    // Deleting the real terrain folder counts what the terrain editor hasn't saved, though its file isn't in the folder.
+    await page.evaluate(`(() => { window.__realAsk = w3.window.askDelete; window.__asked = []; w3.window.askDelete = async (m) => { window.__asked.push(m); return false; }; w3Workbench.editors.tabs.find((t) => t.path === "map/war3map.w3e.txt").dirty = true; })()`);
+    await click("map/terrain", true);
+    await settled(page);
+    await page.evaluate(`document.querySelector(".sidebar .tree").dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", code: "Delete", bubbles: true }))`);
+    await until("the delete question", () => page.evaluate(`window.__asked.length > 0`), 10000).catch(() => {});
+    const asked = await page.evaluate(`window.__asked[0] ?? null`);
+    if (!/Unsaved changes in map\/war3map\.w3e\.txt/.test(asked ?? "")) fail(`deleting map/terrain with unsaved terrain edits asked ${lit(asked)}`);
+    if (!existsSync(join(k.root, "map", "terrain", "terrain.json"))) fail("a cancelled delete removed the terrain");
+    await page.evaluate(`w3Workbench.editors.tabs.find((t) => t.path === "map/war3map.w3e.txt").dirty = false; undefined`);
+    // build/ on request, its files where they are.
+    await page.evaluate(`w3.commands.execute("w3.explorer.toggleBuild")`);
+    await until("build/ listed", async () => (await rows()).includes("build"), 10000).catch(() => fail("build/ didn't appear"));
+    await click("build");
+    await until("build/derived", async () => (await rows()).includes("build/derived"), 10000).catch(() => fail("no build/derived"));
+    await click("build/derived");
+    await until("the pathing file", async () => (await rows()).includes("build/derived/war3map.wpm"), 10000).catch(async () => fail(`build/derived shows ${lit((await rows()).filter((p) => p.startsWith("build")))}`));
+    await page.evaluate(`w3.commands.execute("w3.explorer.toggleBuild")`);
+    await until("build/ hidden again", async () => !(await rows()).includes("build"), 10000).catch(() => fail("build/ stayed"));
+  } finally {
+    await page.evaluate(`(() => { if (window.__realAsk) w3.window.askDelete = window.__realAsk; if (window.__realPick) w3Workbench.quickInput.pick = window.__realPick; delete window.__realAsk; delete window.__realPick; w3.settings.set("explorer.showBuild", undefined); w3.editors.closeAll(); })()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -19305,6 +19364,7 @@ async function run() {
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
         editorUndoStacks,
+        explorerRealFiles,
         fastGameTransfer,
         flatProjectOpens,
         floatingDoodads,
@@ -19662,6 +19722,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectPickerSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
+  await explorerRealFiles(page, found).catch((e) => found.push(`explorer real files: ${e.message}`));
+  await leftOpen(page, "explorerRealFiles", found);
   await unitEditRederives(page, found).catch((e) => found.push(`unit edit rederives: ${e.message}`));
   await leftOpen(page, "unitEditRederives", found);
   await triggerCodeWarning(page, found).catch((e) => found.push(`trigger code warning: ${e.message}`));

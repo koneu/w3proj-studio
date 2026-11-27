@@ -421,7 +421,7 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
                 continue;
             }
             let s = Flat { map_dir: map_dir.clone(), name: v.name, sources: v.sources }.stamp();
-            files.push(FileInfo { path, size: s.size, modified: s.modified });
+            files.push(FileInfo { path, size: s.size, modified: s.modified, is_virtual: true });
         }
         // The derived files in the store under their map/ names, and the Pathing tool's file when a subterrain has
         // overrides (one of these names on disk is listed as itself already).
@@ -431,13 +431,13 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
         if let Ok(store) = w3proj::derived::read_store(project) {
             for name in store.keys() {
                 if let Ok(s) = crate::stamp_of(&w3proj::derived::store_dir(project).join(name)) {
-                    more.push(FileInfo { path: format!("{map}/{name}"), size: s.size, modified: s.modified });
+                    more.push(FileInfo { path: format!("{map}/{name}"), size: s.size, modified: s.modified, is_virtual: true });
                 }
             }
         }
         if pathing_paths(project).is_ok_and(|p| !p.is_empty()) {
             if let Some(s) = pathing_stamp(project) {
-                more.push(FileInfo { path: format!("{at}{}", w3proj::terrain_pathing::JSON_NAME), size: s.size, modified: s.modified });
+                more.push(FileInfo { path: format!("{at}{}", w3proj::terrain_pathing::JSON_NAME), size: s.size, modified: s.modified, is_virtual: true });
             }
         }
         for f in more {
@@ -478,7 +478,7 @@ pub fn list_scripts(root: &Path, files: &mut Vec<FileInfo>) {
                 continue;
             }
             if let Ok(s) = crate::stamp_of(&w3proj::derived::store_dir(project).join(name)) {
-                more.push(FileInfo { path, size: s.size, modified: s.modified });
+                more.push(FileInfo { path, size: s.size, modified: s.modified, is_virtual: true });
             }
         }
     }

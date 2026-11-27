@@ -7,11 +7,18 @@
   "contributes": {
     "viewContainers": [{ "id": "explorer", "title": "Explorer", "icon": "▤", "order": 0 }],
     "views": [{ "id": "w3.explorer.files", "title": "Project", "container": "explorer" }],
+    "configuration": {
+      "title": "Explorer",
+      "properties": {
+        "explorer.showBuild": { "type": "boolean", "default": false, "description": "Show build/ in the Explorer: packed maps, checkpoints and the generated files (pathing, shadows, the minimap, a generated map script). Git ignores it." }
+      }
+    },
     "commands": [
       { "id": "w3.explorer.refresh", "title": "Refresh Explorer", "category": "Explorer" },
       { "id": "w3.explorer.newFolder", "title": "New Folder…", "category": "Explorer" },
       { "id": "w3.explorer.newFile", "title": "New File…", "category": "Explorer" },
       { "id": "w3.explorer.collapseAll", "title": "Collapse All", "category": "Explorer" },
+      { "id": "w3.explorer.toggleBuild", "title": "Show or Hide build/", "category": "Explorer" },
       { "id": "w3.explorer.focus", "menu": "View:2:1", "title": "Show Explorer", "category": "View", "keybinding": "ctrl+shift+e" }
     ]
   }
