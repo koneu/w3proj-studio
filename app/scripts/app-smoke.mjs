@@ -17194,6 +17194,145 @@ async function soundNumbersRefused(page, found) {
   } catch (e) { found.push(`Sound Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** The AI tools (MCP) for cameras, sounds, imports, AI files, campaigns and reserved areas: each edit lands in its file,
+ *  the open editor of that file shows it without being asked, and undo_last_edit takes it back. A call with a progress
+ *  token hears how far a long tool is. */
+async function aiDocTools(page, found) {
+  try {
+  const fail = (what) => found.push(`AI document tools: ${what}`);
+  const k = await heightKit(page, "AiDocTools");
+  const camp = join(work, "campaign-ai-tools");
+  rmSync(camp, { recursive: true, force: true });
+  const json = (text) => JSON.parse(text);
+  const refused = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
+  try {
+    // Cameras: made, shown by the Cameras tab of the open terrain editor (taken in place), changed, refused, undone.
+    const cams = () => (existsSync(join(k.root, "map", "war3map.w3c.json")) ? k.read("war3map.w3c.json").cameras : []);
+    await k.tool("set_camera", { name: "Smoke Cam", target: [256, -256], distance: 2000 });
+    await settled(page);
+    if (cams().map((c) => `${c.name}:${c.targetX}:${c.distance}`).join() !== "Smoke Cam:256:2000") fail(`set_camera wrote ${lit(cams())}`);
+    await k.tab("Cameras");
+    await until("the new camera in the Cameras tab", () => page.evaluate(`[...document.querySelectorAll('select[title="Go to a camera"] option')].some((e) => e.textContent.includes("Smoke Cam"))`), 10000)
+      .catch(() => fail("the open terrain editor's Cameras tab doesn't show the camera set_camera made"));
+    const far = await refused("set_camera", { name: "Smoke Cam", fieldOfView: 170 });
+    if (!far || !/Field of view must be from 5 to 120/.test(far)) fail(`a field of view of 170 wasn't refused: ${lit(far)}`);
+    if (json(await k.tool("list_cameras"))[0]?.fieldOfView !== 70) fail("the refused set_camera changed the camera");
+    await k.tool("undo_last_edit");
+    await settled(page);
+    if (cams().length) fail(`undo_last_edit left the camera: ${lit(cams())}`);
+    await k.tab("Terrain");
+
+    // Sounds: a game sound added while the Sound Editor is open, which then lists it; removed again.
+    const soundFile = await page.evaluate(`w3.game.list().then((l) => { const bs = String.fromCharCode(92);
+      for (const x of l) { const low = x.toLowerCase().split(bs).join("/"); if (!low.startsWith("war3.w3mod:sound/") || low.indexOf(":", 11) >= 0 || !["flac", "wav", "mp3", "ogg"].includes(low.split(".").pop())) continue; return x.slice(11).split("/").join(bs); }
+      return "none of " + l.length + ": " + l.slice(0, 3).join(" | "); })`);
+    if (soundFile?.startsWith("none of ")) fail(`no game sound found (control): ${soundFile}`);
+    if (soundFile && !soundFile.startsWith("none of ")) {
+      await page.evaluate(`w3.commands.execute("w3.sounds.open")`);
+      await until("the Sound Editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3s.json"`), 20000);
+      const made = json(await k.tool("set_sound", { name: "SmokeTool", file: soundFile, volume: 80 }));
+      await settled(page);
+      const sounds = () => k.read("war3map.w3s.json").sounds;
+      if (!made.created || sounds().map((x) => `${x.name}:${x.volume}`).join() !== "gg_snd_SmokeTool:80") fail(`set_sound wrote ${lit(sounds().map((x) => [x.name, x.volume]))}`);
+      await until("the sound in the Sound Editor", () => page.evaluate(`document.querySelector(".tab-content:not([hidden]), .editor-area")?.textContent.includes("SmokeTool") || document.body.textContent.includes("gg_snd_SmokeTool")`), 10000)
+        .catch(() => fail("the open Sound Editor doesn't show the sound set_sound added"));
+      const loud = await refused("set_sound", { name: "SmokeTool", volume: 300 });
+      if (!loud || !/Volume must be a whole number from 0 to 127/.test(loud)) fail(`a volume of 300 wasn't refused: ${lit(loud)}`);
+      await k.tool("remove_sound", { name: "gg_snd_SmokeTool" });
+      await settled(page);
+      if (sounds().length) fail("remove_sound left the sound");
+      await page.evaluate(`w3.editors.close("map/war3map.w3s.json")`);
+    }
+
+    // Imports: a file from disk lands in the import folder and the list; removed with its file.
+    const src = join(work, "ai-tools-import.txt");
+    writeFileSync(src, "imported by a tool\n");
+    const imported = json(await k.tool("import_file", { source: src }));
+    await settled(page);
+    const list = () => k.read("war3map.imp.json").files.map((f) => f.path);
+    if (imported.imported !== "war3mapImported\\ai-tools-import.txt" || !existsSync(join(k.root, "map", "war3mapImported", "ai-tools-import.txt")) || !list().includes(imported.imported)) {
+      fail(`import_file gave ${lit(imported)}; the list has ${lit(list())}`);
+    }
+    const twice = await refused("import_file", { source: src, path: "war3mapImported/ai-tools-import.txt" });
+    if (!twice || !/already has/.test(twice)) fail(`importing onto a taken path wasn't refused: ${lit(twice)}`);
+    if (!json(await k.tool("list_imports")).imports.some((e) => e.path === imported.imported && e.size > 0)) fail("list_imports doesn't show the import with its file");
+    await k.tool("remove_import", { path: imported.imported, deleteFile: true });
+    await settled(page);
+    if (list().length || existsSync(join(k.root, "map", "war3mapImported", "ai-tools-import.txt"))) fail("remove_import with deleteFile left the entry or the file");
+
+    // An AI file: made, shown by the AI Editor opened on it, changed under it, undone.
+    const made = json(await k.tool("set_ai", { file: "map/Smoke.wai", create: true, name: "Smoke Rush", initialDelay: 90 }));
+    if (!made.created || made.ai?.name !== "Smoke Rush" || !existsSync(join(k.root, "map", "Smoke.wai"))) fail(`set_ai with create gave ${lit(made)}`);
+    await page.evaluate(`w3.editors.open("map/Smoke.wai", "w3.aiEditor")`);
+    const nameBox = `[...document.querySelectorAll(".ai-editor input, .tab-content input")].some((i) => i.value === NAME)`;
+    await until("the AI Editor on the new file", () => page.evaluate(nameBox.replace("NAME", lit("Smoke Rush"))), 20000).catch(() => fail("the AI Editor doesn't show the AI set_ai made"));
+    await k.tool("set_ai", { file: "map/smoke.wai", name: "Smoke Turtle", options: { heroesFlee: false } });
+    await until("the AI Editor on the changed file", () => page.evaluate(nameBox.replace("NAME", lit("Smoke Turtle"))), 20000).catch(() => fail("the open AI Editor doesn't follow set_ai's change"));
+    const got = json(await k.tool("get_ai", { file: "map/Smoke.wai" }));
+    if (got.name !== "Smoke Turtle" || got.options.heroesFlee !== false || got.initialDelay !== 90) fail(`get_ai reads ${lit([got.name, got.options?.heroesFlee, got.initialDelay])}`);
+    await k.tool("undo_last_edit");
+    if (json(await k.tool("get_ai", { file: "map/Smoke.wai" })).name !== "Smoke Rush") fail("undo_last_edit didn't put the AI file's name back");
+    await page.evaluate(`w3.editors.close("map/Smoke.wai")`);
+
+    // Reserved areas: doodads keep off, units are placed and named in the answer; reserving is undone as an edit.
+    const reservedFile = join(k.root, ".w3proj", "reserved-areas.json");
+    await k.tool("reserve_area", { name: "base", left: -512, bottom: -512, right: 512, top: 512 });
+    if (!existsSync(reservedFile) || json(readFileSync(reservedFile, "utf8"))[0]?.name !== "base") fail("reserve_area didn't write the area");
+    const trees = json(await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 1536, y: 1536 }] }));
+    if (trees.placed !== 1 || !/reserved area "base"/.test(trees.skipped?.[0]?.reason ?? "")) fail(`a tree on a reserved area: ${lit(trees)}`);
+    const unit = json(await k.tool("place_objects", { objects: [{ id: "hfoo", x: 128, y: 128 }] }));
+    if (unit.placed !== 1 || unit.onReserved?.[0]?.area !== "base") fail(`a unit on a reserved area: ${lit(unit)}`);
+    await k.tool("undo_last_edit");
+    await k.tool("undo_last_edit");
+    await k.tool("undo_last_edit");
+    await settled(page);
+    if (existsSync(reservedFile)) fail(`three undos left the reserved areas: ${readFileSync(reservedFile, "utf8")}`);
+    if (k.doodads().length || k.units().some((u) => u.id === "hfoo")) fail("the undos left placed objects");
+
+    // Progress: a call with a token hears the tool's counts before its answer; one without hears nothing.
+    const objects = Array.from({ length: 60 }, (_, i) => ({ id: "LTlt", x: -2048 + (i % 10) * 384, y: 1024 + Math.floor(i / 10) * 384 }));
+    const call = (meta) => page.evaluate(`(async () => { const notes = [];
+      const reply = JSON.parse(await w3.mcp.handle(${lit(JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "place_objects", arguments: { objects, dryRun: true }, ...(meta ? { _meta: meta } : {}) } }))}, (l) => notes.push(JSON.parse(l))));
+      return { notes, error: reply.result?.isError ? reply.result.content[0].text : null }; })()`);
+    const heard = await call({ progressToken: "smoke" });
+    if (heard.error) fail(`place_objects (dry run) with a progress token: ${heard.error}`);
+    const last = heard.notes.at(-1)?.params;
+    if (!heard.notes.length || heard.notes[0].method !== "notifications/progress" || last?.progressToken !== "smoke" || last?.total !== 60) fail(`progress of a 60-object call: ${lit(heard.notes.slice(0, 3))}`);
+    if (heard.notes.some((n, i) => i && !(n.params.progress > heard.notes[i - 1].params.progress))) fail("the progress values don't grow");
+    if ((await call(null)).notes.length) fail("a call without a progress token sent progress");
+
+    // A campaign: its texts changed where they are kept, the open Campaign Editor follows, undo takes it back.
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${lit(camp)}, name: "Tool Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${lit(camp)}`), 20000);
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "TRIGSTR_001", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${lit(JSON.stringify(campInfo))} }));
+      await w3.workspace.writeText("map/war3campaign.wts", ${lit("STRING 1\r\n{\r\nTool Campaign\r\n}\r\n")});
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "general")`);
+    const shows = (text) => page.evaluate(`[...document.querySelectorAll(".camp-editor input, .camp-editor textarea")].some((i) => i.value === ${lit(text)})`);
+    await until("the Campaign Editor", () => shows("Tool Campaign"), 20000);
+    const info = json(await k.tool("set_campaign_info", { name: "Tools of War", author: "Smoke", race: "orc" }));
+    if (!info.changed || info.campaign?.name !== "Tools of War" || info.campaign?.race !== "orc") fail(`set_campaign_info gave ${lit(info)}`);
+    await settled(page);
+    const w3f = json(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8")), wts = readFileSync(join(camp, "map", "war3campaign.wts"), "utf8");
+    if (w3f.name !== "TRIGSTR_001" || w3f.author !== "Smoke" || w3f.race !== 1 || !wts.includes("Tools of War")) fail(`the campaign files hold ${lit([w3f.name, w3f.author, w3f.race])} and ${lit(wts)}`);
+    await until("the Campaign Editor on the new texts", async () => (await shows("Tools of War")) && (await shows("Smoke")), 20000).catch(() => fail("the open Campaign Editor doesn't follow set_campaign_info"));
+    await k.tool("undo_last_edit");
+    await settled(page);
+    if (!readFileSync(join(camp, "map", "war3campaign.wts"), "utf8").includes("Tool Campaign")) fail("undo_last_edit didn't put the campaign's name back");
+    if (json(await k.tool("campaign_info")).name !== "Tool Campaign") fail("campaign_info doesn't read the name through the string table");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`AI document tools: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Campaign Editor refuses numbers a .w3f can't hold (app/src/builtin/campaign-editor/numbers.ts): Fog style typed as 1.5 or
  *  3000000000 and a density of 1e39 are refused with why, the box shows the value kept, the campaign isn't changed; 2 is taken
  *  (control, one change). */
@@ -19580,6 +19719,7 @@ async function run() {
         addPathReady,
         aiAllBut,
         aiClientSetup,
+        aiDocTools,
         aiNumbersRefused,
         aiTestRun,
         areaLevels,
@@ -20117,6 +20257,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "soundNumbersRefused", found);
   await campaignNumbersRefused(page, found);
   await leftOpen(page, "campaignNumbersRefused", found);
+  await aiDocTools(page, found);
+  await leftOpen(page, "aiDocTools", found);
   await dropChancesRefused(page, found);
   await leftOpen(page, "dropChancesRefused", found);
   await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));

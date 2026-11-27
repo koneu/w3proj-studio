@@ -730,6 +730,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const RESERVED = ".w3proj/reserved-areas.json";
   type Reserved = KeepClear & { name: string };
   const readReserved = async () => JSON.parse(await w3.workspace.readText(RESERVED).catch(() => "[]")) as Reserved[];
+  /** One change of the reserved areas, as an edit of the AI edit list: undo_last_edit takes it back. Whether it changed. */
+  const editReserved = async (title: string, change: (all: Reserved[]) => Reserved[]) => {
+    requireProject(w3);
+    const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    return edits.edit(title, async (read) => {
+      const text = await read(RESERVED);
+      return [{ path: RESERVED, text: JSON.stringify(change(text === null ? [] : JSON.parse(text) as Reserved[]), null, 2) }];
+    });
+  };
   /** The seed a tool was given, or a new one: the answer says it, so any result can be repeated. */
   const seedOf = (seed: unknown) => (typeof seed === "number" ? seed : Math.floor(Math.random() * 1e9));
 
@@ -933,18 +942,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { name } = args;
       if (typeof name !== "string" || !name.trim()) throw new Error("reserve_area needs a name.");
       const [place] = await readKeepClear([args]);
-      const rest = (await readReserved()).filter((r) => r.name !== name.trim());
-      await w3.workspace.writeText(RESERVED, JSON.stringify([...rest, { ...place, name: name.trim() }], null, 2));
-      return `"${name.trim()}" stays free from now on.`;
+      const changed = await editReserved(`Reserve "${name.trim()}"`, (all) => [...all.filter((r) => r.name !== name.trim()), { ...place, name: name.trim() }]);
+      return changed ? `"${name.trim()}" stays free from now on.` : `"${name.trim()}" was reserved like this already.`;
     }),
     w3.mcp.registerTool("release_area", async ({ name }) => {
-      const all = await readReserved(), rest = all.filter((r) => r.name !== name);
-      if (rest.length === all.length) throw new Error(`No area is reserved as "${String(name)}".`);
-      await w3.workspace.writeText(RESERVED, JSON.stringify(rest, null, 2));
+      await editReserved(`Release "${String(name)}"`, (all) => {
+        const rest = all.filter((r) => r.name !== name);
+        if (rest.length === all.length) throw new Error(`No area is reserved as "${String(name)}".`);
+        return rest;
+      });
       return `Released "${String(name)}".`;
     }),
     w3.mcp.registerTool("list_reserved_areas", readReserved),
-    w3.mcp.registerTool("fill_rows", async (args) => {
+    w3.mcp.registerTool("fill_rows", async (args, call) => {
       const { id, spacingX, spacingY, jitter, facing } = args;
       if (typeof spacingX !== "number" || typeof spacingY !== "number" || spacingX <= 0 || spacingY <= 0) throw new Error("spacingX and spacingY must be above 0.");
       const area = await readArea(w3, args);
@@ -952,7 +962,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const seed = seedOf(args.seed), keep = await readReserved();
       const spots = rowSpots(area, spacingX, spacingY, givenNumber("jitter", jitter, { min: 0, max: Infinity, fallback: 0 }), seededRandom(seed)).filter((s) => !isKeptClear(s.x, s.y, keep));
       const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(facing !== undefined ? { facing } : {}) }));
-      return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror })) as object };
+      return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror }, call)) as object };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
       const { handle } = await liveEditor("read");
@@ -1093,7 +1103,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
       };
     }),
-    w3.mcp.registerTool("place_line", async ({ kind, id, from, to, spacing, facingOffset, ignoreRoom, dryRun, mirror }) => {
+    w3.mcp.registerTool("place_line", async ({ kind, id, from, to, spacing, facingOffset, ignoreRoom, ignoreReserved, dryRun, mirror }, call) => {
       if (typeof id !== "string" || id.length !== 4) throw new Error("id must be four characters, like LTlt.");
       const [start, end] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const { handle } = await liveEditor();
@@ -1107,10 +1117,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // Turned by the model's own long side.
       const turn = typeof facingOffset === "number" ? facingOffset : shape && !shape.alongX ? 90 : 0;
       const objects = lineSpots(start, end, step, turn).map((s) => ({ id, x: s.x, y: s.y, facing: s.facing }));
-      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun, ownPieces: step, mirror });
+      const report = await placeObjects({ kind, objects, ignoreRoom, ignoreReserved, dryRun, ownPieces: step, mirror }, call);
       return { spacing: step, facingOffset: turn, ...(report as object) };
     }),
-    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces, mirror }) => {
+    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, ignoreReserved, nearest, dryRun, seed, ownPieces, mirror }, call) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
       const wanted = objects as ({ id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number; properties?: unknown } & UnitChoices)[];
       const { root } = requireProject(w3);
@@ -1163,14 +1173,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
+      // Reserved areas (reserve_area): doodads and destructables keep off them, as scatter_objects and fill_rows do;
+      // units, buildings and items are what a base, a mine or a shop is reserved for, so they are placed, and the
+      // answer names the areas they stand on.
+      const reserved = ignoreReserved === true ? [] : await readReserved();
+      const reservedAt = (px: number, py: number) => reserved.find((r) => isKeptClear(px, py, [r]));
+      const keptOff = (px: number, py: number) => (key === "doodads" ? reservedAt(px, py) : undefined);
+      const builtOn = new Map<string, number>();
+      const noteReserved = (px: number, py: number) => {
+        const on = key === "units" ? reservedAt(px, py) : undefined;
+        if (on) builtOn.set(on.name, (builtOn.get(on.name) ?? 0) + 1);
+      };
+      const onReserved = () => (builtOn.size ? { onReserved: [...builtOn].map(([area, count]) => ({ area, objects: count })) } : {});
       /** Works out what fits; `place` then puts it there. A dry run marks what it finds on a copy of the
        *  editor's map of what's taken, so it refuses the same overlaps among its own objects a real run does. */
       const plan = async (place: ((o: typeof wanted[number], i: number, x: number, y: number, facing: number) => Promise<void>) | null) => {
         skipped.length = shifted.length = 0;
+        builtOn.clear();
         const shared = ignoreRoom === true ? null : await handle.objects.occupancy();
         const room = place ? shared : shared?.scratch() ?? null;
         let placed = 0;
         for (const [i, o] of wanted.entries()) {
+          call.progress(place ? "Placing objects" : "Looking for room", i, wanted.length);
           await handle.objects.ready(o.id as string);
           const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
           if (!type) { skipped.push({ index: i, id, x, y, reason: "no such object type here" }); continue; }
@@ -1186,13 +1210,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py)
             : handle.objects.placedSpot(kindOf, id, px, py, angle).then((at) => [at.x, at.y] as const);
           const fitsAt = (px: number, py: number, ang: number) => fitsSnapped(snap, (sx, sy) => room!.fits(kindOf, id, sx, sy, ang), px, py);
-          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle))) {
+          const area = keptOff(x, y);
+          if (area || (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle)))) {
             spot = null;
             if (nearest === true) {
-              for (const s of spotsAround(x, y)) if (await fitsAt(s[0], s[1], angle)) { spot = s; break; }
+              for (const s of spotsAround(x, y)) if (!keptOff(s[0], s[1]) && (!room || await fitsAt(s[0], s[1], angle))) { spot = s; break; }
             }
             if (!spot) {
-              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
+              skipped.push({ index: i, id, x, y, reason: area ? `it's on the reserved area "${area.name}" (ignoreReserved: true places it there anyway)`
+                : edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
               continue;
             }
             shifted.push({ index: i, id, from: [x, y], to: spot });
@@ -1200,11 +1226,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
+          const twinArea = twin && paired ? keptOff(twin[0], twin[1]) : undefined;
+          if (twin && twinArea) {
+            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} is on the reserved area "${twinArea.name}" (ignoreReserved: true places both anyway)` });
+            continue;
+          }
           if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await fitsAt(twin[0], twin[1], twinAngle))) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1], { kind: kindOf, id })}` });
             continue;
           }
           await place?.(o, i, spot[0], spot[1], facing);
+          noteReserved(spot[0], spot[1]);
+          if (paired) noteReserved(twin[0], twin[1]);
           // A line's pieces touch each other on purpose.
           if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(spot[0], spot[1]), angle);
           if (paired) {
@@ -1215,7 +1248,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         return placed;
       };
-      if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
+      if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped, ...onReserved() };
       let placed = 0;
       // The gold new units get, as the palette's (a map whose ability data can't be read: the game's).
       const startGold = key === "units" ? await loadStartGold(w3).catch(() => DEFAULT_START_GOLD) : DEFAULT_START_GOLD;
@@ -1233,7 +1266,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
       });
-      return { placed, shifted, skipped };
+      return { placed, shifted, skipped, ...onReserved() };
     }),
     w3.mcp.registerTool("scatter_objects", async (args) => {
       const ids = args.ids;

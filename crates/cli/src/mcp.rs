@@ -19,7 +19,29 @@ const WATCH: Duration = Duration::from_secs(2);
 const OFFLINE: &str = "W3Proj Studio isn't reachable. Start it, run the command \"MCP: Turn Server \
                        On or Off\" there (or set mcp.enabled in its settings), and try again.";
 
-type Send = dyn Fn(&str) -> io::Result<String> + std::marker::Send + Sync;
+/// Sends one request to the app and gives its answer; what the app says before it (a long tool's progress
+/// notifications, one line each) goes to the second argument as it comes.
+type Send = dyn Fn(&str, &mut dyn FnMut(&str)) -> io::Result<String> + std::marker::Send + Sync;
+
+/// How a line of the app that isn't the answer starts: a notification, which has no id (the app writes them in this
+/// order; an answer starts with its id).
+const NOTE: &str = r#"{"jsonrpc":"2.0","method":"notifications/"#;
+
+/// The answer among the lines the app sends for one request: lines before it that are notifications go to `note`.
+fn read_reply(mut lines: impl BufRead, note: &mut dyn FnMut(&str)) -> io::Result<String> {
+    loop {
+        let mut reply = String::new();
+        if lines.read_line(&mut reply)? == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        let reply = reply.trim_end();
+        if reply.starts_with(NOTE) {
+            note(reply);
+        } else {
+            return Ok(reply.to_owned());
+        }
+    }
+}
 
 fn failure(id: &Value, code: i32, message: &str) -> String {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }).to_string()
@@ -49,8 +71,9 @@ fn offline(method: &str) -> Value {
     }
 }
 
-/// The answer to one line from the client; None for notifications.
-fn respond(line: &str, send: &Send) -> Option<String> {
+/// The answer to one line from the client; None for notifications. `note` gets what the app says before the answer
+/// (progress), for the client.
+fn respond(line: &str, send: &Send, note: &mut dyn FnMut(&str)) -> Option<String> {
     let Ok(req) = serde_json::from_str::<Value>(line) else {
         return Some(failure(&Value::Null, -32700, "not JSON"));
     };
@@ -59,10 +82,19 @@ fn respond(line: &str, send: &Send) -> Option<String> {
     let result = match method {
         "initialize" => initialize(&req["params"]),
         "ping" => json!({}),
-        "tools/list" | "tools/call" => match send(line) {
-            Ok(reply) => return Some(reply),
-            Err(_) => offline(method),
-        },
+        "tools/list" | "tools/call" => {
+            // A client that gave a progress token hears how far a long call is: the app sends such lines only to a
+            // bridge that says it reads them (`w3progress`).
+            let marked = (method == "tools/call" && !req["params"]["_meta"]["progressToken"].is_null()).then(|| {
+                let mut req = req.clone();
+                req["w3progress"] = json!(true);
+                req.to_string()
+            });
+            match send(marked.as_deref().unwrap_or(line), note) {
+                Ok(reply) => return Some(reply),
+                Err(_) => offline(method),
+            }
+        }
         _ => return Some(failure(id, -32601, &format!("unknown method {method}"))),
     };
     Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string())
@@ -70,7 +102,7 @@ fn respond(line: &str, send: &Send) -> Option<String> {
 
 /// Stands for the app's tool list; changes when the list does, or when the app comes or goes.
 fn revision(send: &Send) -> String {
-    send(r#"{"jsonrpc":"2.0","id":"revision","method":"w3/revision"}"#)
+    send(r#"{"jsonrpc":"2.0","id":"revision","method":"w3/revision"}"#, &mut |_| {})
         .ok()
         .and_then(|reply| serde_json::from_str::<Value>(&reply).ok())
         .and_then(|reply| reply["result"]["revision"].as_str().map(str::to_owned))
@@ -78,7 +110,7 @@ fn revision(send: &Send) -> String {
 }
 
 #[cfg(windows)]
-fn studio(line: &str) -> io::Result<String> {
+fn studio(line: &str, note: &mut dyn FnMut(&str)) -> io::Result<String> {
     /// ERROR_PIPE_BUSY: the app is between two connections.
     const BUSY: i32 = 231;
     let name = w3proj::mcp_pipe_name();
@@ -93,33 +125,25 @@ fn studio(line: &str) -> io::Result<String> {
         }
     };
     (&pipe).write_all(format!("{line}\n").as_bytes())?;
-    let mut reply = String::new();
-    if io::BufReader::new(&pipe).read_line(&mut reply)? == 0 {
-        return Err(io::ErrorKind::UnexpectedEof.into());
-    }
-    Ok(reply.trim_end().to_owned())
+    read_reply(io::BufReader::new(&pipe), note)
 }
 
 /// The app's Unix socket (w3proj::mcp_pipe_name): one connection per request, as with the pipe. Only in a
 /// folder that is this user's alone: a socket in a folder others can write to may be someone else's, who would
 /// then see the requests and answer them.
 #[cfg(unix)]
-fn studio(line: &str) -> io::Result<String> {
+fn studio(line: &str, note: &mut dyn FnMut(&str)) -> io::Result<String> {
     let path = w3proj::mcp_pipe_name();
     if let Some(dir) = std::path::Path::new(&path).parent() {
         w3proj::private_dir(dir).map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e))?;
     }
     let stream = std::os::unix::net::UnixStream::connect(path)?;
     (&stream).write_all(format!("{line}\n").as_bytes())?;
-    let mut reply = String::new();
-    if io::BufReader::new(&stream).read_line(&mut reply)? == 0 {
-        return Err(io::ErrorKind::UnexpectedEof.into());
-    }
-    Ok(reply.trim_end().to_owned())
+    read_reply(io::BufReader::new(&stream), note)
 }
 
 #[cfg(not(any(windows, unix)))]
-fn studio(_: &str) -> io::Result<String> {
+fn studio(_: &str, _: &mut dyn FnMut(&str)) -> io::Result<String> {
     Err(io::ErrorKind::Unsupported.into())
 }
 
@@ -159,7 +183,7 @@ pub fn run() -> anyhow::Result<()> {
         let (send, out) = (send.clone(), out.clone());
         answering.retain(|h| !h.is_finished());
         answering.push(std::thread::spawn(move || {
-            if let Some(reply) = respond(&line, &*send) {
+            if let Some(reply) = respond(&line, &*send, &mut |note| print(&out, note)) {
                 print(&out, &reply);
             }
         }));
@@ -174,11 +198,11 @@ pub fn run() -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    fn up(line: &str) -> io::Result<String> {
+    fn up(line: &str, _: &mut dyn FnMut(&str)) -> io::Result<String> {
         let id = serde_json::from_str::<Value>(line).unwrap()["id"].clone();
         Ok(json!({ "jsonrpc": "2.0", "id": id, "result": { "from": "app" } }).to_string())
     }
-    fn down(_: &str) -> io::Result<String> {
+    fn down(_: &str, _: &mut dyn FnMut(&str)) -> io::Result<String> {
         Err(io::ErrorKind::NotFound.into())
     }
     fn parsed(reply: Option<String>) -> Value {
@@ -188,37 +212,77 @@ mod tests {
     #[test]
     fn initialize_needs_no_app_and_agrees_on_a_version() {
         let old = r#"{"id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"#;
-        assert_eq!(parsed(respond(old, &down))["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(parsed(respond(old, &down, &mut |_| {}))["result"]["protocolVersion"], "2024-11-05");
         let future = r#"{"id":1,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}"#;
-        assert_eq!(parsed(respond(future, &down))["result"]["protocolVersion"], PROTOCOLS[0]);
+        assert_eq!(parsed(respond(future, &down, &mut |_| {}))["result"]["protocolVersion"], PROTOCOLS[0]);
     }
 
     #[test]
     fn tools_go_to_the_app() {
-        let got = parsed(respond(r#"{"id":7,"method":"tools/list"}"#, &up));
+        let got = parsed(respond(r#"{"id":7,"method":"tools/list"}"#, &up, &mut |_| {}));
         assert_eq!((got["id"].clone(), got["result"]["from"].clone()), (json!(7), json!("app")));
     }
 
     #[test]
     fn without_the_app_the_client_is_told_what_to_do() {
-        let list = parsed(respond(r#"{"id":1,"method":"tools/list"}"#, &down));
+        let list = parsed(respond(r#"{"id":1,"method":"tools/list"}"#, &down, &mut |_| {}));
         assert_eq!(list["result"]["tools"][0]["name"], "studio_status");
-        let call = parsed(respond(r#"{"id":2,"method":"tools/call","params":{"name":"terrain_screenshot"}}"#, &down));
+        let call = parsed(respond(r#"{"id":2,"method":"tools/call","params":{"name":"terrain_screenshot"}}"#, &down, &mut |_| {}));
         assert_eq!(call["result"]["isError"], true);
         assert!(call["result"]["content"][0]["text"].as_str().unwrap().contains("Start it"));
     }
 
     #[test]
     fn notifications_get_no_answer_and_rubbish_an_error() {
-        assert!(respond(r#"{"method":"notifications/initialized"}"#, &up).is_none());
-        assert_eq!(parsed(respond("{nope", &up))["error"]["code"], -32700);
-        assert_eq!(parsed(respond(r#"{"id":3,"method":"resources/list"}"#, &up))["error"]["code"], -32601);
+        assert!(respond(r#"{"method":"notifications/initialized"}"#, &up, &mut |_| {}).is_none());
+        assert_eq!(parsed(respond("{nope", &up, &mut |_| {}))["error"]["code"], -32700);
+        assert_eq!(parsed(respond(r#"{"id":3,"method":"resources/list"}"#, &up, &mut |_| {}))["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn a_long_calls_progress_reaches_the_client_before_its_answer() {
+        // The app's lines for one request: two notifications, then the answer.
+        let lines = concat!(
+            r#"{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":"t","progress":3,"message":"Working (3 s)"}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":"t","progress":6,"message":"Working (6 s)"}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":4,"result":{"content":[]}}"#,
+            "\n",
+        );
+        let mut notes = Vec::new();
+        let reply = read_reply(lines.as_bytes(), &mut |n| notes.push(n.to_owned())).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&reply).unwrap()["id"], 4);
+        assert_eq!(notes.len(), 2);
+        assert!(notes[1].contains(r#""progress":6"#));
+        // An app that hangs up without an answer is an error, whatever it said before.
+        assert!(read_reply(lines.lines().next().unwrap().as_bytes(), &mut |_| {}).is_err());
+    }
+
+    #[test]
+    fn only_a_call_with_a_progress_token_asks_the_app_for_progress() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let got = seen.clone();
+        let app = move |line: &str, note: &mut dyn FnMut(&str)| -> io::Result<String> {
+            got.lock().unwrap().push(serde_json::from_str::<Value>(line).unwrap());
+            note("a note");
+            Ok(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.into())
+        };
+        let mut notes = 0;
+        respond(r#"{"id":1,"method":"tools/call","params":{"name":"x","_meta":{"progressToken":7}}}"#, &app, &mut |_| notes += 1);
+        respond(r#"{"id":2,"method":"tools/call","params":{"name":"x"}}"#, &app, &mut |_| {});
+        respond(r#"{"id":3,"method":"tools/list","params":{"_meta":{"progressToken":7}}}"#, &app, &mut |_| {});
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0]["w3progress"], true);
+        assert_eq!(seen[0]["params"]["_meta"]["progressToken"], 7, "the request is otherwise as the client sent it");
+        assert!(seen[1].get("w3progress").is_none() && seen[2].get("w3progress").is_none());
+        assert_eq!(notes, 1, "what the app says on the way is passed on");
     }
 
     #[test]
     fn the_revision_tells_the_app_coming_and_going() {
         assert_eq!(revision(&down), "offline");
-        let answer = |_: &str| -> io::Result<String> { Ok(r#"{"result":{"revision":"a1"}}"#.into()) };
+        let answer = |_: &str, _: &mut dyn FnMut(&str)| -> io::Result<String> { Ok(r#"{"result":{"revision":"a1"}}"#.into()) };
         assert_eq!(revision(&answer), "a1");
     }
 }

@@ -22,6 +22,8 @@ import { readWts, StringTable, writeWts, WtsCutError, wtsCuts } from "../../lib/
 import { h } from "../../workbench/dom";
 import { parseIni } from "../../lib/formats/text";
 import { imagePresetOf, parseImagePresets, parsePresets, presetOptions, type ImagePreset, type Preset } from "./presets";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
+import { describeCampaign, setCampaignInfo, type ToolCampaign } from "./tools";
 import { FOG_UNSET_DENSITY, FOG_UNSET_Z, askNewCampaign, createCampaign } from "./newcampaign";
 
 const FILE = "map/war3campaign.w3f.json", WTS = "map/war3campaign.wts";
@@ -185,6 +187,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.campaign.overview")),
     w3.workspace.onDidSave((p) => { if (/war3campaign\.(w3f\.json|wts)$/i.test(p)) w3.views.refresh("w3.campaign.overview"); }),
+    w3.mcp.registerTool("campaign_info", async () => {
+      await projectWithFiles(w3);
+      if (!isCampaign(w3)) throw new Error("The open project isn't a campaign (it has no map/war3campaign.w3f.json).");
+      const info = JSON.parse(await w3.workspace.readText(FILE)) as ToolCampaign;
+      const wtsText = await readWts(w3.workspace, WTS).catch(() => null);
+      return describeCampaign(info, wtsText !== null ? new StringTable(wtsText) : null);
+    }),
+    w3.mcp.registerTool("set_campaign_info", async (args) => {
+      const { root } = await projectWithFiles(w3);
+      if (!isCampaign(w3)) throw new Error("The open project isn't a campaign (it has no map/war3campaign.w3f.json).");
+      const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+      let shown: ReturnType<typeof describeCampaign> | null = null;
+      const changed = await edits.edit("Change the campaign's info", async (read) => {
+        const text = await read(FILE);
+        if (text === null) throw new Error("This project has no map/war3campaign.w3f.json.");
+        const info = JSON.parse(text) as ToolCampaign;
+        const wtsText = await read(WTS);
+        const table = wtsText !== null ? new StringTable(wtsText) : null;
+        setCampaignInfo(info, table, args);
+        shown = describeCampaign(info, table);
+        const files = [{ path: FILE, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: FILE, text: JSON.stringify(info) }) }];
+        // A text the game would cut (a "}" in it) refuses the edit here (StringTable.serialize), nothing written.
+        if (table?.dirty) files.push({ path: WTS, text: table.serialize() });
+        return files;
+      });
+      return { changed, campaign: shown };
+    }),
     w3.editors.registerProvider("w3.campaignEditor", {
       async resolve(el, doc) {
         const info: CampaignInfo = JSON.parse(await doc.readText());
@@ -206,6 +235,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => view.undo(),
           redo: () => view.redo(),
           save,
+          // The campaign's texts are in its string table: changed by something else (an AI tool, the text editor), the
+          // editor opens again on them, so its next save doesn't write the old texts back.
+          watches: [WTS],
           focus: () => el.focus(),
           dispose: () => { stop.dispose(); openViews.delete(view); view.disposed = true; },
         };

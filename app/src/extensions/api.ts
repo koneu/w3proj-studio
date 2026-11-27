@@ -90,7 +90,15 @@ export type McpContent = { type: "text"; text: string } | { type: "image"; data:
 
 /** Throw to report a failure. Returns text, MCP content (`{ type: "image", data: base64, mimeType }`)
  *  or anything else, which goes out as JSON. */
-export type McpToolHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
+export type McpToolHandler = (args: Record<string, unknown>, call: McpCall) => unknown | Promise<unknown>;
+
+/** The call a tool is answering. */
+export interface McpCall {
+  /** Says how far a long tool is, for a client that asked to hear (it shows it while it waits): what it is doing, and
+   *  with `done` and `total` how much of it. Costs nothing when nobody listens; a tool that says nothing is reported
+   *  as working, with the time it has taken, once it runs for a few seconds. */
+  progress(message: string, done?: number, total?: number): void;
+}
 
 /** A service other extensions can use through `w3.services.get(id)`. */
 export interface ServiceContribution {
@@ -496,8 +504,9 @@ export interface W3Api {
     registerTool(name: string, handler: McpToolHandler): Disposable;
     /** The tools on offer now. */
     list(): { name: string; description: string }[];
-    /** One JSON-RPC request; used by the MCP Server extension. */
-    handle(message: string): Promise<string>;
+    /** One JSON-RPC request; used by the MCP Server extension. `notify` takes the notifications a long tool call sends
+     *  before its answer (notifications/progress), each a JSON-RPC line, for a client that asked for them. */
+    handle(message: string, notify?: (line: string) => void): Promise<string>;
   };
   /** Shared functionality between extensions. A provider declares the id in
    *  `contributes.services` and registers it in activate(); users list the
