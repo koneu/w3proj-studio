@@ -22,13 +22,15 @@ const known = (s: { size: number; modified: number; unknown?: boolean }): Stamp 
 /** The files one write can change together, by the tag of their group (the `map/` folder's project folder in front):
  *  a trigger save writes any of its layout's files (backend triggers.rs); a split terrain's flat files and its Pathing
  *  file are written into the subterrain files and change the other flat files (backend flatview.rs `write_flat`,
- *  `write_pathing`); a split project's derived files and generated script are its store's files (`write_derived`).
- *  Matched in any case and in a flat project too: one group more only orders writes that needn't be. The outermost
+ *  `write_pathing`); a split project's derived files and generated script are its store's files (`write_derived`); the
+ *  flat object files of a project with object folders are written into `map/objects/`, where a kind's two halves share
+ *  their files (backend objectview.rs). Matched in any case and in a flat project too: one group more only orders writes that needn't be. The outermost
  *  `map/` counts (`??`: no folder in front is tried first), so a trigger folder named `map` stays in its layout's group. */
 const WRITE_GROUPS: [RegExp, string][] = [
   [/^(?:(.*?)\/)??map\/triggers\//, "triggers"],
   [/^(?:(.*?)\/)??(?:map\/terrain\/|map\/(?:war3map\.w3e\.txt|war3map\.doo\.json|war3mapunits\.doo\.json|war3map\.w3r\.json)$|\.w3proj\/pathing\.json$)/, "terrain"],
   [/^(?:(.*?)\/)??(?:\.w3proj\/derived\/|map\/(?:war3map\.wpm|war3map\.shd|war3mapmap\.blp|war3map\.mmp|war3map\.mmp\.json|war3map\.j|war3map\.lua)$)/, "derived"],
+  [/^(?:(.*?)\/)??map\/(?:objects\/(?:objects\.json$|(?:units|items|destructables|doodads|abilities|buffs|upgrades)\/)|war3(?:map|campaign)(?:skin)?\.w3[utbdahq]\.json$)/, "objects"],
 ];
 /** The group of files (`WRITE_GROUPS`) a project file's key (`WorkspaceService.key`) belongs to, or null: writes of a
  *  group's files are queued together (`trackedWrite`, `writeTriggers`), so two writes that may touch one file reach the

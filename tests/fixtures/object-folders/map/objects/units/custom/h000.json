@@ -1,0 +1,17 @@
+{
+  "id": "h000",
+  "base": "hfoo",
+  "data": {
+    "end": "h000",
+    "mods": [
+      {"field": "umpm", "type": "int", "value": 500},
+      {"field": "umvs", "type": "int", "value": 320, "end": "hfoo"}
+    ]
+  },
+  "skin": {
+    "mods": [
+      {"field": "unam", "type": "string", "value": "Footman Captain"},
+      {"field": "umdl", "type": "string", "value": "units\\human\\Footman\\Footman.mdl"}
+    ]
+  }
+}

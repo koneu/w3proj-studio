@@ -1,0 +1,9 @@
+{
+  "base": "LOhp",
+  "data": {
+    "end": "LOhp",
+    "mods": [
+      {"field": "dmis", "type": "real", "level": 0, "data": 0, "value": 0.75}
+    ]
+  }
+}

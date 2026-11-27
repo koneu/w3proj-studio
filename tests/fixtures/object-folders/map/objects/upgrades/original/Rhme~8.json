@@ -1,0 +1,9 @@
+{
+  "base": "Rhme",
+  "data": {
+    "end": "Rhme",
+    "mods": [
+      {"field": "gglb", "type": "int", "level": 0, "data": 0, "value": 150}
+    ]
+  }
+}

@@ -34,7 +34,7 @@ pub fn kind(name: &str) -> Option<bool> {
 pub struct Id(pub [u8; 4]);
 
 impl Id {
-    fn is_zero(&self) -> bool {
+    pub fn is_zero(&self) -> bool {
         self.0 == [0; 4]
     }
 }
@@ -90,7 +90,7 @@ pub enum ValueType {
     String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Mod {
     pub field: Id,
     #[serde(rename = "type")]
@@ -115,13 +115,13 @@ fn ser_value<S: Serializer>(v: &Value, s: S) -> std::result::Result<S::Ok, S::Er
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Set {
     pub flag: u32,
     pub mods: Vec<Mod>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Object {
     pub base: Id,
     #[serde(default, skip_serializing_if = "Id::is_zero")]
@@ -137,7 +137,7 @@ pub struct Object {
     pub mods: Option<Vec<Mod>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ObjectFile {
     pub format: String,
     pub version: u32,

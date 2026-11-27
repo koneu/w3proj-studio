@@ -54,8 +54,13 @@ const MAP_LAYOUT: &str = "## Layout
 - `map/`: the map's files; this is all that goes into the packed map.
   - `war3map.w3i.json`: map info (name, players, forces, flags). Other `*.json` / `*.txt` files are the readable form of
     the map's binary files (`war3map.doo.json` doodads, `war3mapUnits.doo.json` units and items, `war3map.w3r.json`
-    regions, `war3map.w3c.json` cameras, `war3map.w3s.json` sounds, `war3map.imp.json` import list), and
-    `*.w3u.json`, `*.w3t.json`, `*.w3a.json`, ... are object data (units, items, abilities, ...).
+    regions, `war3map.w3c.json` cameras, `war3map.w3s.json` sounds, `war3map.imp.json` import list).
+  - `objects/`: the object data (units, items, destructables, doodads, abilities, buffs, upgrades), one file per object:
+    `objects/<kind>/custom/<id>.json` the objects made in the map, `objects/<kind>/original/<id>.json` the changed
+    standard ones. `data` is the object's entry in `war3map.w3u` (and the other kinds' files), `skin` its entry in
+    `war3mapSkin.w3u`; both are packed. An upper-case letter in the id is marked in the file name (`H000~8.json`: `~` and
+    a hex digit, 8 the first letter, 4 the second, 2 the third, 1 the fourth); the id inside the file is what counts.
+    `objects/objects.json` lists the packed files and their versions, `order.txt` the order where it isn't by id.
   - `war3map.wts`: the map's string table. Other files refer to its entries as `TRIGSTR_<number>`.
 ";
 
@@ -80,7 +85,8 @@ const CAMPAIGN_LAYOUT: &str = "## Layout
 
 - `w3proj.toml`: the project's settings (pack output, raw files, checks).
 - `map/`: the campaign's own files: `war3campaign.w3f.json` (campaign info, the chapters' order and names),
-  `war3campaign.imp.json` (imports) and the campaign's object data (`war3campaign.w3u.json`, ...).
+  `war3campaign.imp.json` (imports) and the campaign's object data (`objects/`, one file per object, as in a map
+  project; it packs into `war3campaign.w3u`, ...).
 - `maps/<chapter>/`: each chapter map, a project of its own (`maps/<chapter>/map/` has the map's files as in a map
   project: `war3map.w3i.json`, `war3map.wts`, `triggers/`, terrain, ...). Edit a chapter by editing its folder.
 - `.w3proj/`: tool state, local, ignored by Git. `build/`: pack output, ignored by Git.

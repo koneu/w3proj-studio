@@ -14,6 +14,7 @@ use w3proj::{project, Registry};
 pub mod fastgame;
 pub mod flatview;
 pub mod mergehook;
+pub mod objectview;
 pub mod script;
 pub mod triggers;
 
@@ -178,6 +179,8 @@ pub fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileIn
     flatview::list_flat(root, &mut out);
     // A generated map script (flatview::script_of): under its map/ name, from the store.
     flatview::list_scripts(root, &mut out);
+    // The flat object files of a project that keeps its objects in map/objects/ (objectview).
+    objectview::list(root, &mut out);
     Ok((out, unreadable))
 }
 

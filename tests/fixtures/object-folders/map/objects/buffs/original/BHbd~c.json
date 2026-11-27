@@ -1,0 +1,9 @@
+{
+  "base": "BHbd",
+  "data": {
+    "end": "BHbd",
+    "mods": [
+      {"field": "fta0", "type": "string", "value": "chest"}
+    ]
+  }
+}

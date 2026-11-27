@@ -1,0 +1,9 @@
+{
+  "base": "LTlt",
+  "data": {
+    "end": "LTlt",
+    "mods": [
+      {"field": "bhps", "type": "unreal", "value": 75.0}
+    ]
+  }
+}

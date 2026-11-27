@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Object folders root (map/objects/objects.json)",
+  "description": "Which packed object data files there are, with their versions (docs/object-folders-spec.md, section 1), read and written by crates/w3proj/src/object_layout.rs. A kind or half that is missing means pack writes no such file; one that is listed is written even without objects. Unknown keys are ignored.",
+  "type": "object",
+  "required": ["format"],
+  "properties": {
+    "format": { "description": "w3proj.objectfolders/1; a later 1.x reads the same, a newer major version is refused", "type": "string", "pattern": "^w3proj\\.objectfolders/1(\\..*)?$" },
+    "files": {
+      "description": "per kind (folder name): the version of war3map.<ext> (data) and war3mapSkin.<ext> (skin); a campaign's are war3campaign.<ext> and war3campaignSkin.<ext>",
+      "type": "object",
+      "propertyNames": { "enum": ["units", "items", "destructables", "doodads", "abilities", "buffs", "upgrades"] },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/$defs/version" },
+          "skin": { "$ref": "#/$defs/version" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "version": { "description": "1 and 2 older editors, 3 with sets (Reforged)", "enum": [1, 2, 3] }
+  }
+}

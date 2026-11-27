@@ -394,7 +394,8 @@ fn is_script_input(name: &str) -> bool {
 }
 
 /// The map script's sources as they are now: `SCRIPT_INPUTS` under `map/` and every file under `map/triggers/` and
-/// `map/terrain/` (name under `map/` → fingerprint). One that is there but can't be read is an error.
+/// `map/terrain/`, and the object data's under `map/objects/` (name under `map/` → fingerprint). One that is there but
+/// can't be read is an error.
 pub fn script_sources(project: &Path) -> Result<Sources> {
     let map = project.join(MAP_DIR);
     let mut out = Sources::new();
@@ -412,7 +413,7 @@ pub fn script_sources(project: &Path) -> Result<Sources> {
         let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{MAP_DIR}/{name} can't be read: {e}")))?;
         out.insert(name, fingerprint(&bytes));
     }
-    for folder in [crate::trigger_layout::FOLDER, crate::terrain_layout::FOLDER] {
+    for folder in [crate::trigger_layout::FOLDER, crate::terrain_layout::FOLDER, crate::object_layout::FOLDER] {
         for path in folder.paths(&map)? {
             let bytes = crate::folder_codec::read(&map, &path)?;
             out.insert(path, fingerprint(&bytes));

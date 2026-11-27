@@ -232,6 +232,8 @@ pub enum View {
     Pathing(PathBuf),
     /// A generated map script, kept in the store (`script_of`).
     Script(PathBuf),
+    /// A flat object file of a project that keeps its objects in `map/objects/` (`crate::objectview`).
+    Objects(crate::objectview::ObjectFlat),
 }
 
 /// `View` of a path. A layout that can't be told is an error, never "a file of its own".
@@ -245,6 +247,9 @@ pub fn view_of(path: &Path) -> CmdResult<Option<View>> {
     if let Some(real) = script_of(path)? {
         return Ok(Some(View::Script(real)));
     }
+    if let Some(o) = crate::objectview::object_of(path)? {
+        return Ok(Some(View::Objects(o)));
+    }
     Ok(pathing_of(path)?.map(View::Pathing))
 }
 
@@ -255,6 +260,7 @@ pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
         Some(View::Flat(f)) => layout::read_flat(&f.map_dir, f.name).map_err(err),
         Some(View::Derived(real) | View::Script(real)) => std::fs::read(&real).map_err(|e| stored_err(path, &real, &e)),
         Some(View::Pathing(project)) => read_pathing(&project),
+        Some(View::Objects(o)) => o.read(),
         None => std::fs::read(path).map_err(err),
     }
 }
@@ -265,6 +271,7 @@ pub fn write_view(path: &Path, bytes: &[u8]) -> CmdResult<Option<Stamp>> {
         Some(View::Flat(f)) => Some(write_flat(&f, bytes)?),
         Some(View::Derived(real) | View::Script(real)) => Some(write_derived(path, &real, bytes)?),
         Some(View::Pathing(project)) => Some(write_pathing(&project, bytes)?),
+        Some(View::Objects(o)) => Some(o.write(bytes)?),
         None => None,
     })
 }
@@ -276,6 +283,7 @@ pub fn stat_view(path: &Path) -> CmdResult<Option<Option<Stamp>>> {
         Some(View::Flat(f)) => Some(Some(f.stamp())),
         Some(View::Derived(real) | View::Script(real)) => Some(crate::stamp_of(&real).ok()),
         Some(View::Pathing(project)) => Some(pathing_stamp(&project)),
+        Some(View::Objects(o)) => Some(o.stamp()?),
         None => None,
     })
 }
@@ -287,6 +295,7 @@ pub fn hash_view(path: &Path) -> CmdResult<Option<Option<String>>> {
         Some(View::Flat(f)) => Some(f.hash().ok()),
         Some(View::Derived(real) | View::Script(real)) => Some(std::fs::read(real).ok().map(|b| crate::content_hash(&b))),
         Some(View::Pathing(project)) => Some(read_pathing(&project).ok().map(|b| crate::content_hash(&b))),
+        Some(View::Objects(o)) => Some(o.hash()),
         None => None,
     })
 }
@@ -297,6 +306,7 @@ pub fn exists_view(path: &Path) -> CmdResult<Option<bool>> {
         Some(View::Flat(_)) => Some(true),
         Some(View::Derived(real) | View::Script(real)) => Some(exists_checked(&real)?),
         Some(View::Pathing(project)) => Some(pathing_exists(&project)?),
+        Some(View::Objects(o)) => Some(o.listed()?),
         None => None,
     })
 }
@@ -315,6 +325,8 @@ pub fn delete_view(path: &Path) -> CmdResult<bool> {
             }
             Ok(true)
         }
+        // The flat object file's half goes from the object files (`crate::objectview`).
+        Some(View::Objects(o)) => o.delete().map(|_| true),
         None => Ok(false),
     }
 }
@@ -706,6 +718,11 @@ pub fn refuse_moving(path: &Path) -> CmdResult<()> {
             "{} can't be moved: the project's terrain is split, and its pathing overrides are kept in map/terrain/<subterrain>/{}",
             w3proj::terrain_pathing::JSON_NAME,
             w3proj::terrain_pathing::FILE
+        )),
+        Some(View::Objects(_)) => Err(format!(
+            "{} can't be moved: it isn't a file of its own, the project keeps its object data in map/{}/ (one file per object)",
+            path.display(),
+            w3proj::object_layout::DIR
         )),
         None => Ok(()),
     }

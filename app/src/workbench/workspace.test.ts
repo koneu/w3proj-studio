@@ -530,7 +530,13 @@ test("write groups: a map folder's trigger layout, split terrain and derived fil
   assert.equal(g("maps/c1/map/war3map.j"), g("maps/c1/.w3proj/derived/war3map.j"));
   assert.notEqual(g("maps/c1/map/terrain/a/terrain.txt"), g("map/terrain/a/terrain.txt"), "another chapter's own group");
   assert.notEqual(g("map/triggers/a.j"), g("map/terrain/a/terrain.txt"));
-  for (const k of ["war3map.j", "map/war3map.w3i", "map/war3map.w3e", "map/terrainx/a", "map/war3map.w3e.txt.bak"]) assert.equal(g(k), null, k);
+  // The flat object files and the object folders they are written into (a kind's halves share their files).
+  assert.equal(g("map/war3map.w3u.json"), g("map/war3mapSkin.w3u.json"));
+  assert.equal(g("map/war3map.w3a.json"), g("map/objects/units/custom/H000~8.json"));
+  assert.equal(g("map/objects/objects.json"), g("map/war3mapSkin.w3q.json"));
+  assert.equal(g("maps/c1/map/war3campaign.w3t.json"), g("maps/c1/map/objects/items/original/ratc.json"));
+  assert.notEqual(g("map/objects/objects.json"), g("map/terrain/a/terrain.txt"));
+  for (const k of ["war3map.j", "map/war3map.w3i", "map/war3map.w3e", "map/terrainx/a", "map/war3map.w3e.txt.bak", "map/Objects/InventoryItems/x.blp", "map/war3map.w3u"]) assert.equal(g(k), null, k);
 });
 
 const TRIGGER_FILE = "map/triggers/Melee/init.j";

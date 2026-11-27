@@ -1,0 +1,9 @@
+{
+  "base": "hfoo",
+  "data": {
+    "end": "hfoo",
+    "mods": [
+      {"field": "ua1p", "type": "string", "value": "ground,enemies"}
+    ]
+  }
+}

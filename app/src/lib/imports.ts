@@ -77,9 +77,14 @@ export function unlistedFiles(projectFiles: readonly string[], entries: readonly
   const split = all.some((p) => p.toLowerCase() === "map/terrain/terrain.json");
   // The trigger folders (map/triggers/triggers.json) the same: war3map.wtg and war3map.wct, never files of their own.
   const triggers = all.some((p) => p.toLowerCase() === "map/triggers/triggers.json");
+  // The object folders (map/objects/objects.json) too: the packed object files. Only objects.json and the seven kinds'
+  // folders are theirs; other files under Objects\ are imports into the game's own folder (crates/w3proj
+  // object_layout.rs layout_path).
+  const objects = all.some((p) => p.toLowerCase() === "map/objects/objects.json");
+  const objectFile = (p: string) => /^map\/objects\//i.test(p) && /^(objects\.json$|(units|items|destructables|doodads|abilities|buffs|upgrades)\/.)/.test(p.slice("map/objects/".length));
   const inMap = all.filter((p) => {
     const l = p.toLowerCase();
-    return l.startsWith("map/") && !(split && l.startsWith("map/terrain/")) && !(triggers && l.startsWith("map/triggers/"));
+    return l.startsWith("map/") && !(split && l.startsWith("map/terrain/")) && !(triggers && l.startsWith("map/triggers/")) && !(objects && objectFile(p));
   });
   const byLower = new Map<string, string>();
   for (const p of inMap) if (!byLower.has(p.toLowerCase())) byLower.set(p.toLowerCase(), p);

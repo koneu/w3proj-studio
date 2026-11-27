@@ -36,6 +36,8 @@ const SCHEMAS: Kind[] = [
   { name: "minimap", files: ["war3map.mmp.json"] },
   { name: "lights", files: ["war3map.w3l.json"] },
   { name: "objects", path: /\/map\/[^/]+\.(w3u|w3t|w3b|w3h|w3d|w3a|w3q)\.json$/i, code: true },
+  { name: "object-folders", path: /\/map\/objects\/objects\.json$/i, code: true },
+  { name: "object-file", path: /\/map\/objects\/(units|items|destructables|doodads|abilities|buffs|upgrades)\/(original|custom)\/[^/]+\.json$/i, code: true },
   { name: "terrain", path: /\/map\/terrain\/terrain\.json$/, code: true },
   { name: "terrain-doodads", path: /\/map\/terrain\/[^/]+\/doodads\.json$/, code: true },
   { name: "terrain-units", path: /\/map\/terrain\/[^/]+\/units\.json$/, code: true },
@@ -262,6 +264,17 @@ function expectations(read: ReadSource = readSource): Expect[] {
   serde("objects", ["$defs", "object"], obj, "Object");
   serde("objects", ["$defs", "object", "properties", "sets", "items"], obj, "Set");
   serde("objects", ["$defs", "mod"], obj, "Mod");
+  // The object folders (object_layout.rs): objects.json's keys as parse_root reads them, an object file's as
+  // parse_object takes them off (its halves are serde's Half); unknown keys ignored.
+  const ol = src("object_layout.rs");
+  const halves = strings(ol, /pub const HALVES: \[&str; 2\] = \[([^\]]*)\]/);
+  const rootPart = part(ol, "fn parse_root(", "\n}");
+  const missing = (code: string) => [...code.matchAll(/has no \\"(\w+)\\""\)\)\)/g)].map((m) => m[1]);
+  out.push({ schema: "object-folders", node: [], keys: [...rootPart.matchAll(/v\.get\("(\w+)"\)/g)].map((m) => m[1]), required: missing(rootPart), closed: false });
+  out.push({ schema: "object-folders", node: ["properties", "files", "additionalProperties"], keys: halves, required: [], closed: false });
+  const objectPart = part(ol, "fn parse_object(", "\n}");
+  out.push({ schema: "object-file", node: [], keys: [...[...objectPart.matchAll(/id_of\(&mut m, "(\w+)"\)/g)].map((m) => m[1]), ...halves], required: missing(objectPart), closed: false });
+  serde("object-file", ["$defs", "half"], ol, "Half");
   // terrain.json (terrain_layout.rs Layout::parse_unchecked, terrain_objects.rs Heads::parse): every key it lists is
   // needed, the optional ones are named where the object is read; unknown keys are errors.
   const tl = src("terrain_layout.rs"), to = src("terrain_objects.rs"), w3e = src("w3e.rs");
@@ -338,6 +351,7 @@ test("the code-defined schemas have the keys their codecs read, the ones they ne
   const tag = (name: string) => ((readSchema(name).properties as Record<string, Json>).format ?? {}) as Json;
   assert.equal(tag("objects").const, /pub const FORMAT: &str = "([^"]+)"/.exec(rust("objdata.rs"))![1]);
   assert.equal(tag("terrain").const, /pub const FORMAT: &str = "([^"]+)"/.exec(rust("terrain_layout.rs"))![1]);
+  assert.match(/pub const FORMAT: &str = "([^"]+)"/.exec(rust("object_layout.rs"))![1], new RegExp(String(tag("object-folders").pattern)));
   assert.equal(tag("pathing").const, /const FORMAT: &str = "([^"]+)"/.exec(rust("terrain_pathing.rs"))![1]);
   const triggers = /pub const FORMAT: &str = "([^"]+)"/.exec(rust("trigger_layout.rs"))![1];
   assert.match(triggers, new RegExp(String(tag("triggers").pattern)));
@@ -405,8 +419,8 @@ function checkFiles(dir: string, counts = new Map<string, number>(), only: (rel:
 test("the fixtures' files pass their schemas", () => {
   const counts = new Map<string, number>();
   // The campaign info is in mini-campaign: in a map it would make the map a campaign.
-  for (const f of ["mini-map", "mini-campaign", "trigger-folders"]) assert.deepEqual(checkFiles(fixturePath(f), counts), [], f);
-  for (const name of ["w3i", "doodads", "units", "regions", "cameras", "sounds", "lights", "imports", "minimap", "campaign", "objects", "triggers", "trigger-category", "trigger-gui", "trigger-comment", "trigger-variable", "trigger-frontmatter"]) {
+  for (const f of ["mini-map", "mini-campaign", "trigger-folders", "object-folders"]) assert.deepEqual(checkFiles(fixturePath(f), counts), [], f);
+  for (const name of ["w3i", "doodads", "units", "regions", "cameras", "sounds", "lights", "imports", "minimap", "campaign", "objects", "object-folders", "object-file", "triggers", "trigger-category", "trigger-gui", "trigger-comment", "trigger-variable", "trigger-frontmatter"]) {
     assert.ok((counts.get(name) ?? 0) > 0, `the fixtures have a ${name} file`);
   }
 });
@@ -416,6 +430,11 @@ test("files are matched to their schemas by name and place", () => {
   assert.equal(of("map/war3map.w3u.json"), "objects");
   assert.equal(of("map/war3mapSkin.w3a.json"), "objects");
   assert.equal(of("maps/Chapter1/map/war3map.W3T.json"), "objects");
+  assert.equal(of("map/objects/objects.json"), "object-folders");
+  assert.equal(of("map/objects/units/custom/H000~8.json"), "object-file");
+  assert.equal(of("maps/Chapter1/map/objects/abilities/original/AHbz~c.json"), "object-file");
+  assert.equal(of("map/objects/units/custom/order.txt"), undefined);
+  assert.equal(of("map/Objects/InventoryItems/x.json"), undefined, "the game's Objects folder holds imports");
   assert.equal(of("map/terrain/terrain.json"), "terrain");
   assert.equal(of("map/terrain/west/doodads.json"), "terrain-doodads");
   assert.equal(of("map/terrain/west/units.json"), "terrain-units");
@@ -702,10 +721,11 @@ test("every file unpack and a terrain split write for the corpus maps passes its
   }
   ctx.diagnostic(`${maps.length} maps; documents per schema: ${[...counts].sort().map(([k, n]) => `${k} ${n}`).join(", ")}`);
   assert.deepEqual(failures.slice(0, 30), [], `${failures.length} failures`);
-  // Every schema meets a file, but the pathing overrides (only the app's Pathing tool writes them) and, without the
-  // game, the trigger folders.
+  // Every schema meets a file, but the pathing overrides (only the app's Pathing tool writes them), the flat object
+  // files (unpack writes map/objects/; the flat form is the app's view of it and the fixtures') and, without the game,
+  // the trigger folders.
   for (const { name } of SCHEMAS) {
-    if (name === "pathing" || (!game && (name === "triggers" || name.startsWith("trigger-")))) continue;
+    if (name === "pathing" || name === "objects" || (!game && (name === "triggers" || name.startsWith("trigger-")))) continue;
     assert.ok((counts.get(name) ?? 0) > 0, `the corpus gave no ${name} file`);
   }
 });

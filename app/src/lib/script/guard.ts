@@ -29,9 +29,9 @@ export function writeScriptFile<T>(io: { writeBytes(path: string, bytes: Uint8Ar
   return io.writeBytes(path, encodeLossless(text));
 }
 
-/** Files the map script is made from (also as their .json documents, and every file of the trigger folders,
- *  map/triggers/): saving one regenerates it. */
-export const SCRIPT_INPUTS = /^map\/((war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a|w3b)|war3mapUnits\.doo|war3mapSkin\.(w3u|w3a|w3b))(\.json)?|triggers\/.+)$/i;
+/** Files the map script is made from (also as their .json documents, every file of the trigger folders,
+ *  map/triggers/, and the object folders' files of those kinds, map/objects/): saving one regenerates it. */
+export const SCRIPT_INPUTS = /^map\/((war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a|w3b)|war3mapUnits\.doo|war3mapSkin\.(w3u|w3a|w3b))(\.json)?|triggers\/.+|objects\/(objects\.json|(units|items|abilities|destructables)\/.+))$/i;
 
 /** A campaign's object files the map script of its chapter maps is made from too (in the campaign project's map/
  *  folder; also as their .json documents). */

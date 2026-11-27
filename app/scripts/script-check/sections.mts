@@ -2,6 +2,8 @@
 // Run from a folder with ws/<n>/map (unpacked maps) and the game tables (see README.md).
 // Args: <path to app/src/lib> [section to show diffs for] [number of diffs]
 import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { printSections } from "./report.mjs";
 const L = process.argv[2];
@@ -72,15 +74,30 @@ for (const m of maps) {
   for (const x of p) luaBroken.push(`${m} lua: ${x.message} (line ${src.slice(0, x.from).split("\n").length})`);
 }
 let shown = 0;
+/** A map's object data (`war3map.w3u.json`, … by name) as W3Proj Studio reads it, where the map keeps it in map/objects/
+ *  (one file per object): `w3proj objects` assembles it (W3PROJ_BIN, the CLI that unpacked the maps). */
+const objectsCache = new Map<string, Record<string, unknown>>();
+const objectsOf = (d: string): Record<string, unknown> => {
+  let got = objectsCache.get(d);
+  if (!got) {
+    got = existsSync(`${d}/objects/objects.json`) ? JSON.parse(execFileSync(process.env.W3PROJ_BIN!, ["objects", dirname(d)], { encoding: "utf8", maxBuffer: 1 << 28 })) : {};
+    objectsCache.clear();
+    objectsCache.set(d, got!);
+  }
+  return got!;
+};
 // A file the map doesn't have reads as null (a map without regions has no war3map.w3r). One that is there in a form
 // these checks don't read is an error, never "the map has none": the scripts would be made without it and compared.
 const json = (d: string, n: string) => {
+  const fromObjects = objectsOf(d)[`${n}.json`];
+  if (fromObjects !== undefined && fromObjects !== null) return fromObjects;
   if (existsSync(`${d}/${n}.json`)) return JSON.parse(read(`${d}/${n}.json`));
   if (existsSync(`${d}/${n}`)) throw new Error(`${d}/${n} is there but not as ${n}.json (the unpack kept it raw): the check can't read it`);
   return null;
 };
-/** The folder layouts an unpack writes in place of single files; run.mjs has to turn them back first. */
-const FOLDER_LAYOUTS = [["terrain/terrain.json", "the terrain and the placed units, doodads and regions"], ["objects/objects.json", "the object data"]];
+/** The folder layouts an unpack writes that these checks read as single files; run.mjs has to turn them back first
+ *  (the object data in map/objects/ is read through `w3proj objects` above). */
+const FOLDER_LAYOUTS = [["terrain/terrain.json", "the terrain and the placed units, doodads and regions"]];
 const unreadLayouts = (d: string) => {
   for (const [file, what] of FOLDER_LAYOUTS) {
     if (existsSync(`${d}/${file}`)) throw new Error(`${d}/${file}: ${what} are in a folder layout these checks don't read (run.mjs merges an unpack back into single files first)`);
