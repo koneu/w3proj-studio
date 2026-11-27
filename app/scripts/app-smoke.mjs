@@ -4726,6 +4726,74 @@ async function importPathTab(page, found) {
   }
 }
 
+/** The Import Manager sorts by a column (click again reverses) and filters by mode and type, with the count out of all,
+ *  without touching the saved list; PNG and JPEG imports open in the Texture Viewer with their size. */
+async function importSortImages(page, found) {
+  try {
+  const fail = (what) => found.push(`import sort and images: ${what}`);
+  const k = await heightKit(page, "ImportSortImages");
+  const files = { png: "map/war3mapImported/Pic.png", jpg: "map/war3mapImported/Photo.jpg", big: "map/war3mapImported/Big.txt", small: "map/war3mapImported/Small.txt", hd: "map/_HD.w3mod/war3mapImported/Small.txt" };
+  const entries = ["war3mapImported\\Pic.png", "war3mapImported\\Photo.jpg", "war3mapImported\\Big.txt", "war3mapImported\\Small.txt", "_HD.w3mod\\war3mapImported\\Small.txt"].map((path) => ({ flags: 21, path }));
+  const listText = JSON.stringify({ format: "w3proj.imports/1", version: 1, files: entries });
+  await page.evaluate(`(async () => {
+    const make = async (type) => {
+      const c = document.createElement("canvas"); c.width = 4; c.height = 3;
+      const g = c.getContext("2d"); g.fillStyle = "#c33"; g.fillRect(0, 0, 4, 3);
+      return new Uint8Array(await (await new Promise((r) => c.toBlob(r, type))).arrayBuffer());
+    };
+    await w3.workspace.writeBytes(${lit(files.png)}, await make("image/png"));
+    await w3.workspace.writeBytes(${lit(files.jpg)}, await make("image/jpeg"));
+    await w3.workspace.writeText(${lit(files.big)}, "x".repeat(100000));
+    await w3.workspace.writeText(${lit(files.small)}, "y".repeat(10));
+    await w3.workspace.writeText(${lit(files.hd)}, "z".repeat(20));
+    await w3.workspace.writeText("map/war3map.imp.json", ${lit(listText)});
+    await w3.workspace.refresh();
+  })()`);
+  // PNG and JPEG open in the Texture Viewer with their format and size.
+  for (const [f, fmt] of [[files.png, "PNG"], [files.jpg, "JPEG"]]) {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.editors.open(${lit(f)})`);
+    const bar = () => page.evaluate(`document.querySelector(".tex-toolbar")?.textContent ?? ""`);
+    if (!(await soon(async () => (await bar()).includes(fmt), 20000))) { fail(`${f} doesn't open in the Texture Viewer (toolbar "${await bar()}")`); continue; }
+    if (!/4×3 · 1 mip · /.test(await bar())) fail(`${f}: the toolbar shows "${await bar()}", not its size`);
+    if (!(await page.evaluate(`document.querySelector(".tex-canvas")?.width === 4`))) fail(`${f}: the canvas isn't the image`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+  await settled(page);
+  const rows = () => page.evaluate(`[...document.querySelectorAll(".imp-row .imp-path")].map((t) => t.firstChild.textContent.trim())`);
+  if (!(await soon(async () => (await rows()).length === 4, 20000))) return fail(`the list shows ${lit(await rows())}, not 4 rows`);
+  const listOnDisk = () => k.read("war3map.imp.json");
+  const before = JSON.stringify(await listOnDisk());
+  const click = (n) => page.evaluate(`document.querySelectorAll(".imp-sort")[${n}].click()`);
+  const names = async () => (await rows()).map((r) => r.split("\\").pop());
+  await click(2);
+  let got = (await names()).join();
+  if ((await names())[3] !== "Big.txt") fail(`sorted by size: ${got}`);
+  await click(2);
+  if ((await names())[0] !== "Big.txt") fail(`size sorted again doesn't reverse: ${(await names()).join()}`);
+  await click(0);
+  if ((await names()).join() !== ["Big.txt", "Photo.jpg", "Pic.png", "Small.txt"].join()) fail(`sorted by path: ${(await names()).join()}`);
+  await click(1);
+  if (!/\.txt$/.test((await names())[3]) || !/\.(png|jpg)$/.test((await names())[0])) fail(`sorted by type: ${(await names()).join()}`);
+  const choose = (cls, v) => page.evaluate(`(() => { const s = document.querySelector(${lit(cls)}); s.value = ${lit(v)}; s.dispatchEvent(new Event("change")); })()`);
+  await choose(".imp-filter-mode", "reforged");
+  if ((await names()).join() !== "Small.txt") fail(`the HD filter shows ${(await names()).join()}`);
+  const count = () => page.evaluate(`document.querySelector(".imp-count")?.textContent ?? ""`);
+  if (!/^2 of 5 imported · .* of /.test(await count())) fail(`the count line is "${await count()}"`);
+  await choose(".imp-filter-mode", "");
+  await choose(".imp-filter-type", "Image");
+  if ((await rows()).length !== 2 || !/^2 of 5 /.test(await count())) fail(`the Image filter shows ${(await rows()).length} rows, count "${await count()}"`);
+  await choose(".imp-filter-type", "");
+  if (/ of /.test(await count())) fail(`without a filter the count line is "${await count()}"`);
+  if (JSON.stringify(await listOnDisk()) !== before) fail("sorting and filtering changed the saved list");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await k.save();
+  if (JSON.stringify(await listOnDisk()) !== before) fail("the list on disk changed after a save");
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Import Manager's list writes, one at a time: two "Add to list" clicks whose writes would overlap (the list's
  *  canonicalize held back, the later one let through first) end with the file holding both entries in click order, and
  *  the tab stays dirty after the first write lands while the second entry isn't written yet. */
@@ -19253,6 +19321,7 @@ async function run() {
         importListCleanup,
         importListWriteFail,
         importPathTab,
+        importSortImages,
         importWarnings,
         importWriteOrder,
         itemDrops,
@@ -19681,6 +19750,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
   await leftOpen(page, "importPathTab", found);
+  await importSortImages(page, found).catch((e) => found.push(`import sort and images: ${e.message}`));
+  await leftOpen(page, "importSortImages", found);
   await importWriteOrder(page, found).catch((e) => found.push(`import write order: ${e.message}`));
   await leftOpen(page, "importWriteOrder", found);
   await importListCleanup(page, found).catch((e) => found.push(`import list cleanup: ${e.message}`));

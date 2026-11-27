@@ -1,6 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { errorView, formatBytes, h } from "../../workbench/dom";
 import { decodeImage, type Mip } from "../../lib/image/index.ts";
+import { decodeWebImage, webImageKind } from "../../lib/image/web.ts";
 import { errorText } from "../../lib/oserror";
 
 type Channel = "rgba" | "rgb" | "r" | "g" | "b" | "a";
@@ -30,7 +31,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const bytes = await doc.readBytes();
         let img;
         try {
-          img = decodeImage(bytes, doc.path);
+          img = webImageKind(bytes) ? await decodeWebImage(bytes) : decodeImage(bytes, doc.path);
         } catch (e) {
           el.append(errorView(`Can't decode ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
