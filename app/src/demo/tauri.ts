@@ -128,6 +128,9 @@ const handlers: Record<string, Handler> = {
   // Check Trigger Tree reads the folders' own format: the demo's one made-up file has nothing it would find.
   triggers_check: () => [],
   triggers_fix: () => ({ write: [], delete: [] }),
+  // Opening a project converts a flat terrain (crates/backend flatview.rs convert_on_open): the demo's sample stays as
+  // it is (its files are made up, read by their flat names either way), and nothing is said.
+  terrain_convert_on_open: () => ({ converted: [], kept: [], message: null }),
   "plugin:event|listen": () => 1,
   "plugin:event|unlisten": () => undefined,
   "plugin:dialog|open": () => null,
