@@ -48,9 +48,10 @@ test("replacing a file it can't use is asked, saying a backup is kept; a usable 
 });
 
 test("a backup never takes the name of an earlier one, and a name it can't check stops it", async () => {
-  const taken = new Set([`${FILE}.bak`, `${FILE}.bak2`]);
-  assert.equal(await backupPath(FILE, async (p) => taken.has(p)), `${FILE}.bak3`);
-  assert.equal(await backupPath(FILE, no), `${FILE}.bak`);
+  const BAK = "build/pathing.json.bak";
+  const taken = new Set([BAK, `${BAK}2`]);
+  assert.equal(await backupPath(FILE, async (p) => taken.has(p)), `${BAK}3`);
+  assert.equal(await backupPath(FILE, no), BAK);
   await assert.rejects(backupPath(FILE, async () => { throw "Permission denied"; }), (e) => e === "Permission denied");
   await assert.rejects(backupPath(FILE, yes), /99 backups/);
 });

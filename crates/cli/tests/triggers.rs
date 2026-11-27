@@ -254,8 +254,8 @@ fn a_sync_keeps_the_names_the_files_have() {
     assert!(fresh.join("map/triggers/Initialization/Setup_Players.j").is_file());
 }
 
-/// A script Studio wrote (`.w3proj/generated-script` holds its hash) becomes "generated" on a sync: out of git, in
-/// `.w3proj/derived/`, with a record of its sources. Pack takes it while the record says it follows; after an edit of a
+/// A script Studio wrote (`build/generated-script` holds its hash) becomes "generated" on a sync: out of git, in
+/// `build/derived/`, with a record of its sources. Pack takes it while the record says it follows; after an edit of a
 /// trigger it refuses (`--allow-stale-script` packs it as it is), and a missing one is refused whatever the flags.
 #[test]
 fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
@@ -269,8 +269,8 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     unpack(&map, &project);
     assert!(fs::read_to_string(project.join("map/triggers/triggers.json")).unwrap().contains("\"script\": \"generated\""));
     assert!(!project.join("map/war3map.j").exists(), "a generated script isn't tracked");
-    assert_eq!(fs::read(project.join(".w3proj/derived/war3map.j")).unwrap(), script);
-    assert!(fs::read_to_string(project.join(".gitignore")).unwrap().contains("/.w3proj/derived-from.json"));
+    assert_eq!(fs::read(project.join("build/derived/war3map.j")).unwrap(), script);
+    assert!(fs::read_to_string(project.join(".gitignore")).unwrap().lines().any(|l| l == "build/"));
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Fresh);
     let out = dir.join("out.w3x");
     let o = pack(&project, &out, &[]);
@@ -278,7 +278,7 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     assert_eq!(fs::read(&map).unwrap(), fs::read(&out).unwrap(), "the script comes from the store");
     // A sync from the same map keeps it generated.
     unpack(&map, &project);
-    assert!(!project.join("map/war3map.j").exists() && project.join(".w3proj/derived/war3map.j").is_file());
+    assert!(!project.join("map/war3map.j").exists() && project.join("build/derived/war3map.j").is_file());
     // A trigger edited: stale.
     let setup = project.join("map/triggers/Initialization/Setup_Players.j");
     fs::write(&setup, [fs::read(&setup).unwrap(), b"// more\r\n".to_vec()].concat()).unwrap();
@@ -288,11 +288,11 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     assert!(o.status.success() && text(&o).contains("warning: --allow-stale-script"), "{}", text(&o));
     assert_eq!(cat(&out, "war3map.j"), script);
     // Missing: never packed.
-    fs::remove_file(project.join(".w3proj/derived/war3map.j")).unwrap();
+    fs::remove_file(project.join("build/derived/war3map.j")).unwrap();
     let o = pack(&project, &out, &["--allow-stale-script"]);
-    assert!(!o.status.success() && text(&o).contains("the map script is missing in .w3proj/derived/"), "{}", text(&o));
+    assert!(!o.status.success() && text(&o).contains("the map script is missing in build/derived/"), "{}", text(&o));
     // One in map/ as well as in the store: an error, not a guess.
-    fs::write(project.join(".w3proj/derived/war3map.j"), &script).unwrap();
+    fs::write(project.join("build/derived/war3map.j"), &script).unwrap();
     fs::write(project.join("map/war3map.j"), &script).unwrap();
     let o = pack(&project, &out, &["--allow-stale-script"]);
     assert!(!o.status.success() && text(&o).contains("are both there"), "{}", text(&o));
@@ -304,7 +304,7 @@ fn a_generated_script_is_packed_only_while_it_follows_its_sources() {
     assert!(pack(&src, &edited, &[]).status.success());
     unpack(&edited, &project);
     assert!(fs::read_to_string(project.join("map/triggers/triggers.json")).unwrap().contains("\"script\": \"kept\""));
-    assert!(project.join("map/war3map.j").is_file() && !project.join(".w3proj/derived/war3map.j").exists());
+    assert!(project.join("map/war3map.j").is_file() && !project.join("build/derived/war3map.j").exists());
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown);
 }
 
@@ -327,7 +327,7 @@ fn a_generated_script_in_a_code_page_is_studios_on_a_sync() {
     fs::write(project.join(w3proj::derived::SCRIPT_STAMP), format!("{}\n", w3proj::derived::script_hash(&w3proj::lossless::decode(&script)))).unwrap();
     unpack(&map, &project);
     assert!(fs::read_to_string(project.join("map/triggers/triggers.json")).unwrap().contains("\"script\": \"generated\""));
-    assert_eq!(fs::read(project.join(".w3proj/derived/war3map.j")).unwrap(), script);
+    assert_eq!(fs::read(project.join("build/derived/war3map.j")).unwrap(), script);
 }
 
 /// Git in `repo`, with an identity and no signing (as the roundtrip tests run it); panics when it fails unless

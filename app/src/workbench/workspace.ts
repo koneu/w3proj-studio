@@ -29,7 +29,7 @@ const known = (s: { size: number; modified: number; unknown?: boolean }): Stamp 
 const WRITE_GROUPS: [RegExp, string][] = [
   [/^(?:(.*?)\/)??map\/triggers\//, "triggers"],
   [/^(?:(.*?)\/)??(?:map\/terrain\/|map\/(?:war3map\.w3e\.txt|war3map\.doo\.json|war3mapunits\.doo\.json|war3map\.w3r\.json)$|\.w3proj\/pathing\.json$)/, "terrain"],
-  [/^(?:(.*?)\/)??(?:\.w3proj\/derived\/|map\/(?:war3map\.wpm|war3map\.shd|war3mapmap\.blp|war3map\.mmp|war3map\.mmp\.json|war3map\.j|war3map\.lua)$)/, "derived"],
+  [/^(?:(.*?)\/)??(?:build\/derived\/|map\/(?:war3map\.wpm|war3map\.shd|war3mapmap\.blp|war3map\.mmp|war3map\.mmp\.json|war3map\.j|war3map\.lua)$)/, "derived"],
   [/^(?:(.*?)\/)??map\/(?:objects\/(?:objects\.json$|(?:units|items|destructables|doodads|abilities|buffs|upgrades)\/)|war3(?:map|campaign)(?:skin)?\.w3[utbdahq]\.json$)/, "objects"],
 ];
 /** The group of files (`WRITE_GROUPS`) a project file's key (`WorkspaceService.key`) belongs to, or null: writes of a
@@ -53,7 +53,7 @@ import { validateSetting } from "./settingsvalidate";
 /** The record of what the generated files were made from (w3proj::derived), a campaign's chapters' too. Studio's
  *  backend rewrites it a while after a save, past the workspace's own writes; git ignores it and nobody edits it. So its
  *  change is none from outside. */
-const DERIVED_RECORD = /(^|\/)\.w3proj\/derived-from\.json$/i;
+const DERIVED_RECORD = /(^|\/)build\/derived-from\.json$/i;
 
 /** What tells two recent projects apart: as `fileKey`, case counts only off a Windows root, so on Linux
  *  `/home/u/Map` and `/home/u/map` are two projects, both listed. A `\` is a separator only on Windows. */

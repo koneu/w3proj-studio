@@ -149,7 +149,7 @@ pub fn run(o: Options) -> Result<ExitCode> {
         .map_err(anyhow::Error::msg)
         .with_context(|| format!("opening {}", o.project.display()))?;
     // The checks (check_melee, check_path, the Problems view's) are of the whole map: every subterrain open, whatever
-    // .w3proj/open-subterrains.json says (W3PROJ_OPEN_SUBTERRAINS is overridden too).
+    // build/open-subterrains.json says (W3PROJ_OPEN_SUBTERRAINS is overridden too).
     w3proj::terrain_open::set_override(Some(w3proj::terrain_open::Choice::All));
     let job = job(&o, &info.root)?;
     let server = Server { root: PathBuf::from(&info.root), formats: o.formats.clone(), game: backend::GameCache::default(), read_only: true };

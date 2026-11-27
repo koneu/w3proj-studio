@@ -62,12 +62,16 @@ pub struct Options {
 pub fn run(o: Options) -> Result<ExitCode> {
     let info = backend::open_project(&o.project.to_string_lossy()).map_err(anyhow::Error::msg).with_context(|| format!("opening {}", o.project.display()))?;
     let root = PathBuf::from(&info.root);
-    // A rebuild is of the whole map: every subterrain open, whatever .w3proj/open-subterrains.json says (it makes the
+    // A rebuild is of the whole map: every subterrain open, whatever build/open-subterrains.json says (it makes the
     // derived files fresh after a partial open's save marked them stale).
     w3proj::terrain_open::set_override(Some(w3proj::terrain_open::Choice::All));
+    // A project from before the local files were in build/: moved there first.
+    for path in w3proj::derived::move_local(&root)? {
+        println!("moved      {path} (generated and local files are in build/ now)");
+    }
     // A project split before derived files and pathing overrides moved out of git: moved first, so they are written there.
     for path in w3proj::terrain_layout::migrate_split(&root)? {
-        println!("moved      {path} (a split terrain keeps derived files in .w3proj/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
+        println!("moved      {path} (a split terrain keeps derived files in build/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
     }
     let mut parts = due(&o, &root)?;
     // --replace-script: refused before anything is made; the script it replaces is kept aside before the generator runs.
@@ -196,9 +200,8 @@ pub fn script_is_studios(root: &Path) -> Result<bool, String> {
 // ---------------------------------------------------------------- --replace-script
 
 /// Where `w3proj rebuild --replace-script` keeps the scripts it replaced, relative to the project (the CLI has no
-/// checkpoints). Local, as the derived files are: `REPLACED_IGNORED` goes into the project's `.gitignore`.
-pub const REPLACED_DIR: &str = ".w3proj/replaced-scripts";
-const REPLACED_IGNORED: &str = "/.w3proj/replaced-scripts/";
+/// checkpoints). Local, as the derived files are: in `build/`.
+pub const REPLACED_DIR: &str = "build/replaced-scripts";
 
 /// A script kept aside before the generator replaces it.
 struct Backup {
@@ -270,8 +273,8 @@ fn back_up_scripts(root: &Path) -> Result<Vec<Backup>> {
         out.push(Backup { file, path, shown: format!("{REPLACED_DIR}/{name}"), bytes });
     }
     if !out.is_empty() {
-        if let Err(e) = derived::ensure_lines(root, &[REPLACED_IGNORED]) {
-            println!("note: {REPLACED_IGNORED} isn't in .gitignore ({e}): the backups below would be committed");
+        if let Err(e) = derived::ensure_ignored(root) {
+            println!("note: build/ isn't in .gitignore ({e}): the backups below would be committed");
         }
     }
     Ok(out)
@@ -348,7 +351,7 @@ pub enum PackScript {
 /// ("" or "maps/<chapter>/"). A script that isn't Studio's (edited by hand, the World Editor's, vJASS) stays. A map with
 /// no script at all gets one written into map/, as the app's packing does.
 pub fn script_for_pack(project: &Path, at: &str, game: &str, formats: &[PathBuf]) -> PackScript {
-    // A generated script (map/triggers/triggers.json "script": "generated", in .w3proj/derived/) is the generator's
+    // A generated script (map/triggers/triggers.json "script": "generated", in build/derived/) is the generator's
     // whatever its stamp says: made again when it doesn't follow its sources, or isn't there (a fresh clone). `w3proj
     // pack` checks the record afterwards (main.rs check_script).
     let mut missing = false;
@@ -445,10 +448,10 @@ fn due(o: &Options, root: &Path) -> Result<Due> {
     let mut fresh = Vec::new();
     let mut skipped = Vec::new();
     let freshness = derived::check(root)?;
-    // A split project's store (.w3proj/derived/, not in git) may lack some even when the record says they follow.
+    // A split project's store (build/derived/, not in git) may lack some even when the record says they follow.
     let missing = derived::missing(root)?;
     if !missing.is_empty() {
-        println!("note: {} missing in .w3proj/derived/; pathing, shadows and the minimap are made again", missing.join(", "));
+        println!("note: {} missing in build/derived/; pathing, shadows and the minimap are made again", missing.join(", "));
     }
     if freshness == Freshness::Fresh && missing.is_empty() && !o.force {
         fresh.extend(DERIVED_PARTS);
@@ -769,7 +772,7 @@ impl Server {
             "derived_sources" => to_json(w3proj::derived::sources_open(Path::new(root()?)).map_err(backend::err)?),
             "terrain_open_state" => to_json(backend::flatview::open_state(root()?)?),
             "terrain_set_open" => {
-                self.writable(&Path::new(root()?).join(".w3proj").to_string_lossy())?;
+                self.writable(&Path::new(root()?).join("build").to_string_lossy())?;
                 let names: Vec<String> = args.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
                 to_json(backend::flatview::set_open(root()?, &names)?)
             }
@@ -779,7 +782,7 @@ impl Server {
             "script_state" => to_json(backend::script::state(root()?)?),
             "script_sources" => to_json(backend::script::sources(root()?)?),
             "script_record" => {
-                self.writable(&Path::new(root()?).join(".w3proj").to_string_lossy())?;
+                self.writable(&Path::new(root()?).join("build").to_string_lossy())?;
                 let sources: std::collections::BTreeMap<String, String> = serde_json::from_value(args.get("sources").cloned().unwrap_or(Value::Null)).map_err(|e| format!("argument sources: {e}"))?;
                 to_json(backend::script::record(root()?, &sources)?)
             }
@@ -887,7 +890,7 @@ mod tests {
         let dir = scratch("stamp");
         std::fs::write(dir.join("map/war3map.j"), "function main takes nothing returns nothing\nendfunction\n").unwrap();
         assert_eq!(script_is_studios(&dir), Ok(false), "no record");
-        std::fs::create_dir_all(dir.join(".w3proj")).unwrap();
+        std::fs::create_dir_all(dir.join("build")).unwrap();
         let hash = script_hash(&std::fs::read_to_string(dir.join("map/war3map.j")).unwrap());
         std::fs::write(dir.join(SCRIPT_STAMP), format!("{hash}\n")).unwrap();
         assert_eq!(script_is_studios(&dir), Ok(true));

@@ -929,16 +929,25 @@ fn ignore_store(project: &Path, lines: &[&str]) -> Result<Option<String>> {
     Ok(crate::derived::ensure_lines(project, lines)?.then(|| ".gitignore".to_string()))
 }
 
+/// Moves `.w3proj/pathing.json` to `backup` (in `build/`, made when it isn't there).
+fn move_to_backup(project: &Path, backup: &Path) -> Result<()> {
+    if let Some(dir) = backup.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    Ok(fs::rename(crate::terrain_pathing::json_path(project), backup)?)
+}
+
 /// Splits a flat project's terrain and placed objects into `map/terrain/` (`split`): the layout's
 /// files are written first, then `map/war3map.w3e.txt` and the flat object files go. Nothing is
 /// written when the split can't be lossless. An object file packed raw stays where it is.
 ///
-/// The derived files (`crate::derived::FILES`) move from `map/` into the store `.w3proj/derived/`, which
-/// `.gitignore` then ignores with the record `.w3proj/derived-from.json` (still valid: the sources are
+/// The derived files (`crate::derived::FILES`) move from `map/` into the store `build/derived/`, which
+/// `.gitignore` then ignores with the record `build/derived-from.json` (still valid: the sources are
 /// the same terrain). The Pathing tool's `.w3proj/pathing.json` goes into the subterrains' `pathing.txt`
-/// (`crate::terrain_pathing`) and is kept as `.w3proj/pathing.json.bak`; one that can't go there
+/// (`crate::terrain_pathing`) and is kept as `build/pathing.json.bak`; one that can't go there
 /// refuses the split.
 pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
+    crate::derived::move_local(project)?;
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let SplitPlan { files, before, pathing_json, .. } = split_plan(project, rects)?;
     let map_dir = project.join(crate::project::MAP_DIR);
@@ -957,9 +966,9 @@ pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
         done.written.push(format!("{store}/{name}"));
     }
     if let Some(backup) = backup {
-        fs::rename(crate::terrain_pathing::json_path(project), &backup)?;
+        move_to_backup(project, &backup)?;
         done.removed.push(crate::terrain_pathing::JSON_NAME.to_string());
-        done.written.push(format!(".w3proj/{}", backup.file_name().unwrap_or_default().to_string_lossy()));
+        done.written.push(format!("build/{}", backup.file_name().unwrap_or_default().to_string_lossy()));
     }
     done.written.extend(ignore_store(project, &crate::derived::IGNORED)?);
     if fresh {
@@ -1011,6 +1020,7 @@ fn split_plan(project: &Path, rects: &[Rect]) -> Result<SplitPlan> {
 /// become `.w3proj/pathing.json` again (none: no file), the store's derived files go back into `map/`
 /// (`.gitignore` keeps ignoring the store, which a flat project doesn't have).
 pub fn merge_project(project: &Path) -> Result<Converted> {
+    crate::derived::move_local(project)?;
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let map_dir = project.join(crate::project::MAP_DIR);
     if !is_split_on_disk(&map_dir)? {
@@ -1050,7 +1060,7 @@ pub fn merge_project(project: &Path) -> Result<Converted> {
         done.removed.push(format!("{store}/{name}"));
         done.written.push(at(&name));
     }
-    done.written.extend(ignore_store(project, &crate::derived::IGNORED[..1])?);
+    done.written.extend(ignore_store(project, &crate::derived::IGNORED)?);
     if fresh {
         crate::derived::record_now(project)?;
     }
@@ -1153,7 +1163,7 @@ pub fn relayout(files: &mut BTreeMap<String, Vec<u8>>, plan: &[Planned]) -> Resu
 
 /// `relayout` of a split project on disk: the new layout's files written (only those whose bytes changed), then the
 /// old files it doesn't have removed (a renamed subterrain's folder goes). Nothing is written when it refuses. The
-/// local choice of open subterrains (`.w3proj/open-subterrains.json`) follows: a subterrain is open when one it
+/// local choice of open subterrains (`build/open-subterrains.json`) follows: a subterrain is open when one it
 /// continues was, or when it is new. The derived files' record is made again when it said they followed (the map is
 /// the same).
 pub fn relayout_project(project: &Path, plan: &[Planned]) -> Result<Converted> {
@@ -1364,7 +1374,7 @@ pub fn split_preview(project: &Path, rects: &[Rect]) -> Result<Preview> {
 }
 
 /// A split project's layout as it is on disk: the files under `map/terrain/` (relative to `map/`) and the open choice
-/// (`.w3proj/open-subterrains.json`, None when there is none). What `restore_layout` puts back.
+/// (`build/open-subterrains.json`, None when there is none). What `restore_layout` puts back.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutState {
     pub files: BTreeMap<String, Vec<u8>>,
@@ -1825,7 +1835,7 @@ pub fn write_pathing(project: &Path, bytes: &[u8]) -> Result<(Vec<String>, Vec<S
 
 /// A project split before derived files and pathing overrides moved out of `map/` and `.w3proj/pathing.json` (stage 1):
 /// its derived files go into the store (`crate::derived::migrate`), its `.w3proj/pathing.json` into the subterrains'
-/// `pathing.txt` when none has one yet (kept as `.w3proj/pathing.json.bak`). Nothing for a flat project. What moved,
+/// `pathing.txt` when none has one yet (kept as `build/pathing.json.bak`). Nothing for a flat project. What moved,
 /// relative to the project. A pathing.json that can't go into the subterrains is an error (it stays where it is).
 pub fn migrate_split(project: &Path) -> Result<Vec<String>> {
     if !is_split_on_disk(&project.join(crate::project::MAP_DIR))? {
@@ -1841,7 +1851,7 @@ pub fn migrate_split(project: &Path) -> Result<Vec<String>> {
             let sliced = crate::terrain_pathing::slice(&json, &layout)?;
             let backup = crate::terrain_pathing::backup_path(project)?;
             write_changed(&map_dir, &sliced)?;
-            fs::rename(crate::terrain_pathing::json_path(project), backup)?;
+            move_to_backup(project, &backup)?;
             moved.push(crate::terrain_pathing::JSON_NAME.to_string());
             if fresh {
                 crate::derived::record_now(project)?;
@@ -2342,6 +2352,7 @@ mod tests {
         crate::derived::record_now(&dir).unwrap();
         let json = crate::terrain_pathing::sample_json([t.width, t.height]).unwrap();
         let pj = crate::terrain_pathing::json_path(&dir);
+        fs::create_dir_all(pj.parent().unwrap()).unwrap();
         fs::write(&pj, &json).unwrap();
         let snapshot = || crate::project::walk(&dir).unwrap().into_iter().map(|p| (p.clone(), fs::read(crate::paths::join_rel(&dir, &p)).unwrap())).collect::<BTreeMap<_, _>>();
         let grid = grid_2x2(t.width, t.height);
@@ -2364,11 +2375,11 @@ mod tests {
         let done = split_project(&dir, &grid).unwrap();
         assert!(!map_dir.join("war3map.wpm").exists() && fs::read(store.join("war3map.wpm")).unwrap() == b"pathing");
         assert!(done.removed.contains(&"map/war3map.wpm".to_string()) && done.removed.contains(&".w3proj/pathing.json".to_string()), "{done:?}");
-        assert!(!pj.exists() && fs::read(pj.with_file_name("pathing.json.bak")).unwrap() == json);
+        assert!(!pj.exists() && fs::read(dir.join("build/pathing.json.bak")).unwrap() == json);
         assert_eq!(read_pathing(&dir).unwrap().as_deref(), Some(&json[..]));
         assert!(pathing_files(&dir).unwrap().len() >= 3, "the overrides cross the seams");
         assert_eq!(crate::derived::check(&dir).unwrap(), crate::derived::Freshness::Fresh);
-        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().contains("/.w3proj/derived-from.json\n"));
+        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().lines().any(|l| l == "build/"));
 
         // As a project split before stage 3 has it: migrated, the record still fresh.
         fs::rename(store.join("war3map.wpm"), map_dir.join("war3map.wpm")).unwrap();
@@ -2376,7 +2387,7 @@ mod tests {
         fs::write(&pj, &json).unwrap();
         let moved = migrate_split(&dir).unwrap();
         assert_eq!(moved, ["map/war3map.wpm", ".w3proj/pathing.json"]);
-        assert!(store.join("war3map.wpm").is_file() && !pj.exists() && pj.with_file_name("pathing.json.bak2").is_file());
+        assert!(store.join("war3map.wpm").is_file() && !pj.exists() && dir.join("build/pathing.json.bak2").is_file());
         assert_eq!(read_pathing(&dir).unwrap().as_deref(), Some(&json[..]));
         assert_eq!(crate::derived::check(&dir).unwrap(), crate::derived::Freshness::Fresh);
         assert!(migrate_split(&dir).unwrap().is_empty(), "nothing more to move");
@@ -2416,7 +2427,7 @@ mod tests {
         // The choice of open subterrains too (`crate::terrain_open`): changing it changes what the flat files hold.
         assert_eq!(
             views[2].sources,
-            ["terrain/terrain.json", "terrain/sw/units.json", "terrain/se/units.json", "terrain/nw/units.json", "terrain/ne/units.json", "../.w3proj/open-subterrains.json"]
+            ["terrain/terrain.json", "terrain/sw/units.json", "terrain/se/units.json", "terrain/nw/units.json", "terrain/ne/units.json", "../build/open-subterrains.json"]
         );
         for name in FLAT_NAMES {
             assert_eq!(read_flat(&dir, name).unwrap(), flat[name], "{name}");
@@ -2675,6 +2686,7 @@ mod tests {
         fs::write(map_dir.join("war3map.wpm"), b"pathing").unwrap();
         crate::derived::record_now(&dir).unwrap();
         let json = crate::terrain_pathing::sample_json([t.width, t.height]).unwrap();
+        fs::create_dir_all(dir.join(".w3proj")).unwrap();
         fs::write(crate::terrain_pathing::json_path(&dir), &json).unwrap();
         split_project(&dir, &grid_2x2(t.width, t.height)).unwrap();
         let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).unwrap()).unwrap();

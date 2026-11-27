@@ -1,5 +1,5 @@
 //! Working on part of a split map (spec "Working on Part of the Map"): the subterrains a user opened, kept locally in
-//! `.w3proj/open-subterrains.json` (git-ignored, one per checkout), and what the app's flat files hold then.
+//! `build/open-subterrains.json` (git-ignored, one per checkout), and what the app's flat files hold then.
 //!
 //! ```text
 //! {"format": "w3proj.open-subterrains/1", "open": ["westfall", "elwynn_forest"]}
@@ -32,11 +32,9 @@ use crate::w3e;
 use crate::{Error, Result};
 
 /// The file, relative to the project.
-pub const FILE: [&str; 2] = [".w3proj", "open-subterrains.json"];
+pub const FILE: [&str; 2] = ["build", "open-subterrains.json"];
 /// Its name for messages.
-pub const NAME: &str = ".w3proj/open-subterrains.json";
-/// The `.gitignore` line it needs: the choice is each user's own.
-pub const IGNORED: &str = "/.w3proj/open-subterrains.json";
+pub const NAME: &str = "build/open-subterrains.json";
 const FORMAT: &str = "w3proj.open-subterrains/1";
 /// How far (in corners) around an open subterrain its neighbours are loaded read-only.
 pub const HALO: usize = 2;
@@ -165,7 +163,7 @@ pub fn store(project: &Path, layout: &Layout, names: &[String]) -> Result<()> {
     // In the order of terrain.json, so the same choice is the same file.
     let ordered: Vec<String> = layout.subterrains.iter().filter(|s| names.contains(&s.name)).map(|s| s.name.clone()).collect();
     crate::project::write_atomic(&p, &to_json(&ordered))?;
-    crate::derived::ensure_lines(project, &[IGNORED])?;
+    crate::derived::ensure_ignored(project)?;
     Ok(())
 }
 
@@ -680,7 +678,7 @@ mod tests {
     }
 
     fn open(project: &Path, names: &[&str]) {
-        fs::create_dir_all(project.join(".w3proj")).unwrap();
+        fs::create_dir_all(project.join("build")).unwrap();
         fs::write(path(project), to_json(&names.iter().map(|s| s.to_string()).collect::<Vec<_>>())).unwrap();
     }
 
@@ -958,7 +956,7 @@ mod tests {
     fn a_damaged_choice_is_an_error() {
         let dir = project("damaged");
         let l = layout(&dir);
-        fs::create_dir_all(dir.join(".w3proj")).unwrap();
+        fs::create_dir_all(dir.join("build")).unwrap();
         for (text, why) in [
             (&b"{ not json"[..], "isn't JSON"),
             (br#"{"format": "w3proj.open-subterrains/1", "open": ["a0"], "x": 1}"#, "unknown key"),
@@ -980,7 +978,7 @@ mod tests {
         assert!(store(&dir, &l, &["zz".into()]).unwrap_err().to_string().contains("\"zz\""));
         store(&dir, &l, &["b1".into(), "a0".into()]).unwrap();
         assert_eq!(parse(&fs::read(path(&dir)).unwrap()).unwrap(), ["a0", "b1"], "in terrain.json's order");
-        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().lines().any(|l| l == IGNORED));
+        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().lines().any(|l| l == "build/"));
         let s = state(&dir).unwrap().unwrap();
         assert!(s.partial && s.error.is_none() && s.mask.len() == W * H);
         assert_eq!(s.subterrains.iter().filter(|s| s.open).map(|s| s.name.as_str()).collect::<Vec<_>>(), ["a0", "b1"]);

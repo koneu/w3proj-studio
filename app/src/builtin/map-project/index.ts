@@ -228,7 +228,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     } catch (e) {
       out.append(`unused strings kept in war3map.wts: ${e instanceof Error ? e.message : String(e)}`);
     }
-    // A generated map script (out of git, in .w3proj/derived/) is made now when it doesn't follow its sources (a vJASS
+    // A generated map script (out of git, in build/derived/) is made now when it doesn't follow its sources (a vJASS
     // one isn't made on saves), and a build never takes one that still doesn't, as `w3proj pack` refuses it.
     await w3.commands.execute("w3.script.forPack").catch(() => {});
     const scriptState = await w3.backend.invoke<ScriptState>("script_state", { root: root() }).catch(() => null);

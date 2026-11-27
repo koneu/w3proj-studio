@@ -402,7 +402,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  wrote last. `onlyFor`: only in that project (else nothing is written). `compile: false`: a generated script whose
    *  texts a language extension compiles (vJASS) isn't made now (an open or a save never runs JassHelper, a kept
    *  script included); it stays as it is.
-   *  A generated script (map/triggers/triggers.json "script": "generated", kept in .w3proj/derived/) is always the one
+   *  A generated script (map/triggers/triggers.json "script": "generated", kept in build/derived/) is always the one
    *  the data makes, and what it was made from is recorded (`w3proj pack` checks that record). */
   const write = (reason: string, force = false, onlyFor?: string, opts: { compile?: boolean } = {}): Promise<boolean> => {
     // The queue goes on after a failed run (the caller of that run has its error).
@@ -498,7 +498,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 `);
         await dropOther();
         await record();
-        const how = `${text.length} chars${language ? `, compiled with ${language}` : ""}${generated ? ", generated: in .w3proj/derived/, out of git" : ""}`;
+        const how = `${text.length} chars${language ? `, compiled with ${language}` : ""}${generated ? ", generated: in build/derived/, out of git" : ""}`;
         if (before?.action === "keep") {
           const n = before.lost.length;
           const lost = n ? `; its ${n} function${n === 1 ? "" : "s"} the triggers don't make (${before.lost.slice(0, 5).join(", ")}${n > 5 ? ", …" : ""}) ${n === 1 ? "is" : "are"} gone` : "";
@@ -769,7 +769,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         : `The generator makes every function of ${file}${current === null ? " (there is none yet)" : ""}.`;
       out.append(`Regenerate Map Script: ${what}${lost.length > 5 ? ` All of them: ${lost.join(", ")}` : ""}`);
       const choice = opts?.yes ? "Switch to a Generated Script" : await w3.window.showWarning(
-        `${what} Switching makes the map script a build artifact: generated from the triggers and the map's data into .w3proj/derived/, out of git, and made again on saves; map/${file} is no longer tracked (a checkpoint keeps it).`,
+        `${what} Switching makes the map script a build artifact: generated from the triggers and the map's data into build/derived/, out of git, and made again on saves; map/${file} is no longer tracked (a checkpoint keeps it).`,
         "Switch to a Generated Script", "Show Difference", "Cancel");
       if (choice === "Show Difference") { await showDifference(made.path); return null; }
       if (choice !== "Switch to a Generated Script") return null;
@@ -784,7 +784,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       });
       running = moved;
       await moved;
-      out.append(`Regenerate Map Script: map/triggers/triggers.json says "script": "generated"; ${file} moved into .w3proj/derived/`);
+      out.append(`Regenerate Map Script: map/triggers/triggers.json says "script": "generated"; ${file} moved into build/derived/`);
       const written = await write("Regenerate Map Script", true, root, { compile: true });
       if (written) void w3.window.showInfo(`${file} is generated now (see the Map Script output).`);
       return { mode: "generated", lost, written };

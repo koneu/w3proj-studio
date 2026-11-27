@@ -323,8 +323,8 @@ byte inside a text is written as U+10FF00. Imported items keep their ids and the
 byte for byte (all 119 local maps with triggers, Classic ones too); new items get free ids when packed. Classic maps
 have no map item, ids or nesting, and pack refuses what they can't hold (a folder in a folder, comments, script items).
 A map whose triggers TriggerData can't read (or that has only one of the two files) keeps both raw. The map script stays
-a tracked `map/war3map.j` for a map Studio didn't write (`"kept"`); with `"generated"` it lives in `.w3proj/derived/`
-(git-ignored) and `w3proj pack` takes it only while `.w3proj/derived-from.json` says it follows its sources
+a tracked `map/war3map.j` for a map Studio didn't write (`"kept"`); with `"generated"` it lives in `build/derived/`
+(git-ignored) and `w3proj pack` takes it only while `build/derived-from.json` says it follows its sources
 (`--allow-stale-script` packs it as it is, a missing one never). A new map's script is generated; Studio makes it again
 on saves and when the project opens stale (a vJASS script only on pack and on **Regenerate Map Script…**: JassHelper
 takes seconds), and `w3proj pack` makes a stale or missing one again through the app's code when the game is there.
@@ -346,7 +346,7 @@ its `terrain.txt`, `doodads.json`, `units.json`, `regions.json` and `pathing.txt
 merge in git without conflicts. A new or imported map has one, `main`, over the whole map; **Edit Terrain Layout** cuts
 it into more. Opening a project made before this layout (terrain in `map/war3map.w3e.txt`) converts it once and says so. **Open
 Subterrains…** (or the Subterrains view beside Terrain) opens only some of them: the choice is local
-(`.w3proj/open-subterrains.json`, git-ignored; no file opens all), the others aren't read, drawn or saved, and a strip
+(`build/open-subterrains.json`, git-ignored; no file opens all), the others aren't read, drawn or saved, and a strip
 of two corners around the open ones comes from the neighbours read-only. Every file command, AI tool and the headless
 tools go through the same layer: a save changes only the open subterrains' files, and an edit that would change
 anything outside them is refused with nothing written. `W3PROJ_OPEN_SUBTERRAINS` (`all`, or names separated by commas)
@@ -421,14 +421,25 @@ MyMap/
   w3proj.toml       map header + archive/pack settings
   map/              one file per archive file (object data as *.json), the triggers as folders (map/triggers/)
   unnamed/          files of protected maps whose names can't be recovered (not packed)
-  build/            pack output (git-ignored)
-  build/checkpoints/  automatic packed copies (Restore Checkpoint…)
-  .w3proj/extensions/   optional project-local extensions
-  .w3proj/generated-script   hash of the map script the app wrote last (a script without
-                    it isn't replaced if that would lose functions the triggers don't make)
+  .w3proj/          what the project adds to Studio, in git: settings.json, extensions/, formats/, ...
+  build/            everything made here or local, git-ignored (.gitignore needs only build/):
+    *.w3x           pack output
+    checkpoints/    automatic packed copies (Restore Checkpoint…)
+    derived/        pathing, shadows, the minimap and a generated map script
+    derived-from.json   what those were made from (pack refuses stale ones)
+    generated-script    hash of the map script the app wrote last (a script without it
+                    isn't replaced if that would lose functions the triggers don't make;
+                    opening the project records it again for a script the map's data makes)
+    open-subterrains.json   the subterrains you opened
+    replaced-scripts/, pathing.json.bak   backups
   .gitattributes    map files byte-exact, text formats diffable, imported assets
                     (models, textures, sounds, videos, fonts) via Git LFS where installed
 ```
+
+A project from an older Studio had the derived files, their record, the script stamp, the open subterrains and those
+backups in `.w3proj/`. Opening, packing, syncing or converting it moves them into `build/` and replaces the old
+`.gitignore` lines with `build/` (a file that is in both places and differs stays where it was). If the old script
+stamp was committed, Git shows it as deleted.
 
 ## Repository layout
 
@@ -581,14 +592,14 @@ w3proj unpack MyMap.w3x MyMap/      # create or re-sync a project
 w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x); warns when the map
                                     # has no war3map.j (no script) or no war3map.wtg (the World Editor
                                     # can't open it), and packs it anyway. A project whose terrain is split
-                                    # (map/terrain/) keeps pathing, shadows and minimap in .w3proj/derived/
+                                    # (map/terrain/) keeps pathing, shadows and minimap in build/derived/
                                     # (git-ignored) and its pathing overrides in map/terrain/*/pathing.txt; its
                                     # pack refuses derived files that are stale or missing (open and save it in
                                     # Studio, or `w3proj rebuild`); --allow-terrain-only-derived packs them as
                                     # they are / leaves missing ones out (not for a release); it also checks the
                                     # seams (`w3proj terrain seams`) and refuses on errors unless
                                     # --allow-seam-issues. A generated map script (map/triggers/triggers.json
-                                    # "script": "generated") comes from .w3proj/derived/ and is refused when stale
+                                    # "script": "generated") comes from build/derived/ and is refused when stale
                                     # (--allow-stale-script) or missing; the game's TriggerData checks the GUI
                                     # functions of map/triggers/
 w3proj terrain seams MyMap/         # a split terrain's seams checked with the brushes' cliff, ramp and water
@@ -626,7 +637,7 @@ CLI answers with the same Rust as the app (`crates/backend`). In a checkout the 
 (`app/scripts/headless.mjs`, needs `npm ci` in `app/`); elsewhere it runs `w3proj-headless.mjs` next to the program or in the installed app's resources (the
 installers ship it; made by `node app/scripts/headless.mjs --out w3proj-headless.mjs`) or the file `W3PROJ_HEADLESS` names; `W3PROJ_NODE`
 names another node. Shadows are calculated in whole (as Calculate Shadows does); a script that isn't the one Studio
-wrote last is kept, and vJASS isn't compiled. A rebuild is recorded in `.w3proj/derived-from.json` only when pathing,
+wrote last is kept, and vJASS isn't compiled. A rebuild is recorded in `build/derived-from.json` only when pathing,
 shadows and the minimap all follow the terrain and doodads.
 
 `w3proj check` runs the same way (`app/src/headless/check.ts`), for an AI after its edits or for CI: the Problems

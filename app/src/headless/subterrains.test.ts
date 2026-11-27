@@ -264,7 +264,7 @@ test("after the same edits the split project reads as the flat one, file for fil
   assert.ok(isSplit(grid) && !isSplit(flat));
   assert.deepEqual(await loaded(grid), await loaded(flat));
   for (const f of FLAT_FILES) assert.equal(await grid.workspace.readText(f), await flat.workspace.readText(f), f);
-  // Every other file of the flat project's map/ reads alike in the split one (its derived files from .w3proj/derived/).
+  // Every other file of the flat project's map/ reads alike in the split one (its derived files from build/derived/).
   for (const [f, bytes] of snapshot(flatRoot)) {
     if (FLAT_FILES.includes(f)) continue;
     assert.equal(Buffer.from(await grid.workspace.readBytes(f)).toString("latin1"), bytes, f);
@@ -419,7 +419,7 @@ test("two branches placing in different subterrains merge without a duplicate nu
     [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"], members: [["map/terrain/sw/units.json", "hfoo"], ["map/terrain/sw/units.json", "hfoo"]] }]);
 });
 
-// ---- stage 3: derived files in .w3proj/derived/, the Pathing tool's file in the subterrains' pathing.txt ----
+// ---- stage 3: derived files in build/derived/, the Pathing tool's file in the subterrains' pathing.txt ----
 
 test("the Pathing tool's file reads and writes through the subterrains' pathing.txt; a damaged one is unreadable, never empty", async () => {
   const { w3, root } = await splitProject("pathing");
@@ -449,9 +449,9 @@ test("the Pathing tool's file reads and writes through the subterrains' pathing.
   assert.match((damaged as { why: string }).why, /map\/terrain\/nw\/pathing\.txt line 2/);
 });
 
-test("a split project's derived files are read and written under their map/ names, kept in .w3proj/derived/", async () => {
+test("a split project's derived files are read and written under their map/ names, kept in build/derived/", async () => {
   const { w3, root } = await splitProject("derived");
-  const stored = join(root, ".w3proj", "derived", "war3map.wpm");
+  const stored = join(root, "build", "derived", "war3map.wpm");
   assert.throws(() => statSync(join(root, "map", "war3map.wpm")), "the split moved it out of map/");
   assert.deepEqual(new Uint8Array(await w3.workspace.readBytes("map/war3map.wpm")), new Uint8Array(readFileSync(stored)));
   assert.ok(w3.workspace.files().some((f) => f.path === "map/war3map.wpm"), "listed under its map/ name");
@@ -461,7 +461,7 @@ test("a split project's derived files are read and written under their map/ name
   assert.deepEqual(new Uint8Array(readFileSync(stored)), wpm);
   assert.throws(() => statSync(join(root, "map", "war3map.wpm")), "nothing written into map/");
   assert.deepEqual([...await workspaceOf(w3).externalChanges()], [], "the store's file was the app's own write");
-  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.w3proj\/derived\/$/m);
+  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^build\/$/m);
 });
 
 // ---- stage 4: partial load (Open Subterrains…, crates/w3proj terrain_open.rs) ----
@@ -509,8 +509,8 @@ test("Open Subterrains: closed ones are default-filled and left out, edits save 
   const whole = await loaded(w3);
   const state = await openSubterrains(w3, { names: ["a0"] });
   assert.ok(state?.partial, "partial");
-  assert.equal(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"a0\"]\n}\n");
-  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.w3proj\/open-subterrains\.json$/m);
+  assert.equal(readFileSync(join(root, "build", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"a0\"]\n}\n");
+  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^build\/$/m);
   const closed = ["a2", "b2"].map((s) => folderState(root, s));
   const halo = ["a1", "b0", "b1"].map((s) => folderState(root, s));
   // What the terrain editor loads: a0 whole, the halo (two corners into a1, b0, b1), the default corner elsewhere.
@@ -573,17 +573,17 @@ test("Open Subterrains: closed ones are default-filled and left out, edits save 
   assert.ok(!Object.keys(sources).some((k) => k.includes("/b2/")));
   // All open again: the file goes, the whole map reads with the edits.
   await openSubterrains(w3, { all: true });
-  assert.throws(() => statSync(join(root, ".w3proj", "open-subterrains.json")));
+  assert.throws(() => statSync(join(root, "build", "open-subterrains.json")));
   const after = await loaded(w3);
   assert.equal(after.terrain.corners.length, whole.terrain.corners.length);
   assert.equal(after.placed.filter((p) => p.id === "ATtr").length, whole.placed.filter((p) => p.id === "ATtr").length);
 });
 
-test("a damaged .w3proj/open-subterrains.json is an error when the terrain is read, never a guess of what's open", async () => {
+test("a damaged build/open-subterrains.json is an error when the terrain is read, never a guess of what's open", async () => {
   const { w3, root } = await bigSplit("damaged-open");
-  mkdirSync(join(root, ".w3proj"), { recursive: true });
+  mkdirSync(join(root, "build"), { recursive: true });
   for (const [text, why] of [["{ not json", /isn't JSON/], ['{"format": "w3proj.open-subterrains/1", "open": []}', /opens no subterrain/], ['{"format": "w3proj.open-subterrains/1", "open": ["zz"]}', /"zz"/]] as const) {
-    writeFileSync(join(root, ".w3proj", "open-subterrains.json"), text);
+    writeFileSync(join(root, "build", "open-subterrains.json"), text);
     await w3.workspace.refresh();
     await assert.rejects(w3.workspace.readText("map/war3map.w3e.txt"), why);
     const s = await w3.backend.invoke<{ error: string | null; partial: boolean; subterrains: unknown[] }>("terrain_open_state", { root });
@@ -687,7 +687,7 @@ test("New, Resize, Rename and Join Subterrains: the map stays the same, objects 
   // With some closed: the open choice follows a rename; the closed files are read for the change (it is of the whole map).
   await openSubterrains(w3, { names: ["south_west", "b1"] });
   await renameSubterrain(w3, { name: "b1", to: "north", quiet: true });
-  assert.equal(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"south_west\", \"north\"]\n}\n");
+  assert.equal(readFileSync(join(root, "build", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"south_west\", \"north\"]\n}\n");
   await openSubterrains(w3, { all: true });
   await same("rename with some closed");
 });

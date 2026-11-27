@@ -156,7 +156,7 @@ test("the generated files' record, rewritten by the backend, isn't an outside ch
   reset();
   const { ws } = make();
   await ws.open(A);
-  for (const path of [".w3proj/derived-from.json", "maps/One.w3x/.w3proj/derived-from.json", ".w3proj/settings.json"]) {
+  for (const path of ["build/derived-from.json", "maps/One.w3x/build/derived-from.json", ".w3proj/settings.json"]) {
     backend.get(A)!.push({ path, size: 5, modified: 3 });
   }
   assert.deepEqual([...(await ws.externalChanges())], [ws.key(".w3proj/settings.json")]);
@@ -536,8 +536,8 @@ test("write groups: a map folder's trigger layout, split terrain and derived fil
   assert.equal(g("map/triggers/a.j"), g("map/Triggers/Map/triggers/b.txt"), "a trigger folder named map is in the root's layout");
   assert.equal(g("map/terrain/ne/terrain.txt"), g("map/war3mapUnits.doo.json"));
   assert.equal(g("map/war3map.w3e.txt"), g(".w3proj/pathing.json"));
-  assert.equal(g("map/war3map.wpm"), g(".w3proj/derived/war3map.wpm"));
-  assert.equal(g("maps/c1/map/war3map.j"), g("maps/c1/.w3proj/derived/war3map.j"));
+  assert.equal(g("map/war3map.wpm"), g("build/derived/war3map.wpm"));
+  assert.equal(g("maps/c1/map/war3map.j"), g("maps/c1/build/derived/war3map.j"));
   assert.notEqual(g("maps/c1/map/terrain/a/terrain.txt"), g("map/terrain/a/terrain.txt"), "another chapter's own group");
   assert.notEqual(g("map/triggers/a.j"), g("map/terrain/a/terrain.txt"));
   // The flat object files and the object folders they are written into (a kind's halves share their files).

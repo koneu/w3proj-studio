@@ -75,9 +75,9 @@ const TERRAIN_SPLIT: &str = "  - `terrain/`: the terrain in subterrains (rectang
 const MAP_LAYOUT_2: &str = "  - `triggers/`: the triggers, one file per trigger (`.gui.json` GUI, `.j` / `.lua` / `.vjass` custom text, `.comment.json`),
     in folders; `triggers/triggers.json` is the root (script language and mode), `order.txt` the order in a folder.
   - `war3map.j` / `war3map.lua` is the map script. With `\"script\": \"generated\"` in `triggers/triggers.json` it is made
-    from the triggers and lives in `.w3proj/derived/`, not in `map/`.
-- `.w3proj/`: tool state. `.w3proj/derived/` and `.w3proj/derived-from.json` are local, ignored by Git.
-- `build/`: pack output, ignored by Git.
+    from the triggers and lives in `build/derived/`, not in `map/`.
+- `.w3proj/`: the project's tool settings, kept in Git.
+- `build/`: pack output, derived files and other local files, ignored by Git.
 
 ";
 
@@ -89,7 +89,7 @@ const CAMPAIGN_LAYOUT: &str = "## Layout
   project; it packs into `war3campaign.w3u`, ...).
 - `maps/<chapter>/`: each chapter map, a project of its own (`maps/<chapter>/map/` has the map's files as in a map
   project: `war3map.w3i.json`, `war3map.wts`, `triggers/`, terrain, ...). Edit a chapter by editing its folder.
-- `.w3proj/`: tool state, local, ignored by Git. `build/`: pack output, ignored by Git.
+- `.w3proj/`: the project's tool settings, kept in Git. `build/`: pack output and local files, ignored by Git.
 
 ";
 
@@ -100,8 +100,8 @@ const DERIVED: &str = "## Derived files: do not edit by hand
 - A generated `war3map.j` / `war3map.lua` is made from the triggers (`w3proj rebuild --only script`); change the
   triggers, never the generated script. A script kept in `map/` (`\"script\": \"kept\"`) is yours to edit.
   To replace a script that isn't Studio's with the generated one, use `w3proj rebuild --replace-script` (the old
-  script is first copied to `.w3proj/replaced-scripts/`).
-- Everything in `.w3proj/derived/` and `.w3proj/derived-from.json`.
+  script is first copied to `build/replaced-scripts/`).
+- Everything in `build/derived/` and `build/derived-from.json`.
 ";
 
 const RULES: &str = "

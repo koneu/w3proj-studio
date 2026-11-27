@@ -48,6 +48,9 @@ async fn path_normalize(path: String) -> String {
 async fn project_open(path: String) -> CmdResult<ProjectInfo> {
     tauri::async_runtime::spawn_blocking(move || {
         let info = backend::open_project(&path)?;
+        // A project from before the local files (derived files, their record, the script stamp, the open subterrains) were
+        // in build/: moved there. What can't move stays where it was; the next open tries again.
+        let _ = w3proj::derived::move_local(Path::new(&info.root));
         // A project split before derived files and pathing overrides moved out of git: moved now. One that can't move
         // (two copies that differ, overrides that don't fit) stays, and reading those files says why.
         let _ = w3proj::terrain_layout::migrate_split(Path::new(&info.root));
@@ -243,7 +246,7 @@ async fn script_record(root: String, sources: std::collections::BTreeMap<String,
         .map_err(err)?
 }
 
-/// Switches the map script between a tracked file and a generated one in `.w3proj/derived/` (`backend::script::set_mode`).
+/// Switches the map script between a tracked file and a generated one in `build/derived/` (`backend::script::set_mode`).
 #[tauri::command]
 async fn script_set_mode(root: String, mode: String) -> CmdResult<Value> {
     tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::script::set_mode(&root, &mode)?).map_err(err))

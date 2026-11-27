@@ -22,7 +22,7 @@ const never = async (): Promise<boolean> => { throw new Error("must not ask"); }
 
 test("candidates: the map's own files at its root, the editor's file and the overrides; nothing deeper or foreign", () => {
   const got = resizeCandidates(["map/war3map.w3i.json", "map/War3mapUnits.doo", "map/war3mapMap.blp", "map/war3mapImported/x.mdx", "map/units.txt", "src/war3map.j", "map\\war3map.shd"], "map/war3map.w3e").sort();
-  assert.deepEqual(got, [".w3proj/derived-from.json", ".w3proj/generated-script", ".w3proj/pathing.json", "map/War3mapUnits.doo", "map/war3map.shd", "map/war3map.w3e", "map/war3map.w3i.json", "map/war3mapMap.blp"].sort());
+  assert.deepEqual(got, ["build/derived-from.json", "build/generated-script", ".w3proj/pathing.json", "map/War3mapUnits.doo", "map/war3map.shd", "map/war3map.w3e", "map/war3map.w3i.json", "map/war3mapMap.blp"].sort());
 });
 
 test("changedFiles keeps only what differs; a file on one side counts as missing on the other", () => {
@@ -86,16 +86,16 @@ test("files changed since the resize are asked about; no leaves everything as it
 });
 
 test("the derived files' record, rewritten after the resize when a generated script is made again, isn't asked about; undo puts it back", async () => {
-  const m = memory({ w3e: [1], ".w3proj/derived-from.json": [1] });
-  const before: Files = new Map([["w3e", bytes(1)], [".w3proj/derived-from.json", bytes(1)]]);
-  m.files.set("w3e", bytes(2)); m.files.set(".w3proj/derived-from.json", bytes(2));
-  const kept = changedFiles(before, new Map([["w3e", bytes(2)], [".w3proj/derived-from.json", bytes(2)]]));
+  const m = memory({ w3e: [1], "build/derived-from.json": [1] });
+  const before: Files = new Map([["w3e", bytes(1)], ["build/derived-from.json", bytes(1)]]);
+  m.files.set("w3e", bytes(2)); m.files.set("build/derived-from.json", bytes(2));
+  const kept = changedFiles(before, new Map([["w3e", bytes(2)], ["build/derived-from.json", bytes(2)]]));
   const history = new ResizeHistory();
   history.record({ root: "P", editor: "w3e", title: "Resize map", before: kept.before, after: kept.after });
   // The script made again a moment later: the record says so.
-  m.files.set(".w3proj/derived-from.json", bytes(3));
+  m.files.set("build/derived-from.json", bytes(3));
   assert.ok(await undo(history, m.io, "P", never), "no question about the record");
-  assert.equal(text(m.files.get(".w3proj/derived-from.json")), "1", "the record as before the resize, with the files it describes");
+  assert.equal(text(m.files.get("build/derived-from.json")), "1", "the record as before the resize, with the files it describes");
   assert.equal(text(m.files.get("w3e")), "1");
   // Control: a file of the map changed since is still asked about.
   assert.ok(await redo(history, m.io, "P", never));

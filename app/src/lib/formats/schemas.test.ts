@@ -85,7 +85,7 @@ const problems = (name: string, doc: unknown): string => {
 /** The schema for a project file (`rel`: its path relative to the project, either separator). */
 function schemaFor(rel: string): Kind | undefined {
   const p = "/" + rel.split(sep).join("/");
-  const inStore = p.includes("/.w3proj/");
+  const inStore = p.includes("/.w3proj/") || p.includes("/build/derived/");
   return SCHEMAS.find((s) => (s.path ? s.path.test(p) : !inStore && s.files!.includes(basename(p).toLowerCase())));
 }
 
@@ -440,7 +440,7 @@ test("files are matched to their schemas by name and place", () => {
   assert.equal(of("map/terrain/west/units.json"), "terrain-units");
   assert.equal(of(join("map", "terrain", "west", "regions.json")), "terrain-regions");
   assert.equal(of(".w3proj/pathing.json"), "pathing");
-  assert.equal(of(".w3proj/derived/war3map.mmp.json"), undefined, "the derived files' store isn't the project's files");
+  assert.equal(of("build/derived/war3map.mmp.json"), undefined, "the derived files' store isn't the project's files");
   assert.equal(of("map/triggers/triggers.json"), "triggers");
   assert.equal(of("map/triggers/Init/_category.json"), "trigger-category");
   assert.equal(of("map/triggers/_category.json"), undefined, "the root has triggers.json, no _category.json");
@@ -698,7 +698,7 @@ test("every file unpack and a terrain split write for the corpus maps passes its
         const r = await run(found.bin, ["unpack", "--game", game ?? "none", "--allow-incomplete", maps[i], project]);
         if (r.code !== 0) { failures.push(`${maps[i]}: unpack exit ${r.code}: ${r.err.trim()}`); continue; }
         // The files as unpacked (the split layout), then the flat object files merged from them and the derived files
-        // the merge puts back into map/ (the minimap's icons: a split project keeps them in .w3proj/derived/); a map unpacked flat
+        // the merge puts back into map/ (the minimap's icons: a split project keeps them in build/derived/); a map unpacked flat
         // (a campaign has no terrain of its own; a terrain kept raw or placed objects that stayed raw can't be split,
         // and that is no schema's business) split into one subterrain.
         for (const f of checkFiles(project, counts)) failures.push(`${maps[i]}: ${f}`);

@@ -978,9 +978,9 @@ const GITATTRIBUTES_V1: &str = "\
 *.toc diff
 ";
 
-/// `.*.tmp`: a file being saved (`crate::atomic`) or one a crash left half written. `/.w3proj/derived/`: the derived
-/// files of a split terrain (`crate::derived::STORE_DIR`; a flat project has none there).
-const GITIGNORE: &str = "build/\n.*.tmp\n/.w3proj/derived/\n";
+/// `build/`: everything made here and local (`crate::derived::IGNORED`). `.*.tmp`: a file being saved (`crate::atomic`)
+/// or one a crash left half written.
+const GITIGNORE: &str = "build/\n.*.tmp\n";
 
 /// Writes an extracted archive into a project directory. Existing pack
 /// settings in the manifest are kept.
@@ -1099,6 +1099,10 @@ fn keep_mdl_header_only(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -
 
 /// `top`: the project itself (gets git files), not a chapter map inside a campaign.
 fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_headers: bool) -> Result<UnpackReport> {
+    // A project from before the local files were in build/ is moved over (its chapter maps too).
+    if top && there(&project.join(MANIFEST))? {
+        crate::derived::move_local(project)?;
+    }
     // Before anything is written: a project copy that can't be read stops the sync here.
     let map_dir = project.join(MAP_DIR);
     let kept = keep_classic_over_hd(&map_dir, &mut ex.files)?;
@@ -1223,7 +1227,7 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     remove_empty_dirs(&maps_dir);
     // The chapters' stores and records are local too (their projects have no `.gitignore`: the campaign's covers them).
     if top && has_chapters {
-        crate::derived::ensure_lines(project, &crate::derived::CHAPTERS_IGNORED)?;
+        crate::derived::ensure_ignored(project)?;
     }
     // What couldn't be named: replaced as a whole (not counted), strays aside.
     let unnamed_dir = project.join(UNNAMED_DIR);

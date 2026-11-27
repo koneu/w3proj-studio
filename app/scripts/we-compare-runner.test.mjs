@@ -478,8 +478,8 @@ test("an unpack with trigger folders and a generated script: war3map.wtg / .wct 
   const dir = scratchDir("we-compare-forms-");
   try {
     mkdirSync(join(dir, "map", "triggers"), { recursive: true });
-    mkdirSync(join(dir, ".w3proj", "derived"), { recursive: true });
-    writeFileSync(join(dir, ".w3proj", "derived", "war3map.j"), "function main takes nothing returns nothing\r\nendfunction\r\n");
+    mkdirSync(join(dir, "build", "derived"), { recursive: true });
+    writeFileSync(join(dir, "build", "derived", "war3map.j"), "function main takes nothing returns nothing\r\nendfunction\r\n");
     let runs = 0;
     const forms = run.projectForms(dir, () => { runs++; return { file: { items: [{ name: "T" }] }, custom: { header: "// h" } }; });
     assert.equal(forms.triggerForm("war3map.wtg"), "json");
@@ -487,7 +487,7 @@ test("an unpack with trigger folders and a generated script: war3map.wtg / .wct 
     assert.deepEqual(forms.triggerJson("war3map.wtg"), { items: [{ name: "T" }] });
     assert.deepEqual(forms.triggerJson("war3map.wct"), { header: "// h" });
     assert.equal(runs, 1, "the CLI runs once per unpack");
-    assert.equal(forms.derivedPath("war3map.j"), join(dir, ".w3proj", "derived", "war3map.j"));
+    assert.equal(forms.derivedPath("war3map.j"), join(dir, "build", "derived", "war3map.j"));
     assert.equal(forms.derivedPath("war3map.lua"), null);
     // Control: an unpack without trigger folders (the game's TriggerData missing) keeps the raw files: no JSON claimed.
     const flat = scratchDir("we-compare-forms-flat-");

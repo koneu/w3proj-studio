@@ -120,7 +120,7 @@ pub fn language(files: &BTreeMap<String, Vec<u8>>, codecs: &Registry) -> Lang {
 }
 
 /// Where the map script comes from (`triggers.json` `script`): made by Studio's generator and kept out of git
-/// (`.w3proj/derived/`, `crate::derived`), or a source the project tracks in `map/` (the World Editor's, a hand-edited
+/// (`build/derived/`, `crate::derived`), or a source the project tracks in `map/` (the World Editor's, a hand-edited
 /// one, one with code no trigger makes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScriptMode {
@@ -1751,7 +1751,7 @@ pub struct ModeChange {
 }
 
 /// Switches a project's map script between a tracked file (`kept`: `map/war3map.j|lua`) and a generated one in the store
-/// (`generated`: `.w3proj/derived/`, `crate::derived`). The script there is moved to the other place as it is (the caller
+/// (`generated`: `build/derived/`, `crate::derived`). The script there is moved to the other place as it is (the caller
 /// makes it again afterwards); the record of what a generated script was made from is cleared either way (a moved script
 /// isn't known to follow anything). Order, so no step loses the script: the new place written, then `triggers.json`, then
 /// the old place removed. Refused, nothing written: a project without `map/triggers/` (its triggers kept raw, or none:
@@ -1844,7 +1844,7 @@ fn script_in(files: &BTreeMap<String, Vec<u8>>) -> Option<(String, Vec<u8>)> {
 /// For a sync from a map into a project (`files`: the map's, relative to `map/`, the layout made by `split_map`):
 /// items that have a file in the project's `map/triggers/` keep its name (so a `~2` doesn't move to another item, and
 /// a file renamed by hand stays so), and the script mode is decided. The map's script is "generated" when Studio wrote
-/// it (the project's `.w3proj/generated-script` holds its hash) or it is the generated one the project has already;
+/// it (the project's `build/generated-script` holds its hash) or it is the generated one the project has already;
 /// then it is taken out of `files` and returned, for the store (`crate::derived`). Otherwise it is "kept", a tracked
 /// file in `map/`. Nothing happens to files without the layout. The renamed files must pack into the same
 /// war3map.wtg and war3map.wct, or the sync stops.

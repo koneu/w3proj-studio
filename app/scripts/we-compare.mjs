@@ -431,9 +431,9 @@ export function runLines(command, args, options = {}) {
 
 /** The files of the map script and the triggers as an unpack lays them out now (`project`: the unpacked folder): the
  *  triggers in map/triggers/ (war3map.wtg and war3map.wct are read as `w3proj triggers` gives them: its `file` and its
- *  `custom`), a script the generator makes from them in .w3proj/derived/ instead of map/. `triggers`: runs the CLI. */
+ *  `custom`), a script the generator makes from them in build/derived/ instead of map/. `triggers`: runs the CLI. */
 export function projectForms(project, triggers) {
-  const derived = join(project, ".w3proj", "derived");
+  const derived = join(project, "build", "derived");
   const derivedNames = new Set(existsSync(derived) ? readdirSync(derived) : []);
   const layout = existsSync(join(project, "map", "triggers"));
   let read = null;
@@ -447,7 +447,7 @@ export function projectForms(project, triggers) {
       if (v === undefined || v === null) throw new Error(`${f}: \`w3proj triggers\` gave no ${TRIGGER_FILES[f.toLowerCase()]} of map/triggers/`);
       return v;
     },
-    /** The path of a file the unpack put into .w3proj/derived/ (the generated war3map.j), else null. */
+    /** The path of a file the unpack put into build/derived/ (the generated war3map.j), else null. */
     derivedPath: (f) => (derivedNames.has(f) ? join(derived, f) : null),
   };
 }

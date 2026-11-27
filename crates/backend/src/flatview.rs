@@ -82,7 +82,7 @@ fn split_map_dir(map_dir: &Path) -> CmdResult<bool> {
 }
 
 /// A derived file of a split project (`map/war3map.wpm`, `.shd`, `war3mapMap.blp`, `war3map.mmp(.json)`,
-/// `w3proj::derived::FILES`): the file in the project's store `.w3proj/derived/` it is kept as (the name there in any
+/// `w3proj::derived::FILES`): the file in the project's store `build/derived/` it is kept as (the name there in any
 /// case, else the one asked for). None for any other file and in a flat project.
 pub fn derived_of(path: &Path) -> CmdResult<Option<PathBuf>> {
     let Some(file) = path.file_name().and_then(|n| n.to_str()) else { return Ok(None) };
@@ -105,7 +105,7 @@ pub fn derived_of(path: &Path) -> CmdResult<Option<PathBuf>> {
 
 /// The map script of a project whose script is generated (`map/war3map.j` or `map/war3map.lua` while
 /// `map/triggers/triggers.json` says `"script": "generated"`, `w3proj::trigger_layout::ScriptMode`): the file in the
-/// project's store `.w3proj/derived/` it is kept as (the name there in any case, else the one asked for), so the app's
+/// project's store `build/derived/` it is kept as (the name there in any case, else the one asked for), so the app's
 /// generator writes it there and git never sees it. None for any other file and for a kept script (a tracked file). A
 /// `triggers.json` that is there but can't be read is an error, never "a file of its own".
 pub fn script_of(path: &Path) -> CmdResult<Option<PathBuf>> {
@@ -453,7 +453,7 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
 /// only the `map/` name the caller asked for (which may well be on disk, where this isn't looked for).
 fn stored_err(path: &Path, real: &Path, e: &std::io::Error) -> String {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    format!("{}: {e} ({name} is read from the project's store .w3proj/derived/, not from map/)", real.display())
+    format!("{}: {e} ({name} is read from the project's store build/derived/, not from map/)", real.display())
 }
 
 /// Adds the generated map script of every `map/` folder below `root` whose script is generated (`script_of`) to a
@@ -628,7 +628,7 @@ pub struct OpenConversion {
 
 /// "terrain_convert_on_open": a project opened in the app whose terrain is still flat (`map/war3map.w3e.txt` and the
 /// flat object files, the layout before the split one became the only one) is converted as `w3proj terrain split` does
-/// (one subterrain `main` over the canvas, derived files into `.w3proj/derived/`), the chapter maps of a campaign too.
+/// (one subterrain `main` over the canvas, derived files into `build/derived/`), the chapter maps of a campaign too.
 /// One that can't be (its terrain kept raw, objects sharing a creation number, …) stays as it is, and the message says
 /// why. A project whose layout can't be told is left alone: reading its files says what is wrong.
 pub fn convert_on_open(path: &str) -> CmdResult<OpenConversion> {
@@ -670,9 +670,9 @@ pub fn convert_on_open(path: &str) -> CmdResult<OpenConversion> {
             Err(e) => done.kept.push((rel, kept_reason(&map_dir, &e.to_string()))),
         }
     }
-    // A chapter's store and record are local, as an unpack of the campaign leaves them (`CHAPTERS_IGNORED`).
+    // A chapter's store and record are local, as an unpack of the campaign leaves them.
     if done.converted.iter().any(|r| !r.is_empty()) {
-        w3proj::derived::ensure_lines(&root, &w3proj::derived::CHAPTERS_IGNORED).map_err(err)?;
+        w3proj::derived::ensure_ignored(&root).map_err(err)?;
     }
     done.message = open_message(&done);
     Ok(done)
@@ -698,7 +698,7 @@ fn open_message(done: &OpenConversion) -> Option<String> {
         };
         lines.push(format!(
             "{which} was in the old single-file layout (map/war3map.w3e.txt) and is now kept in map/terrain/, the layout every project uses: \
-             one subterrain, main, over the whole map. The map itself is the same. Pathing, shadows and the minimap moved to .w3proj/derived/, \
+             one subterrain, main, over the whole map. The map itself is the same. Pathing, shadows and the minimap moved to build/derived/, \
              which git ignores. Commit the change."
         ));
     }
@@ -710,13 +710,13 @@ fn open_message(done: &OpenConversion) -> Option<String> {
 
 /// "terrain_open_state": which subterrains of a split project are open (`w3proj::terrain_open::state`: names, rectangles,
 /// open or read for the halo, sizes on disk, the corner mask the terrain editor draws by); None for a flat project. A
-/// choice that can't be used (a damaged `.w3proj/open-subterrains.json`) is in its `error`, not an error of the call: the
+/// choice that can't be used (a damaged `build/open-subterrains.json`) is in its `error`, not an error of the call: the
 /// Subterrains view still lists the subterrains so they can be picked again.
 pub fn open_state(root: &str) -> CmdResult<Option<w3proj::terrain_open::State>> {
     w3proj::terrain_open::state(Path::new(root)).map_err(err)
 }
 
-/// "terrain_set_open" (Open Subterrains…): opens `names` (every subterrain removes `.w3proj/open-subterrains.json`, the
+/// "terrain_set_open" (Open Subterrains…): opens `names` (every subterrain removes `build/open-subterrains.json`, the
 /// default); the new state. Refused for a flat project, no names, or a name the layout doesn't have.
 pub fn set_open(root: &str, names: &[String]) -> CmdResult<Option<w3proj::terrain_open::State>> {
     let project = Path::new(root);
@@ -912,11 +912,11 @@ mod tests {
         fs::write(&triggers, text.replace("\"script\": \"kept\"", "\"script\": \"generated\"")).unwrap();
         fs::write(dir.join("map/war3map.lua"), "-- by hand").unwrap();
         let e = read_bytes(&dir.join("map/war3map.lua")).unwrap_err();
-        let store = dir.join(".w3proj/derived/war3map.lua");
+        let store = dir.join("build/derived/war3map.lua");
         // Windows prints the joined path with backslashes: compare with one separator.
         let slashed = e.replace('\\', "/");
         assert!(slashed.starts_with(&format!("{}:", store.display().to_string().replace('\\', "/"))), "{e}");
-        assert!(slashed.contains(".w3proj/derived/"), "{e}");
+        assert!(slashed.contains("build/derived/"), "{e}");
         // Control: with the file in the store it reads that one.
         fs::create_dir_all(store.parent().unwrap()).unwrap();
         fs::write(&store, "-- stored").unwrap();
@@ -1046,14 +1046,14 @@ mod tests {
         crate::list_tree(&dir).unwrap().into_iter().map(|p| (p.clone(), fs::read(dir.join(&p)).unwrap())).collect()
     }
 
-    /// The derived files of a split project answer from `.w3proj/derived/` under their map/ names: read, stat, exists,
+    /// The derived files of a split project answer from `build/derived/` under their map/ names: read, stat, exists,
     /// listed, written there (named in `also`, `.gitignore` made to ignore the store), deleted from there, never moved.
     /// The flat project's are its own files (control).
     #[test]
     fn derived_files_of_a_split_project_are_in_the_store() {
         let (flat, split) = split_mini("derived");
         let wpm = split.join("map").join("war3map.wpm");
-        let stored = split.join(".w3proj").join("derived").join("war3map.wpm");
+        let stored = split.join("build").join("derived").join("war3map.wpm");
         assert!(!wpm.exists() && stored.is_file(), "the split moved it");
         assert!(derived_of(&flat.join("map").join("war3map.wpm")).unwrap().is_none(), "control: a flat project's file is itself");
         assert_eq!(derived_of(&wpm).unwrap().as_deref(), Some(stored.as_path()));
@@ -1069,18 +1069,18 @@ mod tests {
         assert!(!crate::exists(&shd).unwrap() && crate::stat(&shd).is_none());
         assert!(crate::read_bytes(&shd).unwrap_err().contains("os error 2"));
         let _ = fs::remove_file(split.join(".gitignore"));
-        let _ = fs::remove_dir_all(split.join(".w3proj").join("derived"));
+        let _ = fs::remove_dir_all(split.join("build").join("derived"));
         let st = crate::write_bytes(&shd, b"shadows").unwrap();
-        let in_store = split.join(".w3proj").join("derived").join("war3map.shd");
+        let in_store = split.join("build").join("derived").join("war3map.shd");
         assert_eq!(fs::read(&in_store).unwrap(), b"shadows");
         assert!(!shd.exists(), "nothing written into map/");
         assert_eq!(st.also.iter().map(|a| a.path.as_str()).collect::<Vec<_>>(), [in_store.to_string_lossy()]);
-        assert!(fs::read_to_string(split.join(".gitignore")).unwrap().contains("/.w3proj/derived/\n"), "the new store is ignored");
+        assert!(fs::read_to_string(split.join(".gitignore")).unwrap().lines().any(|l| l == "build/"), "the new store is ignored");
         // A raw minimap icons file through the codec commands lands in the store too.
         let root = split.to_string_lossy().into_owned();
         let icons = fs::read_to_string(flat.join("map").join("war3map.mmp.json")).unwrap();
         crate::codec_write(&root, "map/war3map.mmp", &icons, &[]).unwrap();
-        assert!(split.join(".w3proj").join("derived").join("war3map.mmp").is_file() && !split.join("map").join("war3map.mmp").exists());
+        assert!(split.join("build").join("derived").join("war3map.mmp").is_file() && !split.join("map").join("war3map.mmp").exists());
         let back: serde_json::Value = serde_json::from_str(&crate::codec_decode(&root, "map/war3map.mmp", &[]).unwrap()).unwrap();
         assert_eq!(back, serde_json::from_str::<serde_json::Value>(&icons).unwrap());
         assert!(refuse_moving(&shd).is_err(), "never moved");
@@ -1147,6 +1147,7 @@ mod tests {
         assert!(crate::read_bytes(&split.join("map").join("war3map.w3e.txt")).is_ok());
         // A real .w3proj/pathing.json beside them is in the way.
         fs::write(txt("nw"), "3 1 08 00\n").unwrap();
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
         fs::write(&json, &three).unwrap();
         assert!(crate::read_bytes(&json).unwrap_err().contains("is there, but the terrain is split"));
         fs::remove_file(&json).unwrap();
@@ -1187,7 +1188,7 @@ mod tests {
         assert!(e.contains("subterrain \"sw\"") && e.contains("nothing was written"), "{e}");
         assert_eq!(layout_files(&split), before);
         set_open(&root, &["sw".into(), "se".into(), "nw".into(), "ne".into()]).unwrap();
-        assert!(!split.join(".w3proj").join("open-subterrains.json").exists());
+        assert!(!split.join("build").join("open-subterrains.json").exists());
         assert!(!open_state(&root).unwrap().unwrap().partial);
         let _ = fs::remove_dir_all(flat.parent().unwrap());
     }
@@ -1236,7 +1237,7 @@ mod tests {
             assert!(!dir.join("map").join(name).exists(), "{name} left on disk");
             assert_eq!(&read_bytes(&dir.join("map").join(name)).unwrap(), bytes, "{name} reads as before");
         }
-        assert!(!dir.join("map/war3map.wpm").exists() && dir.join(".w3proj/derived/war3map.wpm").is_file());
+        assert!(!dir.join("map/war3map.wpm").exists() && dir.join("build/derived/war3map.wpm").is_file());
         // It packs as the flat project did: no record before, so the derived files it has follow the map, and the
         // shadows and minimap it never had are absent, not missing.
         assert_eq!(w3proj::derived::check(&dir).unwrap(), w3proj::derived::Freshness::Fresh);
@@ -1280,7 +1281,7 @@ mod tests {
         assert!(dir.join("maps/One/map/terrain/terrain.json").is_file() && !dir.join("maps/One/map/war3map.w3e.txt").exists());
         assert!(dir.join("maps/Loose/map/war3map.w3e.txt").is_file());
         let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
-        assert!(w3proj::derived::CHAPTERS_IGNORED.iter().all(|l| ignore.contains(l)), "{ignore}");
+        assert!(ignore.lines().any(|l| l == "build/"), "{ignore}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1294,14 +1295,14 @@ mod tests {
             FLAT_NAMES.iter().map(|n| (n.to_string(), fs::read_to_string(mini().join("map").join(n)).unwrap())).collect();
         let root = dir.to_string_lossy().into_owned();
         let done = create(&root, files.clone()).unwrap();
-        assert!(done.written.iter().any(|p| p == "map/terrain/terrain.json") && done.written.iter().any(|p| p == ".gitignore"), "{done:?}");
+        assert!(done.written.iter().any(|p| p == "map/terrain/terrain.json") && !done.written.iter().any(|p| p == ".gitignore"), "{done:?}: a new project's .gitignore has build/ already");
         for (name, text) in &files {
             assert!(!dir.join("map").join(name).exists(), "{name} on disk");
             assert_eq!(crate::read_text(&dir.join("map").join(name)).unwrap(), *text);
         }
         // A derived file written by its map/ name lands in the store.
         crate::write_bytes(&dir.join("map/war3map.shd"), b"shadows").unwrap();
-        assert!(!dir.join("map/war3map.shd").exists() && dir.join(".w3proj/derived/war3map.shd").is_file());
+        assert!(!dir.join("map/war3map.shd").exists() && dir.join("build/derived/war3map.shd").is_file());
         let before = crate::list_tree(&dir).unwrap();
         assert!(create(&root, files.clone()).unwrap_err().contains("has a terrain already"));
         assert_eq!(crate::list_tree(&dir).unwrap(), before);

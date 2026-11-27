@@ -148,7 +148,7 @@ fn fixture_unpacked(map: &Path) -> BTreeMap<String, Vec<u8>> {
     let (wtg, wct) = (w3proj(&["cat", s(map), "war3map.wtg"]).stdout, w3proj(&["cat", s(map), "war3map.wct"]).stdout);
     let data = w3proj::triggerdata::TriggerData::parse(&fs::read_to_string(trigger_data()).unwrap());
     want.extend(tl::split_map(&wtg, &wct, &data, tl::Lang::Jass).unwrap());
-    // The terrain and placed objects go into one subterrain, the derived files into the store (.w3proj/derived/).
+    // The terrain and placed objects go into one subterrain, the derived files into the store (build/derived/).
     w3proj::terrain_layout::split(&mut want, &[]).unwrap();
     w3proj::derived::take(&mut want);
     objects_split(&mut want);
@@ -826,7 +826,7 @@ fn a_pack_right_after_a_terrain_or_doodad_edit_refuses_the_old_derived_files() {
         assert!(!o.status.success(), "a pack right after editing {file} went ahead: {}", text(&o));
         assert!(!out.exists(), "the refused pack left a map behind");
         let said = text(&o);
-        for words in [".w3proj/derived/", file, "--force-stale"] {
+        for words in ["build/derived/", file, "--force-stale"] {
             assert!(said.contains(words), "the refusal doesn't name {words}: {said}");
         }
         ok(&["pack", s(&project), "-o", s(&out), "--force-stale"]);
@@ -1051,7 +1051,7 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
     // Shadows and a minimap image as W3Proj Studio would have made them: every derived file is in the store, the record
     // fresh, so only the edit below stops the pack.
     for name in ["war3map.shd", "war3mapMap.blp"] {
-        fs::write(project.join(".w3proj/derived").join(name), name.as_bytes()).unwrap();
+        fs::write(project.join("build/derived").join(name), name.as_bytes()).unwrap();
     }
     let units = |sub: &str| -> serde_json::Value { serde_json::from_slice(&fs::read(project.join(format!("map/terrain/{sub}/units.json"))).unwrap()).unwrap() };
     let mut sw = units("sw");
@@ -1090,7 +1090,7 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
 const PATHING: &str = "{\n  \"format\": \"w3proj.pathing/1\",\n  \"width\": 16,\n  \"height\": 8,\n  \"cells\": [\n    [6,2,2,8],\n    [7,2,2,8],\n    [8,2,2,8],\n    [9,2,2,8],\n    [3,3,0,8],\n    [3,4,0,8],\n    [15,7,2,0]\n  ]\n}\n";
 const GRID: [&str; 4] = ["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"];
 
-/// Stage 3 of the split layout: the derived files leave `map/` (and git) for `.w3proj/derived/`, the Pathing tool's
+/// Stage 3 of the split layout: the derived files leave `map/` (and git) for `build/derived/`, the Pathing tool's
 /// overrides leave `.w3proj/pathing.json` for the subterrains' `pathing.txt`. A split moves both (the record stays
 /// fresh, the project packs into the same map), a pack refuses derived files that are stale or missing and says why and
 /// what to do, `--allow-terrain-only-derived` packs anyway and says so, an unpack over the split project writes the map's
@@ -1102,10 +1102,11 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
     pack(&fixture(), &first);
     let project = dir.join("project");
     unpack_flat(&first, &project);
-    let (map, store) = (project.join("map"), project.join(".w3proj").join("derived"));
+    let (map, store) = (project.join("map"), project.join("build").join("derived"));
     // Shadows and a minimap image besides the mini map's pathing and minimap icons: all four derived files.
     fs::write(map.join("war3map.shd"), b"shadows").unwrap();
     fs::write(map.join("war3mapMap.blp"), b"minimap").unwrap();
+    fs::create_dir_all(project.join(".w3proj")).unwrap();
     fs::write(project.join(".w3proj/pathing.json"), PATHING).unwrap();
     const DERIVED: [&str; 4] = ["war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.mmp.json"];
     let derived: Vec<Vec<u8>> = DERIVED.iter().map(|f| fs::read(map.join(f)).unwrap()).collect();
@@ -1122,9 +1123,9 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
         assert_eq!(&fs::read(store.join(f)).unwrap(), bytes, "{f} moved into the store as it was");
     }
     let ignore = fs::read_to_string(project.join(".gitignore")).unwrap();
-    assert!(ignore.lines().any(|l| l == "/.w3proj/derived/") && ignore.lines().any(|l| l == "/.w3proj/derived-from.json"), "{ignore}");
+    assert!(ignore.lines().any(|l| l == "build/") && !ignore.contains(".w3proj"), "{ignore}");
     assert!(!project.join(".w3proj/pathing.json").exists());
-    assert_eq!(fs::read_to_string(project.join(".w3proj/pathing.json.bak")).unwrap(), PATHING, "the old file is kept");
+    assert_eq!(fs::read_to_string(project.join("build/pathing.json.bak")).unwrap(), PATHING, "the old file is kept");
     let txt = |sub: &str| fs::read_to_string(map.join("terrain").join(sub).join("pathing.txt")).unwrap();
     assert_eq!(txt("sw"), "6..7 2 0a 02\n3 3 08 00\n");
     assert_eq!(txt("se"), "0..1 2 0a 02\n");
@@ -1134,6 +1135,37 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
     let split = dir.join("split.w3x");
     ok(&["pack", s(&project), "-o", s(&split)]);
     assert_eq!(fs::read(&flat).unwrap(), fs::read(&split).unwrap(), "the split project packs another map");
+
+    // A project as Studio left it before the local files were in build/ (the store, the record and the choice of open
+    // subterrains in .w3proj/, with their .gitignore lines): a pack moves it over first and packs the same map, and so
+    // does an unpack into it. Neither leaves a generated file in .w3proj/.
+    let old_ignore = "build/\n.*.tmp\n/.w3proj/derived/\n/.w3proj/derived-from.json\n";
+    let make_old = || {
+        fs::create_dir_all(project.join(".w3proj")).unwrap();
+        for name in ["derived", "derived-from.json"] {
+            fs::rename(project.join("build").join(name), project.join(".w3proj").join(name)).unwrap();
+        }
+        fs::write(project.join(".gitignore"), old_ignore).unwrap();
+    };
+    let moved_over = || {
+        assert!(!project.join(".w3proj/derived").exists() && !project.join(".w3proj/derived-from.json").exists(), "left in .w3proj/");
+        assert!(store.join("war3map.wpm").is_file() && project.join("build/derived-from.json").is_file());
+        assert_eq!(fs::read_to_string(project.join(".gitignore")).unwrap(), "build/\n.*.tmp\n");
+    };
+    make_old();
+    let again = dir.join("moved.w3x");
+    let said = ok(&["pack", s(&project), "-o", s(&again)]);
+    assert!(said.contains("moved      .w3proj/derived-from.json"), "{said}");
+    assert_eq!(fs::read(&flat).unwrap(), fs::read(&again).unwrap(), "the moved project packs another map");
+    moved_over();
+    make_old();
+    unpack(&split, &project);
+    moved_over();
+    // A new unpacked project has none there either.
+    let fresh = dir.join("fresh");
+    unpack(&first, &fresh);
+    assert!(!fresh.join(".w3proj").exists() && fresh.join("build/derived-from.json").is_file());
+    assert_eq!(fs::read_to_string(fresh.join(".gitignore")).unwrap(), "build/\n.*.tmp\n");
 
     // An unpack over the split project writes the map's derived files into the store, never into map/.
     fs::remove_file(store.join("war3map.shd")).unwrap();
@@ -1161,7 +1193,7 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
         let mut args = vec!["pack", s(&project), "-o", s(&out)];
         args.extend(extra);
         let o = w3proj(&args);
-        assert!(!o.status.success() && text(&o).contains("war3mapMap.blp is missing in .w3proj/derived/"), "{extra:?}: {}", text(&o));
+        assert!(!o.status.success() && text(&o).contains("war3mapMap.blp is missing in build/derived/"), "{extra:?}: {}", text(&o));
     }
     let said = ok(&["pack", s(&project), "-o", s(&out), "--allow-terrain-only-derived"]);
     assert!(said.contains("war3mapMap.blp left out of the map"), "{said}");
@@ -1176,7 +1208,7 @@ fn a_split_project_keeps_derived_files_and_pathing_out_of_git() {
     fs::write(map.join("terrain/ne/pathing.txt"), "7 3 02 02\n").unwrap();
 
     // Merged: the derived files back in map/, the overrides back in .w3proj/pathing.json, byte for byte.
-    fs::remove_file(project.join(".w3proj/pathing.json.bak")).unwrap();
+    fs::remove_file(project.join("build/pathing.json.bak")).unwrap();
     ok(&["terrain", "merge", s(&project)]);
     for (f, bytes) in DERIVED.iter().zip(&derived) {
         assert_eq!(&fs::read(map.join(f)).unwrap(), bytes, "{f} back in map/");
@@ -1200,7 +1232,8 @@ fn a_flat_project_packs_as_it_is_and_the_next_unpack_splits_it() {
     pack(&fixture(), &first);
     let project = dir.join("project");
     unpack_flat(&first, &project);
-    assert!(project.join("map/war3map.w3e.txt").is_file() && project.join("map/war3map.wpm").is_file() && !project.join(".w3proj/derived").exists());
+    assert!(project.join("map/war3map.w3e.txt").is_file() && project.join("map/war3map.wpm").is_file() && !project.join("build/derived").exists());
+    fs::create_dir_all(project.join(".w3proj")).unwrap();
     fs::write(project.join(".w3proj/pathing.json"), PATHING).unwrap();
     let before = files(&project);
     let second = dir.join("second.w3x");
@@ -1214,7 +1247,7 @@ fn a_flat_project_packs_as_it_is_and_the_next_unpack_splits_it() {
     for gone in ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.wpm"] {
         assert!(!map.join(gone).exists(), "{gone} stayed in map/");
     }
-    assert!(project.join(".w3proj/derived/war3map.wpm").is_file() && !project.join(".w3proj/pathing.json").exists());
+    assert!(project.join("build/derived/war3map.wpm").is_file() && !project.join(".w3proj/pathing.json").exists());
     // A fresh unpack of the same map has the same map/ files but the overrides.
     let fresh = dir.join("fresh");
     unpack(&first, &fresh);
@@ -1286,6 +1319,7 @@ fn terrain_relayout_packs_the_same_map() {
     let project = dir.join("project");
     unpack_flat(&first, &project);
     let flat_text = fs::read(project.join("map/war3map.w3e.txt")).unwrap();
+    fs::create_dir_all(project.join(".w3proj")).unwrap();
     fs::write(project.join(".w3proj/pathing.json"), PATHING).unwrap();
     let mut args = vec!["terrain", "split", s(&project)];
     for r in GRID {
@@ -1293,7 +1327,7 @@ fn terrain_relayout_packs_the_same_map() {
     }
     ok(&args);
     for name in ["war3map.shd", "war3mapMap.blp"] {
-        fs::write(project.join(".w3proj/derived").join(name), name.as_bytes()).unwrap();
+        fs::write(project.join("build/derived").join(name), name.as_bytes()).unwrap();
     }
     let split = dir.join("split.w3x");
     ok(&["pack", s(&project), "-o", s(&split)]);
@@ -1547,7 +1581,7 @@ fn the_merge_hook_checks_the_seams_after_a_merge() {
 
 /// `w3proj cat <project> <file>` prints a file under map/ as the app reads it: a split project's flat files assembled
 /// from map/terrain/ (the very bytes of the packed map's text form, i.e. of the flat project it was unpacked from), a
-/// derived file from .w3proj/derived/, any other file as it is; a file that is nowhere fails. A map archive still works.
+/// derived file from build/derived/, any other file as it is; a file that is nowhere fails. A map archive still works.
 #[test]
 fn cat_reads_a_projects_files_as_the_app_does() {
     let dir = workdir("cat_project");
@@ -1563,7 +1597,7 @@ fn cat_reads_a_projects_files_as_the_app_does() {
     }
     let wpm = w3proj(&["cat", s(&project), "war3map.wpm"]);
     assert!(wpm.status.success() && !project.join("map/war3map.wpm").exists(), "{}", text(&wpm));
-    assert_eq!(wpm.stdout, fs::read(project.join(".w3proj/derived/war3map.wpm")).unwrap());
+    assert_eq!(wpm.stdout, fs::read(project.join("build/derived/war3map.wpm")).unwrap());
     assert!(!w3proj(&["cat", s(&project), "war3map.nothing"]).status.success());
     // Control: from the archive, the binary terrain.
     let archive = w3proj(&["cat", s(&map), "war3map.w3e"]);

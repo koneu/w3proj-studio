@@ -308,10 +308,9 @@ pub fn read_json(project: &std::path::Path) -> Result<Option<Vec<u8>>> {
 /// A name for the backup of `.w3proj/pathing.json` that isn't taken, as the Pathing tool picks one
 /// (app/src/builtin/terrain-pathing/file.ts backupPath): `.bak`, else `.bak2`, `.bak3`…
 pub fn backup_path(project: &std::path::Path) -> Result<std::path::PathBuf> {
-    let p = json_path(project);
     for i in 1..100 {
         let name = format!("pathing.json.bak{}", if i == 1 { String::new() } else { i.to_string() });
-        let b = p.with_file_name(name);
+        let b = project.join("build").join(name);
         if !b.try_exists().map_err(|e| Error::Project(format!("{} can't be checked: {e}", b.display())))? {
             return Ok(b);
         }

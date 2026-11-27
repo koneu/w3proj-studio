@@ -473,7 +473,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   const [sx, sy] = playableCentre(t);
   // The terrain, placed objects and (empty) regions go straight into map/terrain/, one subterrain main over the map: the
   // only layout (docs/terrain-subterrains-spec.md). From here on the editors read and write them by their flat names
-  // (crates/backend flatview.rs), and the derived files written below land in .w3proj/derived/.
+  // (crates/backend flatview.rs), and the derived files written below land in build/derived/.
   await w3.backend.invoke("terrain_create", {
     root,
     files: {
@@ -491,7 +491,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 3, cameras: [] });
   // The trigger folders (map/triggers/), made here: the project has none yet. New items store no ids.
   await w3.workspace.writeTriggers({ file: defaultTriggerFile(o.name), custom: parseWct(defaultWct(), textTriggers(defaultTriggerFile(o.name)).length) }, { create: true });
-  // A map made here has a generated script (trigger-folders spec, section 5): out of git, in .w3proj/derived/, made from
+  // A map made here has a generated script (trigger-folders spec, section 5): out of git, in build/derived/, made from
   // the map's data on saves and checked by `w3proj pack`. map/war3map.j below lands there. A backend that can't switch
   // leaves it a tracked file, as before.
   await w3.backend.invoke("script_set_mode", { root, mode: "generated" }).catch(() => {});

@@ -16,7 +16,7 @@ use crate::project::{write_atomic, MAP_DIR};
 use crate::{Error, Result};
 
 /// The record, in the project folder.
-pub const STAMP_FILE: &str = ".w3proj/derived-from.json";
+pub const STAMP_FILE: &str = "build/derived-from.json";
 
 const FORMAT: &str = "w3proj.derived-from/1";
 
@@ -318,15 +318,15 @@ fn parse(bytes: &[u8], script: bool) -> Option<Option<Sources>> {
 
 // ---- the map script (`crate::trigger_layout` "script": "generated") ----
 //
-// A generated script isn't tracked in git: it lives in the store `.w3proj/derived/` (war3map.j or war3map.lua), and the
+// A generated script isn't tracked in git: it lives in the store `build/derived/` (war3map.j or war3map.lua), and the
 // record's `script` group says what it was made from (`script_sources`). Studio's generator writes it (it needs the
 // game's data); a pack outside the app takes it only when the record says it follows its sources.
 
-/// The map script's names (`.w3proj/derived/` or `map/`).
+/// The map script's names (`build/derived/` or `map/`).
 pub const SCRIPT_FILES: [&str; 2] = ["war3map.j", "war3map.lua"];
 
 /// The record of the script Studio wrote last (app/src/lib/script/guard.ts SCRIPT_STAMP): its hash (`script_hash`).
-pub const SCRIPT_STAMP: &str = ".w3proj/generated-script";
+pub const SCRIPT_STAMP: &str = "build/generated-script";
 
 /// guard.ts scriptHash: FNV-1a over the text's UTF-16 code units, as 8 hex digits.
 pub fn script_hash(text: &str) -> String {
@@ -465,11 +465,11 @@ pub fn check_script(project: &Path) -> Result<Freshness> {
 // ---- where the derived files are: map/ (flat layout) or the local store (split layout) ----
 //
 // In a project whose terrain is split (`map/terrain/`, `crate::terrain_layout`) the derived files aren't tracked in git:
-// they live in `.w3proj/derived/` under the names they have in `map/` (git-ignored, `IGNORED`), and the app's file
+// they live in `build/derived/` under the names they have in `map/` (git-ignored, `IGNORED`), and the app's file
 // layer answers the `map/` names from there (crates/backend flatview.rs). A flat project keeps them in `map/`.
 
 /// The store of a split project's derived files, relative to the project.
-pub const STORE_DIR: [&str; 2] = [".w3proj", "derived"];
+pub const STORE_DIR: [&str; 2] = ["build", "derived"];
 
 /// The derived files' names under `map/` (any case): pathing, shadows, the minimap and its icons (raw or as JSON).
 pub const FILES: [&str; 5] = ["war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.mmp", "war3map.mmp.json"];
@@ -477,11 +477,10 @@ pub const FILES: [&str; 5] = ["war3map.wpm", "war3map.shd", "war3mapMap.blp", "w
 /// What a pack of a split project needs, one entry per file (any of its names).
 const REQUIRED: [&[&str]; 4] = [&["war3map.wpm"], &["war3map.shd"], &["war3mapMap.blp"], &["war3map.mmp", "war3map.mmp.json"]];
 
-/// The `.gitignore` lines a split project needs: the store and the record are local, never committed.
-pub const IGNORED: [&str; 2] = ["/.w3proj/derived/", "/.w3proj/derived-from.json"];
-
-/// The same for a campaign's chapter maps (`maps/<chapter>/`), which are projects of their own with no `.gitignore`.
-pub const CHAPTERS_IGNORED: [&str; 2] = ["/maps/*/.w3proj/derived/", "/maps/*/.w3proj/derived-from.json"];
+/// The `.gitignore` line the local files need (`build/`: pack output, the derived files' store and record, the script
+/// stamp, the choice of open subterrains, backups). Without a leading `/`, it covers a campaign's chapter maps
+/// (`maps/<chapter>/build/`), which are projects of their own with no `.gitignore`.
+pub const IGNORED: [&str; 1] = ["build/"];
 
 /// Whether a file name under `map/` is a derived file's (`FILES`, any case): the name as `FILES` has it.
 pub fn derived_name(name: &str) -> Option<&'static str> {
@@ -607,6 +606,145 @@ pub fn out_of_store(project: &Path) -> Result<Vec<String>> {
     Ok(moved)
 }
 
+// ---- projects from before the local files were in build/ ----
+
+/// What was in `.w3proj/` and is in `build/` now, under the same name: files and folders. The backups of
+/// `pathing.json` (`pathing.json.bak`, `.bak2`, …) go too (`old_local`).
+const LOCAL: [&str; 5] = ["derived", "derived-from.json", "generated-script", "open-subterrains.json", "replaced-scripts"];
+
+/// The `.gitignore` lines Studio wrote while those were in `.w3proj/`, each with what it was for (relative to the
+/// project; `*`: every chapter).
+const OLD_IGNORED: [(&str, &str); 6] = [
+    ("/.w3proj/derived/", ".w3proj/derived"),
+    ("/.w3proj/derived-from.json", ".w3proj/derived-from.json"),
+    ("/.w3proj/open-subterrains.json", ".w3proj/open-subterrains.json"),
+    ("/.w3proj/replaced-scripts/", ".w3proj/replaced-scripts"),
+    ("/maps/*/.w3proj/derived/", "maps/*/.w3proj/derived"),
+    ("/maps/*/.w3proj/derived-from.json", "maps/*/.w3proj/derived-from.json"),
+];
+
+/// A campaign project's chapter map folders; none for a map project.
+fn chapters(project: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let maps = project.join(crate::project::MAPS_DIR);
+    let entries = match fs::read_dir(&maps) {
+        Ok(e) => e,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(Vec::new()),
+        Err(e) => return Err(Error::Project(format!("{} can't be read: {e}", maps.display()))),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.join(crate::project::MANIFEST).is_file() {
+            out.push(path);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// The names under `.w3proj/` of `project` that belong in `build/` and are there.
+fn old_local(project: &Path) -> Result<Vec<String>> {
+    let dir = project.join(".w3proj");
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(Vec::new()),
+        Err(e) => return Err(Error::Project(format!("{} can't be read: {e}", dir.display()))),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if LOCAL.contains(&name.as_str()) || name.starts_with("pathing.json.bak") {
+            out.push(name);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Moves `from` to `to`, a folder file by file. A file that is at `to` already: the same bytes, the old one goes;
+/// others, both stay (the one in `build/` is the one read). The files moved or removed are added to `moved` (`shown`:
+/// `from` relative to the project).
+fn move_into(from: &Path, to: &Path, shown: &str, moved: &mut Vec<String>) -> Result<()> {
+    let failed = |e: std::io::Error| Error::Project(format!("{shown} can't be moved into build/: {e}"));
+    if fs::symlink_metadata(from).map_err(failed)?.is_dir() {
+        for entry in fs::read_dir(from).map_err(failed)? {
+            let name = entry.map_err(failed)?.file_name();
+            move_into(&from.join(&name), &to.join(&name), &format!("{shown}/{}", name.to_string_lossy()), moved)?;
+        }
+        // Only when empty: what couldn't move stays.
+        let _ = fs::remove_dir(from);
+        return Ok(());
+    }
+    match fs::read(to) {
+        Ok(there) => {
+            if there != fs::read(from).map_err(failed)? {
+                return Ok(());
+            }
+            fs::remove_file(from).map_err(failed)?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(dir) = to.parent() {
+                fs::create_dir_all(dir).map_err(failed)?;
+            }
+            fs::rename(from, to).map_err(failed)?;
+        }
+        Err(e) => return Err(failed(e)),
+    }
+    moved.push(shown.to_string());
+    Ok(())
+}
+
+/// A project (and a campaign's chapter maps) from before the local files were in `build/`: they move there from
+/// `.w3proj/`, and `.gitignore` gets `build/` in place of the lines for the old places (one whose file couldn't move
+/// stays). `.gitignore` is seen to first: when it can't be, nothing moves. The old paths of what moved, relative to the
+/// project. Run when a project is opened, packed, synced or converted.
+pub fn move_local(project: &Path) -> Result<Vec<String>> {
+    let mut projects = vec![(String::new(), project.to_path_buf())];
+    for chapter in chapters(project)? {
+        let name = chapter.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        projects.push((format!("{}/{name}/", crate::project::MAPS_DIR), chapter));
+    }
+    let mut found = Vec::new();
+    for (at, dir) in &projects {
+        for name in old_local(dir)? {
+            found.push((format!("{at}.w3proj/{name}"), dir.clone(), name));
+        }
+    }
+    if found.is_empty() {
+        return Ok(Vec::new());
+    }
+    // A chapter map opened by itself has no .gitignore: its campaign's covers it.
+    let has_gitignore = project.join(".gitignore").exists();
+    let in_campaign = project.parent().is_some_and(|p| p.file_name().is_some_and(|n| n == crate::project::MAPS_DIR) && p.parent().is_some_and(|c| c.join(crate::project::MANIFEST).is_file()));
+    if has_gitignore || !in_campaign {
+        ensure_ignored(project)?;
+    }
+    let mut moved = Vec::new();
+    for (shown, dir, name) in found {
+        move_into(&dir.join(".w3proj").join(&name), &dir.join("build").join(&name), &shown, &mut moved)?;
+    }
+    for (_, dir) in &projects {
+        let _ = fs::remove_dir(dir.join(".w3proj"));
+    }
+    drop_old_ignored(project, &projects)?;
+    Ok(moved)
+}
+
+/// Takes `OLD_IGNORED`'s lines whose files are gone out of the project's `.gitignore`; every other line stays as it is.
+fn drop_old_ignored(project: &Path, projects: &[(String, std::path::PathBuf)]) -> Result<()> {
+    let path = project.join(".gitignore");
+    let Ok(text) = fs::read_to_string(&path) else { return Ok(()) };
+    let gone = |was: &str| match was.strip_prefix("maps/*/") {
+        Some(rest) => projects.iter().filter(|(at, _)| !at.is_empty()).all(|(_, dir)| !dir.join(rest).exists()),
+        None => !project.join(was).exists(),
+    };
+    let kept: String = text.split_inclusive('\n').filter(|line| !OLD_IGNORED.iter().any(|(old, was)| line.trim() == *old && gone(was))).collect();
+    if kept != text {
+        write_atomic(&path, kept.as_bytes())?;
+    }
+    Ok(())
+}
+
 /// A split project whose derived files are still in `map/` (split before the store existed): moved into the store, and
 /// its `.gitignore` gets `IGNORED`. Nothing for a flat project. What was moved.
 pub fn migrate(project: &Path) -> Result<Vec<String>> {
@@ -715,11 +853,68 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// A project from before the local files were in build/: they move there, a chapter map's too, and .gitignore gets
+    /// build/ instead of the old lines. What can't take its place (another file is there) stays, with its ignore line;
+    /// a .gitignore that can't be added to moves nothing. Control: what belongs in git stays in .w3proj/.
+    #[test]
+    fn old_local_files_move_into_build() {
+        let dir = std::env::temp_dir().join(format!("w3proj-derived-local-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let chapter = dir.join("maps/One.w3x");
+        fs::create_dir_all(&chapter).unwrap();
+        fs::write(chapter.join(crate::project::MANIFEST), "").unwrap();
+        let put = |rel: &str, text: &str| {
+            let p = dir.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, text).unwrap();
+        };
+        let old = [
+            ".w3proj/derived/war3map.wpm",
+            ".w3proj/derived-from.json",
+            ".w3proj/generated-script",
+            ".w3proj/open-subterrains.json",
+            ".w3proj/replaced-scripts/war3map.20261125-143005.j",
+            ".w3proj/pathing.json.bak2",
+            "maps/One.w3x/.w3proj/derived/war3map.j",
+        ];
+        for rel in old {
+            put(rel, rel);
+        }
+        put(".w3proj/settings.json", "{}");
+        let ignore = "mine\nbuild/\n/.w3proj/derived/\n/.w3proj/derived-from.json\n/maps/*/.w3proj/derived/\n/.w3proj/open-subterrains.json\n";
+        fs::write(dir.join(".gitignore"), b"\xff not text").unwrap();
+        assert!(move_local(&dir).unwrap_err().to_string().contains("isn't UTF-8"));
+        assert!(old.iter().all(|rel| dir.join(rel).is_file()) && !dir.join("build").exists(), "nothing moved");
+
+        put(".gitignore", ignore);
+        // Another file at the new place of the stamp: both stay. The same one at the record's: the old one goes.
+        put("build/generated-script", "newer");
+        put("build/derived-from.json", ".w3proj/derived-from.json");
+        let moved = move_local(&dir).unwrap();
+        assert_eq!(moved.len(), old.len() - 1, "{moved:?}");
+        for rel in old.iter().filter(|r| **r != ".w3proj/generated-script") {
+            assert!(!dir.join(rel).exists(), "{rel} stayed");
+            assert_eq!(fs::read_to_string(dir.join(rel.replace(".w3proj/", "build/"))).unwrap(), *rel);
+        }
+        assert_eq!(fs::read_to_string(dir.join("build/generated-script")).unwrap(), "newer");
+        assert!(dir.join(".w3proj/generated-script").is_file() && dir.join(".w3proj/settings.json").is_file());
+        assert!(!chapter.join(".w3proj").exists(), "an emptied .w3proj/ goes");
+        assert_eq!(fs::read_to_string(dir.join(".gitignore")).unwrap(), "mine\nbuild/\n");
+        assert!(move_local(&dir).unwrap().is_empty(), "nothing more to move");
+
+        // A line whose file couldn't move stays.
+        put(".w3proj/derived-from.json", "other");
+        put(".gitignore", ignore);
+        move_local(&dir).unwrap();
+        assert_eq!(fs::read_to_string(dir.join(".gitignore")).unwrap(), "mine\nbuild/\n/.w3proj/derived-from.json\n");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_record_that_cant_be_read_is_not_taken_for_none() {
         let dir = project("bad");
         for bad in ["", "{ not json", "{\"format\":\"other\",\"files\":{}}", "{\"format\":\"w3proj.derived-from/1\",\"files\":{\"a\":1}}"] {
-            fs::create_dir_all(dir.join(".w3proj")).unwrap();
+            fs::create_dir_all(dir.join("build")).unwrap();
             fs::write(dir.join(STAMP_FILE), bad).unwrap();
             assert!(matches!(check(&dir).unwrap(), Freshness::Unreadable(_)), "{bad:?}");
         }

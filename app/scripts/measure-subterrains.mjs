@@ -234,8 +234,8 @@ async function measure(o, source, scenario) {
   const open = scenario === "all" ? names : [o.one];
   if (!names.includes(o.one)) throw new Error(`no subterrain ${o.one} (there are ${names.join(", ")})`);
   if (scenario === "one") {
-    mkdirSync(join(dir, ".w3proj"), { recursive: true });
-    writeFileSync(join(dir, ".w3proj", "open-subterrains.json"), JSON.stringify({ format: "w3proj.open-subterrains/1", open }, null, 2) + "\n");
+    mkdirSync(join(dir, "build"), { recursive: true });
+    writeFileSync(join(dir, "build", "open-subterrains.json"), JSON.stringify({ format: "w3proj.open-subterrains/1", open }, null, 2) + "\n");
   }
   const sub = layout.subterrains.find((s) => s.name === o.one);
   const runWork = join(o.work, `app-${scenario}`);

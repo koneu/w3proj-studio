@@ -1,6 +1,6 @@
-//! A campaign project's `.gitignore` also ignores each chapter's `.w3proj/derived/` store and derived-from record:
+//! A campaign project's `.gitignore` (`build/`) covers each chapter's `build/derived/` store and derived-from record:
 //! the chapter projects have no `.gitignore` of their own. Unpacking again (the sync) adds the lines to a campaign
-//! project made before. Control: a path that isn't derived stays unignored.
+//! project made before that lacks the line. Control: a path that isn't derived stays unignored.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,16 +50,16 @@ fn a_campaign_project_ignores_every_chapters_derived_store() {
     w3proj::unpack(&w3n, &root, &codecs, &w3proj::UnpackOptions::default()).unwrap();
     assert!(root.join("maps/One.w3x/w3proj.toml").is_file(), "the chapter became a project");
     Command::new("git").arg("-C").arg(&root).arg("init").arg("-q").status().unwrap();
-    for rel in ["maps/One.w3x/.w3proj/derived/x", "maps/One.w3x/.w3proj/derived-from.json", ".w3proj/derived/x"] {
+    for rel in ["maps/One.w3x/build/derived/x", "maps/One.w3x/build/derived-from.json", "build/derived/x"] {
         assert!(ignored(&root, rel), "{rel} isn't ignored");
     }
     assert!(!ignored(&root, "maps/One.w3x/map/war3map.w3i"), "control: a map file stays tracked");
 
     // A campaign project from before: the lines are missing; the sync adds them.
-    let old = fs::read_to_string(root.join(".gitignore")).unwrap().replace("/maps/*/.w3proj/derived/\n", "").replace("/maps/*/.w3proj/derived-from.json\n", "");
+    let old = fs::read_to_string(root.join(".gitignore")).unwrap().replace("build/\n", "");
     fs::write(root.join(".gitignore"), old).unwrap();
-    assert!(!ignored(&root, "maps/One.w3x/.w3proj/derived/x"));
+    assert!(!ignored(&root, "maps/One.w3x/build/derived/x"));
     w3proj::unpack(&w3n, &root, &codecs, &w3proj::UnpackOptions::default()).unwrap();
-    assert!(ignored(&root, "maps/One.w3x/.w3proj/derived/x"), "the sync adds the lines");
+    assert!(ignored(&root, "maps/One.w3x/build/derived/x"), "the sync adds the line");
     let _ = fs::remove_dir_all(&dir);
 }

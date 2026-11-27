@@ -2,6 +2,8 @@
 
 Companion to [terrain-subterrains-spec.md](terrain-subterrains-spec.md). Both specs share one mechanism: a layout-aware read/write layer, derived files kept out of git in `.w3proj/`, and `pack` refusing stale ones. Where this spec says "as in the terrain spec" it means that mechanism, not a second copy of it.
 
+> **Local files are in `build/` (2026-11-27):** where this spec says `.w3proj/derived/`, `.w3proj/derived-from.json` or `.w3proj/generated-script`, the files are now in `build/` under the same names, ignored by the one `.gitignore` line `build/`.
+
 ## Goal & Motivation
 
 Today the trigger tree is stored in two monolithic files:

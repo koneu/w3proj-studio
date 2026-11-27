@@ -266,7 +266,7 @@ test("with the Checkpoints extension off, AI edits go on and the user is told on
 function scripted(start: Record<string, string>) {
   const files = new Map(Object.entries(start));
   const state = { pending: false, force: false, settles: 0, logged: [] as string[] };
-  const J = "map/war3map.j", STAMP = ".w3proj/generated-script", WTG = "map/war3map.wtg.json";
+  const J = "map/war3map.j", STAMP = "build/generated-script", WTG = "map/war3map.wtg.json";
   const made = (wtg: string | undefined) => `script of ${wtg}`;
   const hash = (t: string | undefined) => `#${t}`;
   const flush = () => {
@@ -292,7 +292,7 @@ function scripted(start: Record<string, string>) {
 }
 
 test("undo puts back the map script the edit's regeneration replaced, and its stamp", async () => {
-  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "written by hand", ".w3proj/generated-script": "#other" });
+  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "written by hand", "build/generated-script": "#other" });
   // The edit's regeneration replaces it (as after "Replace the script").
   s.state.force = true;
   await s.log.edit("Triggers", put(s.WTG, "b"));
@@ -307,7 +307,7 @@ test("undo puts back the map script the edit's regeneration replaced, and its st
 });
 
 test("a script changed after the edit isn't put back over; the rest of the edit is undone", async () => {
-  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "script of a", ".w3proj/generated-script": "#script of a" });
+  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "script of a", "build/generated-script": "#script of a" });
   await s.log.edit("Triggers", put(s.WTG, "b"));
   s.flush();
   assert.equal(s.files.get(s.J), s.made("b"));
@@ -321,7 +321,7 @@ test("a script changed after the edit isn't put back over; the rest of the edit 
 });
 
 test("a group puts back the script as it was before its first edit; edits of other files don't wait for the script", async () => {
-  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "mine", ".w3proj/generated-script": "#x", "map/other.txt": "1" });
+  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "mine", "build/generated-script": "#x", "map/other.txt": "1" });
   await s.log.edit("Other", put("map/other.txt", "2"));
   assert.equal(s.state.settles, 0, "nothing the script is made from changed");
   s.state.force = true;

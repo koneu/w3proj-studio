@@ -34,19 +34,22 @@ export const mayPaint = (f: PathingFile | null, replacing: boolean) => !!f && (f
 /** What is asked before painting over a file it can't use, or null when nothing needs asking. The first action replaces. */
 export function replaceQuestion(f: PathingFile | null, path: string, width: number, height: number): { message: string; actions: [string, string] } | null {
   if (f?.state === "unreadable") {
-    return { message: `${path} is there, but ${f.why}, so painting is off: a save would write over it. Fix the file and open the map again, or start a new overrides file; the old one is kept as a backup next to it (${path}.bak).`, actions: ["Start a new file", "Cancel"] };
+    return { message: `${path} is there, but ${f.why}, so painting is off: a save would write over it. Fix the file and open the map again, or start a new overrides file; the old one is kept as a backup (${backupBase(path)}.bak).`, actions: ["Start a new file", "Cancel"] };
   }
   if (f?.state === "otherSize") {
-    return { message: `${path} has ${f.file.cells.length.toLocaleString()} overrides for a ${f.file.width}×${f.file.height} pathing map; this map's is ${width}×${height}. Painting replaces them with this map's: the file is kept as a backup first (${path}.bak).`, actions: ["Replace", "Cancel"] };
+    return { message: `${path} has ${f.file.cells.length.toLocaleString()} overrides for a ${f.file.width}×${f.file.height} pathing map; this map's is ${width}×${height}. Painting replaces them with this map's: the file is kept as a backup first (${backupBase(path)}.bak).`, actions: ["Replace", "Cancel"] };
   }
   return null;
 }
 
-/** A name for the backup of `path` that isn't taken: `.bak`, else `.bak2`, `.bak3`… An answer that can't be had
+/** Where the first backup of `path` goes: in build/, which git ignores (crates/w3proj terrain_pathing::backup_path). */
+const backupBase = (path: string) => `build/${path.slice(path.lastIndexOf("/") + 1)}`;
+
+/** A name for the backup of `path` that isn't taken: `build/<name>.bak`, else `.bak2`, `.bak3`… An answer that can't be had
  *  (`exists` throws) stops it: no backup, so nothing is written. */
 export async function backupPath(path: string, exists: (p: string) => Promise<boolean>): Promise<string> {
   for (let i = 1; i < 100; i++) {
-    const p = `${path}.bak${i === 1 ? "" : i}`;
+    const p = `${backupBase(path)}.bak${i === 1 ? "" : i}`;
     if (!(await exists(p))) return p;
   }
   throw new Error(`${path}: there are 99 backups of it already; move some away first.`);

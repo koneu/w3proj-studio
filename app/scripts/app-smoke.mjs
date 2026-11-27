@@ -84,7 +84,7 @@ function projectMapFile(path) {
 
 /** A file under a project's map/ as the app reads it (`w3proj cat <project> <file>`, the app's backend): every project
  *  has the split terrain layout, so war3map.w3e.txt, the placed objects and the regions are assembled from map/terrain/,
- *  and pathing, shadows and the minimap come from .w3proj/derived/. A file on disk by that name (any other file, a
+ *  and pathing, shadows and the minimap come from build/derived/. A file on disk by that name (any other file, a
  *  project that stayed flat) is read as it is; one that is neither throws, as readFileSync does. */
 function readMapFile(path, encoding) {
   const at = existsSync(path) ? null : projectMapFile(path);
@@ -201,14 +201,14 @@ function fixtureTriggerData(root) {
   return mini(root) || chapters.some(mini) ? ["--trigger-data", join(repo, "tests", "fixtures", "TriggerData.txt")] : [];
 }
 /** Where the map script of the project at `root` is on disk: map/war3map.j (`name`), or for a generated script
- *  (map/triggers/triggers.json "script": "generated", as a new map has it) its file in .w3proj/derived/. A triggers.json
+ *  (map/triggers/triggers.json "script": "generated", as a new map has it) its file in build/derived/. A triggers.json
  *  that is there but can't be read throws. */
 function scriptOnDisk(root, name = "war3map.j") {
   const layout = join(root, "map", "triggers", "triggers.json");
   const generated = existsSync(layout) && JSON.parse(readFileSync(layout, "utf8")).script === "generated";
-  return generated ? join(root, ".w3proj", "derived", name) : join(root, "map", name);
+  return generated ? join(root, "build", "derived", name) : join(root, "map", name);
 }
-/** The project at `root` (the open one) with its map script as a tracked file (`kept`) or generated in .w3proj/derived/
+/** The project at `root` (the open one) with its map script as a tracked file (`kept`) or generated in build/derived/
  *  (the backend's script_set_mode: the script moves as it is), for checks of what each mode does. */
 const setScriptMode = (page, root, mode) => page.evaluate(`w3.backend.invoke("script_set_mode", { root: ${lit(root)}, mode: ${lit(mode)} }).then(() => w3.workspace.refresh())`);
 /** The map/ files of the project at `root` by hash (snapshot), with its triggers as the map holds them: map/triggers/ or
@@ -292,7 +292,7 @@ function triggersOnDisk(root) {
 
 /** What World Editor 3.0.1 writes for a new map, by project file. */
 // A new map's files under map/: its terrain, placed objects and regions in the split layout (one subterrain main), no
-// flat file of them; its derived files in .w3proj/derived/ (NEW_MAP_DERIVED), none in map/.
+// flat file of them; its derived files in build/derived/ (NEW_MAP_DERIVED), none in map/.
 const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.w3c.json", "triggers/triggers.json", "war3map.wts", "war3map.w3l.json", "war3map.w3grp", "conversation.json",
   "terrain/terrain.json", "terrain/main/terrain.txt", "terrain/main/doodads.json", "terrain/main/units.json", "terrain/main/regions.json"];
 const NEW_MAP_FLAT = ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"];
@@ -354,12 +354,12 @@ async function newMaps(page, found) {
       const scriptFile = args.script === "lua" ? "war3map.lua" : "war3map.j";
       for (const n of NEW_MAP_FILES) if (!names.has(n)) fail(`no ${n}`);
       for (const n of NEW_MAP_FLAT) if (names.has(n)) fail(`map/${n} is on disk: a new map's terrain is in map/terrain/ only`);
-      for (const n of NEW_MAP_DERIVED) if (names.has(n) || !existsSync(join(root, ".w3proj", "derived", n))) fail(`its ${n} isn't in .w3proj/derived/ alone (in map/: ${names.has(n)})`);
-      // A new map's script is generated (trigger-folders spec, section 5): in .w3proj/derived/, out of git, recorded.
+      for (const n of NEW_MAP_DERIVED) if (names.has(n) || !existsSync(join(root, "build", "derived", n))) fail(`its ${n} isn't in build/derived/ alone (in map/: ${names.has(n)})`);
+      // A new map's script is generated (trigger-folders spec, section 5): in build/derived/, out of git, recorded.
       const mode = JSON.parse(readFileSync(join(root, "map", "triggers", "triggers.json"), "utf8")).script;
       if (mode !== "generated") fail(`map/triggers/triggers.json says "script": ${lit(mode)}, not "generated"`);
-      if (names.has(scriptFile) || !existsSync(join(root, ".w3proj", "derived", scriptFile))) fail(`its ${scriptFile} isn't in .w3proj/derived/ alone (in map/: ${names.has(scriptFile)})`);
-      if (!/^\/\.w3proj\/derived\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/derived/");
+      if (names.has(scriptFile) || !existsSync(join(root, "build", "derived", scriptFile))) fail(`its ${scriptFile} isn't in build/derived/ alone (in map/: ${names.has(scriptFile)})`);
+      if (!/^build\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore build/derived/");
       // The agent file (w3proj::agent_file): in the root, for a map project with the split terrain layout, never in map/.
       const agents = existsSync(join(root, "AGENTS.md")) ? readFileSync(join(root, "AGENTS.md"), "utf8") : "";
       if (!agents.includes("terrain/terrain.json") || !agents.includes("w3proj rebuild")) fail(`no AGENTS.md for the split layout in the project root (${agents.length} bytes)`);
@@ -1095,7 +1095,7 @@ async function waterPathing(page, found) {
   if (err) fail(`commit: ${err}`);
   const left = git("status", "--porcelain").stdout.trim();
   if (left) fail(`a commit straight after a tool's edit left changes uncommitted: ${left.split(/[\r\n]+/).slice(0, 4).join(" | ")}`);
-  // The split layout keeps the pathing map in .w3proj/derived/, out of git: the commit has the water's terrain, and the
+  // The split layout keeps the pathing map in build/derived/, out of git: the commit has the water's terrain, and the
   // rebuilt pathing map is in the store (the derived files' record follows the commit's terrain).
   const stat = git("show", "--stat", "--format=", "HEAD").stdout;
   if (!stat.includes("terrain/main/terrain.txt")) fail(`the commit straight after a tool's edit has no terrain: ${stat.trim().slice(0, 200)}`);
@@ -6080,8 +6080,8 @@ async function pathingImport(page, found) {
   try {
   const fail = (what) => found.push(`pathing import: ${what}`);
   const k = await heightKit(page, "PathingImport");
-  // The split layout keeps it in .w3proj/derived/ (read by its map/ name), where another program's edit goes too.
-  const wpmFile = join(k.root, ".w3proj", "derived", "war3map.wpm");
+  // The split layout keeps it in build/derived/ (read by its map/ name), where another program's edit goes too.
+  const wpmFile = join(k.root, "build", "derived", "war3map.wpm");
   const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
   // The import reads war3map.wpm and derives the pathing before it answers (an info, a warning or an error): waited for,
   // as settled() can come first (seen on Windows: the count read "0 cells", then "Imported 2 cells" came).
@@ -6725,8 +6725,8 @@ async function resizeUnreadable(page, found) {
     };
 
     // war3map.shd: a folder in its place (unreadable on every system; not a file the project lists).
-    // The split layout keeps it in .w3proj/derived/ (read by its map/ name).
-    const shdPath = join(dirname(map), ".w3proj", "derived", "war3map.shd");
+    // The split layout keeps it in build/derived/ (read by its map/ name).
+    const shdPath = join(dirname(map), "build", "derived", "war3map.shd");
     const shd = readFileSync(shdPath);
     rmSync(shdPath);
     mkdirSync(shdPath);
@@ -6773,7 +6773,7 @@ async function resizeUnreadable(page, found) {
 }
 
 /** Opening a project still in the flat terrain layout (map/war3map.w3e.txt and the flat object files) converts it into
- *  map/terrain/ (one subterrain main), its derived files into .w3proj/derived/, and says so once (layoutconvert.ts,
+ *  map/terrain/ (one subterrain main), its derived files into build/derived/, and says so once (layoutconvert.ts,
  *  crates/backend flatview.rs convert_on_open); opened again it says nothing. A terrain kept raw can't be converted:
  *  the project opens as it is, with one warning saying why. A campaign's flat chapter map is converted with it. */
 async function flatProjectOpens(page, found) {
@@ -6801,7 +6801,7 @@ async function flatProjectOpens(page, found) {
       const now = await page.evaluate(`w3.workspace.readText(${lit(`map/${f}`)})`).catch((e) => `unreadable: ${e}`);
       if (now !== before[f]) fail(`map/${f} reads otherwise after the conversion`);
     }
-    if (existsSync(join(flat, "map", "war3map.wpm")) || !existsSync(join(flat, ".w3proj", "derived", "war3map.wpm"))) fail("war3map.wpm didn't move into .w3proj/derived/");
+    if (existsSync(join(flat, "map", "war3map.wpm")) || !existsSync(join(flat, "build", "derived", "war3map.wpm"))) fail("war3map.wpm didn't move into build/derived/");
     const told = await until("the message about the conversion", async () => { const t = await toasts(); return /old single-file layout/.test(t) ? t : null; }, 10000).catch(async () => { fail(`nothing said the project was converted: ${(await toasts()).slice(0, 300)}`); return ""; });
     if (told && (told.match(/old single-file layout/g) ?? []).length !== 1) fail(`the conversion was told more than once: ${told.slice(0, 400)}`);
     const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas")`), 30000);
@@ -6963,10 +6963,10 @@ async function subterrains(page, found) {
 
     // Stage 3: pathing painted in the split project with the Pathing brush in the middle of the map (where the four
     // subterrains meet) goes into the subterrains' pathing.txt, not .w3proj/pathing.json; the save's derived files go
-    // into .w3proj/derived/ (git-ignored), none into map/; the project packs, by the app and by `w3proj pack` without a
+    // into build/derived/ (git-ignored), none into map/; the project packs, by the app and by `w3proj pack` without a
     // flag, with the painted cell blocked in the map's pathing.
     {
-      const store = join(root, ".w3proj", "derived");
+      const store = join(root, "build", "derived");
       const hands = new Hands(page);
       await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Pathing").click()`);
       await until("the Pathing tab", () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === "Pathing"`), 5000);
@@ -6987,10 +6987,10 @@ async function subterrains(page, found) {
       const assembledPathing = await page.evaluate(`w3.workspace.readText(".w3proj/pathing.json").then((t) => JSON.parse(t).cells.length, (e) => String(e))`);
       if (assembledPathing !== shown) fail(`the subterrains' pathing.txt read back as ${lit(assembledPathing)} overrides, the tool showed ${shown}`);
       for (const f of ["war3map.wpm", "war3map.shd", "war3mapMap.blp"]) {
-        if (!existsSync(join(store, f))) fail(`the save left no .w3proj/derived/${f}`);
+        if (!existsSync(join(store, f))) fail(`the save left no build/derived/${f}`);
         if (existsSync(join(map, f))) fail(`the save wrote map/${f} in a split project`);
       }
-      if (!/^\/\.w3proj\/derived\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/derived/");
+      if (!/^build\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore build/derived/");
       if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the terrain editor is unsaved after the Pathing save");
       const cell = (b, x, y) => b[16 + (128 + y) * b.readUInt32LE(8) + 128 + x];
       const appMap = join(folder, "subterrains-app.w3x");
@@ -7002,7 +7002,7 @@ async function subterrains(page, found) {
       for (const out of [appMap, cliMap].filter((m) => existsSync(m))) {
         const wpm = spawnSync(cli, ["cat", out, "war3map.wpm"], { maxBuffer: 1 << 26 });
         if (wpm.status !== 0) { fail(`no war3map.wpm in ${out}`); continue; }
-        if (!wpm.stdout.equals(readFileSync(join(store, "war3map.wpm")))) fail(`the war3map.wpm in ${out} isn't .w3proj/derived/war3map.wpm`);
+        if (!wpm.stdout.equals(readFileSync(join(store, "war3map.wpm")))) fail(`the war3map.wpm in ${out} isn't build/derived/war3map.wpm`);
         if (!(cell(wpm.stdout, 0, 0) & 0x02)) fail(`the painted middle cell can be walked in ${out} (flags ${cell(wpm.stdout, 0, 0).toString(16)})`);
       }
       await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select")?.click()`);
@@ -7142,23 +7142,23 @@ async function subterrains(page, found) {
       if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the partial terrain editor is unsaved after its own save");
       const editorSaveChanged = others.filter((s, i) => folderState(s) !== before[i]).map((s) => s.name);
       if (editorSaveChanged.length) fail(`the partial terrain editor's save changed ${editorSaveChanged.join(", ")}`);
-      const partialRecord = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
+      const partialRecord = JSON.parse(readFileSync(join(root, "build", "derived-from.json"), "utf8"));
       if (partialRecord.files?.["?closed-subterrains"] !== "3") fail(`the derived files' record after the partial save: ${lit(partialRecord.files?.["?closed-subterrains"])}`);
       const cliRefused = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",join(folder, "subterrains-partial.w3x"), "--keep-script"], { encoding: "utf8" });
       if (cliRefused.status === 0 || !/3 subterrains were closed/.test(cliRefused.stdout + cliRefused.stderr)) fail(`\`w3proj pack\` after a partial save: exit ${cliRefused.status}, ${(cliRefused.stdout + cliRefused.stderr).trim().slice(-300)}`);
       const appRefused = await run("w3.project.pack");
       if (!appRefused || !/3 of the 4 subterrains are closed/.test(appRefused)) fail(`the app's Pack with subterrains closed: ${lit(appRefused)}`);
       await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
-      if (!/^\/\.w3proj\/open-subterrains\.json$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/open-subterrains.json");
+      if (!/^build\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore build/open-subterrains.json");
       // All open again: the editor reopens whole and makes the derived files again; then `w3proj pack` takes them.
       const all = await run("w3.terrainLayout.openSubterrains", { all: true });
       if (all) fail(`Open Subterrains (all) failed: ${all}`);
-      if (existsSync(join(root, ".w3proj", "open-subterrains.json"))) fail("opening all left .w3proj/open-subterrains.json");
+      if (existsSync(join(root, "build", "open-subterrains.json"))) fail("opening all left build/open-subterrains.json");
       await editorUp();
       await settled(page);
       await page.evaluate(`w3.commands.execute("w3.terrain.settle")`);
       await settled(page);
-      const fresh = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
+      const fresh = JSON.parse(readFileSync(join(root, "build", "derived-from.json"), "utf8"));
       if (fresh.files?.["?closed-subterrains"] !== undefined) fail("opened whole, the editor didn't make the derived files again (the record still counts closed subterrains)");
       const cliPack = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",join(folder, "subterrains-whole.w3x"), "--keep-script"], { encoding: "utf8" });
       if (cliPack.status !== 0) fail(`\`w3proj pack\` after opening all again refused: ${(cliPack.stdout + cliPack.stderr).trim().slice(-400)}`);
@@ -7277,7 +7277,7 @@ async function subterrains(page, found) {
         // The same resize with only nw open (bug: refused, "open them all first"): every subterrain is opened for it and
         // nw alone again afterwards; the map's files are those of the resize with all open. An AI edit landing among the
         // resize's writes is refused, saying why, not lost. Undo Resize, also with nw alone open, puts every file back.
-        const choice = () => (existsSync(join(root, ".w3proj", "open-subterrains.json")) ? JSON.parse(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8")).open : "all");
+        const choice = () => (existsSync(join(root, "build", "open-subterrains.json")) ? JSON.parse(readFileSync(join(root, "build", "open-subterrains.json"), "utf8")).open : "all");
         const partialNow = () => page.evaluate(`!!document.querySelector(".terrain-partial-badge:not([hidden])")`);
         const opened = await run("w3.terrainLayout.openSubterrains", { names: ["nw"] });
         if (opened) fail(`Open Subterrains (nw) failed: ${opened}`);
@@ -7484,7 +7484,7 @@ async function dataSafety(page, found) {
   const fail = (what) => found.push(`data safety: ${what}`);
   const k = await heightKit(page, "DataSafety");
   const { hands, root } = k;
-  const pathing = join(root, ".w3proj", "pathing.json");
+  const pathing = join(root, ".w3proj", "pathing.json"), bak = join(root, "build", "pathing.json.bak");
   const txt = join(root, "map", "terrain", "main", "pathing.txt");
   const read = (p) => (existsSync(p) ? readDiskFile(p, "utf8") : null);
   const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
@@ -7543,7 +7543,7 @@ async function dataSafety(page, found) {
     if (!fresh || fresh.width !== 256 || !(fresh.cells?.length > 0)) fail(`after choosing a new file the save wrote ${lit(fresh)?.slice(0, 120)} (pathing.txt: ${lit(read(txt))?.slice(0, 80)})`);
     if (read(txt)?.includes("garbage")) fail("the new pathing.txt still holds the broken line");
     const kept = (text) => `# map/terrain/main/pathing.txt\n${text}`;
-    if (read(`${pathing}.bak`) !== kept(broken)) fail(`the broken pathing.txt wasn't kept in pathing.json.bak (${lit(read(`${pathing}.bak`))})`);
+    if (read(bak) !== kept(broken)) fail(`the broken pathing.txt wasn't kept in pathing.json.bak (${lit(read(bak))})`);
     if (existsSync(pathing)) fail("the save wrote .w3proj/pathing.json in a split project");
     // ---- 1c. Broken once more: Cancel writes nothing; a new file backs it up under a name not yet taken ----
     const brokenAgain = "nothing of this is a cell\n";
@@ -7560,8 +7560,8 @@ async function dataSafety(page, found) {
     await stroke();
     const replaced = await overrides();
     if (replaced?.width !== 256 || !(replaced.cells?.length > 0)) fail(`the second new file is ${lit(replaced)?.slice(0, 120)}`);
-    if (read(`${pathing}.bak2`) !== kept(brokenAgain)) fail(`the second broken pathing.txt wasn't kept in pathing.json.bak2 (${lit(read(`${pathing}.bak2`))})`);
-    if (read(`${pathing}.bak`) !== kept(broken)) fail("the second backup wrote over the first");
+    if (read(`${bak}2`) !== kept(brokenAgain)) fail(`the second broken pathing.txt wasn't kept in pathing.json.bak2 (${lit(read(`${bak}2`))})`);
+    if (read(bak) !== kept(broken)) fail("the second backup wrote over the first");
     } catch (e) {
       fail(`part 1 (pathing overrides): ${e.message ?? e}`);
     }
@@ -10798,7 +10798,7 @@ async function derivedAfterDeletes(page, found) {
   mkdirSync(dir, { recursive: true });
   let root = "";
   const dooFile = () => join(root, "map", "war3map.doo.json"), w3dFile = () => join(root, "map", "war3map.w3d.json");
-  const wpmFile = () => join(root, "map", "war3map.wpm"), record = () => join(root, ".w3proj", "derived-from.json");
+  const wpmFile = () => join(root, "map", "war3map.wpm"), record = () => join(root, "build", "derived-from.json");
   const pack = (label) => {
     const map = join(dir, `${label}.w3x`);
     const r = spawnSync(cli, ["pack", root, ...fixtureTriggerData(root), "-o",map], { encoding: "utf8" });
@@ -11028,10 +11028,10 @@ async function rebuildCli(page, found) {
     await tool("rebuild_map");
     await settled(page);
     await page.evaluate(`w3.editors.closeAll()`);
-    // A new map's script is generated: in .w3proj/derived/, never in map/.
-    if (existsSync(join(root, "map", "war3map.j"))) fail("the new map has a tracked map/war3map.j; its script should be generated (.w3proj/derived/)");
-    const SCRIPT = ".w3proj/derived/war3map.j";
-    const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", SCRIPT, "map/war3map.w3i.json", ".w3proj/derived-from.json", ".w3proj/generated-script"];
+    // A new map's script is generated: in build/derived/, never in map/.
+    if (existsSync(join(root, "map", "war3map.j"))) fail("the new map has a tracked map/war3map.j; its script should be generated (build/derived/)");
+    const SCRIPT = "build/derived/war3map.j";
+    const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", SCRIPT, "map/war3map.w3i.json", "build/derived-from.json", "build/generated-script"];
     const read = (r, f) => (mapFileExists(join(r, f)) ? readMapFile(join(r, f)) : null);
     const before = Object.fromEntries(FILES.map((f) => [f, read(root, f)]));
     // The edit outside the app (as an AI editing the text files would): the rock and the footman move.
@@ -11742,7 +11742,7 @@ const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); 
 const hash = (p) => createHash("sha256").update(readMapFile(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
 /** A project's map/ files by path (snapshot), with the flat terrain, object and derived files as the app reads them in
- *  the split layout (map/terrain/ and .w3proj/derived/ hold them). */
+ *  the split layout (map/terrain/ and build/derived/ hold them). */
 const mapSnapshot = (root) => {
   const files = snapshot(join(root, "map"));
   for (const name of ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.mmp.json"]) {
@@ -16293,7 +16293,7 @@ async function scriptGuard(page, found) {
   const fail = (what) => found.push(`script guard: ${what}`);
   const k = await heightKit(page, "ScriptGuard");
   const script = () => readFileSync(scriptOnDisk(k.root), "utf8");
-  const stampFile = join(k.root, ".w3proj", "generated-script");
+  const stampFile = join(k.root, "build", "generated-script");
   const settle = () => page.evaluate(`w3.commands.execute("w3.script.settle")`);
   /** Saves the regions file with one region of this name (as an editor's save does: through the workspace). */
   const saveRegion = async (name) => {
@@ -16303,7 +16303,7 @@ async function scriptGuard(page, found) {
     await settle();
   };
   await settle();
-  // The guard is a tracked script's (a new map's is generated, in .w3proj/derived/, which nobody edits by hand).
+  // The guard is a tracked script's (a new map's is generated, in build/derived/, which nobody edits by hand).
   await setScriptMode(page, k.root, "kept");
   if (!existsSync(join(k.root, "map", "war3map.j"))) return fail("switched to a tracked script, map/war3map.j isn't there (control)");
   // The questions about a kept script come through notify (closed when another project opens).
@@ -16459,7 +16459,7 @@ async function scriptQuestionsOnSwitch(page, found) {
   }
 }
 
-/** The generated map script (trigger-folders spec, section 5; a new map has one): 1. it lives in .w3proj/derived/, never
+/** The generated map script (trigger-folders spec, section 5; a new map has one): 1. it lives in build/derived/, never
  *  in map/, and a save makes it again and records its sources, which `w3proj pack` accepts (and refuses once a source
  *  changes outside the app). 2. Regenerate Map Script… on a tracked (kept) script names the function it would lose and
  *  changes nothing on Cancel; agreed, a checkpoint first, then the script moves out of map/ into the store and is made
@@ -16469,7 +16469,7 @@ async function scriptGenerated(page, found) {
   try {
   const fail = (what) => found.push(`script generated: ${what}`);
   const k = await heightKit(page, "ScriptGenerated");
-  const store = join(k.root, ".w3proj", "derived", "war3map.j"), tracked = join(k.root, "map", "war3map.j");
+  const store = join(k.root, "build", "derived", "war3map.j"), tracked = join(k.root, "map", "war3map.j");
   const settle = () => page.evaluate(`w3.commands.execute("w3.script.settle")`);
   const state = () => page.evaluate(`w3.backend.invoke("script_state", { root: ${lit(k.root)} })`);
   const log = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
@@ -16485,7 +16485,7 @@ async function scriptGenerated(page, found) {
   try {
     await settle();
     // ---- 1. In the store, made again on a save, recorded; the CLI's pack takes it, and refuses it once stale ------------
-    if (existsSync(tracked) || !existsSync(store)) return fail(`the new map's script: map/war3map.j ${existsSync(tracked) ? "is" : "isn't"} there, .w3proj/derived/war3map.j ${existsSync(store) ? "is" : "isn't"}`);
+    if (existsSync(tracked) || !existsSync(store)) return fail(`the new map's script: map/war3map.j ${existsSync(tracked) ? "is" : "isn't"} there, build/derived/war3map.j ${existsSync(store) ? "is" : "isn't"}`);
     await saveRegion("Generated Region");
     if (!/gg_rct_Generated_Region/.test(readFileSync(store, "utf8"))) fail("saving a region didn't make the generated script again");
     if (existsSync(tracked)) fail("saving wrote map/war3map.j");
@@ -16522,7 +16522,7 @@ async function scriptGenerated(page, found) {
     await page.evaluate(`window.__sgAnswer = "Switch to a Generated Script"`);
     const switched = await regenerate();
     if (switched?.mode !== "generated" || switched.written !== true || !switched.lost?.includes("SmokeOwnCode")) fail(`the switch: ${lit(switched)}`);
-    if (existsSync(tracked) || !existsSync(store)) fail("after the switch the script isn't in .w3proj/derived/ alone");
+    if (existsSync(tracked) || !existsSync(store)) fail("after the switch the script isn't in build/derived/ alone");
     else if (/SmokeOwnCode/.test(readFileSync(store, "utf8")) || !/gg_rct_Back_Region/.test(readFileSync(store, "utf8"))) fail("the switched script wasn't made again from the map's data");
     if ((await state())?.freshness !== "fresh") fail(`after the switch the script doesn't follow its sources: ${lit(await state())}`);
     if (checkpoints() <= before) fail("the switch made no checkpoint first");

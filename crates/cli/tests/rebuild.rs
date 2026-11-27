@@ -74,7 +74,7 @@ fn s(p: &Path) -> &str {
 
 /// The derived files and the record, as bytes (None: not there).
 fn derived(project: &Path) -> Vec<Option<Vec<u8>>> {
-    ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", ".w3proj/derived-from.json"]
+    ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", "build/derived-from.json"]
         .iter()
         .map(|f| fs::read(project.join(f)).ok())
         .collect()
@@ -99,7 +99,7 @@ fn rebuild_makes_what_pack_takes_skips_what_follows_and_records_only_when_all_fo
         assert!(said.lines().any(|l| l.contains(part)), "no line for {part}: {said}");
     }
     assert!(said.contains("written    map/war3map.shd"), "{said}");
-    assert!(project.join(".w3proj/derived-from.json").is_file(), "{said}");
+    assert!(project.join("build/derived-from.json").is_file(), "{said}");
     assert!(pack("first").status.success());
 
     // Nothing changed: pathing, shadows and the minimap are left as they are.
@@ -214,7 +214,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     let project = dir.join("project");
     copy_dir(&fixture(), &project);
     let script = project.join("map/war3map.j");
-    // No script there: Studio writes its own, and records it (.w3proj/generated-script).
+    // No script there: Studio writes its own, and records it (build/generated-script).
     fs::remove_file(&script).unwrap();
     let o = w3proj(&["rebuild", s(&project), "--only=script"], &game);
     assert!(o.status.success() && text(&o).contains("written    map/war3map.j"), "{}", text(&o));
@@ -274,7 +274,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// A generated script (map/triggers/triggers.json "script": "generated", in .w3proj/derived/): `w3proj pack` makes it
+/// A generated script (map/triggers/triggers.json "script": "generated", in build/derived/): `w3proj pack` makes it
 /// again when it doesn't follow its sources (switched from a tracked file, a header edited outside the app, none there),
 /// writes it into the store only (never map/), records what it was made from, and packs it. Controls: with `--game none`
 /// nothing is made, so the stale script is refused (--allow-stale-script takes it) and a missing one is refused always.
@@ -288,7 +288,7 @@ fn pack_makes_a_generated_script_in_the_store_and_records_it() {
     let project = dir.join("project");
     copy_dir(&fixture(), &project);
     w3proj::trigger_layout::set_script_mode(&project, w3proj::trigger_layout::ScriptMode::Generated).unwrap();
-    let store = project.join(".w3proj/derived/war3map.j");
+    let store = project.join("build/derived/war3map.j");
     assert!(store.is_file() && !project.join("map/war3map.j").exists());
     assert_eq!(w3proj::derived::check_script(&project).unwrap(), w3proj::derived::Freshness::Unknown, "a moved script follows nothing yet");
     let pack = |label: &str, extra: &[&str], game: &str| {
@@ -390,16 +390,16 @@ fn rebuild_force_replaces_a_script_studio_did_not_write_and_says_so() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// The files in `.w3proj/replaced-scripts/`: name → bytes (none when the folder isn't there).
+/// The files in `build/replaced-scripts/`: name → bytes (none when the folder isn't there).
 fn backups(project: &Path) -> Vec<(String, Vec<u8>)> {
-    let Ok(dir) = fs::read_dir(project.join(".w3proj/replaced-scripts")) else { return Vec::new() };
+    let Ok(dir) = fs::read_dir(project.join("build/replaced-scripts")) else { return Vec::new() };
     let mut out: Vec<(String, Vec<u8>)> = dir.map(|e| e.unwrap()).map(|e| (e.file_name().to_string_lossy().into_owned(), fs::read(e.path()).unwrap())).collect();
     out.sort();
     out
 }
 
 /// `--replace-script` (the app's "Replace the script", with a backup instead of a checkpoint): a hand-edited script is
-/// kept by a plain rebuild (the control), replaced with the flag, its old bytes in .w3proj/replaced-scripts/ (git-ignored),
+/// kept by a plain rebuild (the control), replaced with the flag, its old bytes in build/replaced-scripts/ (git-ignored),
 /// and the next run is up to date and leaves the backup alone. A script that isn't UTF-8 (lossless strings from an old
 /// code page) is kept aside byte for byte.
 #[test]
@@ -436,9 +436,9 @@ fn rebuild_replace_script_backs_up_the_script_it_replaces() {
         let (name, bytes) = &kept[0];
         assert!(name.starts_with("war3map.") && name.ends_with(".j"), "{label}: {name}");
         assert_eq!(bytes, &edited, "{label}: the backup isn't the old script byte for byte");
-        assert!(said.contains(&format!("backup     .w3proj/replaced-scripts/{name}")), "{label}: {said}");
+        assert!(said.contains(&format!("backup     build/replaced-scripts/{name}")), "{label}: {said}");
         let ignore = fs::read_to_string(project.join(".gitignore")).unwrap();
-        assert!(ignore.lines().any(|l| l == "/.w3proj/replaced-scripts/"), "{label}: {ignore}");
+        assert!(ignore.lines().any(|l| l == "build/"), "{label}: {ignore}");
 
         // Studio's now: up to date, nothing backed up again, the backup untouched.
         let o = w3proj(&["rebuild", s(&project), "--only=script", "--replace-script"], &game);

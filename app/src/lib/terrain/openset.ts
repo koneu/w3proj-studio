@@ -3,7 +3,7 @@
 // subterrains are default-filled and not drawn, the halo (two corners around the open ones, from their neighbours) is
 // drawn but locked, and nothing outside the open subterrains is edited.
 
-/** The key of `.w3proj/derived-from.json` saying the derived files were made with this many subterrains closed
+/** The key of `build/derived-from.json` saying the derived files were made with this many subterrains closed
  *  (crates/w3proj derived.rs CLOSED_KEY): they follow part of the map only. */
 export const DERIVED_CLOSED_KEY = "?closed-subterrains";
 
@@ -36,7 +36,7 @@ export interface OpenState {
   subterrains: SubterrainState[];
   /** Per corner, rows from the south: "0" closed, "1" halo, "2" open; "" when everything is open. */
   mask: string;
-  /** Why the choice can't be used (a damaged .w3proj/open-subterrains.json, a name terrain.json doesn't have). */
+  /** Why the choice can't be used (a damaged build/open-subterrains.json, a name terrain.json doesn't have). */
   error: string | null;
 }
 

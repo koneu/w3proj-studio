@@ -6663,7 +6663,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // A split project opened whole after a save with subterrains closed: its pathing, shadows and minimap follow part
         // of the map only (derived-from.json counts the closed ones, and `w3proj pack` refuses them): made again now.
         if (editable && openState && !openState.partial) {
-          void w3.workspace.readText(".w3proj/derived-from.json").then((t) => {
+          void w3.workspace.readText("build/derived-from.json").then((t) => {
             if (!disposed && t.includes(`"${DERIVED_CLOSED_KEY}"`)) rebuildSoon(() => ({ doodads: dooFile?.list ?? [] }));
           }, () => {});
         }

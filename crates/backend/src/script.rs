@@ -1,6 +1,6 @@
 //! The map script as a derived file (trigger-folders spec, section 5): a project whose `map/triggers/triggers.json` says
-//! `"script": "generated"` keeps `war3map.j` / `war3map.lua` out of git, in `.w3proj/derived/` (the file commands answer
-//! `map/war3map.j` from there, `flatview::script_of`), and the record `.w3proj/derived-from.json` says what it was made
+//! `"script": "generated"` keeps `war3map.j` / `war3map.lua` out of git, in `build/derived/` (the file commands answer
+//! `map/war3map.j` from there, `flatview::script_of`), and the record `build/derived-from.json` says what it was made
 //! from (`w3proj::derived::record_script`). The app's generator asks here how things stand, records after it wrote, and
 //! switches a project between the two modes. The app and the CLI's headless host answer these commands alike.
 
@@ -109,7 +109,7 @@ mod tests {
         let dir = mini("store");
         let root = dir.to_string_lossy().into_owned();
         let j = dir.join("map").join("war3map.j");
-        let stored = dir.join(".w3proj").join("derived").join("war3map.j");
+        let stored = dir.join("build").join("derived").join("war3map.j");
         let original = fs::read(&j).unwrap();
         assert_eq!(state(&root).unwrap().mode, Some("kept"));
         assert!(crate::flatview::script_of(&j).unwrap().is_none(), "control: a kept script is itself");
@@ -118,7 +118,7 @@ mod tests {
         let change = set_mode(&root, "generated").unwrap();
         assert_eq!(change, trigger_layout::ModeChange { was: "kept", moved: Some("war3map.j".into()) });
         assert!(!j.exists() && fs::read(&stored).unwrap() == original, "moved into the store as it was");
-        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().contains("/.w3proj/derived/"));
+        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().lines().any(|l| l == "build/"));
         assert!(fs::read_to_string(dir.join("map/triggers/triggers.json")).unwrap().contains("\"script\": \"generated\""));
         let s = state(&root).unwrap();
         assert_eq!((s.mode, s.freshness, s.stored), (Some("generated"), Some("unknown"), true), "a moved script isn't known to follow anything");
@@ -176,7 +176,7 @@ mod tests {
     fn switches_that_would_lose_a_script_are_refused() {
         let dir = mini("refused");
         let root = dir.to_string_lossy().into_owned();
-        let store = dir.join(".w3proj").join("derived");
+        let store = dir.join("build").join("derived");
         fs::create_dir_all(&store).unwrap();
         fs::write(store.join("war3map.j"), "other").unwrap();
         let snapshot = || crate::list_tree(&dir).unwrap().into_iter().map(|p| (p.clone(), fs::read(dir.join(&p)).unwrap())).collect::<Vec<_>>();

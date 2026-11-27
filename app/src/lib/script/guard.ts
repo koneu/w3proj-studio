@@ -7,7 +7,7 @@ import { decodeLossless, encodeLossless } from "../formats/lossless";
 
 /** Project file holding the hash of the script this app wrote last: a script that still has it holds nothing but
  *  what the map's data made, so it's replaced without asking. */
-export const SCRIPT_STAMP = ".w3proj/generated-script";
+export const SCRIPT_STAMP = "build/generated-script";
 
 /** Words every warning about a script that is kept (not regenerated) has: Map Size's undo withdraws those its
  *  resize caused. */
@@ -142,7 +142,7 @@ export function scriptDecision(current: string | null | undefined, generated: st
   return { action: "keep", lost: current === undefined ? [] : lostFunctions(current, generated) };
 }
 
-/** The backend's script_state (crates/backend/src/script.rs): "generated" (in .w3proj/derived/, out of git, with a
+/** The backend's script_state (crates/backend/src/script.rs): "generated" (in build/derived/, out of git, with a
  *  record of its sources), "kept" (a tracked map/war3map.j|lua), null (no map/triggers/: tracked as in "kept").
  *  `freshness` only for a generated one. */
 export interface ScriptState {
@@ -156,7 +156,7 @@ export interface ScriptState {
 /** Why a generated script can't go into a build as it is, or null when it can (or the script is tracked). */
 export function staleScriptReason(state: ScriptState | null): string | null {
   if (state?.mode !== "generated") return null;
-  if (!state.stored) return "the generated map script is missing (.w3proj/derived/ has none)";
+  if (!state.stored) return "the generated map script is missing (build/derived/ has none)";
   switch (state.freshness) {
     case "fresh": return null;
     case "stale": {

@@ -327,6 +327,10 @@ fn packed_projects(project: &std::path::Path) -> Vec<(String, PathBuf)> {
 /// (`--allow-terrain-only-derived`): nothing stops the pack of a split project; what goes in stale or is left out is said.
 fn check_derived(project: &std::path::Path, force_stale: bool, terrain_only: bool) -> Result<()> {
     use w3proj::derived::{check, Freshness, DERIVED, STAMP_FILE};
+    // A project from before the local files were in build/: moved there first, so they are found.
+    for path in w3proj::derived::move_local(project).with_context(|| format!("moving the local files of {} into build/", project.display()))? {
+        println!("moved      {path} (generated and local files are in build/ now)");
+    }
     let projects = packed_projects(project);
     let again = "`w3proj rebuild` makes them again (W3Proj Studio does a few seconds after an edit made there and on every \
                  terrain save), then pack again; --force-stale packs them as they are";
@@ -355,7 +359,7 @@ fn check_derived(project: &std::path::Path, force_stale: bool, terrain_only: boo
 }
 
 /// `check_derived` for a project whose terrain is split (map/terrain/): its derived files are in the store
-/// (.w3proj/derived/, not in git) and go into the map only when the record says they follow the sources. Missing or
+/// (build/derived/, not in git) and go into the map only when the record says they follow the sources. Missing or
 /// not known to follow (stale, no record, a record that can't be read): the pack stops, saying which and why, unless
 /// `terrain_only`, which packs them as they are (none left out is computed: this program can't make them) and says so.
 /// `force_stale` lets stale ones go in, never missing ones.
@@ -363,9 +367,9 @@ fn check_split_derived(at: &str, dir: &std::path::Path, force_stale: bool, terra
     use w3proj::derived::{check, missing, Freshness, STAMP_FILE};
     // A project split before the store existed: its derived files in map/ go there first.
     for path in w3proj::terrain_layout::migrate_split(dir).with_context(|| format!("moving the derived files and pathing overrides of {} out of git", dir.display()))? {
-        println!("moved      {at}{path} (a split terrain keeps derived files in .w3proj/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
+        println!("moved      {at}{path} (a split terrain keeps derived files in build/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
     }
-    let store = format!("{at}.w3proj/derived/");
+    let store = format!("{at}build/derived/");
     let missing = missing(dir)?;
     let stale = match check(dir).with_context(|| format!("checking {}", dir.display()))? {
         Freshness::Fresh => None,
@@ -402,7 +406,7 @@ fn check_split_derived(at: &str, dir: &std::path::Path, force_stale: bool, terra
 }
 
 /// A generated map script (map/triggers/triggers.json "script": "generated", `w3proj::trigger_layout`) isn't in git: it is in
-/// .w3proj/derived/, made by W3Proj Studio's generator (this program can't make it), and goes into the map only when the
+/// build/derived/, made by W3Proj Studio's generator (this program can't make it), and goes into the map only when the
 /// record says it follows its sources (the triggers, objects, regions, … `w3proj::derived::check_script`). Missing: the pack
 /// stops, whatever the flags (a map without a script is never packed). Not known to follow (changed sources, no record, a
 /// record that can't be read): it stops unless `allow_stale` (`--allow-stale-script`), which packs it as it is and says so.
@@ -414,7 +418,7 @@ fn check_script(project: &std::path::Path, allow_stale: bool) -> Result<()> {
         if mode != Some(w3proj::trigger_layout::ScriptMode::Generated) {
             continue;
         }
-        let store = format!("{at}.w3proj/derived/");
+        let store = format!("{at}build/derived/");
         if read_script_store(&dir)?.is_empty() {
             anyhow::bail!(
                 "the map script is missing in {store} ({at}map/{} says it is generated, so it isn't in git): {fix}. A map without a script is never packed",
@@ -509,7 +513,7 @@ enum Cmd {
         /// changed since they were made (the app makes them again a moment after an edit).
         #[arg(long)]
         force_stale: bool,
-        /// A project whose terrain is split (map/terrain/) keeps its derived files out of git, in .w3proj/derived/,
+        /// A project whose terrain is split (map/terrain/) keeps its derived files out of git, in build/derived/,
         /// and packs only when they follow the terrain. This packs them as they are even when they don't, and leaves
         /// out the ones that are missing (none is computed: units would walk through trees and buildings). Not for a
         /// release.
@@ -522,7 +526,7 @@ enum Cmd {
         #[arg(long)]
         allow_seam_issues: bool,
         /// A project whose map script is generated (map/triggers/triggers.json "script": "generated") keeps it out of
-        /// git, in .w3proj/derived/, and packs only when it follows the triggers and the other files it is made from. This
+        /// git, in build/derived/, and packs only when it follows the triggers and the other files it is made from. This
         /// packs it as it is even when it doesn't (a missing script still stops the pack). Not for a release.
         #[arg(long)]
         allow_stale_script: bool,
@@ -562,7 +566,7 @@ enum Cmd {
         force: bool,
         /// Replace the map script with the one the triggers make, as the app's "Replace the script":
         /// a war3map.j / war3map.lua that isn't the script Studio wrote last is copied byte for byte
-        /// to .w3proj/replaced-scripts/ first (git-ignored; the line says where). Refused for a
+        /// to build/replaced-scripts/ first (git-ignored; the line says where). Refused for a
         /// project without triggers (map/triggers/ or war3map.wtg); vJASS isn't compiled (no
         /// JassHelper here), so it fails.
         #[arg(long)]
@@ -688,7 +692,7 @@ enum Cmd {
     },
     /// Print one file from a map to stdout. MAP may be a project folder: then FILE is under its map/ and is printed as
     /// W3Proj Studio reads it (war3map.w3e.txt and the placed objects' files assembled from map/terrain/, pathing,
-    /// shadows and the minimap from .w3proj/derived/).
+    /// shadows and the minimap from build/derived/).
     Cat { map: PathBuf, file: String },
     /// List the format definitions in use (built-in, W3PROJ_FORMATS, project).
     Formats {

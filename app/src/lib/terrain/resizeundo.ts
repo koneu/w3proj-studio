@@ -34,7 +34,7 @@ export interface ResizeRecord {
  *  (which says whether war3map.j / .lua is still the generated one) and the record of what pathing, shadows and
  *  the minimap were made from (w3proj::derived). Case doesn't matter. */
 export function resizeCandidates(projectFiles: readonly string[], editor: string): string[] {
-  const out = new Set<string>([editor, ".w3proj/pathing.json", ".w3proj/generated-script", ".w3proj/derived-from.json"]);
+  const out = new Set<string>([editor, ".w3proj/pathing.json", "build/generated-script", "build/derived-from.json"]);
   for (const f of projectFiles) {
     const p = f.replace(/\\/g, "/");
     const m = /^map\/([^/]+)$/i.exec(p);
@@ -71,7 +71,7 @@ export function changedFiles(before: Files, after: Files): { before: Files; afte
  *  script were made from (w3proj::derived), rewritten whenever they are made again, a while after the resize's own
  *  writes. Their change since the resize is no change of the person's to ask about; an undo puts them back with the
  *  files they describe. */
-const BOOKKEEPING = new Set([".w3proj/derived-from.json"]);
+const BOOKKEEPING = new Set(["build/derived-from.json"]);
 
 /** The paths of `files` whose bytes on disk differ from the ones given (`BOOKKEEPING` aside). */
 export async function drifted(io: FileIO, files: Files): Promise<string[]> {
