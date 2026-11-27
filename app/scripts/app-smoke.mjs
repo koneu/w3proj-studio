@@ -378,7 +378,7 @@ async function newMaps(page, found) {
  *  go. `state` says how many ran and how many were running at once, and whether the file's editor has
  *  unsaved changes. The writes are the workspace's, which every editor and tool saves through. */
 async function gateWrites(page, path) {
-  const key = JSON.stringify(path);
+  const key = lit(path);
   await page.evaluate(`(() => {
     const path = ${key}, gates = (window.__gates ??= {});
     const g = gates[path] = { hold: null, release: null, inflight: 0, max: 0, writes: 0 };

@@ -48,5 +48,6 @@ export default defineConfig(({ command }) => ({
   clearScreen: false,
   plugins: [demoTitleBar(), indexHtml()],
   server: { port: 1421, strictPort: true },
-  build: { target: "es2022", outDir: "dist-demo", emptyOutDir: true, rollupOptions: { input: here("./demo.html") } },
+  // The same limit as the app build (vite.config.ts).
+  build: { target: "es2022", outDir: "dist-demo", emptyOutDir: true, chunkSizeWarningLimit: 600, rollupOptions: { input: here("./demo.html") } },
 }));

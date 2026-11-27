@@ -156,3 +156,13 @@ test("old underscore queries still match", () => {
   assert.equal(compare("human", f.op, f.value, "Human"), false);
   assert.equal(compare("nightelf", ":", "Night Elf", "Night Elf"), true);
 });
+
+test("a filter is a key, an operator and a value; anything else is a word", () => {
+  const read = (text: string) => parseQuery(text, []);
+  assert.deepEqual(read('hp>=500 gold<=1 a!=b x>1 y<2 z=3 race:"Night Elf"').filters.map((f) => [f.key, f.op, f.value]),
+    [["hp", ">=", "500"], ["gold", "<=", "1"], ["a", "!=", "b"], ["x", ">", "1"], ["y", "<", "2"], ["z", "=", "3"], ["race", ":", "Night Elf"]]);
+  assert.deepEqual(read('hp>=500').words, []);
+  // No key, or a "!" that starts no operator: words.
+  assert.deepEqual(read('=5 a!b footman "hp > 1"'), { words: ["=5", "a!b", "footman", "hp > 1"], filters: [] });
+  assert.deepEqual(read("a==1").filters.map((f) => [f.key, f.op, f.value]), [["a", "=", "=1"]]);
+});

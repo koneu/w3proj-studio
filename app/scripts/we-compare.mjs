@@ -121,6 +121,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
+import { lit } from "./jslit.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { applyRoundtrip, chooseFrameCap, chooseRenderer, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, gpuMissing, isFullRun, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
 import { parseFrameCap } from "./we-drive.mjs";
@@ -184,7 +185,7 @@ export const defaultWork = (slot) => join(repo, "target", slot ? `we-compare-slo
  * An editor that failed to open (its pane shows the error) stops the spec instead of running steps against nothing.
  */
 async function openEditor(page, path) {
-  const p = JSON.stringify(path);
+  const p = lit(path);
   await page.evaluate(`w3.editors.open(${p})`);
   const state = await until(`the editor of ${path}`, async () => {
     const s = await page.evaluate(`(() => { const t = w3Workbench.editors.tabs.find((x) => x.path === ${p}); return !t ? "not open" : t.failed ? "failed" : t.loading || !t.instance ? "" : "ready"; })()`);
