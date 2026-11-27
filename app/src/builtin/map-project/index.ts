@@ -344,6 +344,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       out.append(`opened ${path}`);
     }),
 
+    // The File menu's Open Recent, as VS Code's: the projects opened lately, newest first, but the one that is open.
+    w3.commands.register("w3.project.openRecent", async () => {
+      const recent = () => w3.settings.get<string[]>("recentProjects", []);
+      const current = w3.workspace.project()?.root;
+      const others = recent().filter((p) => p !== current);
+      if (!others.length) { w3.window.showInfo("No other projects were opened lately."); return; }
+      const pick = await w3.window.quickPick<string>([
+        ...others.map((p) => ({ label: p.split(/[\\/]/).filter(Boolean).pop() ?? p, description: p, value: p })),
+        { label: "Clear Recently Opened", description: "empties this list (the folders stay)", value: "" },
+      ], { placeholder: "Open a recent project" });
+      if (!pick) return;
+      if (!pick.value) { await w3.settings.set("recentProjects", current ? [current] : []); return; }
+      try {
+        await w3.commands.execute("w3.project.open", pick.value);
+      } catch (e) {
+        // Moved or deleted since: the entry can go.
+        const choice = await w3.window.showError(`${pick.value} couldn't be opened: ${(e as Error).message ?? e}`, "Remove from Recent");
+        if (choice === "Remove from Recent") await w3.settings.set("recentProjects", recent().filter((p) => p !== pick.value));
+      }
+    }),
+
     // `file`: the map or campaign to import (else asked for); a map folder works too.
     w3.commands.register("w3.project.importMap", async (file?: string) => {
       const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Choose a map to import", filters: MAP_FILTERS });

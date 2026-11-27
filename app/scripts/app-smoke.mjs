@@ -7997,6 +7997,27 @@ async function configSafety(page, found) {
     await page.evaluate(`w3Workbench.workspace.recentsTidied()`);
     const recent = await k.setting("recentProjects");
     if (!recent?.includes(root) || !recent.includes(twin)) fail(`after opening ${basename(twin)} and ${basename(root)} the recent list is ${lit(recent)}`);
+
+    // ---- 4. File > Open Recent: the other projects, newest first; one that's gone can leave the list ----
+    const gone = `${root}-gone`;
+    await page.evaluate(`w3.settings.set("recentProjects", ${lit([root, twin, gone])})`);
+    const offered = async () => {
+      await page.evaluate(`void w3.commands.execute("w3.project.openRecent")`);
+      return until("the recent projects", () => page.evaluate(`(() => { if (document.querySelector(".quick-input")?.hidden !== false) return null; const l = [...document.querySelectorAll(".quick-input-item")].map((e) => e.textContent); return l.length ? l : null; })()`), 10000);
+    };
+    const rows = await offered();
+    if (rows.length !== 3 || !rows[0].includes(twin) || !rows[1].includes(gone) || !rows[2].includes("Clear Recently Opened")) fail(`Open Recent offers ${lit(rows)}`);
+    await k.hands.click(".quick-input-item .label", basename(twin));
+    if (!(await soon(async () => (await page.evaluate(`w3.workspace.project()?.root`)) === twin, 15000))) fail(`choosing ${basename(twin)} in Open Recent left ${await page.evaluate(`w3.workspace.project()?.root`)} open (${await k.toasts()})`);
+    await page.evaluate(`w3Workbench.workspace.recentsTidied()`);
+    await k.clearToasts();
+    await offered();
+    await k.hands.click(".quick-input-item .label", basename(gone));
+    if (!(await soon(async () => (await k.toasts()).includes("couldn't be opened"), 15000))) fail(`opening a project that's gone said ${lit(await k.toasts())}`);
+    await k.hands.click(".toast button", "Remove from Recent");
+    if (!(await soon(async () => !(await k.setting("recentProjects")).includes(gone), 10000))) fail(`the gone project stays in the recent list: ${lit(await k.setting("recentProjects"))}`);
+    await k.clearToasts();
+    await openProject(root);
   } finally {
     rmSync(strayFile, { force: true });
     // Only the twin this check made: on Windows the name in lower case is the open project itself (deleting it was EBUSY).
