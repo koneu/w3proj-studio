@@ -59,6 +59,7 @@ export class Workbench {
     allowed: ({ source, readOnly, needs }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
       && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true)
       && (!needs || this.settings.get<boolean>(needs, false) === true),
+    activity: () => this.progress.current()?.replace(/[….]+$/, ""),
     whyUnavailable: (id) => {
       const e = this.host.extensions.find((x) => x.manifest.id === id);
       return e?.error ? `${e.manifest.name} ${e.error}.` : undefined;
@@ -446,7 +447,7 @@ export class Workbench {
       },
       backend: { invoke: (command, args) => backendInvoke(wb.workspace, command, args), listen, readBytes, writeBytes: (path, bytes) => writeBytes(path, bytes).then(() => {}) },
       lib: () => import("../extensions/lib"),
-      mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), list: () => wb.mcp.list(), handle: (message) => wb.mcp.handle(message) },
+      mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), list: () => wb.mcp.list(), handle: (message, notify) => wb.mcp.handle(message, notify) },
       extensions: {
         all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, disabled: e.disabled, error: e.error })),
       },

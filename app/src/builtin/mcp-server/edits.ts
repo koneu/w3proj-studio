@@ -2,7 +2,8 @@
 //
 // - Nothing is written while anything in the app is unsaved. An editor's memory and the file would
 //   drift apart, and which of them wins would depend on who saves last.
-// - Only files under map/. An AI that could write .w3proj/ could install its own extensions.
+// - Only files under map/, but for the few the tools keep elsewhere themselves (loggedPath). An AI that could write
+//   .w3proj/ as it likes could install its own extensions.
 // - One edit at a time, reading and writing together: parallel calls can't overwrite each other.
 // - The first edit of a project is preceded by a checkpoint, and each can be undone.
 
@@ -46,6 +47,18 @@ export function editablePath(path: string): string {
   const p = projectPath(path);
   if (!p.toLowerCase().startsWith("map/")) throw new Error(`AI edits stay inside map/: "${path}" isn't.`);
   return p;
+}
+
+/** What tools keep with the project outside map/ (reserve_area's list). */
+const TOOL_FILES = new Set([".w3proj/reserved-areas.json"]);
+
+/** A file an edit of the list may write, normalized: those under map/, and what the tools themselves keep elsewhere
+ *  in the project: their own files (TOOL_FILES) and AI Editor files (.wai), wherever the user put them, but never in
+ *  .w3proj/. edit_text_file takes editablePath alone, so a client's own text never lands outside map/. */
+export function loggedPath(path: string): string {
+  const p = projectPath(path), lower = p.toLowerCase();
+  if (TOOL_FILES.has(lower) || (lower.endsWith(".wai") && !lower.startsWith(".w3proj/"))) return p;
+  return editablePath(path);
 }
 
 export class EditLog {
@@ -157,7 +170,7 @@ export class EditLog {
     return this.inTurn(async () => {
       this.refuseBusy("Not changed");
       await this.refuseUnsaved();
-      const wanted =(await change((path) => this.io.read(editablePath(path)))).map((f) => ({ path: editablePath(f.path), text: f.text }));
+      const wanted = (await change((path) => this.io.read(loggedPath(path)))).map((f) => ({ path: loggedPath(f.path), text: f.text }));
       const files: EditRecord["files"] = [];
       for (const f of wanted) {
         const before = await this.io.read(f.path);

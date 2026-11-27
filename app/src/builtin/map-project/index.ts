@@ -135,9 +135,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** `check`: run the Problems checks first and ask before packing a map with errors. */
   const pack = async (output: string | null, check = false): Promise<PackReport | null> => {
     if (!(await prepare(check))) return null;
-    const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
+    // Setting pack.attributes: an (attributes) as `w3proj pack --attributes` writes it. Off, the call is as it always was.
+    const attributes = w3.settings.get<boolean>("pack.attributes") === true;
+    const args = attributes ? { root: root(), output, attributes } : { root: root(), output };
+    const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", args));
     for (const w of r.warnings ?? []) out.append(`warning: ${w}`);
-    out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);
+    out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}${attributes ? " (with an (attributes), setting pack.attributes)" : ""}`);
     return r;
   };
   /** What a pack does to the project before the backend packs it: every editor saved, the script, the terrain's derived

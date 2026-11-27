@@ -6,7 +6,7 @@ Extension `w3.terrainCameras`. Camera Editor inside the terrain editor: create f
 Reads and writes map/war3map.w3c.json (cameras); reads map/war3map.w3i.json.
 
 ## Contributes
-- MCP tools (1): list_cameras
+- MCP tools (3): set_camera, remove_camera, list_cameras
 - Needs: w3.terrainViewer
 
 Full list: `extension.json` in this folder.

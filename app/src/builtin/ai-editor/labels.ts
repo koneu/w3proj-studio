@@ -50,6 +50,26 @@ export function quantityText(min: number, max: number): string {
   return min === max ? String(min) : `${min} - ${max}`;
 }
 
+export type QuantityMode = "all" | "allBut" | "fixed" | "minAll" | "range";
+
+/** Which quantity choice a unit's minimum and maximum stand for. */
+export function quantityMode(min: number, max: number): QuantityMode {
+  if (signed(min) === -1) return signed(max) > 0 ? "allBut" : "all";
+  if (signed(max) === -1) return "minAll";
+  return min === max ? "fixed" : "range";
+}
+
+/** Switches a unit to a quantity choice, keeping its number where one is kept. */
+export function setQuantityMode(u: { quantity: number; max: number }, mode: QuantityMode) {
+  const was = quantityMode(u.quantity, u.max);
+  const n = was === "all" || was === "allBut" ? 1 : u.quantity;
+  if (mode === "all") { u.quantity = ALL; u.max = ALL; }
+  else if (mode === "allBut") { u.quantity = ALL; u.max = was === "allBut" ? u.max : 1; }
+  else if (mode === "fixed") { u.quantity = n; u.max = n; }
+  else if (mode === "minAll") { u.quantity = n; u.max = ALL; }
+  else { u.quantity = n; u.max = n + 1; }
+}
+
 /** "Total" of the build list: how many of the entry's unit or upgrade the list asks for up to there. */
 export function buildTotals(ai: AiFile): number[] {
   const seen = new Map<string, number>();

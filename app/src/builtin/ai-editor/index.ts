@@ -25,8 +25,12 @@ import { callText, paramText, type DisplayContext } from "../../lib/triggers/dis
 import { CONDITION, parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
+import { projectPath } from "../../extensions/mcp";
+import { waiFromText, waiToText } from "../../lib/ai/waitext";
+import { describeAi, setAi } from "./tools";
 import {
-  ALL, BUILD_EXPANSION, BUILD_UNIT, BUILD_UPGRADE, buildTotals, conditionUses, CREEPS, HERO_ORDERS, quantityText, RACES, removeCondition,
+  ALL, BUILD_EXPANSION, BUILD_UNIT, BUILD_UPGRADE, buildTotals, conditionUses, CREEPS, HERO_ORDERS, quantityMode, quantityText, RACES, removeCondition, setQuantityMode, type QuantityMode,
   removeGroup, SPECIAL_BUILDS, TARGETS, townChoices, townText, workersText,
 } from "./labels";
 
@@ -63,7 +67,40 @@ function loadHeroSkills(w3: W3Api) {
 const slashes = (p: string) => p.replace(/\\/g, "/");
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** The project's AI files (.wai), as listed. */
+  const aiFiles = () => w3.workspace.files().filter((f) => /\.wai$/i.test(f.path)).map((f) => f.path);
+  /** The project path a tool's `file` names: an AI file of the project as listed (in any case), else the path as given. */
+  const aiFile = (file: unknown) => {
+    if (typeof file !== "string" || !/\.wai$/i.test(file.trim())) throw new Error(`file must be an AI file (.wai) of the project. It has: ${aiFiles().join(", ") || "none"}.`);
+    const path = projectPath(file.trim());
+    return aiFiles().find((f) => f.toLowerCase() === path.toLowerCase()) ?? path;
+  };
   ctx.subscriptions.push(
+    w3.mcp.registerTool("get_ai", async ({ file }) => {
+      await projectWithFiles(w3);
+      if (file === undefined) return { files: aiFiles() };
+      const path = aiFile(file);
+      if (!aiFiles().includes(path)) throw new Error(`The project has no ${path}. Its AI files: ${aiFiles().join(", ") || "none"}.`);
+      return describeAi(parseWai(await w3.workspace.readBytes(path), aiArgCount(await aiData(w3))));
+    }),
+    w3.mcp.registerTool("set_ai", async ({ file, create, ...changes }) => {
+      await projectWithFiles(w3);
+      const path = aiFile(file);
+      if (create !== undefined && typeof create !== "boolean") throw new Error("create must be true or false.");
+      const count = aiArgCount(await aiData(w3));
+      const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+      let shown: ReturnType<typeof describeAi> | null = null, made = false;
+      const changed = await edits.edit(`Change AI ${path}`, async (read) => {
+        const text = await read(path);
+        if (text === null && create !== true) throw new Error(`The project has no ${path}. Its AI files: ${aiFiles().join(", ") || "none"}. create: true makes it, as the AI Editor's New AI does.`);
+        made = text === null;
+        const ai = text === null ? newWai() : parseWai(waiFromText(text), count);
+        setAi(ai, changes);
+        shown = describeAi(ai);
+        return [{ path, text: waiToText(writeWai(ai)) }];
+      });
+      return { ...(made ? { created: true } : { changed }), file: path, ai: shown };
+    }),
     w3.commands.register("w3.ai.open", async () => {
       const path = await w3.window.pickFile({ title: "Open an AI file", filters: WAI_FILTER });
       if (path) await w3.editors.open(slashes(path), "w3.aiEditor");
@@ -773,20 +810,14 @@ class AiView {
   private unitDetail() {
     const u = this.ai.groups[this.group]?.units[this.unit];
     if (!u) return null;
-    const all = (u.quantity | 0) === -1, upToAll = !all && (u.max | 0) === -1;
-    const mode = all ? "all" : upToAll ? "minAll" : u.quantity === u.max ? "fixed" : "range";
+    const mode = quantityMode(u.quantity, u.max);
     return h("div.ai-detail", {},
       this.field("Unit", this.objectButton(u.id, "Attack unit", ["w3u"], (id) => { u.id = id; }),
         h("span.muted", {}, " "), this.select(SPECIAL_BUILDS.some(([s]) => s === u.id) ? u.id : "", [["", "Specific unit"], ...SPECIAL_BUILDS.slice(0, 3)] as [string, string][],
           (v) => { if (v) u.id = v; })),
-      this.field("Quantity", this.select(mode, [["all", "All"], ["fixed", "Fixed Value"], ["minAll", "Range: Minimum - All"], ["range", "Range: Minimum - Maximum"]], (v) => {
-        const n = all ? 1 : u.quantity;
-        if (v === "all") { u.quantity = ALL; u.max = ALL; }
-        else if (v === "fixed") { u.quantity = n; u.max = n; }
-        else if (v === "minAll") { u.quantity = n; u.max = ALL; }
-        else { u.quantity = n; u.max = n + 1; }
-      }),
-      mode !== "all" ? this.num("Quantity", u.quantity, (v) => { u.quantity = v; if (mode === "fixed" || (mode === "range" && u.max < v)) u.max = v; }, { min: 0 }) : null,
+      this.field("Quantity", this.select(mode, [["all", "All"], ["allBut", "All but N"], ["fixed", "Fixed Value"], ["minAll", "Range: Minimum - All"], ["range", "Range: Minimum - Maximum"]], (v) => { setQuantityMode(u, v as QuantityMode); }),
+      mode === "allBut" ? this.num("Units kept back", u.max, (v) => { u.max = v; }, { min: 1 }) : null,
+      mode !== "all" && mode !== "allBut" ? this.num("Quantity", u.quantity, (v) => { u.quantity = v; if (mode === "fixed" || (mode === "range" && u.max < v)) u.max = v; }, { min: 0 }) : null,
       mode === "range" ? h("span", {}, " to ", this.num("Maximum quantity", u.max, (v) => { u.max = Math.max(v, u.quantity); }, { min: 0 })) : null),
       this.condEditor(u));
   }

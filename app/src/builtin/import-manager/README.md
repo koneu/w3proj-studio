@@ -10,5 +10,6 @@ Reads and writes map/war3map.imp.json (campaigns: map/war3campaign.imp.json) and
 ## Contributes
 - Commands (6): w3.imports.open, w3.imports.replace, w3.imports.addVersion, w3.imports.addDeVersion, w3.imports.cleanUp, w3.imports.add
 - Editors (1): w3.importManager
+- MCP tools (3): import_file, remove_import, list_imports
 
 Full list: `extension.json` in this folder.

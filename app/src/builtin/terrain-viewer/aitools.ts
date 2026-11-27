@@ -148,7 +148,7 @@ function cliffGrounds(t: Terrain, kinds: readonly CliffKind[]) {
 
 /** Cliffs next to changed corners take the type of their ground, as after a brush stroke. All the
  *  corners changed, those of the cliffs included. `own`: the tileset's own ground list (see groundSlot). */
-export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly CliffKind[], cliffTile?: string, own?: readonly string[]) {
+export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly CliffKind[], cliffTile?: string, own?: readonly string[], stamp?: ReadonlySet<number>) {
   const grounds = cliffGrounds(t, kinds), log = new Touched();
   for (const i of changed) log.corners.add(i);
   let fixed: number | undefined;
@@ -158,8 +158,22 @@ export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly Cl
     if (fixed < 0) throw new Error(`"${cliffTile}" has no cliff. The map's cliffs are those of: ${grounds.filter((g) => g).join(", ") || "none"}. list_ground_tiles marks the tiles that have one.`);
     if (fixed >= MAX_CLIFF_TYPES) throw new Error(`"${cliffTile}"'s cliff is entry ${fixed} of the map's cliff list, but a corner can name only the first ${MAX_CLIFF_TYPES} (0 to ${MAX_CLIFF_TYPES - 1}). Use the cliff of one of: ${grounds.slice(0, MAX_CLIFF_TYPES).filter((g) => g).join(", ")}.`);
   }
-  matchCliffTypes(t, changed, grounds, log, fixed);
+  matchCliffTypes(t, stamp ? [...changed, ...stamp] : changed, grounds, log, fixed, stamp);
   return [...log.corners];
+}
+
+/** The corners a cliff tool's area types whether or not a cliff touches them, as the editor's cliff brush types the
+ *  corners of its stencil round each stamp (lib/terrain/cliffs.ts cliffTypeStencil): the area's corners and the 3×3
+ *  round each, which is that stencil's rule for every brush shape the editor has no measured table for. */
+export function cliffStamp(t: Terrain, inside: readonly { i: number }[]): Set<number> {
+  const out = new Set<number>();
+  for (const { i } of inside) {
+    const x = i % t.width, y = Math.floor(i / t.width);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (x + dx >= 0 && y + dy >= 0 && x + dx < t.width && y + dy < t.height) out.add((y + dy) * t.width + x + dx);
+    }
+  }
+  return out;
 }
 
 /** Takes away the whole ramp a corner belongs to: part of one is no way up. The corners go on `changed`. */
@@ -195,13 +209,12 @@ export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?
     dropRamp(t, i, changed);
     changed.push(i);
   }
-  if (changed.length) {
-    const all = withCliffTypes(t, changed, kinds, cliffTile, own);
-    // Ground raised over its water dries, as with the cliff brushes (dryAboveWater).
-    for (const i of changed) dryIfAbove(t, i, () => {});
-    return all;
-  }
-  return cliffTile === undefined ? changed : setCliffType(t, area, shape, cliffTile, kinds, own);
+  // The corners round the area take the cliff type too, cliff or not, and also where no level moved, as under the
+  // editor's cliff brush (cliffStamp).
+  const all = withCliffTypes(t, changed, kinds, cliffTile, own, cliffStamp(t, inside));
+  // Ground raised over its water dries, as with the cliff brushes (dryAboveWater).
+  for (const i of changed) dryIfAbove(t, i, () => {});
+  return all;
 }
 
 /** Gives the cliffs of an area the look of a ground tile's cliff, adding that tile to the map's list
@@ -213,7 +226,9 @@ export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string,
   cliffSlot(t, tile, kinds, own);
   const grounds = cliffGrounds(t, kinds), log = new Touched(), type = grounds.indexOf(tile);
   if (type >= MAX_CLIFF_TYPES) throw new Error(`"${tile}"'s cliff is entry ${type} of the map's cliff list, but a corner can name only the first ${MAX_CLIFF_TYPES} (0 to ${MAX_CLIFF_TYPES - 1}). Use the cliff of one of: ${grounds.slice(0, MAX_CLIFF_TYPES).filter((g) => g).join(", ")}.`);
-  matchCliffTypes(t, inside.map(({ i }) => i), grounds, log, type);
+  // Cliff or not, with the corners round the area, as the editor's cliff brush types its stencil (cliffStamp).
+  const stamp = cliffStamp(t, inside);
+  matchCliffTypes(t, stamp, grounds, log, type, stamp);
   return [...log.corners];
 }
 

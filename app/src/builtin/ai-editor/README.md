@@ -9,5 +9,6 @@ Test AI (testrun.ts, lib/ai/testmap.ts) makes a copy of the Test Configuration's
 - Commands (6): w3.ai.open, w3.ai.new, w3.ai.exportScript, w3.ai.addToMap, w3.ai.importCustomData, w3.ai.exportCustomData
 - Views (1): w3.ai.files
 - Editors (1): w3.aiEditor
+- MCP tools (2): set_ai, get_ai
 
 Full list: `extension.json` in this folder.

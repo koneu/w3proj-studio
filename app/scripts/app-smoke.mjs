@@ -4809,6 +4809,74 @@ async function importPathTab(page, found) {
   }
 }
 
+/** The Import Manager sorts by a column (click again reverses) and filters by mode and type, with the count out of all,
+ *  without touching the saved list; PNG and JPEG imports open in the Texture Viewer with their size. */
+async function importSortImages(page, found) {
+  try {
+  const fail = (what) => found.push(`import sort and images: ${what}`);
+  const k = await heightKit(page, "ImportSortImages");
+  const files = { png: "map/war3mapImported/Pic.png", jpg: "map/war3mapImported/Photo.jpg", big: "map/war3mapImported/Big.txt", small: "map/war3mapImported/Small.txt", hd: "map/_HD.w3mod/war3mapImported/Small.txt" };
+  const entries = ["war3mapImported\\Pic.png", "war3mapImported\\Photo.jpg", "war3mapImported\\Big.txt", "war3mapImported\\Small.txt", "_HD.w3mod\\war3mapImported\\Small.txt"].map((path) => ({ flags: 21, path }));
+  const listText = JSON.stringify({ format: "w3proj.imports/1", version: 1, files: entries });
+  await page.evaluate(`(async () => {
+    const make = async (type) => {
+      const c = document.createElement("canvas"); c.width = 4; c.height = 3;
+      const g = c.getContext("2d"); g.fillStyle = "#c33"; g.fillRect(0, 0, 4, 3);
+      return new Uint8Array(await (await new Promise((r) => c.toBlob(r, type))).arrayBuffer());
+    };
+    await w3.workspace.writeBytes(${lit(files.png)}, await make("image/png"));
+    await w3.workspace.writeBytes(${lit(files.jpg)}, await make("image/jpeg"));
+    await w3.workspace.writeText(${lit(files.big)}, "x".repeat(100000));
+    await w3.workspace.writeText(${lit(files.small)}, "y".repeat(10));
+    await w3.workspace.writeText(${lit(files.hd)}, "z".repeat(20));
+    await w3.workspace.writeText("map/war3map.imp.json", ${lit(listText)});
+    await w3.workspace.refresh();
+  })()`);
+  // PNG and JPEG open in the Texture Viewer with their format and size.
+  for (const [f, fmt] of [[files.png, "PNG"], [files.jpg, "JPEG"]]) {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.editors.open(${lit(f)})`);
+    const bar = () => page.evaluate(`document.querySelector(".tex-toolbar")?.textContent ?? ""`);
+    if (!(await soon(async () => (await bar()).includes(fmt), 20000))) { fail(`${f} doesn't open in the Texture Viewer (toolbar "${await bar()}")`); continue; }
+    if (!/4×3 · 1 mip · /.test(await bar())) fail(`${f}: the toolbar shows "${await bar()}", not its size`);
+    if (!(await page.evaluate(`document.querySelector(".tex-canvas")?.width === 4`))) fail(`${f}: the canvas isn't the image`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+  await settled(page);
+  const rows = () => page.evaluate(`[...document.querySelectorAll(".imp-row .imp-path")].map((t) => t.firstChild.textContent.trim())`);
+  if (!(await soon(async () => (await rows()).length === 4, 20000))) return fail(`the list shows ${lit(await rows())}, not 4 rows`);
+  const listOnDisk = () => k.read("war3map.imp.json");
+  const before = JSON.stringify(await listOnDisk());
+  const click = (n) => page.evaluate(`document.querySelectorAll(".imp-sort")[${n}].click()`);
+  const names = async () => (await rows()).map((r) => r.split("\\").pop());
+  await click(2);
+  let got = (await names()).join();
+  if ((await names())[3] !== "Big.txt") fail(`sorted by size: ${got}`);
+  await click(2);
+  if ((await names())[0] !== "Big.txt") fail(`size sorted again doesn't reverse: ${(await names()).join()}`);
+  await click(0);
+  if ((await names()).join() !== ["Big.txt", "Photo.jpg", "Pic.png", "Small.txt"].join()) fail(`sorted by path: ${(await names()).join()}`);
+  await click(1);
+  if (!/\.txt$/.test((await names())[3]) || !/\.(png|jpg)$/.test((await names())[0])) fail(`sorted by type: ${(await names()).join()}`);
+  const choose = (cls, v) => page.evaluate(`(() => { const s = document.querySelector(${lit(cls)}); s.value = ${lit(v)}; s.dispatchEvent(new Event("change")); })()`);
+  await choose(".imp-filter-mode", "reforged");
+  if ((await names()).join() !== "Small.txt") fail(`the HD filter shows ${(await names()).join()}`);
+  const count = () => page.evaluate(`document.querySelector(".imp-count")?.textContent ?? ""`);
+  if (!/^2 of 5 imported · .* of /.test(await count())) fail(`the count line is "${await count()}"`);
+  await choose(".imp-filter-mode", "");
+  await choose(".imp-filter-type", "Image");
+  if ((await rows()).length !== 2 || !/^2 of 5 /.test(await count())) fail(`the Image filter shows ${(await rows()).length} rows, count "${await count()}"`);
+  await choose(".imp-filter-type", "");
+  if (/ of /.test(await count())) fail(`without a filter the count line is "${await count()}"`);
+  if (JSON.stringify(await listOnDisk()) !== before) fail("sorting and filtering changed the saved list");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await k.save();
+  if (JSON.stringify(await listOnDisk()) !== before) fail("the list on disk changed after a save");
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Import Manager's list writes, one at a time: two "Add to list" clicks whose writes would overlap (the list's
  *  canonicalize held back, the later one let through first) end with the file holding both entries in click order, and
  *  the tab stays dirty after the first write lands while the second entry isn't written yet. */
@@ -5628,6 +5696,57 @@ async function destructableFlags(page, found) {
     .catch(() => fail(`with no terrain editor open the named tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 0`));
   await k.verify(fail);
   } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Setting pack.attributes (off by default): Pack Release .w3x writes no (attributes) and the archive `w3proj pack` writes
+ *  for the project; on, the archive `w3proj pack --attributes` writes, byte for byte, with its (attributes). */
+async function packAttributes(page, found) {
+  try {
+  const fail = (what) => found.push(`pack attributes: ${what}`);
+  const k = await heightKit(page, "PackAttributes");
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const built = resolve(k.root, await page.evaluate(`w3.workspace.project().default_output`));
+  /** Pack Release .w3x, as the user runs it; the map it wrote. */
+  const appPack = async () => {
+    rmSync(built, { force: true });
+    await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+    await until("the build", () => existsSync(built), 60000);
+    await settled(page);
+    return readFileSync(built);
+  };
+  /** The CLI on the same project as the app left it: the strings the app pruned already, its script as it is. */
+  const cliPack = (name, extra) => {
+    const out = join(work, name);
+    const r = spawnSync(cli, ["pack", k.root, "-o", out, "--keep-unused-strings", "--keep-script", "--game", "none", ...extra], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`w3proj pack ${extra.join(" ")}: ${(r.stdout + r.stderr).slice(-300)}`);
+    return readFileSync(out);
+  };
+  const attributesOf = (map) => {
+    const r = spawnSync(cli, ["cat", map, "(attributes)"], { maxBuffer: 1 << 26 });
+    return r.status === 0 ? r.stdout : null;
+  };
+  if ((await k.setting("pack.attributes")) !== false) fail(`pack.attributes isn't off by default: ${lit(await k.setting("pack.attributes"))}`);
+  const off = await appPack();
+  if (!off.equals(cliPack("pack-attributes-cli-off.w3x", []))) fail("with the setting off, the app's pack isn't the archive `w3proj pack` writes");
+  if (attributesOf(built)) fail("with the setting off, the app's pack has an (attributes)");
+
+  await page.evaluate(`w3.settings.set("pack.attributes", true)`);
+  const on = await appPack();
+  const cliOn = cliPack("pack-attributes-cli-on.w3x", ["--attributes"]);
+  if (on.equals(off)) fail("with the setting on, the app's pack is the one without (control)");
+  if (!on.equals(cliOn)) fail(`with the setting on, the app's pack (${on.length} bytes) isn't the archive \`w3proj pack --attributes\` writes (${cliOn.length} bytes)`);
+  const own = attributesOf(built), theirs = attributesOf(join(work, "pack-attributes-cli-on.w3x"));
+  if (!own) fail("with the setting on, the app's pack has no (attributes)");
+  else if (!theirs || !own.equals(theirs)) fail("the app's (attributes) isn't the CLI's");
+  const verify = spawnSync(cli, ["verify", "-q", built, "--game", "none"], { encoding: "utf8" });
+  if (verify.status !== 0) fail(`the app's pack with (attributes) doesn't verify: ${(verify.stdout + verify.stderr).slice(-300)}`);
+  } finally {
+    await page.evaluate(`w3.settings.set("pack.attributes", undefined)`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     await restoreWindow(page);
   }
@@ -16967,6 +17086,145 @@ async function soundNumbersRefused(page, found) {
   } catch (e) { found.push(`Sound Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** The AI tools (MCP) for cameras, sounds, imports, AI files, campaigns and reserved areas: each edit lands in its file,
+ *  the open editor of that file shows it without being asked, and undo_last_edit takes it back. A call with a progress
+ *  token hears how far a long tool is. */
+async function aiDocTools(page, found) {
+  try {
+  const fail = (what) => found.push(`AI document tools: ${what}`);
+  const k = await heightKit(page, "AiDocTools");
+  const camp = join(work, "campaign-ai-tools");
+  rmSync(camp, { recursive: true, force: true });
+  const json = (text) => JSON.parse(text);
+  const refused = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
+  try {
+    // Cameras: made, shown by the Cameras tab of the open terrain editor (taken in place), changed, refused, undone.
+    const cams = () => (existsSync(join(k.root, "map", "war3map.w3c.json")) ? k.read("war3map.w3c.json").cameras : []);
+    await k.tool("set_camera", { name: "Smoke Cam", target: [256, -256], distance: 2000 });
+    await settled(page);
+    if (cams().map((c) => `${c.name}:${c.targetX}:${c.distance}`).join() !== "Smoke Cam:256:2000") fail(`set_camera wrote ${lit(cams())}`);
+    await k.tab("Cameras");
+    await until("the new camera in the Cameras tab", () => page.evaluate(`[...document.querySelectorAll('select[title="Go to a camera"] option')].some((e) => e.textContent.includes("Smoke Cam"))`), 10000)
+      .catch(() => fail("the open terrain editor's Cameras tab doesn't show the camera set_camera made"));
+    const far = await refused("set_camera", { name: "Smoke Cam", fieldOfView: 170 });
+    if (!far || !/Field of view must be from 5 to 120/.test(far)) fail(`a field of view of 170 wasn't refused: ${lit(far)}`);
+    if (json(await k.tool("list_cameras"))[0]?.fieldOfView !== 70) fail("the refused set_camera changed the camera");
+    await k.tool("undo_last_edit");
+    await settled(page);
+    if (cams().length) fail(`undo_last_edit left the camera: ${lit(cams())}`);
+    await k.tab("Terrain");
+
+    // Sounds: a game sound added while the Sound Editor is open, which then lists it; removed again.
+    const soundFile = await page.evaluate(`w3.game.list().then((l) => { const bs = String.fromCharCode(92);
+      for (const x of l) { const low = x.toLowerCase().split(bs).join("/"); if (!low.startsWith("war3.w3mod:sound/") || low.indexOf(":", 11) >= 0 || !["flac", "wav", "mp3", "ogg"].includes(low.split(".").pop())) continue; return x.slice(11).split("/").join(bs); }
+      return "none of " + l.length + ": " + l.slice(0, 3).join(" | "); })`);
+    if (soundFile?.startsWith("none of ")) fail(`no game sound found (control): ${soundFile}`);
+    if (soundFile && !soundFile.startsWith("none of ")) {
+      await page.evaluate(`w3.commands.execute("w3.sounds.open")`);
+      await until("the Sound Editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3s.json"`), 20000);
+      const made = json(await k.tool("set_sound", { name: "SmokeTool", file: soundFile, volume: 80 }));
+      await settled(page);
+      const sounds = () => k.read("war3map.w3s.json").sounds;
+      if (!made.created || sounds().map((x) => `${x.name}:${x.volume}`).join() !== "gg_snd_SmokeTool:80") fail(`set_sound wrote ${lit(sounds().map((x) => [x.name, x.volume]))}`);
+      await until("the sound in the Sound Editor", () => page.evaluate(`document.querySelector(".tab-content:not([hidden]), .editor-area")?.textContent.includes("SmokeTool") || document.body.textContent.includes("gg_snd_SmokeTool")`), 10000)
+        .catch(() => fail("the open Sound Editor doesn't show the sound set_sound added"));
+      const loud = await refused("set_sound", { name: "SmokeTool", volume: 300 });
+      if (!loud || !/Volume must be a whole number from 0 to 127/.test(loud)) fail(`a volume of 300 wasn't refused: ${lit(loud)}`);
+      await k.tool("remove_sound", { name: "gg_snd_SmokeTool" });
+      await settled(page);
+      if (sounds().length) fail("remove_sound left the sound");
+      await page.evaluate(`w3.editors.close("map/war3map.w3s.json")`);
+    }
+
+    // Imports: a file from disk lands in the import folder and the list; removed with its file.
+    const src = join(work, "ai-tools-import.txt");
+    writeFileSync(src, "imported by a tool\n");
+    const imported = json(await k.tool("import_file", { source: src }));
+    await settled(page);
+    const list = () => k.read("war3map.imp.json").files.map((f) => f.path);
+    if (imported.imported !== "war3mapImported\\ai-tools-import.txt" || !existsSync(join(k.root, "map", "war3mapImported", "ai-tools-import.txt")) || !list().includes(imported.imported)) {
+      fail(`import_file gave ${lit(imported)}; the list has ${lit(list())}`);
+    }
+    const twice = await refused("import_file", { source: src, path: "war3mapImported/ai-tools-import.txt" });
+    if (!twice || !/already has/.test(twice)) fail(`importing onto a taken path wasn't refused: ${lit(twice)}`);
+    if (!json(await k.tool("list_imports")).imports.some((e) => e.path === imported.imported && e.size > 0)) fail("list_imports doesn't show the import with its file");
+    await k.tool("remove_import", { path: imported.imported, deleteFile: true });
+    await settled(page);
+    if (list().length || existsSync(join(k.root, "map", "war3mapImported", "ai-tools-import.txt"))) fail("remove_import with deleteFile left the entry or the file");
+
+    // An AI file: made, shown by the AI Editor opened on it, changed under it, undone.
+    const made = json(await k.tool("set_ai", { file: "map/Smoke.wai", create: true, name: "Smoke Rush", initialDelay: 90 }));
+    if (!made.created || made.ai?.name !== "Smoke Rush" || !existsSync(join(k.root, "map", "Smoke.wai"))) fail(`set_ai with create gave ${lit(made)}`);
+    await page.evaluate(`w3.editors.open("map/Smoke.wai", "w3.aiEditor")`);
+    const nameBox = `[...document.querySelectorAll(".ai-editor input, .tab-content input")].some((i) => i.value === NAME)`;
+    await until("the AI Editor on the new file", () => page.evaluate(nameBox.replace("NAME", lit("Smoke Rush"))), 20000).catch(() => fail("the AI Editor doesn't show the AI set_ai made"));
+    await k.tool("set_ai", { file: "map/smoke.wai", name: "Smoke Turtle", options: { heroesFlee: false } });
+    await until("the AI Editor on the changed file", () => page.evaluate(nameBox.replace("NAME", lit("Smoke Turtle"))), 20000).catch(() => fail("the open AI Editor doesn't follow set_ai's change"));
+    const got = json(await k.tool("get_ai", { file: "map/Smoke.wai" }));
+    if (got.name !== "Smoke Turtle" || got.options.heroesFlee !== false || got.initialDelay !== 90) fail(`get_ai reads ${lit([got.name, got.options?.heroesFlee, got.initialDelay])}`);
+    await k.tool("undo_last_edit");
+    if (json(await k.tool("get_ai", { file: "map/Smoke.wai" })).name !== "Smoke Rush") fail("undo_last_edit didn't put the AI file's name back");
+    await page.evaluate(`w3.editors.close("map/Smoke.wai")`);
+
+    // Reserved areas: doodads keep off, units are placed and named in the answer; reserving is undone as an edit.
+    const reservedFile = join(k.root, ".w3proj", "reserved-areas.json");
+    await k.tool("reserve_area", { name: "base", left: -512, bottom: -512, right: 512, top: 512 });
+    if (!existsSync(reservedFile) || json(readFileSync(reservedFile, "utf8"))[0]?.name !== "base") fail("reserve_area didn't write the area");
+    const trees = json(await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 1536, y: 1536 }] }));
+    if (trees.placed !== 1 || !/reserved area "base"/.test(trees.skipped?.[0]?.reason ?? "")) fail(`a tree on a reserved area: ${lit(trees)}`);
+    const unit = json(await k.tool("place_objects", { objects: [{ id: "hfoo", x: 128, y: 128 }] }));
+    if (unit.placed !== 1 || unit.onReserved?.[0]?.area !== "base") fail(`a unit on a reserved area: ${lit(unit)}`);
+    await k.tool("undo_last_edit");
+    await k.tool("undo_last_edit");
+    await k.tool("undo_last_edit");
+    await settled(page);
+    if (existsSync(reservedFile)) fail(`three undos left the reserved areas: ${readFileSync(reservedFile, "utf8")}`);
+    if (k.doodads().length || k.units().some((u) => u.id === "hfoo")) fail("the undos left placed objects");
+
+    // Progress: a call with a token hears the tool's counts before its answer; one without hears nothing.
+    const objects = Array.from({ length: 60 }, (_, i) => ({ id: "LTlt", x: -2048 + (i % 10) * 384, y: 1024 + Math.floor(i / 10) * 384 }));
+    const call = (meta) => page.evaluate(`(async () => { const notes = [];
+      const reply = JSON.parse(await w3.mcp.handle(${lit(JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "place_objects", arguments: { objects, dryRun: true }, ...(meta ? { _meta: meta } : {}) } }))}, (l) => notes.push(JSON.parse(l))));
+      return { notes, error: reply.result?.isError ? reply.result.content[0].text : null }; })()`);
+    const heard = await call({ progressToken: "smoke" });
+    if (heard.error) fail(`place_objects (dry run) with a progress token: ${heard.error}`);
+    const last = heard.notes.at(-1)?.params;
+    if (!heard.notes.length || heard.notes[0].method !== "notifications/progress" || last?.progressToken !== "smoke" || last?.total !== 60) fail(`progress of a 60-object call: ${lit(heard.notes.slice(0, 3))}`);
+    if (heard.notes.some((n, i) => i && !(n.params.progress > heard.notes[i - 1].params.progress))) fail("the progress values don't grow");
+    if ((await call(null)).notes.length) fail("a call without a progress token sent progress");
+
+    // A campaign: its texts changed where they are kept, the open Campaign Editor follows, undo takes it back.
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${lit(camp)}, name: "Tool Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${lit(camp)}`), 20000);
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "TRIGSTR_001", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${lit(JSON.stringify(campInfo))} }));
+      await w3.workspace.writeText("map/war3campaign.wts", ${lit("STRING 1\r\n{\r\nTool Campaign\r\n}\r\n")});
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "general")`);
+    const shows = (text) => page.evaluate(`[...document.querySelectorAll(".camp-editor input, .camp-editor textarea")].some((i) => i.value === ${lit(text)})`);
+    await until("the Campaign Editor", () => shows("Tool Campaign"), 20000);
+    const info = json(await k.tool("set_campaign_info", { name: "Tools of War", author: "Smoke", race: "orc" }));
+    if (!info.changed || info.campaign?.name !== "Tools of War" || info.campaign?.race !== "orc") fail(`set_campaign_info gave ${lit(info)}`);
+    await settled(page);
+    const w3f = json(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8")), wts = readFileSync(join(camp, "map", "war3campaign.wts"), "utf8");
+    if (w3f.name !== "TRIGSTR_001" || w3f.author !== "Smoke" || w3f.race !== 1 || !wts.includes("Tools of War")) fail(`the campaign files hold ${lit([w3f.name, w3f.author, w3f.race])} and ${lit(wts)}`);
+    await until("the Campaign Editor on the new texts", async () => (await shows("Tools of War")) && (await shows("Smoke")), 20000).catch(() => fail("the open Campaign Editor doesn't follow set_campaign_info"));
+    await k.tool("undo_last_edit");
+    await settled(page);
+    if (!readFileSync(join(camp, "map", "war3campaign.wts"), "utf8").includes("Tool Campaign")) fail("undo_last_edit didn't put the campaign's name back");
+    if (json(await k.tool("campaign_info")).name !== "Tool Campaign") fail("campaign_info doesn't read the name through the string table");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`AI document tools: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Campaign Editor refuses numbers a .w3f can't hold (app/src/builtin/campaign-editor/numbers.ts): Fog style typed as 1.5 or
  *  3000000000 and a density of 1e39 are refused with why, the box shows the value kept, the campaign isn't changed; 2 is taken
  *  (control, one change). */
@@ -17109,6 +17367,70 @@ async function lightSideBar(page, found) {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
   } catch (e) { found.push(`Lighting side bar: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The AI Editor sets an attack group unit to "All but N" (app/src/builtin/ai-editor/labels.ts setQuantityMode): the choice is
+ *  offered, its number is edited, and the saved .wai holds quantity 0xffffffff then N for that unit (as the game's files do). */
+async function aiAllBut(page, found) {
+  try {
+  const fail = (what) => found.push(`AI Editor all but N: ${what}`);
+  const k = await heightKit(page, "AiAllBut");
+  const wai = join(k.root, "..", "AllBut Raider.wai");
+  rmSync(wai, { force: true });
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(async () => { window.__allButSave = w3.window.pickSaveFile; w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+  try {
+    await until("the attack units", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "Attacking"); b?.click(); return !!b && !!document.querySelector("tr.ai-row"); })()`), 20000);
+    await page.evaluate(`document.querySelector("tr.ai-row").click()`);
+    const select = `[...document.querySelectorAll(".ai-detail select")].find((s) => [...s.options].some((o) => o.textContent === "All but N"))`;
+    await until("the quantity choice", () => page.evaluate(`!!(${select})`), 20000);
+    if (await page.evaluate(`[...(${select}).options].map((o) => o.textContent).join("|")`) !== "All|All but N|Fixed Value|Range: Minimum - All|Range: Minimum - Maximum") fail("the quantity choices aren't All, All but N, Fixed, Range");
+    await page.evaluate(`(() => { const s = ${select}; s.selectedIndex = 1; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await settled(page);
+    const kept = `[...document.querySelectorAll(".ai-detail input.ai-num")].find((e) => e.getAttribute("aria-label") === "Units kept back" || e.title === "Units kept back") ?? document.querySelector(".ai-detail input.ai-num")`;
+    await until("the number of units kept back", () => page.evaluate(`!!(${kept})`), 20000);
+    await typeInto(page, kept, "3");
+    await settled(page);
+    const cell = await page.evaluate(`document.querySelector("tr.ai-row.active td:nth-child(2)")?.textContent`);
+    if (cell !== "All but 3") fail(`the unit's quantity reads "${cell}", not "All but 3"`);
+    await k.save();
+    const bytes = existsSync(wai) ? readFileSync(wai) : Buffer.alloc(0);
+    if (!bytes.includes(Buffer.from("ffffffff03000000", "hex"))) fail("the saved .wai has no quantity all with maximum 3");
+  } finally {
+    await page.evaluate(`(() => { if (window.__allButSave) w3.window.pickSaveFile = window.__allButSave; delete window.__allButSave; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`AI Editor all but N: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The Lighting Editor edits the in and out tangents of a Hermite key (form.ts tangent): a typed tangent marks the model
+ *  changed and, saved, is in the .mdl as the key's InTan / OutTan. */
+async function lightTangents(page, found) {
+  try {
+  const fail = (what) => found.push(`Lighting Editor tangents: ${what}`);
+  const k = await heightKit(page, "LightTangent");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(() => { window.__tanQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
+  try {
+    await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+    await until("the light's form in the side bar", () => page.evaluate(`!!document.querySelector(".lighting-session input.lighting-num")`), 30000);
+    await page.evaluate(`(async () => { const b = [...document.querySelectorAll(".lighting-session button")].find((x) => x.textContent === "Done"); b.click(); await new Promise((r) => setTimeout(r, 500)); await w3.editors.open(w3.workspace.files().map((f) => f.path).find((p) => /^map\\/[0-9a-f-]{36}\\.mdl$/i.test(p)), "w3.lightingEditor"); })()`);
+    await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector(".lighting-editor.form-body input.lighting-num")`), 30000);
+    const path = await page.evaluate(`w3.editors.activePath()`);
+    const field = `document.querySelector(".lighting-editor td.lighting-tangent input.lighting-num")`;
+    if (!(await page.evaluate(`!!${field}`))) { fail("no Hermite key shows tangent boxes"); return; }
+    if (await page.evaluate(`w3.editors.isDirty(${lit(path)})`)) fail("the model counts as changed before an edit");
+    await typeInto(page, field, "0.625");
+    await settled(page);
+    if (!(await page.evaluate(`w3.editors.isDirty(${lit(path)})`))) fail("a typed tangent didn't mark the model changed");
+    await k.save();
+    const text = readFileSync(join(k.root, path), "utf8");
+    if (!/InTan \{[^}]*0\.625/.test(text) && !/OutTan \{[^}]*0\.625/.test(text)) fail("the saved model has no tangent 0.625");
+  } finally {
+    await page.evaluate(`(() => { if (window.__tanQuick) w3.window.quickPick = window.__tanQuick; delete window.__tanQuick; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Lighting Editor tangents: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
 /** The Lighting Editor refuses numbers a lighting model's float can't hold (app/src/builtin/lighting-editor/numbers.ts): a
@@ -19288,7 +19610,9 @@ async function run() {
       // different lines and merge without conflicts.
       const onlyChecks = {
         addPathReady,
+        aiAllBut,
         aiClientSetup,
+        aiDocTools,
         aiNumbersRefused,
         aiTestRun,
         areaLevels,
@@ -19338,6 +19662,7 @@ async function run() {
         importListCleanup,
         importListWriteFail,
         importPathTab,
+        importSortImages,
         importWarnings,
         importWriteOrder,
         itemDrops,
@@ -19346,6 +19671,7 @@ async function run() {
         keyChords,
         lightNumbersRefused,
         lightSideBar,
+        lightTangents,
         luaNames,
         mapInfoColorTools,
         mapInfoUndoKept,
@@ -19380,6 +19706,7 @@ async function run() {
         objectsWhileOpening,
         objectValueRange,
         oldLocalFiles,
+        packAttributes,
         paletteMouse,
         pasteWaitsForSizes,
         pathingImport,
@@ -19632,6 +19959,8 @@ async function checksA(page, found) {
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
   await leftOpen(page, "wholeMapGround", found);
+  await packAttributes(page, found).catch((e) => found.push(`pack attributes: ${e.message}`));
+  await leftOpen(page, "packAttributes", found);
   await destructableFlags(page, found).catch((e) => found.push(`destructable flags: ${e.message}`));
   await leftOpen(page, "destructableFlags", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
@@ -19769,6 +20098,8 @@ async function checksB(page, found) {
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
   await leftOpen(page, "importPathTab", found);
+  await importSortImages(page, found).catch((e) => found.push(`import sort and images: ${e.message}`));
+  await leftOpen(page, "importSortImages", found);
   await importWriteOrder(page, found).catch((e) => found.push(`import write order: ${e.message}`));
   await leftOpen(page, "importWriteOrder", found);
   await importListCleanup(page, found).catch((e) => found.push(`import list cleanup: ${e.message}`));
@@ -19805,10 +20136,14 @@ async function checksC(page, found, project) {
   await leftOpen(page, "typedFieldSave", found);
   await aiNumbersRefused(page, found);
   await leftOpen(page, "aiNumbersRefused", found);
+  await aiAllBut(page, found);
+  await leftOpen(page, "aiAllBut", found);
   await aiClientSetup(page, found);
   await leftOpen(page, "aiClientSetup", found);
   await lightNumbersRefused(page, found);
   await leftOpen(page, "lightNumbersRefused", found);
+  await lightTangents(page, found);
+  await leftOpen(page, "lightTangents", found);
   await lightSideBar(page, found).catch((e) => found.push(`Lighting side bar: ${e.message}`));
   await leftOpen(page, "lightSideBar", found);
   await aiTestRun(page, found).catch((e) => found.push(`Test AI: ${e.message}`));
@@ -19817,6 +20152,8 @@ async function checksC(page, found, project) {
   await leftOpen(page, "soundNumbersRefused", found);
   await campaignNumbersRefused(page, found);
   await leftOpen(page, "campaignNumbersRefused", found);
+  await aiDocTools(page, found);
+  await leftOpen(page, "aiDocTools", found);
   await dropChancesRefused(page, found);
   await leftOpen(page, "dropChancesRefused", found);
   await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));

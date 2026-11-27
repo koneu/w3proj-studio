@@ -56,7 +56,7 @@ test("cliffs take the look of their ground, or the one asked for", () => {
   const t = flat();
   setCliffs(t, block, "box", { level: 3 }, kinds);
   assert.equal(corner(t, 8, 12).cliffTexture, 1, "grass cliff on grass");
-  assert.equal(corner(t, 12, 12).cliffTexture, 15, "flat ground in the middle has none");
+  assert.equal(corner(t, 12, 12).cliffTexture, 1, "the flat ground in the middle takes it too, as under the editor's cliff brush");
   const rock = flat();
   setCliffs(rock, block, "box", { level: 3 }, kinds, "Lrok");
   assert.equal(corner(rock, 8, 12).cliffTexture, 2);
@@ -70,8 +70,25 @@ test("existing cliffs can change their look", () => {
   const changed = setCliffType(t, block, "box", "Ldrt", kinds);
   assert.ok(changed.length > 0);
   assert.equal(corner(t, 8, 12).cliffTexture, 0);
-  assert.equal(corner(t, 12, 12).cliffTexture, 15, "flat ground isn't a cliff");
+  assert.equal(corner(t, 12, 12).cliffTexture, 0, "the flat ground inside too");
   assert.deepEqual(setCliffType(t, block, "box", "Ldrt", kinds), [], "already so");
+});
+
+test("the corners round the area take the cliff type, cliff or not, as round the editor's cliff brush", () => {
+  // A level that moves nothing still types its stamp: the area's corners and the ring round them.
+  const t = flat();
+  const one = { left: 12 * 128 - 64, bottom: 12 * 128 - 64, right: 12 * 128 + 64, top: 12 * 128 + 64 };
+  const changed = setCliffs(t, one, "box", { level: corner(t, 12, 12).layer }, kinds, "Ldrt");
+  assert.equal(changed.length, 9, "the corner and the eight round it");
+  for (let y = 10; y <= 14; y++) for (let x = 10; x <= 14; x++) {
+    const near = Math.abs(x - 12) <= 1 && Math.abs(y - 12) <= 1;
+    assert.equal(corner(t, x, y).cliffTexture, near ? 0 : 15, `corner ${x},${y}`);
+  }
+  // set_cliff_type: the same corners.
+  const u = flat();
+  setCliffType(u, one, "box", "Lrok", kinds);
+  assert.equal(corner(u, 13, 13).cliffTexture, 2);
+  assert.equal(corner(u, 14, 12).cliffTexture, 15);
 });
 
 test("asking for the level it's at still changes the look", () => {
