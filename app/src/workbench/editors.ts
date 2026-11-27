@@ -70,6 +70,8 @@ export interface DocumentIO {
   /** Resolves once the project's whole file list is read (at once when no project is open), so that an editor
    *  deciding by it whether its file is there (new and empty, or read) never takes "not listed yet" for absent. */
   filesReady?(path: string): Promise<void>;
+  /** A tab's name and tooltip where the file's own would mislead (a virtual file, the terrain editor's among them). */
+  tab?(path: string): { label: string; tooltip: string } | null;
 }
 
 /** Tabbed editor area. Picks an editor provider per file from the
@@ -321,10 +323,11 @@ export class EditorService {
     // Virtual documents show their editor's title; "w3:<kind>:<file>" ones (e.g. a diff) the file too.
     const editorTitle = this.contributions.find((c) => c.id === id)?.title ?? path;
     const about = /^w3:[^:]+:(.+)$/.exec(path)?.[1];
-    const title = path.startsWith("w3:")
+    const named = this.io.tab?.(path);
+    const title = named?.label ?? (path.startsWith("w3:")
       ? (about ? `${about.split("/").pop()} (${editorTitle})` : editorTitle)
-      : path.split(/[/:]/).pop()!;
-    const tab: Tab = { path, providerId: id, el, dirty: false, writing: 0, tabEl: h("div.tab", { title: path }) };
+      : path.split(/[/:]/).pop()!);
+    const tab: Tab = { path, providerId: id, el, dirty: false, writing: 0, tabEl: h("div.tab", { title: named?.tooltip ?? path }) };
     const closeBtn = h("span.tab-close", { onclick: (e: MouseEvent) => { e.stopPropagation(); this.close(tab); } }, "×");
     tab.tabEl.append(h("span.tab-label", {}, title), closeBtn);
     tab.tabEl.addEventListener("mousedown", (e) => {

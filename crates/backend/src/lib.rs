@@ -96,6 +96,10 @@ pub struct FileInfo {
     pub size: u64,
     /// Last write, ms since the Unix epoch (0 if unknown): to notice changes made outside the app.
     pub modified: u64,
+    /// No file of this name is on disk: the app's own code reads and writes it, from other files (`flatview`,
+    /// `objectview`). What shows a user the project's files leaves it out.
+    #[serde(rename = "virtual", skip_serializing_if = "std::ops::Not::not")]
+    pub is_virtual: bool,
 }
 
 /// A folder (or entry) `project_files_partial` couldn't read, below the root, and why.
@@ -169,7 +173,7 @@ pub fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileIn
                 let meta = entry.metadata().ok();
                 let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
                 let modified = meta.as_ref().map(modified_ms).unwrap_or(0);
-                out.push(FileInfo { path: rel, size, modified });
+                out.push(FileInfo { path: rel, size, modified, is_virtual: false });
             }
         }
     }
