@@ -19110,7 +19110,7 @@ async function niceToHaves(page, found) {
   try {
     // ---- Import Map Folder: the fixture's map, its files loose in a folder, becomes the fixture's project -----------------
     const packed = join(dir, "mini.w3x"), folder = join(dir, "Mini Folder.w3x");
-    if (spawnSync(cli, ["pack", FIXTURE, ...fixtureTriggerData(FIXTURE), "-o", packed]).status !== 0) throw new Error("the CLI can't pack the fixture");
+    if (spawnSync(cli, ["pack", FIXTURE, "--keep-objects", ...fixtureTriggerData(FIXTURE), "-o", packed]).status !== 0) throw new Error("the CLI can't pack the fixture");
     const names = spawnSync(cli, ["ls", packed], { encoding: "utf8" }).stdout.split(/\r?\n/).slice(1).filter((l) => l && !l.startsWith("file data")).map((l) => l.trim().split(/\s+/)[3]);
     for (const name of names) {
       const file = join(folder, ...name.split("\\"));
@@ -19649,7 +19649,8 @@ async function run() {
   const project = join(work, "project");
   cpSync(FIXTURE, project, { recursive: true });
   const wanted = join(work, "by-cli.w3x"), packed = join(work, "by-app.w3x");
-  const pack = spawnSync(cli, ["pack", project, ...fixtureTriggerData(project), "-o", wanted], { encoding: "utf8" });
+  // --keep-objects: the map is compared with the fixture as it is (its hand-made doodads aren't on the editor's grids).
+  const pack = spawnSync(cli, ["pack", project, "--keep-objects", ...fixtureTriggerData(project), "-o", wanted], { encoding: "utf8" });
   if (pack.status !== 0) throw new Error(`the CLI can't pack the fixture: ${pack.stderr}`);
   if (process.argv.includes("--break")) writeFileSync(join(project, "map", "war3map.w3r.json"), "{ not json");
   const before = snapshot(project);
