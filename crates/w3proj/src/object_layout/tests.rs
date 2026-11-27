@@ -585,3 +585,59 @@ fn a_sync_keeps_an_order_txt_that_still_gives_the_maps_order() {
     assert_eq!(text(&incoming, "objects/units/custom/order.txt"), "h000\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Check Objects reports every file's fault at once, where pack stops at the first; a layout pack takes gives nothing.
+#[test]
+fn check_reports_every_fault_by_file() {
+    use crate::trigger_check::Severity;
+    let root = "{\n  \"format\": \"w3proj.objectfolders/1\",\n  \"files\": {\n    \"units\": {\"data\": 3}\n  }\n}\n";
+    let unit = |id: &str, base: &str| format!("{{\"id\": \"{id}\", \"base\": \"{base}\", \"data\": {{\"mods\": []}}}}");
+    let mut files = Files::new();
+    let put = |files: &mut Files, p: &str, t: &str| {
+        files.insert(p.to_string(), t.as_bytes().to_vec());
+    };
+    put(&mut files, "objects/objects.json", root);
+    put(&mut files, "objects/units/custom/h000.json", &unit("h000", "hfoo"));
+    put(&mut files, "objects/units/original/hkni.json", "{\"base\": \"hkni\", \"data\": {\"mods\": []}}");
+    // The game's own folder of that name is no part of the layout.
+    put(&mut files, "Objects/InventoryItems/x.txt", "x");
+    assert_eq!(check::check(&files, Prefix::Map), vec![]);
+    assert!(assemble(&files, &[], Prefix::Map, &mut Vec::new()).is_ok());
+
+    put(&mut files, "objects/units/custom/h001.json", "{\n<<<<<<< ours\n=======\n>>>>>>> theirs\n}");
+    put(&mut files, "objects/units/custom/h002.json", &unit("h003", "hfoo"));
+    put(&mut files, "objects/units/custom/hkni.json", &unit("hkni", "hfoo"));
+    put(&mut files, "objects/units/custom/h004.json", "{\"id\": \"h004\", \"base\": \"hfoo\", \"skin\": {\"mods\": []}}");
+    put(&mut files, "objects/units/custom/order.txt", "h000\nh000\nh999\nh001\n");
+    put(&mut files, "objects/units/notes.md", "n");
+    let got = check::check(&files, Prefix::Map);
+    let of = |s: Severity| got.iter().filter(|i| i.severity == s).map(|i| (i.file.as_str(), i.line)).collect::<Vec<_>>();
+    assert_eq!(
+        of(Severity::Error),
+        [
+            ("objects/units/custom/h001.json", Some(2)),
+            ("objects/units/custom/h002.json", None),
+            ("objects/units/custom/h004.json", None),
+            ("objects/units/custom/hkni.json", None),
+            ("objects/units/notes.md", None),
+        ],
+        "{got:#?}"
+    );
+    // h000 twice and h999 without a file; h001 has a file, though it can't be read.
+    assert_eq!(of(Severity::Warning), [("objects/units/custom/order.txt", None), ("objects/units/custom/order.txt", None)], "{got:#?}");
+    assert!(assemble(&files, &[], Prefix::Map, &mut Vec::new()).is_err());
+}
+
+/// One id as a new object and as a changed standard one (a merge, a copied file): pack refuses it, naming both files.
+#[test]
+fn one_id_in_both_tables_is_refused() {
+    let mut files = Files::new();
+    files.insert("objects/objects.json".into(), b"{\"format\": \"w3proj.objectfolders/1\", \"files\": {\"units\": {\"data\": 3}}}".to_vec());
+    files.insert("objects/units/custom/hkni.json".into(), b"{\"id\": \"hkni\", \"base\": \"hfoo\", \"data\": {\"mods\": []}}".to_vec());
+    files.insert("objects/units/original/hkni.json".into(), b"{\"base\": \"hkni\", \"data\": {\"mods\": []}}".to_vec());
+    let e = assemble(&files, &[], Prefix::Map, &mut Vec::new()).unwrap_err().to_string();
+    assert!(e.contains("custom/hkni.json") && e.contains("original/hkni.json"), "{e}");
+    let got = check::check(&files, Prefix::Map);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert_eq!(got[0].file, "objects/units/custom/hkni.json");
+}

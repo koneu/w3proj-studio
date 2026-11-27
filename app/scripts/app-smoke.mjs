@@ -17758,10 +17758,57 @@ async function objectOneFile(page, found) {
     only("hit points", await edit(unit, "uhpm", "777"), "changed", unit, "777");
     only("the name", await edit(unit, "unam", "One File Renamed"), "changed", unit, "One File Renamed");
     only("a standard unit's first change", await edit("hfoo", "uhpm", "888"), "added", "hfoo", "888");
+    // Another unit's file changed outside (a pull) while the editor has an unsaved change: the save asks first, and
+    // Cancel leaves both files as they are on disk.
+    await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(unit)})`);
+    await until(`${unit}'s fields`, () => page.evaluate(`!!document.querySelector("input.obj-field-search")`), 30000);
+    await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = "uhpm"; s.dispatchEvent(new Event("input")); })()`);
+    await until("the field uhpm", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
+    await page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)"); i.value = "999"; i.dispatchEvent(new Event("change")); })()`);
+    const theirs = [...files().keys()].find((f) => f.startsWith("units/custom/") && idOf(files().get(f)) === other);
+    writeFileSync(join(dir, theirs), files().get(theirs).replace("600", "650"));
+    const pulled = files();
+    await page.evaluate(`(() => { window.__ofConfirm = w3Workbench.editors.confirm; window.__ofAsked = [];
+      w3Workbench.editors.confirm = async (m) => { window.__ofAsked.push(String(m)); return "Cancel"; }; })()`);
+    await k.save();
+    const asked = await page.evaluate(`window.__ofAsked`);
+    if (!asked.some((m) => /changed on disk since this editor read it/.test(m))) fail(`saving over another unit's outside change asked ${lit(asked)}`);
+    if (lit([...files()]) !== lit([...pulled])) fail("the cancelled save changed map/objects/");
+    // Overwritten after all, so the editor closes clean.
+    await page.evaluate(`w3Workbench.editors.confirm = async () => "Overwrite"`);
+    await k.save();
+    // Check Objects: a merge conflict left in an object file is listed at its file and line.
+    await page.evaluate(`w3.editors.closeAll()`);
+    const clean = await page.evaluate(`w3.commands.execute("w3.problems.checkObjects")`);
+    if (!clean || clean.problems.length) fail(`control: Check Objects on a sound project gave ${lit(clean?.problems ?? clean)}`);
+    const kept = files().get(theirs);
+    writeFileSync(join(dir, theirs), kept.replace("\n", "\n<<<<<<< HEAD\n"));
+    await page.evaluate(`w3.workspace.refresh()`);
+    const group = await page.evaluate(`w3.commands.execute("w3.problems.checkObjects")`);
+    const listed = (group?.problems ?? []).map((p) => `${p.severity} ${p.location}: ${p.message}`);
+    if (listed.length !== 1 || !listed[0].startsWith(`error map/objects/${theirs}:2: `) || !/merge conflict markers/.test(listed[0])) fail(`Check Objects on a conflicted file gave ${lit(listed)}`);
+    writeFileSync(join(dir, theirs), kept);
+    await page.evaluate(`w3.workspace.refresh()`);
+    // Source Control: a changed object file is listed with the object's name, and its diff says which field changed.
+    const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args],
+      { cwd: k.root, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(k.root) } });
+    const commands = [["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "objects"]];
+    if (commands.some((c) => git(...c).status !== 0)) return fail("control: the scratch repository couldn't be made");
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "uhpm", value: 779 }] });
+    await k.save();
+    await page.evaluate(`w3.commands.execute("w3.scm.show")`);
+    const rowOf = `[...document.querySelectorAll(".scm-row")].find((r) => r.querySelector(".scm-name")?.textContent === ${lit(`${unit}.json`)})`;
+    const label = () => page.evaluate(`${rowOf}?.querySelector(".scm-object")?.textContent ?? null`);
+    await until("the object's name in the changes list", async () => (await label())?.trim() === "One File Renamed (unit)", 20000)
+      .catch(async () => fail(`the changed object file's row says ${lit(await label())}`));
+    await page.evaluate(`${rowOf}?.click()`);
+    const summary = () => page.evaluate(`[...document.querySelectorAll(".diff-objects")].find((d) => d.offsetParent !== null)?.textContent ?? null`);
+    await until("the diff's object summary", async () => /Objects: 1 changed.*One File Renamed.*uhpm.*779/s.test((await summary()) ?? ""), 20000)
+      .catch(async () => fail(`the object file's diff says ${lit(await summary())}`));
   } catch (e) {
     fail(e.message);
   } finally {
-    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await page.evaluate(`(() => { if (window.__ofConfirm) w3Workbench.editors.confirm = window.__ofConfirm; w3.editors.closeAll(); })()`).catch(() => {});
     await restoreWindow(page);
   }
 }

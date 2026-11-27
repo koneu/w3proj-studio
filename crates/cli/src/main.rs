@@ -663,8 +663,18 @@ enum Cmd {
     /// Print a project's object data as JSON, as W3Proj Studio reads it: each packed file's tables (format
     /// w3proj.objects/1) under its flat name (`war3map.w3u.json`, `war3mapSkin.w3a.json`, a campaign's
     /// `war3campaign.w3u.json`), assembled from map/objects/ (one file per object), or a project's flat files as they
-    /// are. Exit 1 when a file can't be read.
-    Objects { project: PathBuf },
+    /// are. Exit 1 when a file can't be read. `--check`: Check Objects instead, as W3Proj Studio's Problems view runs
+    /// it (conflict markers, files that can't be read, a name or folder that doesn't fit the id, order.txt entries);
+    /// exit 1 when it finds errors.
+    Objects {
+        project: PathBuf,
+        /// Report what the files of map/objects/ get wrong.
+        #[arg(long)]
+        check: bool,
+        /// With --check: the report as JSON.
+        #[arg(long, requires = "check")]
+        json: bool,
+    },
     /// MCP server over stdin and stdout: AI clients start this to use the running W3Proj Studio.
     Mcp,
     /// The app's backend commands over stdin and stdout, framed as `w3proj rebuild` answers them: for the app's
@@ -1123,7 +1133,25 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let read = backend::triggers::read(&project.to_string_lossy(), &extra).map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string(&read)?);
         }
-        Cmd::Objects { project } => {
+        Cmd::Objects { project, check: true, json } => {
+            let issues = backend::objectview::check(&project.to_string_lossy()).map_err(anyhow::Error::msg)?;
+            let errors = issues.iter().filter(|i| i.severity == w3proj::trigger_check::Severity::Error).count();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&issues)?);
+            } else {
+                for i in &issues {
+                    let sev = if i.severity == w3proj::trigger_check::Severity::Error { "error" } else { "warning" };
+                    let line = i.line.map(|l| format!(":{l}")).unwrap_or_default();
+                    println!("{sev:<7}  {}{line}  {}", i.file, i.message);
+                }
+                let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+                println!("Check Objects: {}, {}", plural(errors, "error"), plural(issues.len() - errors, "warning"));
+            }
+            if errors > 0 {
+                return Ok(ExitCode::FAILURE);
+            }
+        }
+        Cmd::Objects { project, .. } => {
             // Through the app's file layer (backend), so a flat file reads as the app reads it in either layout.
             let map_dir = project.join(w3proj::project::MAP_DIR);
             let prefix = w3proj::object_layout::Prefix::of_map_dir(&map_dir)?;

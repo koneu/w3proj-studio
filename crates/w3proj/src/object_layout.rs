@@ -25,6 +25,8 @@ use crate::folder_codec::{self, Files, Folder};
 use crate::objdata::{self, Id, Mod, Object, ObjectFile, Set};
 use crate::{Error, Result};
 
+pub mod check;
+
 pub const DIR: &str = "objects";
 /// The layout's folder under `map/`.
 pub const FOLDER: Folder = Folder::new(DIR);
@@ -471,6 +473,12 @@ fn conflict(path: &str) -> Error {
     bad(format!("map/{path} has merge conflict markers: resolve the conflict first"))
 }
 
+fn both_tables(custom: &str, original: &str) -> Error {
+    bad(format!(
+        "map/{custom} and map/{original} hold one id, as a new object and as a changed standard one: remove one, or give the new object another id"
+    ))
+}
+
 fn not_part(path: &str) -> Error {
     bad(format!(
         "map/{path} isn't part of the object layout (map/{DIR}/ holds objects.json and <kind>/original|custom/ with one <id>.json per object and an order.txt; kinds: {})",
@@ -636,6 +644,11 @@ fn parse_kind(kind: Kind, prefix: Prefix, versions: [Option<u32>; 2], files: &Fi
         rest.sort_by_key(|o| o.key(t).0);
         ordered.extend(rest);
         data.tables[t] = ordered;
+    }
+    let standard: HashMap<[u8; 4], &Obj> = data.tables[0].iter().map(|o| (o.key(0).0, o)).collect();
+    if let Some(o) = data.tables[1].iter().find(|o| standard.contains_key(&o.key(1).0)) {
+        let at = |t: usize, id: Id| format!("{}/{}.json", table_dir(kind, t), file_stem(id));
+        return Err(both_tables(&at(1, o.key(1)), &at(0, o.key(1))));
     }
     Ok(data)
 }

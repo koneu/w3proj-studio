@@ -1101,6 +1101,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .scm-A .scm-status, .scm-U .scm-status { color: #98c379; }
 .scm-D .scm-status, .scm-C .scm-status { color: var(--error); }
 .scm-D .scm-name { text-decoration: line-through; }
+.scm-object { padding-left: 4px; }
 .diff-pane { display: flex; flex-direction: column; height: 100%; }
 .diff-head { display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .diff-actions { margin-left: auto; display: flex; gap: 4px; }

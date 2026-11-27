@@ -745,6 +745,7 @@ impl Server {
             "triggers_read" => to_json(backend::triggers::read(root()?, &self.formats)?),
             // Check Trigger Tree, and its fixes as a plan only (the caller writes the files).
             "triggers_check" => to_json(backend::triggers::check(root()?, &self.formats)?),
+            "objects_check" => to_json(backend::objectview::check(root()?)?),
             "triggers_fix" => {
                 let fixes: Vec<String> = args.get("fixes").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
                 Ok(Answer::Json(backend::triggers::fix(root()?, &self.formats, &fixes)?))

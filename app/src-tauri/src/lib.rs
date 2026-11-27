@@ -478,6 +478,12 @@ async fn triggers_check(app: AppHandle, root: String) -> CmdResult<Vec<w3proj::t
     tauri::async_runtime::spawn_blocking(move || backend::triggers::check(&root, &formats)).await.map_err(err)?
 }
 
+/// Check Objects: what the files of `map/objects/` get wrong (backend::objectview::check); [] without them.
+#[tauri::command]
+async fn objects_check(root: String) -> CmdResult<Vec<w3proj::object_layout::check::Issue>> {
+    tauri::async_runtime::spawn_blocking(move || backend::objectview::check(&root)).await.map_err(err)?
+}
+
 /// What Check Trigger Tree's fixes ("renumber", "order", "collapse") would write and remove (backend::triggers::fix):
 /// nothing is written, the app writes them as one undoable edit.
 #[tauri::command]
@@ -1405,6 +1411,7 @@ pub fn run() {
             triggers_plan,
             triggers_write,
             triggers_check,
+            objects_check,
             triggers_fix,
             terrain_open_state,
             terrain_set_open,

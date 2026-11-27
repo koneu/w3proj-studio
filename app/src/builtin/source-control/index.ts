@@ -15,7 +15,7 @@ import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
 import { diffExtensions } from "./diffext";
-import { diffObjects, type ObjectChange } from "./objdiff";
+import { diffObjects, flatOfObjectFile, objectFileOf, type ObjectChange } from "./objdiff";
 import { errorText } from "../../lib/oserror";
 
 interface Status { branch: string; outer_repo: string; changes: Change[] }
@@ -402,6 +402,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           disabled: busy || !ticked, title: "Stages and commits the ticked changes (Ctrl+Enter)", onclick: () => commit().catch(failed),
         }, busy ? "Committing…" : `Commit${n ? ` ${ticked === n ? "" : `${ticked} of `}${n} change${n === 1 ? "" : "s"}` : ""}`)));
         if (!n) { el.append(h("div.view-empty", {}, "No changes since the last commit.")); return; }
+        // What object a file of map/objects/ holds, beside its name (an id alone says little); the names come later.
+        const objectRows: { node: HTMLElement; id: string; ext: string; noun: string }[] = [];
+        const objectLabel = (path: string, deleted: boolean) => {
+          const o = objectFileOf(path);
+          if (!o) return [];
+          const node = h("span.scm-object", {}, ` ${o.noun}`);
+          if (!deleted && !/(^|\/)maps\//i.test(path) && objectRows.length < MAX_OBJECTS) objectRows.push({ node, ...o });
+          return [node];
+        };
         const rows = [...status.changes].sort((a, b) => a.path.localeCompare(b.path)).map((c) => {
           const slash = c.path.lastIndexOf("/");
           const open = () => w3.editors.open(`${DIFF}${c.path}`, "w3.diff").catch(failed);
@@ -425,10 +434,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 { label: "Discard Changes…", disabled: c.status === "C", run: () => void discard([c]).catch(failed) },
               ]);
             },
-          }, tick, h("span.scm-name", {}, c.path.slice(slash + 1)), h("small.muted", {}, slash > 0 ? ` ${c.path.slice(0, slash)}` : ""),
+          }, tick, h("span.scm-name", {}, c.path.slice(slash + 1)), ...objectLabel(c.path, c.status === "D"), h("small.muted", {}, slash > 0 ? ` ${c.path.slice(0, slash)}` : ""),
             h("span.scm-status", {}, c.status));
         });
         el.append(h("div.tree", {}, ...rows));
+        if (objectRows.length) {
+          void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then(async (objects) => {
+            for (const o of objectRows) {
+              const name = await objects.name(o.id, [o.ext]).catch(() => undefined);
+              if (name) o.node.textContent = ` ${name} (${o.noun})`;
+            }
+          }, () => {});
+        }
       },
     }),
 
@@ -493,7 +510,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Previous change", onclick: step(goToPreviousChunk) }, "↑"),
               h("button", { title: "Next change", onclick: step(goToNextChunk) }, "↓"),
               missing(after) ? null : h("button", { onclick: () => w3.editors.open(path).catch(failed) }, "Open File")));
-          el.replaceChildren(head, ...(OBJECT_FILE.test(path) ? [objectSummary(w3, path, a, b)] : []), box);
+          el.replaceChildren(head, ...(OBJECT_FILE.test(path) || objectFileOf(path) ? [objectSummary(w3, path, a, b)] : []), box);
         };
         await render();
         // Saved again (here or outside the app): redraw.
@@ -518,11 +535,13 @@ const MAX_OBJECTS = 200;
 /** Changed objects of an object data file, with their changed fields (labels and names from the
  *  game's data, filled in when loaded); an object opens in the Object Editor. */
 function objectSummary(w3: W3Api, path: string, before: string, after: string): HTMLElement {
-  const kind = OBJECT_FILE.exec(path)![1].toLowerCase();
+  const one = objectFileOf(path);
+  const kind = one ? one.ext : OBJECT_FILE.exec(path)![1].toLowerCase();
+  const read = (text: string) => (one ? flatOfObjectFile(one.section, text) : text ? JSON.parse(text) : null);
   const el = h("div.diff-objects");
   let changes: ObjectChange[];
   try {
-    changes = diffObjects(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null);
+    changes = diffObjects(read(before), read(after));
   } catch (e) {
     el.append(h("div.muted", {}, `Objects can't be compared: ${errorText(e)}`));
     return el;
@@ -542,7 +561,8 @@ function objectSummary(w3: W3Api, path: string, before: string, after: string): 
   const later = (map: Map<string, HTMLElement[]>, key: string, node: HTMLElement) => { map.set(key, [...(map.get(key) ?? []), node]); return node; };
   for (const c of changes.slice(0, MAX_OBJECTS)) {
     const mark = c.what === "added" ? "+" : c.what === "removed" ? "−" : "✎";
-    const open = c.what === "removed" || /campaign/i.test(path) ? undefined
+    // A chapter map's object isn't one the Object Editor would open here.
+    const open = c.what === "removed" || /campaign/i.test(path) || /(^|\/)maps\//i.test(path) ? undefined
       : () => void w3.commands.execute("w3.objectEditor.open", kind, c.id).catch((e) => w3.window.showError(String(e)));
     list.append(h(`div.diff-object.diff-${c.what}${open ? ".clickable" : ""}`, { onclick: open, title: open ? "Open in the Object Editor" : "" },
       h("span.diff-mark", {}, mark), h("code", {}, c.id), " ", later(names, c.id, h("span", {})),

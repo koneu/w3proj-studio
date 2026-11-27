@@ -19,6 +19,10 @@ import { fixTriggerTree, treeProblem, type TreeIssue } from "./triggertree";
 
 const GITATTRIBUTES = ".gitattributes";
 /** The rule a project with trigger folders needs (written by a new project, crates/w3proj/src/project.rs GITATTRIBUTES). */
+/** A file of the object layout (map/objects/: objects.json and the kinds' folders; a campaign chapter's too). Another
+ *  file under Objects\ is the game's folder of that name, an import. */
+const OBJECT_LAYOUT = /^(maps\/[^/]+\/)?map\/objects\/(objects\.json$|(units|items|destructables|doodads|abilities|buffs|upgrades)\/)/i;
+
 export const TRIGGERS_GIT_RULE = "map/triggers/** -text";
 
 /** Whether a .gitattributes has a rule that keeps Git off the trigger texts' line endings: `map/triggers/**` (or a
@@ -144,6 +148,25 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         if (!root || !w3.workspace.files().some((f) => isTriggerLayoutPath(f.path))) return [];
         const issues = await w3.backend.invoke<TreeIssue[]>("triggers_check", { root });
         const out = issues.slice(0, LIMIT).map((i) => treeProblem(i, (fix) => fixTriggerTree(w3, [fix])));
+        if (issues.length > LIMIT) out.push({ severity: "warning", message: `… and ${issues.length - LIMIT} more` });
+        return out;
+      },
+    },
+    {
+      // Check Objects (crates/w3proj/src/object_layout/check.rs, as `w3proj objects --check` runs it): what the files of
+      // map/objects/ get wrong, mostly after a Git merge. Pack refuses its errors.
+      id: "objectFolders",
+      title: "Check Objects",
+      async run() {
+        const root = w3.workspace.project()?.root;
+        if (!root || !w3.workspace.files().some((f) => OBJECT_LAYOUT.test(f.path))) return [];
+        const issues = await w3.backend.invoke<TreeIssue[]>("objects_check", { root });
+        const out: Problem[] = issues.slice(0, LIMIT).map((i) => ({
+          severity: i.severity,
+          message: i.message,
+          location: i.line ? `${i.file}:${i.line}` : i.file,
+          reveal: { command: "w3.text.revealLine", args: [i.file, i.line ?? 1] },
+        }));
         if (issues.length > LIMIT) out.push({ severity: "warning", message: `… and ${issues.length - LIMIT} more` });
         return out;
       },

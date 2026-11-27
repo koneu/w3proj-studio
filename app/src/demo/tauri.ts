@@ -127,6 +127,7 @@ const handlers: Record<string, Handler> = {
   triggers_plan: ({ save }) => ({ write: [{ path: "map/triggers/triggers.json", text: JSON.stringify(save, null, 2) }], delete: [] }),
   // Check Trigger Tree reads the folders' own format: the demo's one made-up file has nothing it would find.
   triggers_check: () => [],
+  objects_check: () => [],
   triggers_fix: () => ({ write: [], delete: [] }),
   // Opening a project converts a flat terrain (crates/backend flatview.rs convert_on_open): the demo's sample stays as
   // it is (its files are made up, read by their flat names either way), and nothing is said.

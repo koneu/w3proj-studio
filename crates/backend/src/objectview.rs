@@ -130,6 +130,53 @@ impl ObjectFlat {
     }
 }
 
+/// Check Objects (`objects_check`, `w3proj::object_layout::check`): what the object files on disk get wrong, in the
+/// project's `map/` and its campaign chapters', each file as a project path. A file that can't be read is a finding
+/// too. Nothing for a project without the layout.
+pub fn check(root: &str) -> CmdResult<Vec<ol::check::Issue>> {
+    let root = Path::new(root);
+    let mut dirs = vec![w3proj::project::MAP_DIR.to_string()];
+    let maps = root.join(w3proj::project::MAPS_DIR);
+    if maps.is_dir() {
+        let mut chapters: Vec<String> = std::fs::read_dir(&maps)
+            .map_err(|e| format!("{}: {e}", maps.display()))?
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| format!("{}/{}/{}", w3proj::project::MAPS_DIR, e.file_name().to_string_lossy(), w3proj::project::MAP_DIR))
+            .filter(|m| join_rel(root, m).is_dir())
+            .collect();
+        chapters.sort();
+        dirs.extend(chapters);
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        let map_dir = join_rel(root, &dir);
+        let mut files = std::collections::BTreeMap::new();
+        let mut unread = Vec::new();
+        for path in ol::FOLDER.paths(&map_dir).map_err(err)? {
+            if ol::layout_path(&path).is_none() {
+                continue;
+            }
+            match std::fs::read(join_rel(&map_dir, &path)) {
+                Ok(b) => {
+                    files.insert(path, b);
+                }
+                Err(e) => unread.push(ol::check::Issue {
+                    severity: w3proj::trigger_check::Severity::Error,
+                    message: format!("map/{path} can't be read: {e}"),
+                    file: path,
+                    line: None,
+                }),
+            }
+        }
+        let prefix = ol::Prefix::of_map_dir(&map_dir).map_err(err)?;
+        // With a file unread, the rest would be judged without it (a missing objects.json, say): its error stands alone.
+        let found = if unread.is_empty() { ol::check::check(&files, prefix) } else { unread };
+        out.extend(found.into_iter().map(|i| ol::check::Issue { file: format!("{dir}/{}", i.file), ..i }));
+    }
+    Ok(out)
+}
+
 /// Adds the flat object files of every `map/` folder below `root` that keeps its objects in the layout to a project's
 /// file list (`walk_project`), unless a file of that name is listed, with the size and time of the files they are made
 /// from (taken from the list itself: no second look at the disk).
