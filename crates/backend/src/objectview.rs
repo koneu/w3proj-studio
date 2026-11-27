@@ -182,9 +182,12 @@ mod tests {
         std::fs::write(dir.join(w3proj::project::MANIFEST), "format = 1\n").unwrap();
         let data = br#"{"format":"w3proj.objects/1","version":3,"original":[],"custom":[{"base":"hfoo","id":"h000","mods":[{"field":"umpm","type":"int","value":5}]},{"base":"hfoo","id":"h001","mods":[]}]}"#;
         let skin = br#"{"format":"w3proj.objects/1","version":3,"original":[],"custom":[{"base":"hfoo","id":"h000","mods":[{"field":"unam","type":"string","value":"A"}]}]}"#;
-        crate::write_bytes(&dir.join("map/war3map.w3u.json"), data).unwrap();
-        crate::write_bytes(&dir.join("map/war3mapSkin.w3u.json"), skin).unwrap();
+        // In the codec's own form, as the app saves (codec_canonicalize).
+        let canonical = |j: &[u8]| w3proj::objdata::to_json(&w3proj::objdata::from_json(j, false).unwrap(), false).unwrap();
+        crate::write_bytes(&dir.join("map/war3map.w3u.json"), &canonical(data)).unwrap();
+        crate::write_bytes(&dir.join("map/war3mapSkin.w3u.json"), &canonical(skin)).unwrap();
         let flat = crate::read_bytes(&dir.join("map/war3map.w3u.json")).unwrap();
+        assert_eq!(flat, canonical(data), "a read after the save gives back what was saved");
         (dir, flat)
     }
 
