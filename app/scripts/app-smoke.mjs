@@ -14844,6 +14844,20 @@ async function placerAndCampaign(page, found) {
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
     if (trees().length !== alone) fail(`one undo after the packed brush left ${trees().length - alone} of its trees`);
+    // One drag fills its path: more than one stamp's 15, no two trees on top of each other, still one undo step.
+    await k.look(-640, 768);
+    const from = await k.hands.where(".model-stage canvas");
+    await k.hands.drag({ x: from.x - 150, y: from.y }, { x: from.x + 150, y: from.y }, 20);
+    await settled(page);
+    await sleep(1500);
+    await k.save();
+    const path = trees().filter((d) => d.position[0] !== -1408 || d.position[1] !== 896);
+    const stacked = path.some((a, i) => path.slice(i + 1).some((b) => Math.abs(a.position[0] - b.position[0]) < 128 && Math.abs(a.position[1] - b.position[1]) < 128));
+    console.log(`  the packed brush's drag placed ${path.length} trees`);
+    if (path.length < 25 || stacked) fail(`a drag of the packed brush placed ${path.length} trees${stacked ? ", some on top of each other" : ""}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    if (trees().length !== alone) fail(`one undo after the packed brush's drag left ${trees().length - alone} of its trees`);
     await set(".terrain-place-pattern", "random");
     await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
     await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);
