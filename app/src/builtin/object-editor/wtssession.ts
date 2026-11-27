@@ -83,6 +83,30 @@ export class WtsSession {
     }
   }
 
+  /** The file changed outside and the editor takes it in (a merged Git pull): `diskText` is what the session reads
+   *  and merges against from now on, the editor's own changes kept on top. A string both changed differently stays
+   *  pending as it was, so the save still asks about it (collisions). False, nothing changed: after a failed write,
+   *  or when the file no longer has a string the editor changed (writing it back would be dropped silently). */
+  rebase(diskText: string): boolean {
+    if (this.torn) return false;
+    const disk = new StringTable(diskText), clash = new Set(this.collisions(diskText));
+    const kept = [...this.owned].filter(([n, o]) => !o.undone && norm(this.table.get(n)) !== norm(this.savedValues.get(n)));
+    if (kept.some(([n]) => !disk.has(n))) return false;
+    const next = new StringTable(diskText), savedValues = new Map(disk.entries()), owned = new Map<number, Owned>();
+    for (const [n, o] of kept) {
+      const mine = this.table.get(n)!;
+      if (norm(disk.get(n)) === norm(mine)) continue; // the same text: nothing of the editor's is left
+      if (clash.has(n)) savedValues.set(n, this.savedValues.get(n)!);
+      owned.set(n, { ...o, text: clash.has(n) ? o.text : disk.get(n)!, since: this.saves, racy: false });
+      next.set(n, mine);
+    }
+    this.table = next;
+    this.saved = diskText;
+    this.savedValues = savedValues;
+    this.owned = owned;
+    return true;
+  }
+
   /** Whether a string differs from the saved file, or the last write failed and may have left the file cut short. */
   get dirty(): boolean {
     if (this.torn) return true;

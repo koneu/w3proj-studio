@@ -733,6 +733,10 @@ The app reads the game's files straight from the CASC storage in `Data/`:
   editing an inherited value creates the modification, ↺ resets it. Abilities and upgrades
   show one row per level. **+ New** picks the base object by name and suggests the next
   free id (`hfoo` → `h000`); **Open Object Editor…** (F6) creates missing object files.
+- A change of the object data by another program (a Git pull) while the Object Editor has unsaved edits is merged in,
+  at the window's focus and before a save: untouched objects reload, unsaved edits stay, and a save keeps both. An
+  object changed on both sides is marked **changed outside** (fields changed apart are both kept; on a field both
+  changed yours stands), with **Take Theirs** and **Keep Mine**. Undo starts anew after such a merge.
 - Extensions use `w3.game.read("Units\\UnitData.slk")` etc. Plain paths resolve like the
   game does: locale → art layer (`game.graphicsMode`: `hd`/`sd`/`de`) → base, with
   `FileAliases.json` and `.blp`→`.dds` fallback.

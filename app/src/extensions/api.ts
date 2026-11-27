@@ -176,6 +176,11 @@ export interface EditorInstance {
    *  characters as JSON isn't kept): kept with the project's open tabs and given back as `EditorDocument.viewState`. */
   viewState?(): unknown;
   save?(): Promise<void>;
+  /** For an editor that can take another program's change of its files into unsaved edits (the Object Editor after a
+   *  Git pull): called when its file or a watched one changed on disk while it is unsaved, and before a save of a
+   *  changed file. True: taken in, nothing is left to ask about. False, nothing changed: the workbench goes on as for
+   *  any editor (the "saved elsewhere" bar, the question before a save). */
+  mergeOutside?(): Promise<boolean>;
   /** Applies edits still waiting (text committed after a pause in typing) and marks them unsaved: the workbench
    *  calls it before it saves the editor or asks whether it has unsaved changes (closing, reloading, Save All).
    *  Without it, a save first has the focused text field in the editor commit its text (it loses the focus and gets

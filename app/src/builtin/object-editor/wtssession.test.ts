@@ -825,3 +825,21 @@ test("collisions: a string both editors changed is named, undone, unchanged and 
   assert.deepEqual([get(d.text, 1), get(d.text, 2)], ["B1", "A2"]);
   assert.deepEqual(a.collisions(d.text), []);
 });
+
+test("rebase takes the file in as changed outside: the editor's pending text stays, others are the file's, a string both changed is still asked about", async () => {
+  const d = disk();
+  const s = new WtsSession(d.text);
+  s.set(1, "mine");
+  d.b(2, "theirs two");
+  assert.ok(s.rebase(d.text));
+  assert.deepEqual([s.table.get(1), s.table.get(2), s.dirty, s.collisions(d.text)], ["mine", "theirs two", true, []]);
+  d.b(1, "theirs one");
+  assert.ok(s.rebase(d.text));
+  assert.deepEqual([s.table.get(1), s.collisions(d.text)], ["mine", [1]]);
+  await s.save(d.read, d.write);
+  assert.deepEqual([get(d.text, 1), get(d.text, 2), s.dirty], ["mine", "theirs two", false]);
+  // A string the editor changed that the file no longer has: refused, nothing changed.
+  s.set(2, "again");
+  assert.ok(!s.rebase("STRING 1\n{\nmine\n}\n"));
+  assert.deepEqual([s.table.get(2), s.dirty], ["again", true]);
+});

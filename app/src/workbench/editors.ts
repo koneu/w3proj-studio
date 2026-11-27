@@ -473,6 +473,7 @@ export class EditorService {
       if (t.loading) { for (const k of paths) t.missed?.add(k); continue; }
       if (![...paths].some((k) => this.shows(t, k)) && !(t.failed && paths.has(this.key(t.path)))) continue;
       if (this.unsaved(t)) {
+        if (await this.mergeIn(t)) continue;
         // Unsaved changes stay. Only files the editor takes without touching them (imported art) are reloaded; its own file isn't.
         const safe = [...paths].filter((k) => this.key(t.path) !== k && this.shows(t, k) && t.instance?.reloadsWithEdits?.(k.toLowerCase()));
         const taken = t.instance?.reloadFile && safe.length ? (await Promise.all(safe.map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)))).every(Boolean) : false;
@@ -566,6 +567,10 @@ export class EditorService {
     // What was typed a moment ago is saved with the rest (and isn't left unsaved after the save).
     this.commitField(t);
     this.flush(t);
+    if (t.instance.mergeOutside && t.stamp !== undefined) {
+      const now = await this.stampOf(t.path);
+      if (now !== undefined && !sameStamp(now, t.stamp)) await this.mergeIn(t);
+    }
     if (!(await this.mayOverwrite(t))) return false;
     // Typed while the question about the file on disk was open.
     this.flush(t);
@@ -595,6 +600,7 @@ export class EditorService {
         else if (t.instance) await this.reopen(t);
         continue;
       }
+      if (await this.mergeIn(t)) continue;
       // A watched file the editor takes with unsaved changes too (the trigger folders' files, saved in the text editor).
       if (!own && t.instance?.reloadsWithEdits?.(key.toLowerCase()) && t.instance.reloadFile) {
         if (await t.instance.reloadFile(key.toLowerCase()).catch(() => false)) t.stamp = await this.stampOf(t.path);
@@ -602,6 +608,21 @@ export class EditorService {
       }
       if (own) this.flagConflict(t);
     }
+  }
+
+  /** Lets a tab with unsaved changes take a change on disk into them (`EditorInstance.mergeOutside`); true when it
+   *  did: what is on disk is then what it has read. */
+  private async mergeIn(t: Tab): Promise<boolean> {
+    if (!t.instance?.mergeOutside) return false;
+    // What was typed a moment ago is an edit the change is merged with.
+    this.commitField(t);
+    this.flush(t);
+    // Taken before the editor reads: a write after this one is seen as another change.
+    const stamp = await this.stampOf(t.path);
+    if (!(await t.instance?.mergeOutside?.().catch(() => false))) return false;
+    if (t.stamp !== undefined) t.stamp = stamp;
+    this.resolved(t);
+    return true;
   }
 
   /** The bar saying that something else saved the tab's file while it has unsaved changes. */

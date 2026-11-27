@@ -3899,6 +3899,63 @@ async function explorerRealFiles(page, found) {
   }
 }
 
+/** The Object Editor takes another program's change of the object data (a Git pull) into its unsaved edits: at the
+ *  window's focus and, unnoticed until then, at a save. Objects it didn't change come in, one changed on both sides
+ *  keeps its edit and is marked, Take Theirs drops the edit, and the saved file holds both sides. */
+async function objectEditorMerge(page, found) {
+  const fail = (what) => found.push(`object editor merge: ${what}`);
+  const k = await heightKit(page, "ObjectMerge");
+  try {
+    const own = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Merge Guard" })).id;
+    await k.save();
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(own)})`);
+    const input = (field) => `[...document.querySelectorAll(".obj-table tr")].find((r) => r.querySelector("td code")?.textContent === ${lit(field)})?.querySelector("input")`;
+    await until("the object's fields", () => page.evaluate(`!!(${input("uhpm")})`), 60000);
+    const type = (field, value) => page.evaluate(`(() => { const i = ${input(field)}; i.focus(); i.value = ${lit(value)}; i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    const unsaved = () => page.evaluate(`w3.editors.unsavedPaths().includes("map/war3map.w3u.json")`);
+    // Another program: written past the app's own file layer, which would tell the editor at once.
+    const outside = async (custom, hp, extra) => {
+      const file = k.read("war3map.w3u.json");
+      const mine = file.custom.find((o) => o.id === custom);
+      const set = (id, value) => { const list = mine.sets ? mine.sets[0].mods : mine.mods; const m = list.find((x) => x.field === id); if (m) m.value = value; else list.push({ field: id, type: "int", value }); };
+      set("uhpm", hp);
+      if (extra) file.custom.push({ ...structuredClone(mine), id: extra });
+      await page.evaluate(`(async () => {
+        const root = w3.workspace.project().root, path = "map/war3map.w3u.json";
+        const text = await w3.backend.invoke("objects_canonicalize", { name: path, text: ${lit(JSON.stringify(file))} });
+        await w3.backend.invoke("fs_write_text", { path: root + "/" + path, text });
+      })()`);
+    };
+    const stored = (id, field) => { const o = k.read("war3map.w3u.json").custom.find((x) => x.id === id); return (o?.sets ? o.sets.flatMap((s) => s.mods) : o?.mods ?? []).find((m) => m.field === field)?.value; };
+    const note = () => page.evaluate(`document.querySelector(".obj-conflict-note span")?.textContent ?? null`);
+    // At the window's focus.
+    await type("uhpm", "999");
+    if (!(await unsaved())) return fail("control: typing hit points left the editor saved");
+    await outside(own, 111, "h0ZZ");
+    await page.evaluate(`window.dispatchEvent(new Event("focus"))`);
+    if (!(await soon(async () => /Changed outside too/.test((await note()) ?? ""), 20000))) return fail(`no mark on the object changed on both sides: ${lit(await note())}, ${lit(await k.toasts())}`);
+    if (!(await unsaved())) fail("the merge saved the editor, or dropped the edit");
+    if ((await page.evaluate(`(${input("uhpm")})?.value`)) !== "999") fail("the typed hit points are gone from the field");
+    if (await page.evaluate(`!!document.querySelector(".editor-conflict")`)) fail("the saved-elsewhere bar came up too");
+    // At a save the app hasn't noticed the change before.
+    await outside(own, 222, "h0ZY");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (await unsaved()) fail(`the save didn't go through: ${lit(await k.toasts())}`);
+    const saved = [stored(own, "uhpm"), stored("h0ZZ", "uhpm"), stored("h0ZY", "uhpm")];
+    if (JSON.stringify(saved) !== "[999,111,222]") fail(`saved hit points (mine, pulled, pulled later): ${lit(saved)}`);
+    // Take Theirs: their value, as an edit.
+    await page.evaluate(`[...document.querySelectorAll(".obj-conflict-note button")].find((b) => b.textContent === "Take Theirs")?.click()`);
+    if (!(await soon(async () => (await note()) === null && (await page.evaluate(`(${input("uhpm")})?.value`)) === "222", 10000))) fail(`Take Theirs left ${lit(await page.evaluate(`(${input("uhpm")})?.value`))}, note ${lit(await note())}`);
+    await k.save();
+    if (stored(own, "uhpm") !== 222) fail(`after Take Theirs the file has ${stored(own, "uhpm")} hit points`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -19825,6 +19882,7 @@ async function run() {
         niceToHaves,
         objectCopy,
         objectEditorColorTools,
+        objectEditorMerge,
         objectEditorRawSkin,
         objectEditorWtsWriteFail,
         objectFilePicker: (p, f) => objectFilePicker(p, f, project),
@@ -20146,6 +20204,8 @@ async function checksB(page, found) {
   await leftOpen(page, "triggerParamColorTools", found);
   await explorerRealFiles(page, found).catch((e) => found.push(`explorer real files: ${e.message}`));
   await leftOpen(page, "explorerRealFiles", found);
+  await objectEditorMerge(page, found).catch((e) => found.push(`object editor merge: ${e.message}`));
+  await leftOpen(page, "objectEditorMerge", found);
   await unitEditRederives(page, found).catch((e) => found.push(`unit edit rederives: ${e.message}`));
   await leftOpen(page, "unitEditRederives", found);
   await triggerCodeWarning(page, found).catch((e) => found.push(`trigger code warning: ${e.message}`));

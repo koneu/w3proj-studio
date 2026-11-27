@@ -160,7 +160,7 @@ Pack refuses the errors above, as it does for the trigger tree. The checks the P
 - **Write:** better than today. The layer keeps a content hash per file and writes only the objects that changed, instead of two multi-MB JSON files. Dirty state is per object.
 - **Watching:** a save or a `git checkout` touches many files. `map/objects/**` is watched with a debounce and handled as one batch.
 - **Windows is not measured.** On NTFS with Defender, 7,400 files can cost seconds. This is the main risk; stage 2 measures it before the stage counts as done.
-- **Prerequisite:** an outside change to many objects (a pull) while the Object Editor has unsaved edits: an object with unsaved edits keeps them and shows a conflict flag, the others reload. This lands with stage 2.
+- **Prerequisite:** an outside change to many objects (a pull) while the Object Editor has unsaved edits: an object with unsaved edits keeps them and shows a conflict flag, the others reload. Built 2026-11-27 for both layouts (`builtin/object-editor/merge.ts`: merged per object and, where both sides changed one, per field).
 
 ---
 

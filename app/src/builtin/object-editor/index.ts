@@ -18,6 +18,7 @@ import { fieldSound, soundSets } from "./browse";
 import { PATH_KIND, pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { textCodec, UnencodableError } from "../../lib/formats/codepage";
 import { readWts, StringTable, writeWts, WtsCutError } from "../../lib/formats/wts";
+import { mergeChanged, sameObjects, type ObjectConflict } from "./merge";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
@@ -404,7 +405,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // object data files are small). Restoring maps the selection back by id. 200 states are kept
         // (199 undo steps and the state now). Unsaved is judged by isDirty, not by the history.
         const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: wts.snapshot() });
-        const history = new History(snapshot, (s) => restore(s), { limit: 199 });
+        let history = new History(snapshot, (s) => restore(s), { limit: 199 });
         /** Other modules hear of each edit, undo and redo here (ObjectsService.onDidEdit). */
         const told = () => { if (liveData.get(doc.path)?.data === liveNow) edits.fire(kind); };
         const record = () => { if (history.commit()) told(); };
@@ -438,6 +439,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           file.custom = d.custom;
           file.original = d.original;
           if (hasWts) wts.restore(d.wts);
+          reselect(keys, anchor);
+          doc.setDirty(isDirty());
+          renderDetail();
+          told();
+        };
+        /** Selects the objects of `keys` again after the file's objects were replaced. */
+        const reselect = (keys: ReadonlySet<string>, anchor: string | null) => {
           const all = [...file.custom, ...file.original];
           // A standard object whose change is undone is a standard one again.
           for (const key of keys) {
@@ -447,14 +455,90 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selection = new Set(all.filter((o) => keys.has(objectKey(o))));
           selected = all.find((o) => objectKey(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
           if (selected) selection.add(selected);
-          doc.setDirty(isDirty());
-          renderDetail();
-          told();
         };
         const step = (dir: -1 | 1) => { if (dir < 0) history.undo(); else history.redo(); };
 
         /** Set when this editor is closed: a paste that was asking something doesn't go on into it. */
         let closed = false;
+
+        /** Objects changed both here and outside, by objectKey: flagged until the user takes theirs or keeps theirs
+         *  own (merge.ts). */
+        const conflicts = new Map<string, ObjectConflict>();
+        /** Takes a change of the two files by another program into the edits here. False, nothing changed, when they
+         *  (or the strings) can't be taken in: the workbench then asks, as for any editor. */
+        const takeOutside = async (): Promise<boolean> => {
+          if (doc.readOnly || !savedMain) return false;
+          let main: EditFile, skin: EditFile | null;
+          try {
+            main = JSON.parse(await doc.readText()) as EditFile;
+            if (main.format !== FORMAT) return false;
+            withLists(main);
+            const read = skinPath === doc.path ? null : await readMapDocStrict<EditFile>(w3, skinPath);
+            skin = read && withLists(read);
+          } catch { return false; }
+          if (closed) return false;
+          const shown = (m: EditFile, sk: EditFile | null) => mergeSkin(m, sk, { addSkinOnly: true });
+          const base = shown(savedMain, savedSkin), theirs = shown(main, skin);
+          const changed = theirs.version !== file.version || !sameObjects(base, theirs);
+          if (changed && hasWts) {
+            const text = await readWts(w3.workspace, WTS).catch(() => null);
+            if (closed || text === null || !wts.rebase(text)) return false;
+          }
+          // What a save splits against is what is on disk now, also when only its writing changed.
+          [savedMain, savedSkin] = [main, skin];
+          if (!changed) return true;
+          const merged = mergeChanged(base, file as unknown as EditFile, theirs);
+          const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
+          Object.assign(file, merged.file);
+          for (const key of [...untouched.keys()]) if (file.original.some((o) => o.base === key)) untouched.delete(key);
+          saved = JSON.stringify({ ...file, original: (theirs.original as Obj[]).filter(hasMods), custom: theirs.custom });
+          // Flags from an earlier change stay while their object does.
+          for (const key of [...conflicts.keys()]) if (![...file.custom, ...file.original].some((o) => objectKey(o) === key)) conflicts.delete(key);
+          for (const c of merged.conflicts) conflicts.set(c.key, c);
+          reselect(keys, anchor);
+          // The steps before would take the outside change back with them.
+          history = new History(snapshot, (s) => restore(s), { limit: 199 });
+          doc.setDirty(isDirty());
+          renderDetail();
+          told();
+          const ids = (list: ObjectConflict[]) => list.map((c) => c.key.slice(2)).join(", ");
+          const both = merged.conflicts.filter((c) => !c.removedHere), gone = merged.conflicts.filter((c) => c.removedHere);
+          void w3.window.showInfo(`${doc.path.slice(4).replace(/\.json$/, "")} changed outside: read in${isDirty() ? ", your unsaved edits kept" : ""}. Undo starts again from here.${
+            both.length ? ` Changed on both sides, marked in the list: ${ids(both)}.` : ""}${gone.length ? ` Changed outside but removed here, so still removed: ${ids(gone)}.` : ""}`);
+          return true;
+        };
+        /** One at a time: the workbench's check for outside changes and a save can both ask. */
+        let merging: Promise<unknown> = Promise.resolve();
+        const mergeOutside = (): Promise<boolean> => {
+          const next = merging.then(takeOutside, takeOutside);
+          merging = next.catch(() => {});
+          return next;
+        };
+        /** Their object in place of the editor's (or the removal of it), as one edit. */
+        const takeTheirObject = (o: Obj, c: ObjectConflict) => {
+          if (doc.readOnly) return;
+          const list = o.id ? file.custom : file.original;
+          const at = list.indexOf(o);
+          if (at < 0) return;
+          const theirs = c.theirs && (structuredClone(c.theirs) as Obj);
+          if (theirs) list[at] = theirs;
+          else list.splice(at, 1);
+          conflicts.delete(c.key);
+          select(theirs ?? (o.id ? list[Math.min(at, list.length - 1)] ?? null : standardOf(o.base)));
+          markDirty();
+          renderDetail();
+        };
+        /** The bar over an object that was changed on both sides. */
+        const conflictNote = (o: Obj): HTMLElement | null => {
+          const c = conflicts.get(objectKey(o));
+          if (!c) return null;
+          const names = c.fields.map((id) => kd?.fieldById.get(id)?.label ?? id);
+          return h("div.obj-conflict-note", {},
+            h("span", {}, c.theirs === null ? "Removed outside while you had unsaved edits here: yours is kept."
+              : `Changed outside too. Your unsaved edits are kept${c.fields.length ? `; both changed ${names.join(", ")}, where yours stands` : " beside the other changes"}.`),
+            h("button", { disabled: doc.readOnly, title: c.theirs === null ? "Removes it, as outside" : "Drops your changes to this object", onclick: () => takeTheirObject(o, c) }, "Take Theirs"),
+            h("button", { title: "Removes the mark; the object stays as shown", onclick: () => { conflicts.delete(c.key); renderDetail(); } }, "Keep Mine"));
+        };
         /** The Gameplay Constants that limit fields (map first, else the game's); empty until read, and while the
          *  map's file can't be read (it may set any of them). */
         let gameplayLimits: GameplayLimits = {};
@@ -500,7 +584,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const base = stripColors(baseName(o));
           const ownIcon = ICON_FIELD[kind] ? modLists(o).flatMap((l) => l.mods).find((m) => m.field === ICON_FIELD[kind] && typeof m.value === "string")?.value : undefined;
           // The icon is the base's while the object has none of its own: the game data and the graphics mode decide it.
-          const shows = JSON.stringify([ofCampaign, o.id ?? null, o.base, name, base, ownIcon ?? null, !!kd, w3.settings.get<string>("game.graphicsMode") ?? ""]);
+          const clash = !ofCampaign && conflicts.has(objectKey(o));
+          const shows = JSON.stringify([ofCampaign, o.id ?? null, o.base, name, base, ownIcon ?? null, !!kd, w3.settings.get<string>("game.graphicsMode") ?? "", clash]);
           let row = rows.get(o);
           if (row?.shows !== shows) {
             const el = h(`div.obj-item${ofCampaign ? ".obj-campaign" : ""}`, ofCampaign
@@ -510,7 +595,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("code", {}, o.id ?? o.base),
             o.id ? h("small", { title: base }, `← ${o.base}`) : null,
             h("span", {}, name),
-            ofCampaign ? h("span.badge", {}, "campaign") : null);
+            ofCampaign ? h("span.badge", {}, "campaign") : null,
+            clash ? h("span.badge.obj-conflict", { title: "Changed outside while you had unsaved edits to it" }, "changed outside") : null);
             rows.set(o, (row = { shows, el }));
           }
           row.el.classList.toggle("selected", selected);
@@ -1333,6 +1419,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 ? h("span.muted.obj-standard-note", {}, "Standard object: changing a field adds it to this map.")
                 : h("button", { title: "Delete key also removes the selection", onclick: removeSelection }, "Remove object"),
             ),
+            conflictNote(o),
             kd ? h("div.obj-detail-toolbar", {},
               fieldSearch,
               h("label", {}, h("input", { type: "checkbox", checked: modifiedOnly, onchange: (e: Event) => { modifiedOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), " Modified only"),
@@ -1705,7 +1792,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           undo: () => step(-1),
           redo: () => step(1),
+          mergeOutside,
           async save() {
+            // What another program changed since is taken in first, so the save doesn't write over it.
+            await mergeOutside();
             // Nothing is written into a vanished map folder: it would leave a lone file there.
             const root = w3.workspace.project()?.root;
             if (root) {
