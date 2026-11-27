@@ -244,6 +244,10 @@ export interface FileInfo {
   size: number;
   /** Last write (ms since 1970). */
   modified: number;
+  /** No file of this name is on disk: Studio reads and writes it, from other files (a split terrain's single files, the
+   *  generated files kept in build/, the flat object files). What shows a user the project's files leaves it out
+   *  (lib/projectview.ts). */
+  virtual?: boolean;
 }
 
 export interface GameInfo {

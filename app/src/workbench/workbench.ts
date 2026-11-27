@@ -1,4 +1,5 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { openTarget, realFiles, virtualTab } from "../lib/projectview";
 import { adoptOldTabKeys, tabsKey } from "./tabmemory";
 import { timeLimit } from "./timelimit";
 import { convertFlatTerrain } from "./layoutconvert";
@@ -79,6 +80,7 @@ export class Workbench {
     const isGame = (p: string) => p.startsWith(GAME_SCHEME);
     const gamePath = (p: string) => p.slice(GAME_SCHEME.length);
     this.editors = new EditorService({
+      tab: (p) => virtualTab(p, this.workspace.files()),
       resolve: (p) => (p.startsWith("w3:") || isGame(p) ? null : this.workspace.resolve(p)),
       readOnly: isGame,
       readText: async (p) => {
@@ -479,10 +481,10 @@ export class Workbench {
       const files = this.workspace.files();
       if (!files.length) return;
       const pick = await this.quickInput.pick(
-        files.map((f) => ({ label: f.path.split("/").pop()!, description: f.path, value: f.path })),
+        realFiles(files).map((f) => ({ label: f.path.split("/").pop()!, description: f.path, value: f.path })),
         { placeholder: "Search files by name" },
       );
-      if (pick) await this.editors.open(pick.value!);
+      if (pick) await this.editors.open(openTarget(pick.value!, files));
     }, { keybinding: "ctrl+p", category: "Go", menu: "Edit:2:1", when: "project" });
     c("workbench.toggleSidebar", "Toggle Side Bar", () => this.views.toggleSidebar(), { keybinding: "ctrl+b", menu: "View:1:1" });
     c("workbench.togglePanel", "Toggle Output Panel", () => this.output.toggle(), { keybinding: "ctrl+j", menu: "View:1:2" });
