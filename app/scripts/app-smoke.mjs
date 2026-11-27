@@ -1522,6 +1522,7 @@ async function heightsPreserve(page, found) {
   if (loose.length !== 1 || loose[0].position[2] !== ground || (loose[0].flags & k.FIXED)) fail(`a pasted fixed doodad with Preserve Copied Object Height off: ${lit(loose.map((d) => [d.position, d.flags]))}`);
 
   // The toolbar box switches it on again, and gives the keys back to the map.
+  await unfold(page, "Behaviour");
   await k.hands.click(".model-toggle", "Keep pasted height");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box didn't switch Preserve Copied Object Height on");
   if (!(await page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`))) fail("the Preserve Copied Object Height box kept the keyboard");
@@ -1546,6 +1547,7 @@ async function heightsPreserve(page, found) {
   await page.evaluate(`w3.settings.set("terrain.preserveCopiedHeight", true, "project")`);
   await k.run("w3.terrain.togglePreserveCopiedHeight");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== false || (await k.box("Keep pasted height")) !== false) fail("the toggle command did nothing while the project keeps its own Preserve Copied Object Height");
+  await unfold(page, "Behaviour");
   await k.hands.click(".model-toggle", "Keep pasted height");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box did nothing while the project keeps its own Preserve Copied Object Height");
   await k.verify(fail);
@@ -2470,8 +2472,10 @@ async function viewModes(page, found) {
   await key("Escape", "Escape", 27);
 
   // The toolbar's box is the same item as the key.
+  await unfold(page, "Overlays");
   await k.hands.click(".model-toggle", "Light ranges");
   if (!(await state()).lightRanges) fail("the Light ranges box didn't turn them on");
+  await unfold(page, "Overlays");
   await k.hands.click(".model-toggle", "Light ranges");
   // Light Ranges and the graphics mode: rings for the brazier in HD, none in SD, back in HD.
   {
@@ -2483,6 +2487,7 @@ async function viewModes(page, found) {
       let n = -2;
       await until(what, async () => {
         // The editor opened again for the mode: Light Ranges is a choice of the view, put it on if the new one lost it.
+        await unfold(page, "Overlays");
         if ((await state())?.lightRanges === false) await k.hands.click(".model-toggle", "Light ranges");
         n = await lightRings();
         return want(n);
@@ -2498,6 +2503,7 @@ async function viewModes(page, found) {
       await ringsBecome("Light Ranges back in HD shows rings again", (n) => n > 0);
     } finally {
       await setMode(mode);
+      await unfold(page, "Overlays");
       if ((await state())?.lightRanges) await k.hands.click(".model-toggle", "Light ranges");
     }
   }
@@ -5826,6 +5832,7 @@ async function heightsLimits(page, found) {
     await hands.drag({ x: c.x - (down ? 6 : 40), y: c.y + down }, { x: c.x + (down ? 6 : 40), y: c.y + down });
     await k.save();
   };
+  await unfold(page, "Behaviour");
   await hands.click(".model-toggle", "Water limits");
   if ((await k.setting("terrain.enforceWaterLimits")) !== true) fail("the toolbar box didn't switch Enforce Water Height Limits on");
   await stroke(-1024, -1024);
@@ -8337,6 +8344,9 @@ async function gridDefault(page, found) {
   }
 }
 
+/** Unfolds one of the terrain toolbar's groups (folded ones hide their boxes from the pointer). */
+const unfold = (page, name) => page.evaluate(`document.querySelector(${lit(`.model-toggle-group.closed[data-group="${name}"] > .model-toggle-group-title`)})?.click()`);
+
 /** The terrain view's toggles in three labelled groups (View, Overlays, Behaviour), each one also a command, and what
  *  game view does to them: greyed with the note "Forced by game view", showing what the view draws then (Fog and
  *  Effects on, Doodads on though the choice is off, Regions off). Nothing is edited; the map is left saved. */
@@ -8366,6 +8376,23 @@ async function toggleGroups(page, found) {
       if (!has || JSON.stringify(has.labels) !== JSON.stringify(want)) fail(`${g} holds ${lit(has?.labels)}, not ${lit(want)}`);
       if (has && (has.selects !== SELECTS[g] || has.title !== g)) fail(`${g}: ${has.selects} selects, title ${has.title}`);
     }
+    // Folded, a group is its name alone (its boxes take no room); its name unfolds and folds it, which is kept, and the
+    // open one comes after the folded ones.
+    const shape = () => page.evaluate(`(() => Object.fromEntries([...document.querySelectorAll(".model-toggle-group")].map((g) => [g.dataset.group,
+      { open: g.querySelector(".model-toggle-group-title").getAttribute("aria-expanded"), shown: [...g.querySelectorAll(".model-toggle")].filter((l) => l.getBoundingClientRect().width > 0).length, x: g.getBoundingClientRect().x, y: g.getBoundingClientRect().y }])))()`);
+    const press = (name) => page.evaluate(`document.querySelector(${lit(`.model-toggle-group[data-group="${name}"] > .model-toggle-group-title`)}).click()`);
+    // Earlier checks of the run may have left some open (kept per user): fold those first.
+    await page.evaluate(`document.querySelectorAll(".model-toggle-group:not(.closed) > .model-toggle-group-title").forEach((b) => b.click())`);
+    const folded = await shape();
+    if (Object.values(folded).some((g) => g.open !== "false" || g.shown)) fail(`the groups don't fold: ${lit(folded)}`);
+    await press("View");
+    const one = await shape();
+    if (one.View.open !== "true" || one.View.shown !== WANT.View.length || one.Overlays.shown) fail(`after View's name: ${lit(one)}`);
+    if (!(one.Overlays.y < one.View.y || (one.Overlays.y === one.View.y && one.Overlays.x < one.View.x))) fail(`the open View group doesn't follow the folded Overlays: ${lit(one)}`);
+    const keptOpen = await page.evaluate(`localStorage.getItem("w3.terrain.openGroups")`);
+    if (keptOpen !== `["View"]`) fail(`the open groups are kept as ${lit(keptOpen)}`);
+    await press("View");
+    if ((await shape()).View.shown) fail("View's name doesn't fold the group again");
     // Every toggle is a command: the command flips its box, and the same command flips it back.
     const COMMANDS = {
       Doodads: "toggleDoodads", Units: "toggleUnits", Water: "toggleWater", Blight: "toggleBlight", Cliffs: "toggleCliffs", Effects: "toggleEffects",
@@ -8446,6 +8473,7 @@ async function toolbarNarrow(page, found) {
     })()`).then((x) => x);
     const squeeze = (w) => page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); v.style.width = "${w}px"; v.style.height = "1000px"; v.style.maxHeight = "none"; v.style.overflow = "hidden"; v.style.flex = "none"; })()`);
     const unsqueeze = () => page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); for (const p of ["width", "height", "maxHeight", "overflow", "flex"]) v.style[p] = ""; })()`);
+    for (const name of ["View", "Overlays", "Behaviour"]) await unfold(page, name);
     const hit = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
     for (const w of [800, 500, 400]) {
       await squeeze(w);
@@ -8457,6 +8485,14 @@ async function toolbarNarrow(page, found) {
       for (let i = 0; i < m.groups.length; i++) for (let j = i + 1; j < m.groups.length; j++) if (hit(m.groups[i], m.groups[j])) fail(`${w} px wide: the ${m.groups[i].name} and ${m.groups[j].name} groups intersect`);
       if (w === 400 && !m.scrolls) fail("at 400 px the toolbar doesn't scroll (control: it should have more than it shows)");
     }
+    // Folded again, the toolbar is a few lines where it filled its cap.
+    await squeeze(800);
+    await new Promise((r) => setTimeout(r, 400));
+    const unfolded = (await measure()).toolbar.h;
+    await page.evaluate(`document.querySelectorAll(".model-toggle-group:not(.closed) > .model-toggle-group-title").forEach((b) => b.click())`);
+    const low = (await measure()).toolbar.h;
+    console.log(`  800 px wide: the toolbar is ${unfolded} px high with its groups open, ${low} folded`);
+    if (!(low <= 130 && low < unfolded * 0.6)) fail(`800 px wide: the toolbar is ${low} px high with its groups folded, ${unfolded} with them open`);
     await unsqueeze();
     await k.save();
   } finally {
@@ -8750,14 +8786,18 @@ async function viewCommandsOn(page, fail, shots, size) {
 
   // Focus: after a click on a toolbar control the keys belong to the map again, so an arrow key pans.
   const before = (await state()).camera.target;
+  await unfold(page, "Overlays");
   await hands.click(".model-toggle", "Camera objects");
   if (!(await canvasFocused())) bad("a toolbar box kept the keyboard");
   await hands.key("ArrowRight", "ArrowRight", 39);
   const after = (await state()).camera.target;
   if (Math.hypot(after[0] - before[0], after[1] - before[1]) < 1) bad("an arrow key after a click on a toolbar box didn't pan");
+  await unfold(page, "Overlays");
   await hands.click(".model-toggle", "Camera objects");
+  await unfold(page, "View");
   await hands.click(".model-toggle", "Fog");
   if (!(await canvasFocused())) bad("the Fog box kept the keyboard");
+  await unfold(page, "View");
   await hands.click(".model-toggle", "Fog");
   await page.evaluate(`(() => { const s = document.querySelector('select[title^="Grid"]'); s.focus(); s.value = "large"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   if (!(await canvasFocused())) bad("the grid box kept the keyboard");
@@ -8967,9 +9007,9 @@ async function byHand(page, found) {
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
 
   // Noise: a drag roughens the ground (a stamp at the press and one per step of the pointer, as the World Editor's), and the
-  // whole stroke is one undo step. It has no Strength slider: a stamp's size is the editor's fixed one.
+  // whole stroke is one undo step. Studio's Strength slider is at 100% until set: a stamp's size is the editor's.
   await page.evaluate(`document.querySelector('button.tool-button[title^="Noise:"]').click()`);
-  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].some((l) => l.textContent.startsWith("Strength"))`)) fail("Noise still has a Strength slider");
+  if ((await page.evaluate(`document.querySelector(".painter-strength:not([hidden]) input")?.value ?? null`)) !== "100") fail("Noise's Strength slider isn't at 100%");
   await hands.drag({ x: canvas.x - 40, y: canvas.y + 20 }, { x: canvas.x + 40, y: canvas.y + 20 });
   await save();
   const noisy = hash(ground);
@@ -8998,6 +9038,7 @@ async function byHand(page, found) {
 
   await objectByHand(page, hands, root, fail);
   await triggerByHand(page, hands, root, fail);
+  await toGameByHand(page, hands, folder, fail);
   } finally {
     await restoreWindow(page);
   }
@@ -9060,6 +9101,32 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }
     }
   }
+  // The Strength slider: at 200% one Raise stamp of size 3 moves the middle corner 153 stored units (76 at the World
+  // Editor's 100%, checked above); the cliff tools have none. Back to 100% for what follows.
+  const strength = (v) => page.evaluate(`(() => { const i = document.querySelector(".painter-strength input"); if (!i || i.closest("[hidden]")) return false; i.value = "${v}"; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Raise:"]').click()`);
+  await setSize(3);
+  if (!(await strength(200))) fail("the Raise tool has no Strength slider");
+  await hands.mouse("mouseMoved", canvas.x + 7, canvas.y - 5);
+  await hands.mouse("mousePressed", canvas.x + 7, canvas.y - 5, 1);
+  await hands.mouse("mouseReleased", canvas.x + 7, canvas.y - 5);
+  await save();
+  {
+    const values = readFileSync(ground, "utf8").split("\n[height]\n")[1].split("\n[")[0].trim().split(/\s+/)
+      .flatMap((v) => { const [x, k] = v.split("*"); return Array(Number(k ?? 1)).fill(Number(x)); });
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+    const top = Math.max(...values) - [...counts].sort((x, y) => y[1] - x[1])[0][0];
+    if (top !== 153) fail(`a Raise click of size 3 at 200% raised the middle corner by ${top} stored units, not 153`);
+  }
+  if ((await page.evaluate(`document.querySelector(".painter-strength-value")?.textContent`)) !== "200%") fail("the slider doesn't show its value");
+  await strength(100);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("undo didn't take the strong Raise back"); return; }
+  await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
+  if (!(await page.evaluate(`document.querySelector(".painter-strength").hidden`))) fail("a cliff tool shows the Strength slider");
+
   // A cliff tool with "Paint texture too" (the World Editor's Apply Texture and Apply Cliff): one click changes the
   // levels and the ground, and one undo takes both back. The box is off before, and the paint tool has none.
   await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
@@ -9220,6 +9287,23 @@ async function speedLimits(page, hands, fail) {
 }
 
 /** The Trigger Editor: renames the map's trigger, switches it off, and Build carries both. */
+/** The status bar's To Game: one click packs into the game's Maps folder, in its "w3proj" folder. The backend's answer
+ *  for where that is stands in a scratch folder: the real one is the user's. */
+async function toGameByHand(page, hands, folder, fail) {
+  const maps = join(folder, "stand-in-maps");
+  mkdirSync(maps, { recursive: true });
+  await page.evaluate(`(() => { const real = w3.backend.invoke.bind(w3.backend); window.__realInvoke = w3.backend.invoke;
+    w3.backend.invoke = (cmd, args) => (cmd === "game_maps_folder" ? Promise.resolve(${lit(maps)}) : real(cmd, args)); })()`);
+  try {
+    const output = await page.evaluate(`w3.workspace.project().default_output`);
+    const target = join(maps, "w3proj", output.split(/[\\/]/).pop());
+    await hands.click('.statusbar-item[data-id="w3.project.toGame"]');
+    await until("the map in the stand-in Maps folder", () => existsSync(target), 20000).catch(() => fail(`one click on To Game packed nothing to ${target}`));
+  } finally {
+    await page.evaluate(`w3.backend.invoke = window.__realInvoke`);
+  }
+}
+
 async function triggerByHand(page, hands, root, fail) {
   await page.evaluate(`w3.editors.closeAll()`);
   await page.evaluate(`w3.editors.open("map/triggers")`);
@@ -14962,6 +15046,107 @@ async function placerAndCampaign(page, found) {
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
     if (doodads().length !== before - 1) fail(`one undo left ${doodads().length} of ${before} rocks`);
+
+    // Recent: the rock just placed heads the list; with another thing chosen, taking it there places rocks again.
+    const recent = () => page.evaluate(`[...document.querySelectorAll(".terrain-place-recent option")].map((o) => o.textContent)`);
+    const listed = await recent();
+    if (listed[0] !== "Recent…" || !/\(ARrk\)$/.test(listed[1] ?? "") || listed.length !== 2) fail(`the Recent list after placing rocks: ${lit(listed)}`);
+    await k.hands.click(".terrain-group-tools button", "Start location");
+    await page.evaluate(`(() => { const s = document.querySelector(".terrain-place-recent"); s.value = "0"; s.dispatchEvent(new Event("change")); })()`);
+    if (!(await soon(() => page.evaluate(`/Placing .*ARrk/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) fail("choosing the rock in Recent didn't take it up again");
+    // Scatter stays as set (a setting).
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    if (!(await soon(async () => (await k.setting("terrain.placement.scatter")) === true, 5000))) fail("Scatter isn't kept as a setting");
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);
+    // The forest brush: Scatter's packed circle of size 3 places trees as the World Editor's multiple placement does
+    // (15, in rows of 1, 4, 5, 4, 1; lib/terrain/forest), a second click adds none, and one undo takes them all.
+    const trees = () => k.doodads().filter((d) => d.id === "LTlt");
+    await k.tool("place_objects", { objects: [{ id: "LTlt", x: -1408, y: 896 }], ignoreRoom: true });
+    await k.save();
+    await k.look(-1408, 896, { id: "LTlt", x: -1408, y: 896 });
+    await k.run("w3.terrain.selectInPalette");
+    await soon(() => page.evaluate(`/Placing .*LTlt/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000);
+    const alone = trees().length;
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    if (!(await set(".terrain-place-pattern", "circle")) || !(await set(".terrain-place-forest", "3"))) fail("Scatter shows no Pattern and packed Size");
+    await settled(page);
+    await click(-640, 768);
+    await k.save();
+    const forest = trees().filter((d) => Math.abs(d.position[0] + 640) < 400 && Math.abs(d.position[1] - 768) < 400);
+    const middle = (i) => (Math.min(...forest.map((d) => d.position[i])) + Math.max(...forest.map((d) => d.position[i]))) / 2;
+    const rows = [...new Set(forest.map((d) => d.position[1]))].sort((a, b) => b - a)
+      .map((y) => [y - middle(1), forest.filter((d) => d.position[1] === y).map((d) => d.position[0] - middle(0)).sort((a, b) => a - b)]);
+    const wanted = [[256, [0]], [128, [-192, -64, 64, 192]], [0, [-256, -128, 0, 128, 256]], [-128, [-192, -64, 64, 192]], [-256, [0]]];
+    if (lit(rows) !== lit(wanted) || middle(0) % 64 || middle(1) % 64) fail(`a packed circle of size 3 placed ${forest.length} trees as ${lit(rows)} round ${middle(0)},${middle(1)} (${await k.toasts()})`);
+    await click(-640, 768);
+    await k.save();
+    if (trees().length !== alone + 15) fail(`filling the same spot again left ${trees().length - alone} trees, not 15`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    if (trees().length !== alone) fail(`one undo after the packed brush left ${trees().length - alone} of its trees`);
+    // One drag fills its path: more than one stamp's 15, no two trees on top of each other, still one undo step.
+    await k.look(-640, 768);
+    const from = await k.hands.where(".model-stage canvas");
+    await k.hands.drag({ x: from.x - 150, y: from.y }, { x: from.x + 150, y: from.y }, 20);
+    await settled(page);
+    await sleep(1500);
+    await k.save();
+    const path = trees().filter((d) => d.position[0] !== -1408 || d.position[1] !== 896);
+    const stacked = path.some((a, i) => path.slice(i + 1).some((b) => Math.abs(a.position[0] - b.position[0]) < 128 && Math.abs(a.position[1] - b.position[1]) < 128));
+    console.log(`  the packed brush's drag placed ${path.length} trees`);
+    if (path.length < 25 || stacked) fail(`a drag of the packed brush placed ${path.length} trees${stacked ? ", some on top of each other" : ""}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    if (trees().length !== alone) fail(`one undo after the packed brush's drag left ${trees().length - alone} of its trees`);
+    await set(".terrain-place-pattern", "random");
+    await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
+    await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);
+    await k.clearToasts();
+    // Place… names a doodad's tilesets, finds by them, and opens again on the tab and search it was left with.
+    const openPlace = async () => {
+      await k.hands.click(".terrain-group-tools button", "Place…");
+      await until("the object browser", () => page.evaluate(`!!document.querySelector(".picker-overlay input.picker-search")`), 20000);
+    };
+    const closePlace = async () => {
+      await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await until("the object browser closed", () => page.evaluate(`!document.querySelector(".picker-overlay")`), 5000);
+    };
+    // The 3D preview is off by default; on, it shows the highlighted object's model and follows the highlight.
+    await openPlace();
+    if (await page.evaluate(`!!document.querySelector(".picker-preview")`)) fail("Place… has a 3D preview with the setting off");
+    await closePlace();
+    await page.evaluate(`w3.settings.set("terrain.placement.preview3d", true)`);
+    await openPlace();
+    const previewed = () => page.evaluate(`(() => { const e = document.querySelector(".picker-preview .obj-preview"); return e?.dataset.state ? JSON.parse(e.dataset.state) : null; })()`);
+    // Followed through the search, which sets the highlight whatever the list's order or where the pointer rests (rows
+    // beside each other can share one model): the Footman's, then the Peasant's.
+    const find = (text) => page.evaluate(`(() => { const i = document.querySelector("input.picker-search"); i.value = ${lit(text)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await page.evaluate(`[...document.querySelectorAll(".picker-tabs button")][0].click()`);
+    await until("the units tab", () => page.evaluate(`!!document.querySelector(".picker-overlay input.picker-search") && [...document.querySelectorAll(".picker-tabs button")][0].classList.contains("on")`), 20000);
+    for (const [word, model] of [["hfoo footman", /Footman/i], ["hpea peasant", /Peasant/i]]) {
+      await find(word);
+      if (!(await soon(async () => { const st = await previewed(); return !!st?.path && st.ready && model.test(st.path); }, 30000))) fail(`the 3D preview of "${word}": ${lit(await previewed())}`);
+    }
+    await find("");
+    await closePlace();
+    await page.evaluate(`w3.settings.set("terrain.placement.preview3d", false)`);
+    await openPlace();
+    await page.evaluate(`[...document.querySelectorAll(".picker-tabs button")].at(-1).click()`);
+    await until("the doodads", () => page.evaluate(`!!document.querySelector(".picker-overlay input.picker-search") && [...document.querySelectorAll(".picker-tabs button")].at(-1).classList.contains("on")`), 20000);
+    await page.evaluate(`(() => { const i = document.querySelector("input.picker-search"); i.value = "archway ashenvale"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    const names = await page.evaluate(`[...document.querySelectorAll(".picker-rows .picker-name")].map((e) => e.textContent)`);
+    if (!names.length || !names.every((n) => n.includes(" · ")) || !names.some((n) => /Archway · .*Ashenvale/.test(n))) fail(`the doodads found for "archway ashenvale": ${lit(names.slice(0, 6))}`);
+    await closePlace();
+    await openPlace();
+    const reopened = await page.evaluate(`({ query: document.querySelector("input.picker-search").value, tab: [...document.querySelectorAll(".picker-tabs button")].findIndex((b) => b.classList.contains("on")) })`);
+    if (reopened.query !== "archway ashenvale" || reopened.tab !== 3) fail(`Place… reopened with ${lit(reopened)}, not the doodads' tab and the search`);
+    await page.evaluate(`(() => { const i = document.querySelector("input.picker-search"); i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); [...document.querySelectorAll(".picker-tabs button")][0].click(); })()`);
+    await until("the units again", () => page.evaluate(`[...document.querySelectorAll(".picker-tabs button")][0]?.classList.contains("on") === true`), 20000);
+    await closePlace();
+    // The rock again for what follows.
+    await page.evaluate(`(() => { const s = document.querySelector(".terrain-place-recent"); s.value = "0"; s.dispatchEvent(new Event("change")); })()`);
+    await soon(() => page.evaluate(`/Placing .*ARrk/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000);
 
     // Random objects: a group with a unit and an item position in Map Properties' random groups.
     const info = k.read("war3map.w3i.json");

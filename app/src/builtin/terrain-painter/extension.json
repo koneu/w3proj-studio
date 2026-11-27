@@ -6,6 +6,9 @@
   "activationEvents": ["onEditor:w3.terrainViewer", "onCommand:w3.terrain.settings", "onEditor:w3.terrainSettings"],
   "extensionDependencies": ["w3.terrainViewer"],
   "contributes": {
+    "configuration": { "title": "Terrain Painter", "properties": {
+      "terrain.brush.strength": { "type": "number", "default": 100, "minimum": 10, "maximum": 200, "description": "How strong a height brush stamp is, in percent of the World Editor's (100)." }
+    } },
     "editors": [{ "id": "w3.terrainSettings", "title": "Terrain Settings", "patterns": ["w3:terrain-settings"] }],
     "commands": [
       { "id": "w3.terrain.settings", "when": "project", "title": "Edit Tileset / Terrain Settings", "category": "Terrain" }

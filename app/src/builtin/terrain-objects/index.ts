@@ -1,7 +1,8 @@
 // Object Placer: placing units, items, doodads and destructables as a tool
 // group of the terrain editor (service "w3.terrain"). One object per click,
-// or Scatter (forests): a click or drag fills the brush, spaced by the
-// objects' footprints, with random variation, facing and scale. Start locations: one per
+// or Scatter: a click or drag fills the brush, spaced by the objects' footprints, with
+// random variation and scale, either loosely at random or (forests) packed in the World
+// Editor's multiple-placement pattern (lib/terrain/forest). Start locations: one per
 // player, placing it again moves it; saving adds/moves/removes the map's players to match.
 // One at a time, an object takes the toolbar's look (lib/terrain/randomplace): a chosen or random
 // variation, random rotation and random scale. "Random…" places a Random Unit, Building or Item.
@@ -15,8 +16,10 @@ import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
 import { applyRandom, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
+import { FOREST_SIZES, forestCentre, forestOverlaps, forestPoints, forestReach, forestSpacing, type ForestShape } from "../../lib/terrain/forest";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
+import { parseRecent, withRecent, type RecentPlaced } from "./recent";
 import { readArea } from "../../lib/terrain/area";
 import { h } from "../../workbench/dom";
 
@@ -49,7 +52,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   /** Type chosen with "Place…", or a random unit, building or item chosen with "Random…". */
   let placing: { kind: string; id: string; name: string; random?: RandomSpec } | null = null;
-  let owner = 0, scatter = false, size = 2;
+  // The owner, Scatter and its size stay as they were left (settings, as the other placement options).
+  const kept = (key: string, low: number, high: number, fallback: number) => {
+    const v = w3.settings.get<number>(key);
+    return typeof v === "number" && Number.isInteger(v) && v >= low && v <= high ? v : fallback;
+  };
+  let owner = kept("terrain.placement.owner", 1, 28, 1) - 1, size = kept("terrain.placement.scatterSize", 1, 10, 2);
+  let scatter = w3.settings.get<boolean>("terrain.placement.scatter") === true;
+  // Scatter's pattern: loose at random, or packed as the World Editor's brush places (its sizes and shapes).
+  const PATTERNS = [["random", "Random"], ["circle", "Packed circle"], ["square", "Packed square"]] as const;
+  let pattern: "random" | ForestShape = PATTERNS.find(([v]) => v === w3.settings.get<string>("terrain.placement.scatterPattern"))?.[0] ?? "random";
+  const keptForest = kept("terrain.placement.forestSize", 2, 8, 5);
+  let forestSize: number = FOREST_SIZES.find((n) => n === keptForest) ?? 5;
+  /** The shape of the packed brush in use; null: one at a time, or loose scatter. */
+  const packed = (): ForestShape | null => (scatter && pattern !== "random" ? pattern : null);
+  /** The packed brush's spacing for the type being placed (its footprint, once read). */
+  let spacing = 128;
+  const keepOwner = () => void w3.settings.set("terrain.placement.owner", owner + 1);
+  const RECENT_KEY = "w3.placer.recent";
+  let recent: RecentPlaced[] = parseRecent((() => { try { return localStorage.getItem(RECENT_KEY); } catch { return null; } })());
+  /** The label the object browser gave the type being placed (with its tilesets), else its name. */
+  const labels = new Map<string, string>();
   const respect = () => w3.settings.get<boolean>("terrain.placement.respectPathing");
   const deg = (d: number) => (d * Math.PI) / 180;
 
@@ -109,13 +132,15 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     ed.pushEdit({ undo: () => ed.objects.remove([e]), redo: () => ed.objects.insert([e]), terrain: false, objects: true });
   };
 
-  /** A scatter drag: everything it places is one undo step. */
-  let drag: { entries: PlacedEntry[]; last: [number, number, number]; queue: Promise<void> } | null = null;
+  /** What a drag has placed so far, and what Recent gets from it. */
+  type Stroke = { entries: PlacedEntry[]; placed?: RecentPlaced };
+  /** A scatter drag: everything it places is one undo step. `last` is where it last filled the brush. */
+  let drag: (Stroke & { last: [number, number, number]; queue: Promise<void> }) | null = null;
 
   const autoCycle = () => w3.settings.get<boolean>("terrain.placement.autoCycleRandomGroups", true) !== false;
 
   /** Places the chosen object at `pos`, or (with `stroke`) fills the brush there. */
-  const placeAt = async (pos: [number, number, number], stroke?: { entries: PlacedEntry[] }) => {
+  const placeAt = async (pos: [number, number, number], stroke?: Stroke) => {
     if (!placing) return;
     if (isStart()) { if (!stroke) placeStart(pos); return; }
     const { kind, id, name, random } = placing;
@@ -134,6 +159,24 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         return;
       }
       spots.push({ x, y, angle });
+    } else if (packed()) {
+      const shape = packed()!, apart = forestSpacing(fp);
+      const [cx, cy] = forestCentre(pos[0], pos[1]);
+      // Never two of the type on top of each other, whether or not pathing is respected: filling a spot again adds nothing.
+      const reach = forestReach(forestSize, apart) + apart;
+      const near = ed.objects.list().filter((o) => o.id === id && Math.abs(o.position[0] - cx) <= reach && Math.abs(o.position[1] - cy) <= reach)
+        .map((o) => ({ x: o.position[0], y: o.position[1] }));
+      for (const [dx, dy] of forestPoints(forestSize, shape, apart)) {
+        const spot = await ed.objects.placedSpot(kind, id, cx + dx, cy + dy, facing());
+        if (near.some((o) => forestOverlaps(o, spot, apart))) continue;
+        if (respect() && fp) {
+          if (!ed.objects.backdrop(kind, spot.x, spot.y) && !(await occ!.fits(kind, id, spot.x, spot.y, spot.angle))) continue;
+          await occ!.mark(kind, id, spot.x, spot.y, spot.angle);
+        }
+        near.push(spot);
+        spots.push(spot);
+      }
+      if (!spots.length) return;
     } else {
       // A jittered grid over the brush, spaced by the footprint (wider at lower density).
       const density = Math.min(1, Math.max(0.05, w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1));
@@ -176,8 +219,11 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       entries.push(e);
     }
     ed.objects.insert(entries);
-    if (stroke) stroke.entries.push(...entries);
+    const placed: RecentPlaced = { kind, id, label: labels.get(id) ?? name, ...(random ? { random } : {}) };
+    // A stroke is noted when it ends: a new line in Recent can wrap the toolbar, which moves the view under the pointer.
+    if (stroke) { stroke.entries.push(...entries); stroke.placed = placed; }
     else {
+      noteRecent(placed);
       ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
       // The next one looks different again (when anything is random).
       if (placing?.id === id) reroll();
@@ -190,11 +236,27 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); ed.focus(); } });
     return h("label.terrain-place-opt", { title }, box, ` ${label}`);
   };
-  const ownerSel = h("select", { title: "Owner of placed units", onchange: () => { owner = Number(ownerSel.value); ed.focus(); } },
+  const ownerSel = h("select", { title: "Owner of placed units", onchange: () => { owner = Number(ownerSel.value); keepOwner(); ed.focus(); } },
     ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: i === owner }, ownerName(i))));
   const ownerWrap = h("span.terrain-tool-opt", {}, "for ", ownerSel);
   const sizeWrap = h("label.terrain-tool-opt", { title: "Scatter brush radius in tiles" }, "Size ",
-    h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } }));
+    h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); },
+      onchange: () => { void w3.settings.set("terrain.placement.scatterSize", size); } }));
+  const patternSel = h("select.terrain-place-pattern", { title: "Random: spread loosely over the brush. Packed: the World Editor's multiple placement, as close as the footprints allow (forests); setting terrain.placement.scatterPattern",
+    onchange: () => {
+      pattern = patternSel.value as typeof pattern;
+      void w3.settings.set("terrain.placement.scatterPattern", pattern);
+      update();
+      ed.focus();
+    } }, ...PATTERNS.map(([v, label]) => h("option", { value: v, selected: v === pattern }, label)));
+  const patternWrap = h("label.terrain-tool-opt", {}, "Pattern ", patternSel);
+  const forestSel = h("select.terrain-place-forest", { title: "The packed brush's size, as the World Editor's palette sizes (setting terrain.placement.forestSize)",
+    onchange: () => {
+      forestSize = Number(forestSel.value);
+      void w3.settings.set("terrain.placement.forestSize", forestSize);
+      ed.focus();
+    } }, ...FOREST_SIZES.filter((n) => n > 1).map((n) => h("option", { value: String(n), selected: n === forestSize }, String(n))));
+  const forestWrap = h("label.terrain-tool-opt", {}, "Size ", forestSel);
   const densityWrap = h("label.terrain-place-opt", { title: "Scatter density: 100% packs objects as close as their footprints allow (setting terrain.placement.scatterDensity)" }, "Density ",
     h("input", { type: "range", min: "10", max: "100", value: String(Math.round((w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1) * 100)),
       onchange: (e: Event) => { void w3.settings.set("terrain.placement.scatterDensity", Number((e.target as HTMLInputElement).value) / 100); ed.focus(); } }));
@@ -233,7 +295,9 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       : isStart() ? "Placing the start location: click the ground (moves it if the player has one) · Esc to stop"
       : `Placing ${placing.name} (${placing.id}): click the ground · Esc to stop`;
     ownerWrap.hidden = placing?.kind !== "w3u";
-    sizeWrap.hidden = densityWrap.hidden = !scatter || isStart();
+    patternWrap.hidden = !scatter || isStart();
+    forestWrap.hidden = !packed() || isStart();
+    sizeWrap.hidden = densityWrap.hidden = !scatter || !!packed() || isStart();
     const type = placing && !isStart() ? ed.objects.type(placing.id) : null;
     fillVariations();
     rotationWrap.hidden = !placing || isStart() || scatter || type?.fixedRot != null || !rotatesRandomly(type);
@@ -243,16 +307,18 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const startPlacing = (p: typeof placing) => {
     if (p?.id !== placing?.id || p?.random !== placing?.random) chosenVariation = null;
     placing = p;
+    spacing = 128;
     update();
     reroll();
+    if (p) void ed.objects.occupancy().then(async (occ) => { const fp = await occ.footprint(p.kind, p.id); if (placing === p) spacing = forestSpacing(fp); }).catch(() => { /* a tree's */ });
     // A destructable's fixed rotation depends on its pathing texture, which is read now: look again.
     if (p) void ed.objects.ready(p.id).then(() => { if (placing === p) { update(); reroll(); } });
   };
   const choose = async () => {
     try {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
-      const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"] });
-      if (r) startPlacing({ kind: r.kind, id: r.id, name: r.name });
+      const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"], remember: "place", preview: w3.settings.get<boolean>("terrain.placement.preview3d") === true });
+      if (r) { labels.set(r.id, r.label ?? r.name); startPlacing({ kind: r.kind, id: r.id, name: r.name }); }
     } catch (e) {
       w3.window.showError(String((e as Error).message ?? e));
     }
@@ -281,6 +347,28 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     }
     ed.focus();
   };
+  const recentSel = h("select.terrain-place-recent", { title: "The last objects placed: choose one to place it again",
+    onchange: () => { const r = recent[Number(recentSel.value)]; recentSel.value = ""; if (r) void takeRecent(r); ed.focus(); } });
+  const fillRecent = () => {
+    recentSel.replaceChildren(h("option", { value: "" }, "Recent…"), ...recent.map((r, i) => h("option", { value: String(i) }, r.random ? r.label : `${r.label} (${r.id})`)));
+    recentSel.value = "";
+    recentSel.disabled = !recent.length;
+  };
+  const noteRecent = (placed: RecentPlaced) => {
+    recent = withRecent(recent, placed);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(recent)); } catch { /* not remembered */ }
+    fillRecent();
+  };
+  const takeRecent = async (r: RecentPlaced) => {
+    labels.set(r.id, r.label);
+    if (r.random) { startPlacing({ kind: r.kind, id: r.id, name: r.label, random: r.random }); return; }
+    // A custom object of another map isn't in this one.
+    const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+    const name = await objects.name(r.id, [r.kind]).catch(() => undefined);
+    if (name === undefined) { void w3.window.showWarning(`${r.label} (${r.id}) isn't an object of this map.`); return; }
+    startPlacing({ kind: r.kind, id: r.id, name });
+  };
+
   const select = async (what: { kind: string; id: string; player?: number }) => {
     if (what.id === START.id) startPlacing(START);
     else if (/^[uib]DNR$/.test(what.id)) {
@@ -291,7 +379,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
       startPlacing({ kind: what.kind, id: what.id, name: await objects.name(what.id, [what.kind]).catch(() => undefined) ?? what.id });
     }
-    if (what.kind === "w3u" && typeof what.player === "number" && what.player >= 0 && what.player < 28) { owner = what.player; ownerSel.value = String(owner); }
+    if (what.kind === "w3u" && typeof what.player === "number" && what.player >= 0 && what.player < 28) { owner = what.player; ownerSel.value = String(owner); keepOwner(); }
     update();
     void showGhost(null);
     return true;
@@ -302,15 +390,16 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       onclick: () => void chooseRandom() }, "Random…"),
     h("button", { title: "Place or move a player's start location; saving adds, moves or removes the map's players to match",
       onclick: () => { startPlacing(START); ed.focus(); } }, "Start location"),
-    hint, ownerWrap, variationWrap, rotationWrap, scaleWrap,
+    recentSel, hint, ownerWrap, variationWrap, rotationWrap, scaleWrap,
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
-      () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
-    sizeWrap, densityWrap,
+      () => scatter, (v) => { scatter = v; void w3.settings.set("terrain.placement.scatter", v); update(); void showGhost(null); }),
+    patternWrap, forestWrap, sizeWrap, densityWrap,
     toggle("Auto cycle random groups", "Every 3 seconds the units and items from a random group are drawn as a random line of the group (maybe the same again), as the World Editor does; setting terrain.placement.autoCycleRandomGroups",
       () => autoCycle(), (v) => void w3.settings.set("terrain.placement.autoCycleRandomGroups", v)),
     toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
       () => respect(), (v) => void w3.settings.set("terrain.placement.respectPathing", v)),
   );
+  fillRecent();
   update();
 
   return {
@@ -323,18 +412,24 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     pointerDown(p) {
       if (!ed.editable || !placing || !p.ground) return false;
       if (!scatter || isStart()) { void placeAt(p.ground); return true; }
-      const d = { entries: [] as PlacedEntry[], last: p.ground, queue: Promise.resolve() };
+      const d: NonNullable<typeof drag> = { entries: [], last: p.ground, queue: Promise.resolve() };
       d.queue = placeAt(p.ground, d);
       drag = d;
       return true;
     },
     pointerMove(p) {
       lastGround = p.ground ?? null;
-      ed.setBrush(scatter && placing && !isStart() && p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: [140, 230, 140] } : null);
+      const shape = packed(), centre = shape && p.ground ? forestCentre(p.ground[0], p.ground[1]) : null;
+      ed.setBrush(scatter && placing && !isStart() && p.ground
+        ? { x: centre?.[0] ?? p.ground[0], y: centre?.[1] ?? p.ground[1], r: shape ? forestReach(forestSize, spacing) : size * 128, rgb: [140, 230, 140], square: shape === "square" }
+        : null);
       void showGhost(p.ground);
       const d = drag;
-      // Fills again once the pointer moved half a brush radius.
-      if (p.down && d && p.ground && Math.hypot(p.ground[0] - d.last[0], p.ground[1] - d.last[1]) >= size * 64) {
+      // Fills again once the pointer moved half a brush radius; the packed brush whenever its centre moves.
+      const moved = (g: [number, number, number], from: [number, number, number]) => shape
+        ? forestCentre(g[0], g[1]).some((v, i) => v !== forestCentre(from[0], from[1])[i])
+        : Math.hypot(g[0] - from[0], g[1] - from[1]) >= size * 64;
+      if (p.down && d && p.ground && moved(p.ground, d.last)) {
         const g = p.ground;
         d.last = g;
         d.queue = d.queue.then(() => placeAt(g, d));
@@ -346,6 +441,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       if (!d) return;
       void d.queue.then(() => {
         if (!d.entries.length) { if (placing) w3.window.showWarning(`No free room for ${placing.name} under the brush.`); return; }
+        if (d.placed) noteRecent(d.placed);
         const entries = d.entries;
         ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
       });

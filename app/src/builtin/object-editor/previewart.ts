@@ -37,6 +37,17 @@ export function abilityArt(has: (id: string) => string, chosen?: string, index =
   return null;
 }
 
+/** The model an object of a kind with one shows first, as the editor's preview does: its model field's value (the
+ *  first of a list), the first variation ("…0") when it has several. `value`: a field's value for the object (a custom
+ *  one's own where it sets one, else its base's). Null for a kind without a model, or none set. */
+export function firstShownModel(fields: { model: string; variations?: string } | undefined, value: (field: string) => string | undefined): string | null {
+  if (!fields) return null;
+  const path = modelAt(value(fields.model) ?? "");
+  if (!path) return null;
+  const variations = fields.variations ? Number(value(fields.variations)) || 1 : 1;
+  return variations > 1 ? `${path.replace(/\.(mdl|mdx)$/i, "")}0` : path;
+}
+
 /** The choices of a preview, and what resets them: they belong to one object, a different one starts at its defaults. */
 export interface PreviewPicks { key: string | null; team: number | null; texture: number | null; art: string | undefined; model: number }
 export function freshPicks(): PreviewPicks { return { key: null, team: null, texture: null, art: undefined, model: 0 }; }

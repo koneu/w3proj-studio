@@ -17,7 +17,7 @@ export interface ObjectsService {
   /** The object browser (search, facets, field filters) over one or more
    *  object kinds ("w3u", "w3t", "w3b", "w3d", …) with a tab per kind,
    *  including the map's custom objects. Shown over `host`. */
-  pick(host: HTMLElement, opts: { title: string; kinds: string[]; extra?: { id: string; name: string }[] }): Promise<PickedObject | undefined>;
+  pick(host: HTMLElement, opts: { title: string; kinds: string[]; extra?: { id: string; name: string }[]; remember?: string; /** A turning 3D view of the highlighted object beside the list. */ preview?: boolean }): Promise<PickedObject | undefined>;
   /** Icon of an object (custom ids use the map's own art, else their base's) as a data URL, or null. */
   icon(kind: string, id: string): Promise<string | null>;
   /** Display name of an object id (custom objects: the map's name), searching `kinds` (default: all). */
@@ -62,6 +62,8 @@ export interface LiveObject { id?: string; base: string; mods?: { field?: string
 export type CopiedObject = import("../lib/objects/copydeps").Copied;
 
 export interface PickedObject {
+  /** The name as the browser listed it (a doodad's or destructable's with its tilesets). */
+  label?: string;
   kind: string;
   id: string;
   /** Display name (the map's own name for custom objects). */

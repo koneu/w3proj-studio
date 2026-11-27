@@ -166,7 +166,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ? paintBoundary(terrain, brush, tool === "boundary", stroke.s)
       : isLayerTool(tool)
       ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s, enforceWater())
-      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : 0, stroke.s);
+      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : 0, stroke.s, Math.random, strength / 100);
     return done || painted;
   };
   /** The brush at a ground point, and along the way from the last one. */
@@ -293,8 +293,19 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let paintToo = false;
   const paintTooBox = h("input", { type: "checkbox", onchange: () => { paintToo = paintTooBox.checked; setTool(tool); } }) as HTMLInputElement;
   const paintTooWrap = h("label.terrain-tool-opt.painter-paint-too", { title: "Each stamp paints the chosen ground tile too, as the World Editor's Apply Texture beside Apply Cliff (one undo step)" }, paintTooBox, "Paint texture too");
+  /** The height tools: Studio's strength slider is theirs. */
+  const isHeightTool = (t: Tool) => t === "raise" || t === "lower" || t === "plateau" || t === "smooth" || t === "noise";
+  const savedStrength = w3.settings.get<number>("terrain.brush.strength");
+  let strength = typeof savedStrength === "number" && savedStrength >= 10 && savedStrength <= 200 ? Math.round(savedStrength) : 100;
+  const strengthValue = h("span.painter-strength-value", {}, `${strength}%`);
+  const strengthSlider = h("input", { type: "range", min: "10", max: "200", step: "5", value: String(strength),
+    oninput: () => { strength = Number(strengthSlider.value); strengthValue.textContent = `${strength}%`; },
+    onchange: () => { void w3.settings.set("terrain.brush.strength", strength); ed.focus(); } }) as HTMLInputElement;
+  const strengthWrap = h("label.terrain-tool-opt.painter-strength", { title: "How strong a stamp is. 100%: the World Editor's. Raise, Lower and Noise move up to twice as far; Plateau and Smooth go this part of the way (100% and more: all of it)" },
+    "Strength ", strengthSlider, " ", strengthValue);
   const setTool = (t: Tool) => {
     tool = t;
+    strengthWrap.hidden = !isHeightTool(t);
     for (const [k, b] of buttons) b.classList.toggle("active", k === t);
     paintTooWrap.hidden = !cliffPaints(t);
     texWrap.hidden = !(t === "paint" || (paintToo && cliffPaints(t)));
@@ -318,7 +329,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("label.terrain-tool-opt", { title: "Brush shape (not for Raise, Lower and ramps: they stay round, as the World Editor's)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
-    cliffWrap, paintTooWrap, texWrap),
+    strengthWrap, cliffWrap, paintTooWrap, texWrap),
   );
   setTool("paint");
   editorsSet.add(ed);

@@ -6,6 +6,8 @@ A cliff or water tool can paint the chosen tile too ("Paint texture too", the Wo
 
 The ground tile list takes as many tiles as the map's file has room for, as the World Editor's Modify Tileset: 64 (version 12), 16 (version 11).
 
+The height tools have a Strength slider (setting `terrain.brush.strength`, 10 to 200 %); at 100 % a stamp is the World Editor's.
+
 ## Data
 Reads and writes the terrain (map/war3map.w3e through the terrain viewer's document); tool brushes are described in brush.ts, file.ts.
 

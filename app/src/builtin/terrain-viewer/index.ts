@@ -43,6 +43,7 @@ import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type 
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
 import { MinimapPanel, viewOutline } from "./minimappanel";
 import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
+import { openGroups } from "./opengroups";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy, roomShape, type RoomShape } from "./occupancy";
@@ -6027,9 +6028,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         minimapSetting = applyMinimapSetting;
         applyMinimapSetting();
-        /** The toolbar's toggles in labelled groups (the World Editor's Layer menu is not copied as a menu). */
-        const toggleGroup = (name: string, hint: string, ...items: (HTMLElement | null)[]) =>
-          h("div.model-toggle-group", { role: "group", "aria-label": name, "data-group": name, title: hint }, h("span.model-toggle-group-title", {}, name), ...items.filter((x) => x));
+        /** The toolbar's toggles in labelled groups (the World Editor's Layer menu is not copied as a menu). A group is
+         *  folded to its name until that is clicked; the open ones are kept per user and follow the folded ones. */
+        const toggleGroup = (name: string, hint: string, ...items: (HTMLElement | null)[]) => {
+          const header = h("button.model-toggle-group-title", { type: "button", onclick: () => {
+            const open = openGroups.read();
+            openGroups.write(open.includes(name) ? open.filter((n) => n !== name) : [...open, name]);
+            show();
+            keysToMap();
+          } }, name);
+          const group = h("div.model-toggle-group", { role: "group", "aria-label": name, "data-group": name, title: hint }, header, ...items.filter((x) => x));
+          const show = () => {
+            const open = openGroups.read().includes(name);
+            group.classList.toggle("closed", !open);
+            header.setAttribute("aria-expanded", String(open));
+          };
+          show();
+          return group;
+        };
         const lightingLabel = h("label.model-toggle", keyTitle("The map's day and night lighting; off: an even light", "w3.terrain.toggleLighting"), lightBox, " Lighting");
         greyTip(lightingLabel, () => (gameViewOn() ? FORCED_NOTE : null));
         greyTip(lightSelect, () => (gameViewOn() ? FORCED_NOTE : null));
@@ -6037,7 +6053,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("div.model-main", {},
             h("div.model-toolbar", {},
               h("label.model-toggle", keyTitle("Game view: the map lit and fogged as the game shows it, without regions, cameras, start locations, pathing or grids", "w3.terrain.toggleGameView"), gameViewBox, " Game view"),
-              toggleGroup("View", "What is drawn",
+              h("div.model-toggle-groups", {}, toggleGroup("View", "What is drawn",
                 terrainSelect,
                 layerToggle("Doodads", "Doodads and destructables", "doodads", "w3.terrain.toggleDoodads"),
                 layerToggle("Units", "Units, items and start locations", "units", "w3.terrain.toggleUnits"),
@@ -6069,11 +6085,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
                 switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]),
                 switchBox("Reset fixed heights", "Reset Fixed Object Heights (Ctrl+Shift+H): a doodad with a height of its own that is moved lands on the ground and follows it again; with it off the doodad keeps its height", "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]),
-                switchBox("Enforce camera bounds", "Enforce Camera Bounds: the Cameras tab makes no camera from a view outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]))] : []),
+                switchBox("Enforce camera bounds", "Enforce Camera Bounds: the Cameras tab makes no camera from a view outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]))] : [])),
               h("button", { title: "Reset camera", onclick: () => { resetCamera(); keysToMap(); } }, "⟲"),
               h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); keysToMap(); } }, "⛶"),
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
-              h("span.muted", {}, dragHint, cameraHint)),
+              // One line, cut off where the room ends; the whole text is its tooltip.
+              h("span.muted.terrain-view-hint", { onmouseenter: (e: Event) => { const el = e.currentTarget as HTMLElement; el.title = el.textContent ?? ""; } }, dragHint, cameraHint)),
             ...(editable ? [tabsEl, groupBar] : lockedText ? [h("div.terrain-locked", { role: "status" }, lockedText)] : []),
             h("div.model-stage", {}, canvas, labelLayer, gameBadge, partialBadge, minimapPanel.el, glLost)),
           side));

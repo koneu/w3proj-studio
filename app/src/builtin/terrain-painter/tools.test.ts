@@ -257,6 +257,33 @@ test("Plateau levels the whole disc to the stroke's start, rim included; Smooth 
   }
 });
 
+test("the strength slider: 100% is the World Editor's stamp; Raise and Noise move as many times as far, Plateau and Smooth that part of the way", () => {
+  const raised = (strength: number) => { const t = flatMap(); applyHeight(t, brushOf("raise", t, 0, 0, 3), "raise", 0, new Stroke("raise"), Math.random, strength); return heightGrid(t)[2]; };
+  assert.deepEqual(raised(1), [0, 54, 76, 54, 0]);
+  assert.deepEqual(raised(2), [0, 108, 153, 108, 0], "twice 76.8 is 153.6, rounded down");
+  assert.deepEqual(raised(0.5), [0, 27, 38, 27, 0]);
+  // Noise: the same draws, each corner's whole number of 25.6 steps times the strength, rounded down as a stamp is.
+  const drawn = (strength: number) => {
+    let n = 0;
+    const t = flatMap(), draws: number[] = [];
+    applyHeight(t, brushOf("noise", t, 0, 0, 3), "noise", 0, new Stroke("noise"), () => { const r = (n++ % 21) / 21; draws.push(Math.floor(r * 21) - 10); return r; }, strength);
+    const got = t.corners.map((c) => c.rawHeight - 0x2000).filter((v, i) => v !== 0 || i < 0);
+    return { got: got.sort((x, y) => x - y), want: draws.map((step) => Math.floor(0x2000 + step * 25.6 * strength) - 0x2000).filter((v) => v !== 0).sort((x, y) => x - y) };
+  };
+  for (const strength of [0.5, 1, 2]) assert.deepEqual(drawn(strength).got, drawn(strength).want, `noise at ${strength}`);
+  assert.notDeepEqual(drawn(2).got, drawn(1).got, "the control: the strength changes it");
+  // Plateau at half strength goes half the way, at 100% and more all the way, and at a low one still arrives.
+  const level = (strength: number, stamps = 1) => {
+    const t = flatMap();
+    for (let k = 0; k < stamps; k++) applyHeight(t, brushOf("plateau", t, 0, 0, 1), "plateau", 0x2000 + 100, new Stroke("plateau"), Math.random, strength);
+    return heightGrid(t)[2][2];
+  };
+  assert.deepEqual([level(1), level(2), level(0.5), level(0.5, 2), level(0.1), level(0.1, 60)], [100, 100, 50, 75, 10, 100]);
+  // Smooth: a spike goes part of the way to what the World Editor's stamp gives (255 -> 204).
+  const spike = (strength: number) => { const t = flatMap(); t.corners[16 * t.width + 16].rawHeight = 0x2000 + 255; applyHeight(t, brushOf("smooth", t, 0, 0, 3), "smooth", 0, new Stroke("smooth"), Math.random, strength); return heightGrid(t)[2][2]; };
+  assert.deepEqual([spike(1), spike(0.5)], [204, 230]);
+});
+
 test("raise and lower don't read the amount: any amount gives the same ground", () => {
   // applyHeight's amount is for plateau only (tools.ts applyHeight); raiseLower takes none, and Noise draws its steps.
   for (const tool of ["raise", "lower"] as const) {

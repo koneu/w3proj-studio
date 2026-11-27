@@ -1,12 +1,15 @@
 // The "w3.objects" service (see extensions/services.ts): the object browser
 // for other extensions, over game objects and the map's custom objects.
 
+import { tilesetTag } from "./objectinfo";
 import type { W3Api } from "../../extensions/api";
 import type { ObjectsService, PickedObject } from "../../extensions/services";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 import { loadEditorTypes, objectEditor } from "./fields";
 import { pickFile, pickLabel } from "./filepicker";
 import { pickObject } from "./picker";
+import { firstShownModel } from "./previewart";
+import { ModelPreview } from "../../lib/model/preview";
 import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -19,7 +22,7 @@ import { joinPath } from "../../lib/paths";
 import { mergeSkin } from "./w3o";
 import { withLists, withSkin } from "./skin";
 import type { EditFile } from "./objectedit";
-import { ICON_FIELD, KIND_LABELS } from "./shared";
+import { ICON_FIELD, KIND_LABELS, MODEL_FIELD } from "./shared";
 
 /** war3map.wts as "TRIGSTR_nnn" → text. */
 export function parseWts(text: string): Map<string, string> {
@@ -38,7 +41,7 @@ export interface RawObject {
 }
 
 /** A custom object as the browser lists it. `campaign`: one of a chapter map's campaign. */
-interface CustomEntry { id: string; base: string; name: string; icon?: string; campaign?: boolean }
+interface CustomEntry { id: string; base: string; name: string; icon?: string; campaign?: boolean; /** Its own values of the fields the preview shows (model, variations). */ shown?: Record<string, string> }
 
 /** Custom objects of one object file with their display names (the object's own name field, resolved through the
  *  string table `wts`). */
@@ -51,7 +54,9 @@ function entriesOf(kind: string, kd: KindData, objects: RawObject[], wts: string
     const nameMod = mods.find((m) => /nam$/.test(m.field) && typeof m.value === "string");
     const name = nameMod ? resolve(nameMod.value as string) : kd.names.get(o.base) ?? o.base;
     const icon = mods.find((m) => m.field === ICON_FIELD[kind] && typeof m.value === "string")?.value as string | undefined;
-    return { id: o.id!, base: o.base, name: stripColors(name), icon, ...(campaign ? { campaign: true } : {}) };
+    const model = MODEL_FIELD[kind];
+    const shown = Object.fromEntries(mods.filter((m) => model && (m.field === model.model || m.field === model.variations)).map((m) => [m.field, String(m.value)]));
+    return { id: o.id!, base: o.base, name: stripColors(name), icon, shown, ...(campaign ? { campaign: true } : {}) };
   });
 }
 
@@ -153,6 +158,18 @@ export function soundLabels(w3: W3Api): Promise<string[]> {
   return labels;
 }
 
+/** What a remembering browser was left at; null for nothing or nonsense. */
+function readKept(name: string): { tab: number; query: string; chosen: Record<string, string[]> } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(`w3.picker.${name}`) ?? "null");
+    if (!v || !Number.isInteger(v.tab) || v.tab < 0 || typeof v.query !== "string") return null;
+    const chosen = Object.fromEntries(Object.entries(v.chosen ?? {}).filter((e): e is [string, string[]] => Array.isArray(e[1]) && e[1].every((x) => typeof x === "string")));
+    return { tab: v.tab, query: v.query, chosen };
+  } catch {
+    return null;
+  }
+}
+
 export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFor" | "bringTypes" | "liveObjects" | "onDidEdit">): ObjectsService {
   const icons = iconLoader(w3);
   const images = imageLoader(w3);
@@ -198,7 +215,17 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
     },
     async pick(host, opts): Promise<PickedObject | undefined> {
       const key = opts.kinds.join(",");
-      let tab = Math.min(lastTab.get(key) ?? 0, opts.kinds.length - 1), query = "";
+      // `remember`: the browser opens as it was left (its tab, search and filters), also after a restart.
+      const kept = opts.remember ? readKept(opts.remember) : null;
+      let tab = Math.min(kept?.tab ?? lastTab.get(key) ?? 0, opts.kinds.length - 1), query = kept?.query ?? "";
+      let chosen = kept?.chosen;
+      const keep = (q: string, c: Record<string, string[]>) => {
+        if (!opts.remember) return;
+        try { localStorage.setItem(`w3.picker.${opts.remember}`, JSON.stringify({ tab, query: q, chosen: c })); } catch { /* not remembered */ }
+      };
+      // The 3D preview beside the list, when asked for: one view for the whole browsing, closed with it.
+      const view = opts.preview ? new ModelPreview(w3) : null;
+      try {
       for (;;) {
         const kind = opts.kinds[tab];
         const kd = await loadKind(w3, kind);
@@ -206,14 +233,30 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
         // Not awaited: the browser opens at once and labels its values when the types arrive.
         const editorTypes = loadEditorTypes(w3).catch(() => null);
         const r = await pickObject(host, kd, {
-          title: opts.title, custom, query, editorTypes, extra: opts.extra,
+          title: opts.title, custom, query, chosen, onState: keep, editorTypes, extra: opts.extra,
+          preview: view && MODEL_FIELD[kind] ? {
+            el: view.el,
+            show: (id) => {
+              const own = custom.find((c) => c.id === id);
+              view.show(firstShownModel(MODEL_FIELD[kind], (field) => {
+                const f = kd.fieldById.get(field);
+                return own?.shown?.[field] ?? (f ? kd.defaultValue(own?.base ?? id, f, 0) : undefined);
+              }));
+            },
+          } : undefined,
           iconOf: (id, base) => icons(kd, kind, id, base, custom.find((c) => c.id === id)?.icon),
           tabs: opts.kinds.length > 1 ? { labels: opts.kinds.map((k) => KIND_LABELS[k] ?? k), active: tab } : undefined,
         });
         if (!r) return undefined;
-        if ("tab" in r) { tab = r.tab; query = r.query; lastTab.set(key, tab); continue; }
+        // The other kind's facets are its own.
+        if ("tab" in r) { tab = r.tab; query = r.query; chosen = undefined; lastTab.set(key, tab); continue; }
         const c = custom.find((x) => x.id === r.id);
-        return { kind, id: r.id, name: c?.name ?? stripColors(kd.names.get(r.id) ?? r.id), base: c?.base };
+        const name = c?.name ?? stripColors(kd.names.get(r.id) ?? r.id);
+        const tag = c ? null : tilesetTag(kd, r.id);
+        return { kind, id: r.id, name, label: tag ? `${name} · ${tag.short}` : name, base: c?.base };
+      }
+      } finally {
+        view?.dispose();
       }
     },
   };
