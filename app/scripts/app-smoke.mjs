@@ -17721,6 +17721,39 @@ async function objectManagerLive(page, found) {
 /** One file per object (map/objects/, docs/object-folders-spec.md): changing one unit in the Object Editor and saving
  *  changes that unit's file only, for a field of the main object file and for one of the Skin file (the name), and a
  *  first change of a standard unit adds its file only. */
+/** A new project has its generated and local files in build/ and no .w3proj/. One as an older Studio left it (them in
+ *  .w3proj/, with their .gitignore lines) is moved over when the app opens it. */
+async function oldLocalFiles(page, found) {
+  const fail = (what) => found.push(`old local files: ${what}`);
+  const k = await heightKit(page, "OldLocal");
+  try {
+    await k.save();
+    await settled(page);
+    const at = (...p) => join(k.root, ...p);
+    const NAMES = ["derived", "derived-from.json", "generated-script"];
+    for (const n of NAMES) if (!existsSync(at("build", n))) fail(`a new map has no build/${n}`);
+    if (existsSync(at(".w3proj"))) fail(`a new map has .w3proj/: ${lit(readdirSync(at(".w3proj")))}`);
+    if (!/^build\/\r?$/m.test(readDiskFile(at(".gitignore"), "utf8")) || readDiskFile(at(".gitignore"), "utf8").includes(".w3proj")) fail(".gitignore of a new map");
+    const wpm = hash(at("build", "derived", "war3map.wpm"));
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.close(); })()`);
+    mkdirSync(at(".w3proj"), { recursive: true });
+    for (const n of NAMES) renameSync(at("build", n), at(".w3proj", n));
+    writeFileSync(at(".gitignore"), "build/\n.*.tmp\n/.w3proj/derived/\n/.w3proj/derived-from.json\n");
+    await page.evaluate(`w3.workspace.open(${lit(k.root)})`);
+    await settled(page);
+    for (const n of NAMES) if (!existsSync(at("build", n))) fail(`opening didn't move ${n} into build/`);
+    if (existsSync(at(".w3proj"))) fail(`opening left .w3proj/: ${lit(readdirSync(at(".w3proj")))}`);
+    const ignore = readDiskFile(at(".gitignore"), "utf8");
+    if (ignore !== "build/\n.*.tmp\n") fail(`.gitignore after the move is ${lit(ignore)}`);
+    if (hash(at("build", "derived", "war3map.wpm")) !== wpm) fail("the moved pathing isn't the one there was");
+    const listed = await page.evaluate(`w3.workspace.files().map((f) => f.path)`);
+    for (const n of ["map/war3map.wpm", "map/war3map.j"]) if (!listed.includes(n)) fail(`the opened project doesn't list ${n}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 async function objectOneFile(page, found) {
   const fail = (what) => found.push(`object one file: ${what}`);
   const k = await heightKit(page, "OneFile");
@@ -19174,6 +19207,7 @@ async function run() {
         objectStandardList: (p, f) => objectStandardList(p, f, project),
         objectsWhileOpening,
         objectValueRange,
+        oldLocalFiles,
         paletteMouse,
         pasteWaitsForSizes,
         pathingImport,
@@ -19572,6 +19606,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectManagerSkin", found);
   await objectOneFile(page, found).catch((e) => found.push(`object one file: ${e.message}`));
   await leftOpen(page, "objectOneFile", found);
+  await oldLocalFiles(page, found).catch((e) => found.push(`old local files: ${e.message}`));
+  await leftOpen(page, "oldLocalFiles", found);
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
   await leftOpen(page, "niceToHaves", found);
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
