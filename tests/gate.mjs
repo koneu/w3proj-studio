@@ -210,18 +210,18 @@ const SMOKE_PARTS = Math.min(16, Math.max(1, Math.floor(Number(process.env.W3_SM
 // A part's memory: measured as PSS of its process tree, up to 5800 MB in five parts (they grow with every check).
 const SMOKE_PART_MEM = 6500;
 // The checks that run a Windows program (JassHelper, through Proton) in the user's game prefix. While the user's
-// Warcraft III or Battle.net runs in that prefix they would fail in confusing ways (X BadWindow, "Fontconfig out of
-// memory"; seen 2026-11-15), so the parts leave them out then (app-smoke.mjs --skip) and the table says so. The we-drive
-// steps are not among them: the World Editor has its own prefix under target/we.
+// Warcraft III or Battle.net runs in that prefix they can fail in confusing ways (X BadWindow, "Fontconfig out of
+// memory"; seen 2026-11-15), but mostly they pass (a whole batch gate did beside Battle.net, 2026-11-28). So they run
+// all the same, and a failed smoke part gets a line saying what may be behind it. The we-drive steps are not among
+// them: the World Editor has its own prefix under target/we.
 const PREFIX_CHECKS = ["vjassCheck", "scriptGenerated"];
 /** Set when the steps start (runSteps): the process line that shows the game running, else null. */
 let gameBusy = null;
-const skipFlag = () => (gameBusy ? ` --skip=${PREFIX_CHECKS.join(",")}` : "");
 /** The app smoke test's parts, on the build of `appbuild`: the gate's longest chain, so `priority`. */
 const smokeParts = Array.from({ length: SMOKE_PARTS }, (_, i) => ({
   id: `appsmoke${i + 1}`, name: `the real app on a scratch project (part ${i + 1}/${SMOKE_PARTS})`, tier: "corpus", weight: 2, mem: SMOKE_PART_MEM, priority: 1, after: ["cli", "appbuild"],
   // The command is made when the step starts: whether the game runs is known by then.
-  run: (ctx) => shell(`node scripts/app-smoke.mjs --part=${i + 1}/${SMOKE_PARTS} --no-build${skipFlag()}`, { cwd: app, env: smokeEnv })(ctx),
+  run: (ctx) => shell(`node scripts/app-smoke.mjs --part=${i + 1}/${SMOKE_PARTS} --no-build`, { cwd: app, env: smokeEnv })(ctx),
 }));
 const update = args.includes("--update-floor") ? " --update-floor" : "";
 
@@ -395,7 +395,7 @@ async function runSteps(beside) {
   // Asked now, after the wait in the queue: the user may have started the game meanwhile.
   if (chosen.some((s) => s.id.startsWith("appsmoke"))) {
     gameBusy = gamePrefixBusy(processLines());
-    if (gameBusy) console.log(`gate: SKIPPED (game running): ${PREFIX_CHECKS.join(", ")} of the app smoke test: ${gameBusy.slice(0, 120)}`);
+    if (gameBusy) console.log(`gate: the game or Battle.net runs in the game's prefix (${gameBusy.slice(0, 120)}): ${PREFIX_CHECKS.join(", ")} of the app smoke test may fail for that alone`);
   }
   const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
   await schedule({ steps: order, locks, serial, jobs, memBudget: budget.mb, onMemWait, launch, skip, done });
@@ -415,11 +415,10 @@ console.log(`\n--- gate: ${only ? `only ${chosen.map((s) => s.id).join(", ")} (n
 for (const s of chosen) if (!done.has(s.id)) done.set(s.id, { ok: false, seconds: 0 }); // never ran: a failure, not a gap
 const results = table.filter((id) => done.has(id)).map((id) => ({ name: steps.find((s) => s.id === id).name, ...done.get(id) }));
 for (const r of results) console.log(`${r.ok ? "pass" : "FAIL"}  ${String(r.seconds).padStart(4)}s  ${r.name}`);
-// A check that can't run fails (TESTING.md): green always means it ran. So the skipped ones count as failures, each named.
-const skipped = gameBusy ? PREFIX_CHECKS : [];
-for (const c of skipped) console.log(`SKIP  ${"".padStart(4)}   app smoke check ${c}: not run, the game or Battle.net runs in the game's prefix`);
-const failed = results.filter((r) => !r.ok).length + skipped.length;
-console.log(failed ? `${failed} of ${results.length + skipped.length} FAILED${skipped.length ? ` (${skipped.length} SKIPPED (game running): close Warcraft III and Battle.net, then run again)` : ""}` : `all ${results.length} passed`);
+const failed = results.filter((r) => !r.ok).length;
+const smokeFailed = table.some((id) => id.startsWith("appsmoke") && done.get(id)?.ok === false);
+if (gameBusy && smokeFailed) console.log(`note: the game or Battle.net ran in the game's prefix: if ${PREFIX_CHECKS.join(" or ")} is what failed, close them and run that part again`);
+console.log(failed ? `${failed} of ${results.length} FAILED` : `all ${results.length} passed`);
 console.log(`total ${Math.round((Date.now() - started) / 1000)}s`);
 const code = failed ? 1 : 0;
 // Wine servers a run of ours left behind: reported, never killed (the prefix may be the user's).
