@@ -1,0 +1,602 @@
+[
+ {
+  "name": "forest-clicks-3",
+  "description": "circle size 3: two clicks apart",
+  "input": {
+   "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+  },
+  "we": {
+   "mode": "sd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--key",
+     "d"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1475,184"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "1446,544"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ],
+    [
+     "--move",
+     "400,500"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "400,500"
+    ],
+    [
+     "--sleep",
+     "800"
+    ],
+    [
+     "--move",
+     "1000,500"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1000,500"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "terrain.placement.scatter": true,
+    "terrain.placement.scatterPattern": "circle",
+    "terrain.placement.forestSize": 3,
+    "terrain.placement.randomRotation": false,
+    "game.graphicsMode": "sd"
+   },
+   "steps": [
+    {
+     "terrain": true
+    },
+    {
+     "ui": [
+      [
+       "tab",
+       "Objects"
+      ],
+      [
+       "view",
+       "we"
+      ]
+     ]
+    },
+    {
+     "eval": "const o = await w3.services.get('w3.objects'); const was = o.pick; o.pick = async () => ({ kind: 'w3b', id: 'LTlt', name: 'Summer Tree Wall' }); try { const b = [...document.querySelectorAll('.terrain-group-tools button')].find((x) => x.textContent.trim().startsWith('Place')); if (!b) throw new Error('no Place button'); b.click(); for (let i = 0; i < 40 && !/Placing .*LTlt/.test(document.querySelector('.terrain-place-hint')?.textContent ?? ''); i++) await new Promise((r) => setTimeout(r, 250)); if (!/Placing .*LTlt/.test(document.querySelector('.terrain-place-hint')?.textContent ?? '')) throw new Error('not placing the tree: ' + document.querySelector('.terrain-place-hint')?.textContent); } finally { o.pick = was; }"
+    },
+    {
+     "ui": [
+      [
+       "click",
+       400,
+       500
+      ],
+      [
+       "click",
+       1000,
+       500
+      ]
+     ]
+    },
+    {
+     "sleep": 1500
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.doo",
+    "as": "doodad-places"
+   }
+  ],
+  "limit": 80
+ },
+ {
+  "name": "forest-free-bones-2sq",
+  "description": "Rib Bones (LOrb, Props; model 335.8 wide): square size 2, two clicks apart",
+  "input": {
+   "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+  },
+  "we": {
+   "mode": "sd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--key",
+     "d"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1450,102"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1420,186"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1475,301"
+    ],
+    [
+     "--sleep",
+     "600"
+    ],
+    [
+     "--click",
+     "1414,544"
+    ],
+    [
+     "--click",
+     "1414,604"
+    ],
+    [
+     "--move",
+     "400,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "400,450"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--move",
+     "1000,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1000,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ],
+    [
+     "--click",
+     "1450,102"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1420,212"
+    ],
+    [
+     "--sleep",
+     "800"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "terrain.placement.scatter": true,
+    "terrain.placement.scatterPattern": "square",
+    "terrain.placement.forestSize": 2,
+    "terrain.placement.randomRotation": false,
+    "game.graphicsMode": "sd"
+   },
+   "steps": [
+    {
+     "terrain": true
+    },
+    {
+     "ui": [
+      [
+       "tab",
+       "Objects"
+      ],
+      [
+       "view",
+       "we"
+      ]
+     ]
+    },
+    {
+     "eval": "const o = await w3.services.get('w3.objects'); const was = o.pick; o.pick = async () => ({ kind: 'w3d', id: 'LOrb', name: 'Bones Rib' }); try { const b = [...document.querySelectorAll('.terrain-group-tools button')].find((x) => x.textContent.trim().startsWith('Place')); if (!b) throw new Error('no Place button'); b.click(); for (let i = 0; i < 40 && !/Placing .*LOrb/.test(document.querySelector('.terrain-place-hint')?.textContent ?? ''); i++) await new Promise((r) => setTimeout(r, 250)); if (!/Placing .*LOrb/.test(document.querySelector('.terrain-place-hint')?.textContent ?? '')) throw new Error('not placing: ' + document.querySelector('.terrain-place-hint')?.textContent); await new Promise((r) => setTimeout(r, 1500)); } finally { o.pick = was; }"
+    },
+    {
+     "ui": [
+      [
+       "click",
+       400,
+       450
+      ],
+      [
+       "click",
+       1000,
+       450
+      ]
+     ]
+    },
+    {
+     "sleep": 1500
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.doo",
+    "as": "doodad-places"
+   }
+  ],
+  "limit": 80
+ },
+ {
+  "name": "forest-free-flowers-twice",
+  "description": "Flowers, circle size 3: two clicks on one spot place the pattern twice",
+  "input": {
+   "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+  },
+  "we": {
+   "mode": "sd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--key",
+     "d"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1450,102"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1420,160"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1475,210"
+    ],
+    [
+     "--sleep",
+     "600"
+    ],
+    [
+     "--click",
+     "1446,544"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ],
+    [
+     "--move",
+     "700,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "700,450"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "700,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ],
+    [
+     "--click",
+     "1450,102"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1420,212"
+    ],
+    [
+     "--sleep",
+     "800"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "terrain.placement.scatter": true,
+    "terrain.placement.scatterPattern": "circle",
+    "terrain.placement.forestSize": 3,
+    "terrain.placement.randomRotation": false,
+    "game.graphicsMode": "sd"
+   },
+   "steps": [
+    {
+     "terrain": true
+    },
+    {
+     "ui": [
+      [
+       "tab",
+       "Objects"
+      ],
+      [
+       "view",
+       "we"
+      ]
+     ]
+    },
+    {
+     "eval": "const o = await w3.services.get('w3.objects'); const was = o.pick; o.pick = async () => ({ kind: 'w3d', id: 'ZPfw', name: 'Flowers' }); try { const b = [...document.querySelectorAll('.terrain-group-tools button')].find((x) => x.textContent.trim().startsWith('Place')); if (!b) throw new Error('no Place button'); b.click(); for (let i = 0; i < 40 && !/Placing .*ZPfw/.test(document.querySelector('.terrain-place-hint')?.textContent ?? ''); i++) await new Promise((r) => setTimeout(r, 250)); if (!/Placing .*ZPfw/.test(document.querySelector('.terrain-place-hint')?.textContent ?? '')) throw new Error('not placing: ' + document.querySelector('.terrain-place-hint')?.textContent); await new Promise((r) => setTimeout(r, 1500)); } finally { o.pick = was; }"
+    },
+    {
+     "ui": [
+      [
+       "click",
+       700,
+       450
+      ],
+      [
+       "click",
+       700,
+       450
+      ]
+     ]
+    },
+    {
+     "sleep": 1500
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.doo",
+    "as": "doodad-places"
+   }
+  ],
+  "limit": 80
+ },
+ {
+  "name": "forest-barrel-3",
+  "description": "a destructable with a small footprint (Barrel LTbr, 2x2 cells): circle size 3, two clicks apart: 64 apart on its grid",
+  "input": {
+   "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+  },
+  "we": {
+   "mode": "sd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--key",
+     "d"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1450,102"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1420,212"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1475,223"
+    ],
+    [
+     "--sleep",
+     "600"
+    ],
+    [
+     "--click",
+     "1446,544"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ],
+    [
+     "--move",
+     "400,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "400,450"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--move",
+     "1000,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1000,450"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "1382,604"
+    ],
+    [
+     "--click",
+     "1450,102"
+    ],
+    [
+     "--sleep",
+     "1000"
+    ],
+    [
+     "--click",
+     "1420,212"
+    ],
+    [
+     "--sleep",
+     "800"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "terrain.placement.scatter": true,
+    "terrain.placement.scatterPattern": "circle",
+    "terrain.placement.forestSize": 3,
+    "terrain.placement.randomRotation": false,
+    "game.graphicsMode": "sd"
+   },
+   "steps": [
+    {
+     "terrain": true
+    },
+    {
+     "ui": [
+      [
+       "tab",
+       "Objects"
+      ],
+      [
+       "view",
+       "we"
+      ]
+     ]
+    },
+    {
+     "eval": "const o = await w3.services.get('w3.objects'); const was = o.pick; o.pick = async () => ({ kind: 'w3b', id: 'LTbr', name: 'Barrel' }); try { const b = [...document.querySelectorAll('.terrain-group-tools button')].find((x) => x.textContent.trim().startsWith('Place')); if (!b) throw new Error('no Place button'); b.click(); for (let i = 0; i < 40 && !/Placing .*LTbr/.test(document.querySelector('.terrain-place-hint')?.textContent ?? ''); i++) await new Promise((r) => setTimeout(r, 250)); if (!/Placing .*LTbr/.test(document.querySelector('.terrain-place-hint')?.textContent ?? '')) throw new Error('not placing: ' + document.querySelector('.terrain-place-hint')?.textContent); await new Promise((r) => setTimeout(r, 1500)); } finally { o.pick = was; }"
+    },
+    {
+     "ui": [
+      [
+       "click",
+       400,
+       450
+      ],
+      [
+       "click",
+       1000,
+       450
+      ]
+     ]
+    },
+    {
+     "sleep": 1500
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.doo",
+    "as": "doodad-places"
+   }
+  ],
+  "limit": 80
+ }
+]

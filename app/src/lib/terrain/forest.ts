@@ -4,6 +4,12 @@
 // centre. Circle: every second row is shifted by half a footprint, and a point is taken
 // within a fixed radius per size. The centre snaps to a 64 grid. While the brush is
 // dragged, a point where an object would overlap one already there stays empty.
+//
+// A type with a pathing texture is spaced by it (a barrel's 64, a barn's 320: its longer side), on the same grid. A
+// doodad without one (flowers, bones, corn) has nothing to collide with: the editor spaces the same pattern by the
+// model's own width (the longer of its X and Y extent, variation 0's model: Cattail 102.12, Rib Bones 335.82), centres
+// it on the pointer itself, and places it again wherever the brush is pressed or dragged to, on top of what is there
+// (a second click on one spot gives every point twice). Measured 2026-11-28, docs/testing/saved-data-rules.md.
 
 export const FOREST_SIZES = [1, 2, 3, 5, 8] as const;
 export type ForestShape = "circle" | "square";
@@ -43,6 +49,15 @@ export function forestPoints(size: number, shape: ForestShape, spacing = 128): [
 
 /** How far the brush reaches from its centre (for the ring under the pointer). */
 export const forestReach = (size: number, spacing = 128) => (size - 1) * spacing + spacing / 2;
+
+/** How a packed brush lays out a type. `cells`: its pathing footprint (null: none); `span`: the width of its model on
+ *  the ground (the longer of the X and Y extent; null: not known), which counts for a doodad or destructable without
+ *  a footprint. `free`: nothing to collide with, so the centre is the pointer itself and every press or move of the
+ *  brush places the whole pattern again, also on top of what is there (the World Editor on pathless doodads). */
+export function forestLayout(cells: { width: number; height: number } | null, span: number | null): { spacing: number; free: boolean } {
+  if (cells || span === null || !(span > 0) || !Number.isFinite(span)) return { spacing: forestSpacing(cells), free: false };
+  return { spacing: span, free: true };
+}
 
 /** Whether two objects of footprint `spacing` at these places would overlap. */
 export const forestOverlaps = (a: { x: number; y: number }, b: { x: number; y: number }, spacing: number) =>

@@ -481,12 +481,22 @@ function makeReader(cli, project, mapFile, map) {
 }
 
 /** Both maps unpacked with the CLI (its codecs), once; `file(name)` reads one file's forms from an unpacked folder. */
+/** The unpacked save with its terrain files flat again (war3map.doo.json, war3mapUnits.doo.json, war3map.w3e.txt …):
+ *  an unpack splits a map's terrain into map/terrain/ since the split became the default, and the compare kinds read
+ *  the flat files. */
+function flatTerrain(cli, project, map) {
+  if (!existsSync(join(project, "map", "terrain", "terrain.json"))) return;
+  const r = spawnSync(cli, ["terrain", "merge", project], { encoding: "utf8", timeout: 600000 });
+  if (r.status !== 0) throw new Error(`w3proj terrain merge of the unpacked ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
+}
+
 export function reader(cli, game, dir, map) {
   const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
   const mapFile = join(dir, map);
   rmSync(project, { recursive: true, force: true });
   const r = spawnSync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"], { encoding: "utf8", timeout: 600000 });
   if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
+  flatTerrain(cli, project, map);
   return makeReader(cli, project, mapFile, map);
 }
 
@@ -528,6 +538,7 @@ async function readerAsync(cli, game, dir, map) {
   rmSync(project, { recursive: true, force: true });
   const r = await runCliAsync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"]);
   if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout || r.error?.message || "").trim().split("\n").pop()}`);
+  flatTerrain(cli, project, map);
   return makeReader(cli, project, mapFile, map);
 }
 

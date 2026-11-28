@@ -1,6 +1,6 @@
 # Object Placer
 
-Extension `w3.terrainObjects`. Object Placer of the terrain editor: units, items, doodads and destructables, single, scattered or packed into forests (the World Editor's multiple placement), optionally respecting pathing.
+Extension `w3.terrainObjects`. Object Placer of the terrain editor: units, items, doodads and destructables, single, scattered or packed into forests (the World Editor's multiple placement: spaced by the type's pathing footprint on its grid, a pathless doodad by its model's width at the pointer; `lib/terrain/forest.ts`), optionally respecting pathing.
 
 The toolbar's Recent list takes up one of the last five objects placed again (kept per user). The owner, Scatter and its size, like the random options, are settings and stay as left; Place… opens on the tab, search and filters it was left with. In it doodads and destructables name their tilesets (an Archway per tileset). With `terrain.placement.preview3d` on (off by default) it shows a turning 3D preview of the highlighted object.
 

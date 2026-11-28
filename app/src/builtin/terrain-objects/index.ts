@@ -16,7 +16,7 @@ import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
 import { applyRandom, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
-import { FOREST_SIZES, forestCentre, forestOverlaps, forestPoints, forestReach, forestSpacing, type ForestShape } from "../../lib/terrain/forest";
+import { forestLayout, FOREST_SIZES, forestCentre, forestOverlaps, forestPoints, forestReach, type ForestShape } from "../../lib/terrain/forest";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { parseRecent, withRecent, type RecentPlaced } from "./recent";
@@ -66,8 +66,14 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let forestSize: number = FOREST_SIZES.find((n) => n === keptForest) ?? 5;
   /** The shape of the packed brush in use; null: one at a time, or loose scatter. */
   const packed = (): ForestShape | null => (scatter && pattern !== "random" ? pattern : null);
-  /** The packed brush's spacing for the type being placed (its footprint, once read). */
-  let spacing = 128;
+  /** The packed brush's spacing for the type being placed (its footprint, or without one its model's width, once
+   *  read), and whether it places freely (forestLayout: on the pointer itself, on top of what is there). */
+  let spacing = 128, free = false;
+  /** How the packed brush lays out a type: by its footprint, a pathless doodad or destructable by its model. */
+  const layoutOf = async (kind: string, id: string, fp: { width: number; height: number } | null) =>
+    forestLayout(fp, fp || (kind !== "w3d" && kind !== "w3b") ? null : (await ed.objects.modelShape(id).catch(() => null))?.length ?? null);
+  /** Where the packed brush's centre is for a pointer position. */
+  const centreOf = (x: number, y: number): [number, number] => (free ? [x, y] : forestCentre(x, y));
   const keepOwner = () => void w3.settings.set("terrain.placement.owner", owner + 1);
   const RECENT_KEY = "w3.placer.recent";
   let recent: RecentPlaced[] = parseRecent((() => { try { return localStorage.getItem(RECENT_KEY); } catch { return null; } })());
@@ -160,15 +166,22 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       }
       spots.push({ x, y, angle });
     } else if (packed()) {
-      const shape = packed()!, apart = forestSpacing(fp);
-      const [cx, cy] = forestCentre(pos[0], pos[1]);
-      // Never two of the type on top of each other, whether or not pathing is respected: filling a spot again adds nothing.
+      const shape = packed()!, layout = await layoutOf(kind, id, fp), apart = layout.spacing;
+      // The centre: the pointer itself for a pathless doodad; else the place the type's own grid gives nearest the
+      // pointer (a tree's is the 64 grid, a barrel's lies half a cell off it: World Editor, 2026-11-28).
+      const own = layout.free ? null : await ed.objects.placedSpot(kind, id, pos[0], pos[1], facing());
+      const [cx, cy] = own ? [own.x, own.y] : [pos[0], pos[1]];
+      // Never two of a type with a footprint on top of each other, whether or not pathing is respected: filling a spot
+      // again adds nothing. A pathless doodad collides with nothing: the whole pattern again, as the World Editor.
       const reach = forestReach(forestSize, apart) + apart;
-      const near = ed.objects.list().filter((o) => o.id === id && Math.abs(o.position[0] - cx) <= reach && Math.abs(o.position[1] - cy) <= reach)
+      const near = layout.free ? [] : ed.objects.list().filter((o) => o.id === id && Math.abs(o.position[0] - cx) <= reach && Math.abs(o.position[1] - cy) <= reach)
         .map((o) => ({ x: o.position[0], y: o.position[1] }));
       for (const [dx, dy] of forestPoints(forestSize, shape, apart)) {
-        const spot = await ed.objects.placedSpot(kind, id, cx + dx, cy + dy, facing());
-        if (near.some((o) => forestOverlaps(o, spot, apart))) continue;
+        // A point halfway between two places of the type's grid (a barrel's shifted rows) goes to the one farther
+        // from the map's middle, as the editor rounds (-960 to -992, 512 to 544).
+        const away = (v: number) => (layout.free ? v : v + Math.sign(v) * 0.01);
+        const spot = await ed.objects.placedSpot(kind, id, away(cx + dx), away(cy + dy), facing());
+        if (!layout.free && near.some((o) => forestOverlaps(o, spot, apart))) continue;
         if (respect() && fp) {
           if (!ed.objects.backdrop(kind, spot.x, spot.y) && !(await occ!.fits(kind, id, spot.x, spot.y, spot.angle))) continue;
           await occ!.mark(kind, id, spot.x, spot.y, spot.angle);
@@ -242,7 +255,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const sizeWrap = h("label.terrain-tool-opt", { title: "Scatter brush radius in tiles" }, "Size ",
     h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); },
       onchange: () => { void w3.settings.set("terrain.placement.scatterSize", size); } }));
-  const patternSel = h("select.terrain-place-pattern", { title: "Random: spread loosely over the brush. Packed: the World Editor's multiple placement, as close as the footprints allow (forests); setting terrain.placement.scatterPattern",
+  const patternSel = h("select.terrain-place-pattern", { title: "Random: spread loosely over the brush. Packed: the World Editor's multiple placement, as close as the footprints allow (forests); a doodad without pathing is spaced by its model's width and placed again at every press, also on top of what is there; setting terrain.placement.scatterPattern",
     onchange: () => {
       pattern = patternSel.value as typeof pattern;
       void w3.settings.set("terrain.placement.scatterPattern", pattern);
@@ -308,9 +321,10 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (p?.id !== placing?.id || p?.random !== placing?.random) chosenVariation = null;
     placing = p;
     spacing = 128;
+    free = false;
     update();
     reroll();
-    if (p) void ed.objects.occupancy().then(async (occ) => { const fp = await occ.footprint(p.kind, p.id); if (placing === p) spacing = forestSpacing(fp); }).catch(() => { /* a tree's */ });
+    if (p) void ed.objects.occupancy().then(async (occ) => { const l = await layoutOf(p.kind, p.id, await occ.footprint(p.kind, p.id)); if (placing === p) ({ spacing, free } = l); }).catch(() => { /* a tree's */ });
     // A destructable's fixed rotation depends on its pathing texture, which is read now: look again.
     if (p) void ed.objects.ready(p.id).then(() => { if (placing === p) { update(); reroll(); } });
   };
@@ -419,7 +433,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     },
     pointerMove(p) {
       lastGround = p.ground ?? null;
-      const shape = packed(), centre = shape && p.ground ? forestCentre(p.ground[0], p.ground[1]) : null;
+      const shape = packed(), centre = shape && p.ground ? centreOf(p.ground[0], p.ground[1]) : null;
       ed.setBrush(scatter && placing && !isStart() && p.ground
         ? { x: centre?.[0] ?? p.ground[0], y: centre?.[1] ?? p.ground[1], r: shape ? forestReach(forestSize, spacing) : size * 128, rgb: [140, 230, 140], square: shape === "square" }
         : null);
@@ -427,7 +441,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const d = drag;
       // Fills again once the pointer moved half a brush radius; the packed brush whenever its centre moves.
       const moved = (g: [number, number, number], from: [number, number, number]) => shape
-        ? forestCentre(g[0], g[1]).some((v, i) => v !== forestCentre(from[0], from[1])[i])
+        ? centreOf(g[0], g[1]).some((v, i) => v !== centreOf(from[0], from[1])[i])
         : Math.hypot(g[0] - from[0], g[1] - from[1]) >= size * 64;
       if (p.down && d && p.ground && moved(p.ground, d.last)) {
         const g = p.ground;

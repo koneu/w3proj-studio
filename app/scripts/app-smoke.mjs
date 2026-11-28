@@ -15925,6 +15925,32 @@ async function placerAndCampaign(page, found) {
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
     if (trees().length !== alone) fail(`one undo after the packed brush's drag left ${trees().length - alone} of its trees`);
+    // A doodad without a pathing texture (Flowers): the packed circle is spaced by the model's width, not the tree's
+    // 128, stands where the pointer is (no 64 grid), and a second click on the spot places all 15 again (World Editor).
+    const flowers = () => k.doodads().filter((d) => d.id === "ZPfw");
+    await k.tool("place_objects", { objects: [{ id: "ZPfw", x: -1408, y: 512 }], ignoreRoom: true });
+    await k.save();
+    await k.look(-1408, 512, { id: "ZPfw", x: -1408, y: 512 });
+    await k.run("w3.terrain.selectInPalette");
+    if (!(await soon(() => page.evaluate(`/Placing .*ZPfw/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) fail("Select in palette didn't take up the flowers");
+    else {
+      await sleep(1500); // the model's size is read once the type is taken up
+      await click(-600, 300);
+      await k.save();
+      const bed = flowers().filter((d) => Math.hypot(d.position[0] + 600, d.position[1] - 300) < 600);
+      const ys = [...new Set(bed.map((d) => Math.round(d.position[1] * 100) / 100))].sort((a, b) => b - a);
+      const step = ys.length === 5 ? (ys[0] - ys[4]) / 4 : 0;
+      console.log(`  the packed brush placed ${bed.length} flowers, rows ${step.toFixed(2)} apart`);
+      if (bed.length !== 15 || !(step > 20 && step < 127) || bed.every((d) => d.position[0] % 64 === 0 && d.position[1] % 64 === 0)) fail(`a packed circle of size 3 placed ${bed.length} flowers in ${ys.length} rows ${step.toFixed(2)} apart (${await k.toasts()})`);
+      await click(-600, 300);
+      await k.save();
+      const twice = flowers().filter((d) => Math.hypot(d.position[0] + 600, d.position[1] - 300) < 600).length;
+      if (twice !== 30) fail(`a second click on the flowers left ${twice} of them, not 30 (the pattern again, on top)`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await k.save();
+      if (flowers().length !== 1) fail(`two undos after the flowers left ${flowers().length - 1} of them`);
+    }
     await set(".terrain-place-pattern", "random");
     await page.evaluate(`[...document.querySelectorAll(".terrain-place-opt")].find((l) => l.textContent.trim() === "Scatter").querySelector("input").click()`);
     await soon(async () => (await k.setting("terrain.placement.scatter")) === false, 5000);

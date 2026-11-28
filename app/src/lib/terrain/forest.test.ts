@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FOREST_SIZES, forestCentre, forestOverlaps, forestPoints, forestSpacing } from "./forest";
+import { FOREST_SIZES, forestCentre, forestLayout, forestOverlaps, forestPoints, forestSpacing } from "./forest";
 
 /** The points as rows, north first: [y, xs]. */
 const rows = (points: [number, number][]) => {
@@ -48,4 +48,29 @@ test("the centre snaps to 64 and the pattern grows with the footprint", () => {
   assert.equal(forestSpacing({ width: 1, height: 1 }), 64);
   assert.equal(forestSpacing(null), 128);
   assert.deepEqual(forestPoints(2, "circle", 256), forestPoints(2, "circle").map(([x, y]) => [x * 2, y * 2]));
+});
+
+test("a type with a footprint is spaced by it on the grid; a pathless doodad by its model's width, freely", () => {
+  // A tree (4 cells), a barrel (2), a barn (10): the footprint's longer side, the model's width not looked at.
+  assert.deepEqual(forestLayout({ width: 4, height: 4 }, 300), { spacing: 128, free: false });
+  assert.deepEqual(forestLayout({ width: 2, height: 2 }, null), { spacing: 64, free: false });
+  assert.deepEqual(forestLayout({ width: 10, height: 6 }, null), { spacing: 320, free: false });
+  // No footprint: the model's width as measured in the World Editor (Cattail 102.12, Rib Bones 335.82, Lily Pad 61.88).
+  assert.deepEqual(forestLayout(null, 102.124), { spacing: 102.124, free: true });
+  assert.deepEqual(forestLayout(null, 335.821), { spacing: 335.821, free: true });
+  // No model known (or one without a size): a tree's spacing, on the grid, as before.
+  for (const span of [null, 0, -5, NaN, Infinity]) assert.deepEqual(forestLayout(null, span), { spacing: 128, free: false });
+});
+
+test("the pattern of a pathless doodad is the tree's, scaled to its spacing", () => {
+  // Flowers (78.452) at size 3: rows of 1, 4, 5, 4, 1 one spacing apart, every second row shifted by half (World Editor).
+  const p = forestPoints(3, "circle", 78.452);
+  assert.deepEqual(rows(p).map(([, xs]) => xs.length), [1, 4, 5, 4, 1]);
+  const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} isn't ${b}`);
+  near(rows(p)[0][0], 2 * 78.452);
+  near(rows(p)[1][1][0], -1.5 * 78.452);
+  near(rows(p)[2][1][1] - rows(p)[2][1][0], 78.452);
+  assert.equal(forestPoints(2, "circle", 78.452).length, 7);
+  assert.equal(forestPoints(5, "circle", 78.452).length, 57);
+  assert.equal(forestPoints(2, "square", 335.821).length, 9);
 });
