@@ -101,7 +101,7 @@ export function soundPlayer(w3: W3Api) {
     if (!file) throw new Error(`${label} has no sound file.`);
     const path = storedSound(file, await loadGameFiles(w3));
     if (!path) throw new Error(`${file} isn't in the game's files.`);
-    const bytes = await w3.game.read(path);
+    const bytes = await w3.game.read(path, { shared: true });
     const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
     const type = ext === "mp3" ? "audio/mpeg" : ext === "ogg" ? "audio/ogg" : ext === "wav" ? "audio/wav" : "audio/flac";
     url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));

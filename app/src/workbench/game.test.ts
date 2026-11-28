@@ -88,6 +88,43 @@ test("a shared read returns the kept bytes, a plain read a copy of them", async 
   assert.equal(game.backendReads, 1);
 });
 
+test("the guard finds a caller that wrote into shared bytes, at the next read and by sharedChanged", async () => {
+  const { game } = make();
+  game.guardShared = true;
+  // Control: callers that only look pass, however often they read.
+  const fine = await game.read("Units\\UnitData.slk", undefined, false, true);
+  assert.equal(fine[0], 1);
+  await game.read("Units\\UnitData.slk");
+  await game.read("Units\\UnitData.slk", undefined, false, true);
+  assert.deepEqual(game.sharedChanged(), []);
+  assert.deepEqual(game.sharedChanges, []);
+  // A caller that changes them: the next read, shared or not, throws and names the file.
+  fine[1] = 77;
+  await assert.rejects(game.read("units/unitdata.slk"), /Units\\UnitData\.slk was changed .* shared: true/);
+  assert.deepEqual(game.sharedChanges, ["Units\\UnitData.slk"]);
+  // Said once: the changed bytes are the state now.
+  assert.deepEqual([...await game.read("Units\\UnitData.slk", undefined, false, true)], [1, 77, 3]);
+  // The sweep finds one nobody reads again.
+  fine[2] = 5;
+  assert.deepEqual(game.sharedChanged(), ["Units\\UnitData.slk"]);
+});
+
+test("the guard finds shared bytes whose buffer was transferred away", async () => {
+  const { game } = make();
+  game.guardShared = true;
+  const bytes = await game.read("Units\\UnitData.slk", undefined, false, true);
+  structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+  assert.deepEqual(game.sharedChanged(), ["Units\\UnitData.slk"]);
+});
+
+test("without the guard a shared read notes nothing", async () => {
+  const { game } = make();
+  const bytes = await game.read("Units\\UnitData.slk", undefined, false, true);
+  bytes[0] = 9;
+  assert.deepEqual(game.sharedChanged(), []);
+  await game.read("Units\\UnitData.slk");
+});
+
 test("a file that isn't there is remembered as such; another failure is asked again", async () => {
   const { game } = make();
   await assert.rejects(game.read("Nothing.tif"), /not found/);

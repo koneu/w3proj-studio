@@ -23,7 +23,7 @@ function textureLoader(w3: W3Api, doc: EditorDocument) {
     const slash = path.replace(/\\/g, "/");
     if (layer) {
       for (const v of variants(slash)) {
-        try { return await w3.game.read(layer + v); } catch { /* next */ }
+        try { return await w3.game.read(layer + v, { shared: true }); } catch { /* next */ }
       }
     } else if (w3.workspace.project()) {
       // Under its name on disk, whatever the case the model asks for (as the game finds it). A map's Reforged version
@@ -33,7 +33,7 @@ function textureLoader(w3: W3Api, doc: EditorDocument) {
     }
     let failed: unknown;
     for (const v of variants(path)) {
-      try { return await w3.game.read(v); } catch (e) { failed = e; }
+      try { return await w3.game.read(v, { shared: true }); } catch (e) { failed = e; }
     }
     throw failed;
   };
@@ -115,7 +115,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const gamePath = doc.path.startsWith("game:") ? doc.path.slice(5) : null;
         if (gamePath && /:_(hd|de)\.w3mod:/i.test(gamePath) && !model.particleEmitters2.length && !model.ribbons.length && model.skipped.includes("CORN")) {
           try {
-            const sd = parseMdx(await w3.game.read(`War3.w3mod:${gamePath.slice(gamePath.lastIndexOf(":") + 1)}`));
+            const sd = parseMdx(await w3.game.read(`War3.w3mod:${gamePath.slice(gamePath.lastIndexOf(":") + 1)}`, { shared: true }));
             if (sd.particleEmitters2.length || sd.ribbons.length) {
               renderer.setEffectModel(sd);
               effectModel = sd;

@@ -1089,7 +1089,7 @@ async function prepareImports(w3: W3Api, names: string[]): Promise<() => Promise
 async function readReforged(w3: W3Api, path: string, source: Source, modelPath = ""): Promise<{ name: string; bytes: Uint8Array }> {
   const isTexture = /\.(blp|tif|tiff|tga|png|jpg|dds)$/i.test(path);
   const candidates = isTexture ? textureCandidates(path, modelPath) : [path.replace(/\\/g, "/")];
-  const { name, bytes } = await readLayered(candidates, source, (full) => w3.game.read(full), path);
+  const { name, bytes } = await readLayered(candidates, source, (full) => w3.game.read(full, { shared: true }), path);
   return { name, bytes };
 }
 

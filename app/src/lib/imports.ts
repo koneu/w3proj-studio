@@ -22,11 +22,6 @@ export const projectPath = (archivePath: string) => `map/${toProjectPath(archive
 /** The archive path of a file in the project's map folder ("map/…"). */
 export const archivePath = (projectFile: string) => toArchiveName(projectFile.replace(/^map\//, ""));
 
-/** The name the game's lookup (game.resolve) knows an archive path's file by: the game stores an art set or language
- *  folder as a layer of its own (`War3.w3mod:_HD.w3mod:Units/…`), so a map's `_HD.w3mod\Units\X.mdx` or
- *  `_Locales\deDE.w3mod\X.wav` is `_HD.w3mod:Units\X.mdx` or `_Locales\deDE.w3mod:X.wav` there; other paths as they are. */
-export const gameLookupName = (archivePath: string) => archivePath.replace(/\.w3mod[\\/]/gi, (m) => `${m.slice(0, -1)}:`);
-
 /** Same archive path regardless of case (the game's archive isn't case sensitive). */
 export const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
