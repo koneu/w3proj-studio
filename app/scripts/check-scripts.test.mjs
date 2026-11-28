@@ -68,6 +68,8 @@ test("the --only map and the full run must name the same checks", () => {
   assert.match(smokeListProblems(twice).join("\n"), /named twice in the full run's list: byHand/);
   // The list gone (renamed), or the map: said so, not passed.
   assert.match(smokeListProblems(smoke.replace("const CHECKS = [", "const LIST = [")).join("\n"), /full run's list .* wasn't found/);
+  // The same file as a Windows checkout has it (CRLF line ends): the list and the map are found alike.
+  assert.deepEqual(smokeListProblems(smoke.replace(/\r?\n/g, "\r\n")), smokeListProblems(smoke));
   assert.match(smokeListProblems(smoke.replace("const onlyChecks = {", "const checks = {")).join("\n"), /wasn't found/);
 });
 

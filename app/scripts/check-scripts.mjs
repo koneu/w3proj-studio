@@ -85,7 +85,8 @@ export function smokeChecks(source) {
   const map = /const onlyChecks = \{([\s\S]*?)\};/.exec(source);
   if (!map) return null;
   const only = topLevel(map[1]).map((p) => /^(\w+)/.exec(p)?.[1]).filter(Boolean);
-  const list = /^const CHECKS = \[\n([\s\S]*?)\n\];/m.exec(source);
+  // \r?: a Windows checkout has the file with CRLF line ends (CI's windows job).
+  const list = /^const CHECKS = \[\r?\n([\s\S]*?)\r?\n\];/m.exec(source);
   const run = list ? [...list[1].matchAll(/^\s*\[(\w+),/gm)].map((m) => m[1]) : null;
   const declared = new Set([...source.matchAll(/^(?:async )?function (\w+)\s*\(/gm)].map((m) => m[1]));
   // Two names on one line of the map (`a, b,`): it's kept one per line so parallel branches don't conflict on it.
