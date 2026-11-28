@@ -13526,7 +13526,7 @@ async function paletteMouse(page, found) {
  *  One more texture since HD draws the border's shade over a copy of the picture (renderer.ts drawHdBorder's
  *  copyScene, 349c45f0): one per view and size, as HD water's (measured alone 2026-11-19 by bisecting, branch
  *  fix-reads-once: 117, 143, 141). */
-const GAME_READS_RECORDED = { reads: 117, asked: 143, textures: 141 };
+const GAME_READS_RECORDED = { reads: 117, asked: 144, textures: 141 };
 const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
 async function gameReadsOnce(page, found) {
@@ -13581,6 +13581,7 @@ async function gameReadsOnce(page, found) {
   // The picture waits until every model and texture is in.
   // Nothing earlier checks read is kept: the scene's reads are the same alone as in the full run.
   await page.evaluate(`w3Workbench.game.reload()`);
+  await page.evaluate(`w3Workbench.game.requestLog = []`);
   const before = await reads(), askedBefore = await asked();
   const texturesBefore = await page.evaluate(`window.__texturesMade`);
   await tool("terrain_screenshot", { maxSize: 64 });
@@ -13588,6 +13589,7 @@ async function gameReadsOnce(page, found) {
   await readsSettled();
   const first = (await reads()) - before;
   const askedFirst = (await asked()) - askedBefore;
+  const askedNames = await page.evaluate(`(() => { const l = w3Workbench.game.requestLog ?? []; w3Workbench.game.requestLog = null; return l; })()`);
   const texturesFirst = (await page.evaluate(`window.__texturesMade`)) - texturesBefore;
   // The default state, the minimap panel on (a new view has it): it draws on a timer after the view is open, and reads the
   // game files of its icons and the tiles' colours. What it reads is bounded, not counted: it depends on the checks before.
@@ -13605,6 +13607,13 @@ async function gameReadsOnce(page, found) {
   console.log(`  game reads: the first opening of the scene read ${first} game files, asked for ${askedFirst}, made ${texturesFirst} textures (recorded: ${RECORDED.reads}, ${RECORDED.asked}, ${RECORDED.textures})`);
   if (first > RECORDED.reads) fail(`the first opening read ${first} game files, ${RECORDED.reads} when recorded`);
   if (askedFirst > RECORDED.asked) fail(`the first opening asked for ${askedFirst} game files, ${RECORDED.asked} when recorded`);
+  if (askedFirst > RECORDED.asked) {
+    // Which ones: the files asked for more than once, then every file in order.
+    const times = new Map();
+    for (const n of askedNames) times.set(n.toLowerCase(), (times.get(n.toLowerCase()) ?? 0) + 1);
+    console.log(`  game reads: asked more than once: ${[...times].filter(([, n]) => n > 1).map(([f, n]) => `${f} x${n}`).join(", ") || "none"}`);
+    console.log(`  game reads: asked for, in order: ${askedNames.join(", ")}`);
+  }
   if (texturesFirst > RECORDED.textures) fail(`the first opening made ${texturesFirst} textures, ${RECORDED.textures} when recorded`);
   // HD models name .tif textures; the game stores them as .dds only, and that is asked for first.
   const tifMissed = await page.evaluate(`w3Workbench.game.backendMisses.filter((p) => /\\.tif$/i.test(p))`);

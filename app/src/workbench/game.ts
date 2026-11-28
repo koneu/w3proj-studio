@@ -61,6 +61,8 @@ export class GameService {
   backendReads = 0;
   /** Reads asked of this service, kept or not: an editor loading twice asks for everything twice (the app smoke's guard). */
   requests = 0;
+  /** When set (the app smoke's guard sets it), every path asked for is noted here, in order: a count that went up can be named. */
+  requestLog: string[] | null = null;
   /** Paths the backend said aren't there, in order (each once, as they're remembered; `reload` empties it, as it forgets them): for the app smoke's guard. */
   readonly backendMisses: string[] = [];
   /** Reads waiting on the backend now, and the ones queued for a place (see MAX_READS_IN_FLIGHT). */
@@ -175,6 +177,7 @@ export class GameService {
    *  `shared`: the kept bytes themselves, not a copy (see GameReadOptions): the caller must never write to them. */
   async read(path: string, tileset?: string, background = false, shared = false): Promise<Uint8Array> {
     this.requests++;
+    this.requestLog?.push(path);
     const args = this.args();
     // As the backend looks paths up: either slash, any case.
     const key = [args.install ?? "", args.modeName ?? "", tileset ?? "", path.replace(/\\/g, "/").toLowerCase()].join("|");
