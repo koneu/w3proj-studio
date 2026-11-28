@@ -181,7 +181,7 @@ test("revert and take-a-version arguments: a hash of the history only, the path 
 test("revert makes a commit that undoes one; take a version changes the working copy only", { skip: !hasGit }, () => {
   const dir = mkdtempSync(join(tmpdir(), "w3-scm-revert-"));
   try {
-    const sh = (args: string[]) => spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.invalid", ...args], { cwd: dir, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(dir) } });
+    const sh = (args: string[]) => spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.invalid", "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(dir) } });
     const commit = (text: string, file = "a.txt") => { writeFileSync(join(dir, file), text); sh(["add", "-A"]); sh(["commit", "-q", "-m", text.trim()]); return sh(["rev-parse", "HEAD"]).stdout.trim(); };
     sh(["init", "-q"]);
     const one = commit("one\n");
