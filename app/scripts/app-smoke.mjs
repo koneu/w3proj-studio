@@ -14889,6 +14889,67 @@ async function objectFilePicker(page, found, root) {
   }
 }
 
+/** The Object Editor's lists for values the World Editor offers a list for: a doodad's category and tilesets, and
+ *  the searchable lists of ground textures, order strings and the Game Interface's music. */
+async function objectChoiceLists(page, found, root) {
+  const fail = (what) => found.push(`object choice lists: ${what}`);
+  const hands = new Hands(page);
+  const row = (label) => `[...document.querySelectorAll(".obj-table tr")].find((r) => ${label}.test(r.cells[0]?.textContent ?? "") && r.querySelector("td:nth-child(2)"))`;
+  const openObject = async (kind, id, label) => {
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", ${lit(kind)}, ${lit(id)})`);
+    await until(`${id}'s fields`, () => page.evaluate(`!!${row(label)}`), 30000);
+  };
+  const openList = async (label) => {
+    await page.evaluate(`(() => { const r = ${row(label)}; r.scrollIntoView({ block: "center" }); [...r.querySelectorAll("button")].find((b) => b.textContent === "Choose…").click(); })()`);
+    await until("the list's rows", () => page.evaluate(`document.querySelectorAll(".picker-browse .picker-row").length > 0`), 30000);
+    // The list opens on the current value: all of it shows once the search is empty.
+    await page.evaluate(`(() => { const s = document.querySelector(".picker-browse .picker-search"); s.value = ""; s.dispatchEvent(new Event("input")); })()`);
+    return page.evaluate(`[...document.querySelectorAll(".picker-browse .picker-row .picker-name")].map((n) => n.textContent)`);
+  };
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
+    // The Game Interface's music fields choose from the game's music labels (asked of the service: opening the Game
+    // Interface would give this shared project a war3mapSkin.txt).
+    await page.evaluate(`void w3.services.get("w3.objects").then((o) => o.pickMusic(document.body, { title: "Choose music", current: "" }))`);
+    await until("the music list's rows", () => page.evaluate(`document.querySelectorAll(".picker-browse .picker-row").length > 0`), 30000);
+    await page.evaluate(`(() => { const s = document.querySelector(".picker-browse .picker-search"); s.value = "defeat"; s.dispatchEvent(new Event("input")); })()`);
+    const music = await page.evaluate(`[...document.querySelectorAll(".picker-browse .picker-row .picker-name")].map((n) => n.textContent)`);
+    if (!music.includes("HumanDefeat · HumanDefeat.flac") || music.length > 12) fail(`the music found by "defeat" is ${music.slice(0, 5).join(", ")} (${music.length})`);
+    await hands.key("Escape", "Escape", 27);
+    await page.evaluate(`w3.editors.closeAll()`);
+    // A doodad: its category is one choice, its tilesets are boxes, "All tilesets" among them.
+    await openObject("w3d", "APms", "/^Category/");
+    await until("the category's choices", () => page.evaluate(`!!${row("/^Category/")}?.querySelector("select.obj-select")`), 30000);
+    const categories = await page.evaluate(`[...${row("/^Category/")}.querySelectorAll("option")].map((o) => o.textContent)`);
+    if (!categories.includes("Props") || !categories.includes("Environment")) fail(`a doodad's Category offers ${categories.join(", ")}`);
+    const sets = await page.evaluate(`[...(${row("/^Tilesets/")}?.querySelectorAll(".obj-check") ?? [])].map((l) => l.textContent.trim() + (l.querySelector("input").checked ? "*" : ""))`);
+    if (sets[0]?.replace("*", "") !== "All tilesets" || sets.length < 10) fail(`a doodad's Tilesets are ${sets.slice(0, 4).join(", ")}… (${sets.length})`);
+    if (!sets.includes("Ashenvale*")) fail(`the Ashenvale mushrooms' tilesets are ${sets.filter((x) => x.endsWith("*")).join(", ") || "none"}`);
+    // A building's ground texture: the game's splats by name, the code stored.
+    await openObject("w3u", "hbar", "/Ground Texture/");
+    const splat = () => page.evaluate(`${row("/Ground Texture/")}.querySelector("input.obj-value").value`);
+    const before = await splat();
+    const splats = await openList("/Ground Texture/");
+    if (splats.length < 20 || !splats.every((x) => /\(\w{4}\)$|^\w{4}$/.test(x))) fail(`the ground textures are ${splats.slice(0, 3).join(", ")}… (${splats.length})`);
+    const target = splats.findIndex((x) => !x.includes(`(${before})`));
+    await page.evaluate(`document.querySelectorAll(".picker-browse .picker-row")[${target}].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+    await until("the list closed", () => page.evaluate(`!document.querySelector(".picker-browse")`), 5000);
+    const after = await until("the chosen ground texture", async () => { const v = await splat(); return v !== before && v; }, 5000).catch(() => splat());
+    if (!splats[target].includes(after)) fail(`choosing "${splats[target]}" stored "${after}" (was "${before}")`);
+    // An ability's order string: what the game's abilities use.
+    await openObject("w3a", "AHtc", "/Order String - Use/");
+    const orders = await openList("/Order String - Use/");
+    if (!orders.some((x) => x.startsWith("thunderclap · ")) || orders.length < 100) fail(`the order strings are ${orders.slice(0, 3).join(", ")}… (${orders.length})`);
+    await hands.key("Escape", "Escape", 27);
+    if (await page.evaluate(`!!document.querySelector(".picker-browse")`)) fail("Escape left the list open");
+  } finally {
+    await hands.key("Escape", "Escape", 27).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
  *  preview pushed it below itself), every section's Value column in the same place, and the preview over no table. */
 async function objectLayout(page, found, root) {
@@ -20273,6 +20334,7 @@ async function run() {
         objectEditorMerge,
         objectEditorRawSkin,
         objectEditorWtsWriteFail,
+        objectChoiceLists: (p, f) => objectChoiceLists(p, f, project),
         objectFilePicker: (p, f) => objectFilePicker(p, f, project),
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectListKept: (p, f) => objectListKept(p, f, project),
@@ -20641,6 +20703,7 @@ const CHECKS = [
   [editorTabRaces, "editor tabs", "project"],
   [playerStarts, "player starts", "project"],
   [objectFilePicker, "object file picker", "project"],
+  [objectChoiceLists, "object choice lists", "project"],
   [objectLayout, "object editor layout", "project"],
   [objectListKept, "object list kept", "project"],
   [objectStandardList, "object standard list", "project"],

@@ -20,7 +20,8 @@ export const PATH_KIND: Record<string, FileKind> = {
 };
 const EXTENSIONS: Record<FileKind, RegExp> = { model: /\.(mdx|mdl)$/i, image: /\.(blp|dds|tga)$/i };
 
-interface FileEntry { path: string; imported: boolean }
+/** `label`: what the row shows and the search also finds, where the value alone says little (a splat's code). */
+interface FileEntry { path: string; imported: boolean; label?: string }
 
 /** The game's files as data writes them ("Units\Human\…"): no storage or art-set prefix, one
  *  entry per path (any case). Read once. */
@@ -127,6 +128,13 @@ export function pickLabel(w3: W3Api, host: HTMLElement, opts: { title: string; c
     load: async () => (await opts.labels()).map((path) => ({ path, imported: false })) });
 }
 
+/** Lets the user choose one of `choices` (a field's known values, each with what to show for it); resolves with
+ *  its value, or null when cancelled. */
+export function pickChoice(host: HTMLElement, opts: { title: string; current: string; placeholder: string; choices: () => Promise<{ value: string; label: string }[]> }): Promise<string | null> {
+  return pick(host, { title: opts.title, current: opts.current, images: false, placeholder: opts.placeholder,
+    load: async () => (await opts.choices()).map((c) => ({ path: c.value, label: c.label, imported: false })) });
+}
+
 export type PickerAction = { kind: "move"; active: number } | { kind: "choose" } | { kind: "cancel" };
 
 /** What a key does in the open picker, or null when it's left alone (typing, or Enter on a button,
@@ -223,13 +231,13 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
         return h("div.picker-row", {
           onclick: () => { active = i; mark(); },
           ondblclick: () => finish(f.path),
-        }, img, h("span.picker-name", { title: f.path }, f.path), f.imported ? h("span.badge", { title: "Imported into this map" }, "map") : null);
+        }, img, h("span.picker-name", { title: f.path }, f.label ?? f.path), f.imported ? h("span.badge", { title: "Imported into this map" }, "map") : null);
       }));
       mark();
     };
     const filter = () => {
       const words = search.value.toLowerCase().split(/[\s\\/]+/).filter(Boolean);
-      shown = all.filter((f) => { const p = f.path.toLowerCase(); return inFolder(f.path, folder) && words.every((w) => p.includes(w)); });
+      shown = all.filter((f) => { const p = f.label ? `${f.path} ${f.label}`.toLowerCase() : f.path.toLowerCase(); return inFolder(f.path, folder) && words.every((w) => p.includes(w)); });
       countEl.textContent = shown.length > MAX_ROWS ? `${MAX_ROWS} of ${shown.length}` : String(shown.length);
       renderRows();
     };

@@ -6,7 +6,9 @@ import type { W3Api } from "../../extensions/api";
 import type { ObjectsService, PickedObject } from "../../extensions/services";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 import { loadEditorTypes, objectEditor } from "./fields";
-import { pickFile, pickLabel } from "./filepicker";
+import { parseSlk } from "../../lib/formats/text";
+import { musicChoices } from "./choices";
+import { pickChoice, pickFile, pickLabel } from "./filepicker";
 import { pickObject } from "./picker";
 import { firstShownModel } from "./previewart";
 import { ModelPreview } from "../../lib/model/preview";
@@ -190,6 +192,8 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
     ...copying,
     pickFile: (host, opts) => pickFile(w3, host, { ...opts, thumb: images }),
     pickSoundLabel: (host, opts) => pickLabel(w3, host, { ...opts, labels: () => soundLabels(w3) }),
+    pickMusic: (host, opts) => pickChoice(host, { ...opts, placeholder: "Search by words of the name or the file",
+      choices: async () => musicChoices(parseSlk(await w3.game.readText("UI\\SoundInfo\\Music.slk"))) }),
     image: (path) => images(/\.\w+$/.test(path) ? path : `${path}.blp`),
     objectField: (host, opts) => objectEditor(service, host, opts.kinds, opts.list, opts.current, opts.onCommit),
     async savedObjects(kind) {

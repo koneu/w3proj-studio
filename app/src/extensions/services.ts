@@ -29,6 +29,8 @@ export interface ObjectsService {
   pickFile(host: HTMLElement, opts: { title: string; kind: "model" | "image"; current: string }): Promise<string | null>;
   /** The game's sound labels to choose from; null when cancelled. */
   pickSoundLabel(host: HTMLElement, opts: { title: string; current: string }): Promise<string | null>;
+  /** The game's music (the labels of UI\\SoundInfo\\Music.slk) to choose from; null when cancelled. */
+  pickMusic(host: HTMLElement, opts: { title: string; current: string }): Promise<string | null>;
   /** An image of the map's imports or the game as a data URL, or null. */
   image(path: string): Promise<string | null>;
   /** The object editor's control for a field holding object ids (one, or a comma list). */

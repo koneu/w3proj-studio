@@ -6,6 +6,7 @@
 // "w3.triggers.gui"), over the functions AIEditorData.txt allows. Objects are
 // chosen in the object browser ("w3.objects").
 
+import { heroSkillsOf, type UnitData } from "../../lib/ai/heroskills";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, TRIGGER_GUI_SERVICE, type ObjectsService, type TriggerGuiService } from "../../extensions/services";
 import {
@@ -228,6 +229,8 @@ class AiView {
   private names = new Map<string, string>();
   private pending = new Set<string>();
   private skills = new Map<string, string[]>();
+  /** The map's saved unit data: a custom hero's skills are its own list or its base's. */
+  private units: UnitData | null = null;
   private display: DisplayContext;
 
   constructor(private w3: W3Api, private el: HTMLElement, public ai: AiFile, private data: TriggerData, private objects: ObjectsService,
@@ -238,6 +241,7 @@ class AiView {
     addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => this.keyDown(e));
     void loadHeroSkills(w3).then((m) => { this.skills = m; if (this.tab === 1) this.render(); });
+    void objects.savedObjects("w3u").then((u) => { this.units = u; if (u && this.tab === 1) this.render(); }, () => {});
     this.render();
   }
 
@@ -631,7 +635,8 @@ class AiView {
   private heroes() {
     const ai = this.ai;
     const hero = ai.heroes[this.hero] ?? NO_ID;
-    const known = this.skills.get(hero) ?? [];
+    // An open Object Editor's unsaved units count, as in the object browser.
+    const known = heroSkillsOf(hero, this.skills, this.objects.liveObjects().get("w3u") ?? this.units);
     const skillSelect = (list: string[], level: number) => {
       const ids = [...new Set([...known, ...list.filter((x) => x !== NO_ID)])];
       const options: [string, string][] = [[NO_ID, "(none)"], ...ids.map((x): [string, string] => [x, this.label(x)])];

@@ -15,7 +15,9 @@ import { findCampaign } from "../../lib/objects/campaign";
 import { importedPathFor } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
-import { PATH_KIND, pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
+import { parseSlk } from "../../lib/formats/text";
+import { CHOICE_TYPES, orderChoices, splatChoices } from "./choices";
+import { PATH_KIND, pickChoice, pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { textCodec, UnencodableError } from "../../lib/formats/codepage";
 import { readWts, StringTable, writeWts, WtsCutError } from "../../lib/formats/wts";
 import { mergeChanged, sameObjects, type ObjectConflict } from "./merge";
@@ -1000,6 +1002,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
             if (label !== null) onCommit(label);
           } }, "Choose…"));
+        /** One of the known values of an order string or ground texture field, from a searchable list. */
+        const choiceButton = (metaType: string, value: string, onCommit: (v: number | string) => void): HTMLElement | null => (!CHOICE_TYPES[metaType] ? null
+          : h("button.obj-art-view", { title: metaType === "orderString" ? "Choose one of the orders the game's abilities use" : "Choose one of the game's ground textures", onclick: async () => {
+            const picked = await pickChoice(el, {
+              ...CHOICE_TYPES[metaType], current: value,
+              choices: async () => (metaType === "orderString" ? orderChoices(kd!) : splatChoices(parseSlk(await w3.game.readText("Splats\\UberSplatData.slk")))),
+            });
+            if (picked !== null) onCommit(picked);
+          } }, "Choose…"));
         /** ▶ beside a sound field, to hear what it's set to without opening anything. */
         const sounds = soundPlayer(w3);
         const playButton = (metaType: string, value: string): HTMLElement | null => (!["soundLabel", "unitSound", "combatSound"].includes(metaType) ? null
@@ -1080,7 +1091,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
           });
           return h("div.obj-value-cell", {}, type === "string" && metaType === "string" && !mixed ? withColorTools(input, { commit: true }) : input, resolved ? h("div.obj-resolved", {}, codec.show(stripColors(resolved))) : null,
-            browseButton(metaType, mixed ? "" : String(current), onCommit), labelButton(metaType, mixed ? "" : String(current), onCommit),
+            browseButton(metaType, mixed ? "" : String(current), onCommit), labelButton(metaType, mixed ? "" : String(current), onCommit), choiceButton(metaType, mixed ? "" : String(current), onCommit),
             mixed ? null : playButton(metaType, String(current)),
             mixed ? null : artPreview(metaType, String(current)));
         };

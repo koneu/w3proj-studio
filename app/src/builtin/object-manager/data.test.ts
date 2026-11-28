@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, placedPath, triggersUsing, type MapContents, type Node } from "./data";
+import { ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, placedPath, triggersUsing, usedIds, type MapContents, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -245,4 +245,19 @@ test("View In Object Manager: the rows down to a placed object, by creation numb
   assert.deepEqual(placedPath(tree, { id: "LTlt", x: 64, y: 64 }), ["/Destructables (1)", "/Destructables (1)/LTlt (1)", "/Destructables (1)/LTlt (1)/LTlt 0007"]);
   assert.equal(placedPath(tree, { id: "hhou", x: 64, y: 64 }), null, "no farm there");
   assert.equal(placedPath(tree, { id: "hkni", editorId: 1, x: 0, y: 0 }), null, "another type with that number");
+});
+
+test("used objects: what only unused objects name is unused too", () => {
+  const all = new Set(["h000", "A000", "A001", "B000", "A002", "A003", "h001"]);
+  const by = (...users: string[]) => new Map(users.map((id) => [`x: ${id}`, { kind: "object" as const, ext: "w3u", id }]));
+  const users = new Map([
+    ["A000", by("h000")], // the placed footman's ability
+    ["B000", by("A000")], // and that ability's buff
+    ["A001", by("h001")], // an unused unit's ability
+    ["A002", by("A003")], ["A003", by("A002")], // two that name only each other
+    ["h001", by("hpea")], // a game object's (the Peasant builds it)
+  ]);
+  const used = usedIds(all, (id) => id === "h000", users);
+  assert.deepEqual([...used].sort(), ["A000", "A001", "B000", "h000", "h001"]);
+  assert.deepEqual([...usedIds(all, () => false, new Map())], []);
 });

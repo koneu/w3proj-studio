@@ -18,7 +18,7 @@ import { readScriptFile } from "../../lib/script/guard";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import {
-  ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, placedPath, triggersUsing,
+  ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, placedPath, triggersUsing, usedIds,
   type KindData, type MapContents, type Node as TreeNode, type Target,
 } from "./data";
 
@@ -89,7 +89,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const customIds = new Set(c.custom.flatMap((k) => k.ids.map((o) => o.id)));
         const users = objectRefs(c.objects, customIds, c.nameOf);
         const mentioned = new Set(c.texts.flatMap((t) => idsInText(t, customIds)));
-        const unusedCount = markUnused(tree, (id) => mentioned.has(id) || users.has(id) || refs.has(id));
+        const used = usedIds(customIds, (id) => mentioned.has(id) || refs.has(id), users);
+        const unusedCount = markUnused(tree, (id) => used.has(id));
         result = { tree, refs, users, unusedCount, summary: mapSummary(c) };
       } catch (e) {
         failed = String((e as Error).message ?? e);
@@ -321,7 +322,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("span.tree-icon", {}, kids.length ? (isOpen ? "▾" : "▸") : ""),
               h("span.tree-label", {}, n.label),
               n.detail ? h("span.om-detail", {}, n.detail) : null,
-              n.unused ? h("span.om-unused", { title: "Nothing uses it: no placed object, other object, trigger or script" }, "unused") : null,
+              n.unused ? h("span.om-unused", { title: users.has(n.ref ?? "") ? "Only unused objects use it" : "Nothing uses it: no placed object, other object, trigger or script" }, "unused") : null,
               used ? h("span.om-used", { title: "Triggers using it" }, `ϟ${used}`) : null));
               if (kids.length && isOpen) walk(kids, depth + 1, key);
             }
@@ -360,7 +361,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.append(h("div.om-view", {}, h("div.om-toolbar", {}, search,
           h("button.icon-button.om-summary-button", { title: "Map Summary: what the map holds, counted per kind", onclick: showSummary }, "Σ"),
           h("button.icon-button", { title: "Refresh", onclick: () => void load(true) }, "⟳")),
-          h("label.om-filter", { title: "Custom objects no placed object, other object, trigger or script uses" }, unusedBox, ` Unused only (${unusedCount})`),
+          h("label.om-filter", { title: "Custom objects no placed object, trigger or script uses, and no object that is used itself" }, unusedBox, ` Unused only (${unusedCount})`),
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },
     }),

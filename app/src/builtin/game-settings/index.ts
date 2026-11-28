@@ -288,7 +288,13 @@ class SettingsView {
   /** A choose button for art and sound fields, with a small picture for images. */
   private picker(f: Field, value: string, commit: (v: string) => void): HTMLElement[] | null {
     const objects = this.objects;
-    if (!objects || !this.editable || !["icon", "model", "soundLabel"].includes(f.type)) return null;
+    if (!objects || !this.editable || !["icon", "model", "soundLabel", "musicFile"].includes(f.type)) return null;
+    if (f.type === "musicFile") {
+      return [h("button", { title: "Choose one of the game's music labels", onclick: async () => {
+        const chosen = await objects.pickMusic(this.el, { title: "Choose music", current: value });
+        if (chosen !== null) commit(chosen);
+      } }, "Choose…")];
+    }
     const button = h("button", { title: f.type === "soundLabel" ? "Choose one of the game's sound labels" : "Choose a file from the map's imports or the game", onclick: async () => {
       const chosen = f.type === "soundLabel" ? await objects.pickSoundLabel(this.el, { title: "Choose a sound label", current: value })
         : await objects.pickFile(this.el, { title: f.type === "icon" ? "Choose an image" : "Choose a model", kind: f.type === "icon" ? "image" : "model", current: value });

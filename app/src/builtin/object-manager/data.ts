@@ -146,6 +146,23 @@ export function idsInText(text: string, ids: ReadonlySet<string>): string[] {
   return [...new Set(text.match(/(?<![A-Za-z0-9])[A-Za-z0-9]{4}(?![A-Za-z0-9])/g) ?? [])].filter((t) => ids.has(t));
 }
 
+/** Those of the custom `ids` something uses: `direct` says what the map's texts, triggers and placed objects use; an
+ *  object another object names counts when that one is a game object or itself used. So an ability only an unused
+ *  unit has is unused too, and two objects naming only each other both are. */
+export function usedIds(ids: ReadonlySet<string>, direct: (id: string) => boolean, users: ReadonlyMap<string, ReadonlyMap<string, Target>>): Set<string> {
+  const used = new Set([...ids].filter(direct));
+  for (let grown = true; grown;) {
+    grown = false;
+    for (const id of ids) {
+      if (used.has(id)) continue;
+      for (const user of users.get(id)?.values() ?? []) {
+        if (user.kind !== "object" || !ids.has(user.id) || used.has(user.id)) { used.add(id); grown = true; break; }
+      }
+    }
+  }
+  return used;
+}
+
 /** Marks custom objects nothing uses, returning how many. `isUsed` should rather say yes: this
  *  invites deleting what it lists. */
 export function markUnused(nodes: Node[], isUsed: (ref: string) => boolean): number {

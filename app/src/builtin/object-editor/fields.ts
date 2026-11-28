@@ -22,7 +22,8 @@ export const OBJECT_LIST: Record<string, string[]> = {
 export interface EditorType {
   /** one value, a comma list of values, or bit flags (bit n = entry with value n). */
   shape: "single" | "list" | "flags";
-  entries: { value: string; label: string; alts: string[] }[];
+  /** `alone`: a list value that stands for the whole list ("*", every tileset) and is never stored beside others. */
+  entries: { value: string; label: string; alts: string[]; alone?: boolean }[];
 }
 
 /** UnitEditorData types stored as comma lists whose name doesn't end in "List". */
@@ -50,10 +51,29 @@ export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
       // unitClass is stored as a comma list too ("giant,undead"), though its name doesn't say so.
       out.set(name, { shape: /Flags$/.test(name) ? "flags" : /List/.test(name) || LISTS.has(name) ? "list" : "single", entries });
     }
+    for (const [name, t] of worldEditTypes(parseIni(await w3.game.readText("UI\\WorldEditData.txt").catch(() => "")), (key) => westring(strings, key), out)) out.set(name, t);
     return out;
   })();
   typesPromise.catch(() => { typesPromise = null; });
   return typesPromise;
+}
+
+/** The value types the World Editor fills from other tables than UnitEditorData: a doodad's and a destructable's
+ *  category and the tilesets (UI\WorldEditData.txt), and an ability's lightning effects (UnitEditorData's
+ *  lightningEffect, stored as a list). Only those whose table has entries. */
+export function worldEditTypes(data: ReadonlyMap<string, ReadonlyMap<string, string>>, label: (key: string) => string, unitTypes: ReadonlyMap<string, EditorType>): Map<string, EditorType> {
+  const out = new Map<string, EditorType>();
+  const section = (name: string) => [...(data.get(name) ?? [])].filter(([k]) => /^[a-z]$/i.test(k)).map(([k, v]) => {
+    const key = v.split(",")[0].trim(), text = label(key);
+    return { value: k.toUpperCase(), label: !text || text.startsWith("WESTRING_") ? k.toUpperCase() : text, alts: [] };
+  });
+  const put = (name: string, shape: EditorType["shape"], entries: EditorType["entries"]) => { if (entries.length) out.set(name, { shape, entries }); };
+  put("doodadCategory", "single", section("DoodadCategories"));
+  put("destructableCategory", "single", section("DestructibleCategories"));
+  const tilesets = section("TileSets").sort((a, b) => a.label.localeCompare(b.label));
+  put("tilesetList", "list", tilesets.length ? [{ value: "*", label: "All tilesets", alts: [], alone: true }, ...tilesets] : []);
+  put("lightningList", "list", unitTypes.get("lightningEffect")?.entries ?? []);
+  return out;
 }
 
 /** What a value of an editor type (a choice, a comma list, bit flags) shows as: its labels ("nightelf" →
@@ -86,6 +106,15 @@ export function setListValue(old: string, value: string, alts: string[], on: boo
   const same = new Set([value, ...alts].map((s) => s.toLowerCase()));
   const rest = listItems(old).filter((s) => !same.has(s.toLowerCase()));
   return (on ? [...rest, value] : rest).join(",");
+}
+
+/** setListValue for an editor type's entry: one that stands alone ("*") replaces the list when ticked and
+ *  leaves it when another entry is. */
+export function tickListValue(t: EditorType, old: string, e: EditorType["entries"][number], on: boolean): string {
+  if (on && e.alone) return e.value;
+  const alone = new Set(t.entries.filter((x) => x.alone).map((x) => x.value.toLowerCase()));
+  const kept = on ? listItems(old).filter((s) => !alone.has(s.toLowerCase())).join(",") : old;
+  return setListValue(kept, e.value, e.alts, on);
 }
 
 /** How many of `values` a check applies to, as a checkbox shows it. */
@@ -127,8 +156,13 @@ export function typeEditor(t: EditorType, current: number | string, numeric: boo
   const boxes = t.entries.map((e, n) => {
     const state = mixed ? checkState(mixed.values, (v) => holds(v, e)) : { checked: holds(String(current), e), indeterminate: false };
     return h("input", { type: "checkbox", checked: state.checked, indeterminate: state.indeterminate, onchange: () => {
-      if (mixed) { mixed.each((old) => setListValue(old, e.value, e.alts, (boxes[n] as HTMLInputElement).checked)); return; }
-      onCommit(t.entries.filter((_, i) => (boxes[i] as HTMLInputElement).checked).map((x) => x.value).join(","));
+      const on = (boxes[n] as HTMLInputElement).checked;
+      if (mixed) { mixed.each((old) => tickListValue(t, old, e, on)); return; }
+      // The boxes in the table's order, as before; a value that stands alone ("*") isn't kept beside others.
+      const ticked = t.entries.filter((x, i) => (boxes[i] as HTMLInputElement).checked && (x === e || (on ? !x.alone && !e.alone : true)));
+      // A value the table doesn't list (a tileset letter of an extended editor) stays, unless the whole list is replaced.
+      const unknown = on && e.alone ? [] : listItems(String(current)).filter((s) => !t.entries.some((x) => holds(s, x)));
+      onCommit([...ticked.map((x) => x.value), ...unknown].join(","));
     } });
   });
   return h("div.obj-checks", {}, ...t.entries.map((e, i) => h("label.obj-check", {}, boxes[i], e.label)));
