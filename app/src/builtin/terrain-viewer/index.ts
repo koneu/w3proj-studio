@@ -71,7 +71,10 @@ import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { readWts, StringTable, writeWts } from "../../lib/formats/wts";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
-import { campsOf } from "./meleecheck";
+import { CAMP_SIGHT, campsOf } from "./meleecheck";
+import { forestPlan } from "./forestfill";
+import { LAYOUT_LEGEND, layoutPicture } from "./layoutpicture";
+import { encodePng } from "../../lib/image/png";
 import { meleeFacts as meleeFactsOf, meleeReport, pathReport, walkGrid as gridOf, withNeighbour as neighbourOf, type WalkSource } from "./meleefacts";
 import { hasTabKey, lateCancel, SELECT_TOGGLE_COMMAND, TAB_COMMANDS, tabTarget } from "./tabkeys";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
@@ -83,7 +86,7 @@ import { CornerUndo, MAX_CLIFF_TYPES, cliffSlot } from "../../lib/terrain/cliffs
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices, GROUND_KINDS, groundKind, groupSkipped, pocketSpots, type GroundKind } from "./aitools";
+import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices, GROUND_KINDS, groundKind, groupSkipped, pocketSpots, type GroundKind, withTwin } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -101,7 +104,7 @@ import { judgedHidden, playerRaces, StartJudge, startPreviewHidden, startPreview
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { maxGroundTiles, drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { onBoundary, maxGroundTiles, drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -973,6 +976,100 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(facing !== undefined ? { facing } : {}) }));
       return { seed, ...briefSkips(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror }, call)) };
     }),
+    w3.mcp.registerTool("fill_forest", async (args) => {
+      const ids = args.ids;
+      if (!Array.isArray(ids) || !ids.length || !ids.every((i) => typeof i === "string" && i.length === 4)) throw new Error("ids must list tree types of four characters, like LTlt. list_objects with trees gives the tileset's.");
+      await refusePartial("fill_forest");
+      const waysWide = args.ways === 0 ? 0 : givenNumber("ways", args.ways, { min: 192, max: 2000, fallback: 448 });
+      const limit = givenNumber("limit", args.limit, { min: 1, max: 20000, whole: true, fallback: 8000 });
+      const reserved = await readReserved();
+      const keep = [...await readKeepClear(args.avoid), ...reserved];
+      if (!keep.length) throw new Error("Nothing is reserved, so the whole map would become forest. Reserve the bases, mines, ways, clearings and shops first (reserve_area), then fill what is left.");
+      const seed = seedOf(args.seed), random = seededRandom(seed);
+      const { handle } = await liveEditor();
+      const whole = wholeMap(handle), edge = await playable().catch(() => null), t = handle.terrain;
+      const inside = (x: number, y: number) => (args.border === true || !edge || inArea(x, y, edge)) && !onBoundary(t, x, y);
+      // The kept places by name, each by its middle: the ways run between these.
+      const anchors = reserved.map((r) => ({ name: r.name, at: ("points" in r ? r.points[Math.floor(r.points.length / 2)] : [(r.left + r.right) / 2, (r.bottom + r.top) / 2]) as [number, number] }));
+      const grid = await walkGrid(handle);
+      let placed = 0, noRoom = 0, plan: ReturnType<typeof forestPlan> | null = null;
+      const counts = new Map<string, number>();
+      const report = () => ({
+        ways: plan!.ways.map((w) => ({ from: w.from, to: w.to, length: w.length })),
+        ...(plan!.unreached.length ? { unreached: plan!.unreached, unreachedNote: "No way on foot joins these reserved places to the others as the ground is (water or cliffs between): nothing was left free toward them. Build the crossing (set_ramp, set_water with mode shallow), reserve it, and fill again." } : {}),
+        waysWide,
+      });
+      const fill = async (f: PlacedFile | null) => {
+        const room = await handle.objects.occupancy();
+        await Promise.all((ids as string[]).map((id) => handle.objects.ready(id)));
+        const types = (ids as string[]).map((id) => {
+          const type = handle.objects.type(id);
+          if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
+          return { id, type };
+        });
+        const sizes = await Promise.all(types.map(({ id, type }) => room.footprint(type.kind, id)));
+        const open = types.filter((_, i) => !sizes[i]).map((x) => x.id);
+        if (open.length) throw new Error(`${open.join(", ")} ha${open.length === 1 ? "s" : "ve"} no pathing footprint, so a forest of ${open.length === 1 ? "it" : "them"} walls nothing in: take trees (list_objects with trees).`);
+        const spacing = Math.max(64, ...sizes.map((fp) => Math.max(fp!.width, fp!.height) * 32));
+        plan = forestPlan(grid, {
+          anchors, kept: (x, y) => isKeptClear(x, y, keep), inside, ways: waysWide, spacing,
+          ...(args.mirror === true ? { twin: (x: number, y: number) => twinOf(x, y, whole) } : {}),
+        });
+        if (plan.spots.length > limit) throw new Error(`Nothing was planted: the forest would take ${plan.spots.length.toLocaleString("en-US")} trees, more than the limit of ${limit.toLocaleString("en-US")}. Reserve more, or raise limit (at most 20,000).`);
+        for (const asked of plan.spots) {
+          const { id, type } = types[Math.floor(random() * types.length)];
+          const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
+          const spot = await handle.objects.placedSpot(type.kind, id, asked.x, asked.y, angle);
+          if (!isBackdrop(type.kind, spot.x, spot.y, edge, whole) && !(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
+          placed++;
+          counts.set(id, (counts.get(id) ?? 0) + 1);
+          if (!f) continue;
+          await room.mark(type.kind, id, spot.x, spot.y, angle);
+          const entry = add(f, handle, id, spot.x, spot.y, undefined, { facing }, true, random);
+          await handle.objects.settleDoodads([entry], { place: true, scale: true });
+          markBackdrop(entry, entry.position[0], entry.position[1], edge);
+        }
+        if (!placed) throw new Error("There's no free ground left for forest: everything is reserved, kept as a way, or taken.");
+      };
+      if (args.dryRun === true) { await fill(null); return { wouldPlant: placed, byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, ...report(), seed }; }
+      await editPlaced(`Fill the land with forest (${(ids as string[]).join(", ")})`, "doodads", fill);
+      return { planted: placed, byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, ...report(), seed, next: "check_melee measures the open ground and each camp's shelter now; map_layout shows the result as a plan." };
+    }),
+    w3.mcp.registerTool("map_layout", async (args) => {
+      await refusePartial("map_layout");
+      const f = await meleeFacts(32);
+      const { handle } = f, t = handle.terrain;
+      const [pathing, standing, destructables] = await Promise.all([handle.pathing(), handle.objects.standing(), handle.objects.destructables()]);
+      const edge = await playable().catch(() => null);
+      const size = givenNumber("maxSize", args.maxSize, { min: 256, max: 4096, whole: true, fallback: 1536 });
+      const scale = Math.max(1, Math.min(8, Math.floor(size / Math.max(pathing.width, pathing.height))));
+      const starts = f.units.filter((u) => u.id === "sloc"), mines = f.units.filter((u) => u.id === "ngol");
+      const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
+      const camps = campsOf(f.units, { level: f.levels });
+      const cellAt = (i: number): [number, number] => [t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32];
+      const picture = layoutPicture({
+        width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY,
+        noWalk: (i) => (pathing.cells[i] & NO_WALK) !== 0, water: (i) => groundKind(t, ...cellAt(i)) !== "land",
+        trees: destructables, standing,
+        border: (i) => { const [x, y] = cellAt(i); return (!!edge && !inArea(x, y, edge)) || onBoundary(t, x, y); },
+        starts: starts.map(at), mines: mines.map(at),
+        shops: f.units.filter((u) => u.player === 27 && u.id !== "ngol" && u.id !== "sloc").map(at),
+        camps: camps.map((c) => ({
+          centre: c.centre, level: c.level, guard: mines.some((m) => Math.hypot(m.x - c.centre[0], m.y - c.centre[1]) < 750),
+          // As far as its creeps see: Camp mode's range, a creep's own, or the game's for its type.
+          sight: Math.max(...c.creeps.map((u) => (u.acquisition > 0 ? u.acquisition : u.acquisition === -2 ? CAMP_SIGHT : f.sights(u.id) ?? 600))),
+        })),
+        routes: f.routes.flatMap((r) => (r.points ? [r.points] : [])),
+      }, scale);
+      const png = await encodePng(picture.width, picture.height, picture.rgba);
+      let binary = "";
+      for (let i = 0; i < png.length; i += 0x8000) binary += String.fromCharCode(...png.subarray(i, i + 0x8000));
+      return [{ type: "image", data: btoa(binary), mimeType: "image/png" }, {
+        type: "text",
+        text: `The whole map as a plan, north up, ${picture.width} x ${picture.height} pixels: ${scale} pixel${scale === 1 ? "" : "s"} for 32 world units, x ${t.offsetX} at the left edge, y ${t.offsetY} at the bottom. ${LAYOUT_LEGEND}. `
+          + `${starts.length} start${starts.length === 1 ? "" : "s"}, ${mines.length} mine${mines.length === 1 ? "" : "s"}, ${camps.length} camp${camps.length === 1 ? "" : "s"}, ${f.routes.filter((r) => r.points).length} route${f.routes.filter((r) => r.points).length === 1 ? "" : "s"}.`,
+      }];
+    }),
     w3.mcp.registerTool("make_pocket", async (args, call) => {
       const { id, x, y } = args;
       if (typeof id !== "string" || id.length !== 4) throw new Error("id must be a tree type of four characters, like LTlt. list_objects gives the tileset's.");
@@ -1017,7 +1114,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const fray = givenNumber("edge", edge, { min: 0, max: 1, fallback: 0.4 });
       const seed = seedOf(args.seed), random = seededRandom(seed);
       const kinds = await cliffKinds(), own = await ownGroundLists();
-      return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => withCliffTypes(t, paintPath(t, points as [number, number][], across, groundSlot(t, tile, kinds, own.get(t.tileset)), fray, flatten === true, random), kinds)) };
+      return { seed, ...await editGround(`Paint a path of ${tile}`, withTwin(args.mirror, { points: points as [number, number][], width: across }, (t, line) => withCliffTypes(t, paintPath(t, line.points as [number, number][], across, groundSlot(t, tile, kinds, own.get(t.tileset)), fray, flatten === true, random), kinds))) };
     }),
     w3.mcp.registerTool("paint_terrain", async (args) => {
       const { tile } = args;
@@ -1030,7 +1127,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const shape = args.shape === "box" ? "box" : "ellipse";
       const seed = seedOf(args.seed), random = seededRandom(seed);
       const kinds = await cliffKinds(), own = await ownGroundLists();
-      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => withCliffTypes(t, paintCorners(t, area, shape, groundSlot(t, tile, kinds, own.get(t.tileset)), edge, random), kinds)) };
+      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, withTwin(args.mirror, area, (t, a) => withCliffTypes(t, paintCorners(t, a, shape, groundSlot(t, tile, kinds, own.get(t.tileset)), edge, random), kinds))) };
     }),
     w3.mcp.registerTool("sculpt_terrain", async (args) => {
       const { mode, amount } = args;
@@ -1042,9 +1139,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const shape = args.shape === "box" ? "box" : "ellipse";
       if (mode === "roughen") {
         const seed = seedOf(args.seed), random = seededRandom(seed);
-        return { seed, ...await editGround(`Roughen ground in ${area.name ?? "an area"}`, (t) => roughenCorners(t, area, shape, typeof amount === "number" ? amount : 24, random)) };
+        return { seed, ...await editGround(`Roughen ground in ${area.name ?? "an area"}`, withTwin(args.mirror, area, (t, a) => roughenCorners(t, a, shape, typeof amount === "number" ? amount : 24, random))) };
       }
-      return editGround(`${mode[0].toUpperCase()}${mode.slice(1)} ground in ${area.name ?? "an area"}`, (t) => sculptCorners(t, area, shape, mode, typeof amount === "number" ? amount : undefined));
+      return editGround(`${mode[0].toUpperCase()}${mode.slice(1)} ground in ${area.name ?? "an area"}`, withTwin(args.mirror, area, (t, a) => sculptCorners(t, a, shape, mode, typeof amount === "number" ? amount : undefined)));
     }),
     w3.mcp.registerTool("set_cliff_level", async (args) => {
       const { level, by, cliffTile } = args;
@@ -1055,7 +1152,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!area) throw new Error("set_cliff_level needs a region, or left, bottom, right and top.");
       const kinds = await cliffKinds(), own = await ownGroundLists();
       const target = { level: level as number | undefined, by: by as number | undefined };
-      return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile, own.get(t.tileset)), true);
+      return editGround(`Cliffs in ${area.name ?? "an area"}`, withTwin(args.mirror, area, (t, a) => setCliffs(t, a, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile, own.get(t.tileset))), true);
     }),
     w3.mcp.registerTool("set_cliff_type", async (args) => {
       const { tile } = args;
@@ -1063,7 +1160,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const area = await readArea(w3, args);
       if (!area) throw new Error("set_cliff_type needs a region, or left, bottom, right and top.");
       const kinds = await cliffKinds(), own = await ownGroundLists();
-      return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, (t) => setCliffType(t, area, args.shape === "box" ? "box" : "ellipse", tile, kinds, own.get(t.tileset)));
+      return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, withTwin(args.mirror, area, (t, a) => setCliffType(t, a, args.shape === "box" ? "box" : "ellipse", tile, kinds, own.get(t.tileset))));
     }),
     w3.mcp.registerTool("set_water", async (args) => {
       const { mode, points, width } = checkWaterArgs(args);
@@ -1072,7 +1169,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const place = area ?? { points: points!, width };
       const kinds = await cliffKinds();
       const where = area ? area.name ?? "an area" : "a line";
-      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds), true);
+      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, withTwin(args.mirror, place, (t, where_) => setWater(t, where_, args.shape === "box" ? "box" : "ellipse", mode, kinds)), true);
     }),
     w3.mcp.registerTool("rebuild_map", async () => {
       // Only the derived files are written, without the GPU: it works on a lost view too.
@@ -1082,11 +1179,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await rebuilding.run(() => editor.derive());
       return "Pathing and the minimap are rebuilt from the map as it is. Shadows only follow the edits that make them.";
     }),
-    w3.mcp.registerTool("set_ramp", async ({ at, width, remove }) => {
+    w3.mcp.registerTool("set_ramp", async ({ at, width, remove, mirror }) => {
       const [x, y] = await readPlace(at, "at");
       const wide = width === undefined ? 2 : width;
       if (!Number.isInteger(wide) || (wide as number) < 2 || (wide as number) > 16 || (wide as number) % 2) throw new Error("width must be an even number of tiles, from 2 to 16.");
-      return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
+      return editGround(remove === true ? "Remove a ramp" : "Build a ramp", withTwin(mirror, [x, y] as const, (t, [px, py]) => setRamp(t, px, py, wide as number, remove === true)));
     }),
     w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
       const problems = await w3.services.get<ProblemsService>(PROBLEMS_SERVICE).catch(() => null);
