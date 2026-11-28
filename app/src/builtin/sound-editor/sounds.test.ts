@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findLabel, labelIndex, newSound, sortSounds, stepVolume, UNSET, type Sound } from "./sounds";
+import { findLabel, labelIndex, labelNamed, labelValue, newSound, sortSounds, stepVolume, UNSET, type Sound } from "./sounds";
 import { generateSections, type ScriptInput } from "../../lib/script/jass";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 
@@ -131,4 +131,16 @@ test("the three sounds' InitSounds lines are the World Editor's (AchievementEarn
     '    call SetSoundParamsFromLabel( gg_snd_AAGAREK_Death1, "AAGarek_Death1" )',
     "    call SetSoundVolume( gg_snd_AAGAREK_Death1, 120 )",
   ]);
+});
+
+test("an unset setting of a labelled sound shows the label's value, else the game's default", () => {
+  const index = labelIndex([[{ SoundName: "GoodJob", FileNames: "Sound\\Interface\\GoodJob.wav", Volume: "100", Pitch: "0.9", Priority: "12", MinDistance: "", MaxDistance: "5000" }]]);
+  const label = labelNamed(index, "GoodJob");
+  assert.equal(label?.name, "GoodJob");
+  assert.equal(labelNamed(index, "Nobody"), undefined);
+  assert.equal(labelNamed(index, ""), undefined);
+  assert.deepEqual([labelValue(label, "volume"), labelValue(label, "pitch"), labelValue(label, "priority"), labelValue(label, "maxDistance")], [100, 0.9, 12, 5000]);
+  // The table has none: the game's default where it has one.
+  assert.deepEqual([labelValue(label, "minDistance"), labelValue(label, "distanceCutoff"), labelValue(label, "pitchVariance")], [0, 3000, undefined]);
+  assert.equal(labelValue(undefined, "pitch"), undefined);
 });

@@ -83,6 +83,24 @@ export function findLabel(index: Map<string, SoundLabel>, file: string): SoundLa
  *  lib/script/jass.ts labelledSoundParams); a label value equal to it is stored unset, as the World Editor does. */
 const LABEL_DEFAULTS = { pitch: 1, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000 };
 
+/** The settings a label has a value for. */
+export type LabelSetting = "volume" | "pitch" | "pitchVariance" | "priority" | "minDistance" | "maxDistance" | "distanceCutoff";
+
+/** What an unset setting of a labelled sound plays with: the label's value, else the game's own default where it has
+ *  one (LABEL_DEFAULTS); undefined when neither says. */
+export function labelValue(label: SoundLabel | undefined, key: LabelSetting): number | undefined {
+  const v = label?.[key];
+  if (v !== undefined && Number.isFinite(v)) return v;
+  return label ? (LABEL_DEFAULTS as Partial<Record<LabelSetting, number>>)[key] : undefined;
+}
+
+/** The label called `name` (a sound's assetLabel). */
+export function labelNamed(index: Map<string, SoundLabel>, name: string): SoundLabel | undefined {
+  if (!name) return undefined;
+  for (const l of index.values()) if (l.name === name) return l;
+  return undefined;
+}
+
 /** A label's number as a new sound stores it: unset when the table has none or it is the game's default. */
 const fromLabel = (v: number | undefined, def?: number) => (v === undefined || !Number.isFinite(v) || v === def ? UNSET : v);
 

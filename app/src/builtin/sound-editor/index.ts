@@ -32,7 +32,7 @@ import { importedPath } from "../../lib/imports";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { describeSound, emptySounds, removeSound, setSound, type SoundFacts, type ToolSoundsDoc } from "./tools";
 import {
-  findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
+  findLabel, isUnset, labelNamed, labelValue, type LabelSetting, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
   sortSounds, stepVolume, type Sound, type SoundLabel,
 } from "./sounds";
 
@@ -683,6 +683,7 @@ class SoundEditor {
     const ro = !this.editable;
     const set = (f: () => void) => { f(); this.changed(); this.renderList(); };
     const labelled = !!s.assetLabel;
+    const usedLabel = labelled && this.game ? labelNamed(this.game.labels, s.assetLabel!) : undefined;
     const text = (value: string, onSet: (v: string) => void, attrs: Record<string, unknown> = {}) => {
       const input = h("input", { type: "text", value, readOnly: ro, ...attrs, onchange: () => onSet(input.value) });
       return input;
@@ -692,8 +693,11 @@ class SoundEditor {
       const v = s[key] as number;
       const isEmpty = opts.unset !== undefined && (opts.unset === UNSET ? isUnset(v) : v === opts.unset);
       const shown = () => (isEmpty ? "" : String(Math.round(v * 1000) / 1000));
+      // An empty field of a labelled sound plays with the label's value: shown, greyed, where the label has one.
+      const fromLabel = usedLabel && opts.hint === "label" ? labelValue(usedLabel, key as LabelSetting) : undefined;
+      const hint = fromLabel !== undefined ? `label: ${Math.round(fromLabel * 1000) / 1000}` : opts.hint ?? "default";
       const input = h("input.snd-num", { type: "text", value: shown(), readOnly: ro,
-        placeholder: opts.unset !== undefined ? opts.hint ?? "default" : "", onchange: () => {
+        placeholder: opts.unset !== undefined ? hint : "", title: fromLabel !== undefined && isEmpty ? `Empty: the sound label ${usedLabel!.name} gives ${Math.round(fromLabel * 1000) / 1000}` : "", onchange: () => {
           const raw = input.value.trim();
           if (raw === "" && opts.unset !== undefined) { set(() => { (s[key] as number) = opts.unset!; }); return; }
           // A value the file can't hold, or past the editor's limits, is refused with why: the box shows the value kept.
@@ -743,14 +747,14 @@ class SoundEditor {
       );
     }
     parts.push(
-      row("Volume", num("volume", "Volume", { unset: -1, ...SOUND_LIMITS.volume, kind: "i32", hint: "default" }), h("span.muted", {}, " 0–127")),
+      row("Volume", num("volume", "Volume", { unset: -1, ...SOUND_LIMITS.volume, kind: "i32", hint: labelled ? "label" : "default" }), h("span.muted", {}, " 0–127")),
       row("Fade in / out rate", num("fadeInRate", "Fade in rate", { ...(music ? {} : SOUND_LIMITS.fadeInRate), kind: "u32" }), " / ", num("fadeOutRate", "Fade out rate", { ...(music ? {} : SOUND_LIMITS.fadeOutRate), kind: "u32" })),
     );
     if (!music) {
       const unsetHint = labelled ? "label" : "default";
       parts.push(
         row("Pitch", num("pitch", "Pitch", { unset: UNSET, ...SOUND_LIMITS.pitch, kind: "f32", hint: unsetHint }), " variance ", num("pitchVariance", "Pitch variance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
-        row("Priority", num("priority", "Priority", { unset: -1, kind: "i32" })),
+        row("Priority", num("priority", "Priority", { unset: -1, kind: "i32", hint: unsetHint })),
       );
       if (s.flags & THREE_D) {
         parts.push(

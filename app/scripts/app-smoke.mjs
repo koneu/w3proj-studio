@@ -970,7 +970,10 @@ async function sourceControlHistory(page, found) {
     writeFileSync(trigFile, `<<<<<<< ours\n${trigWas}\n=======\n>>>>>>> theirs\n`);
     git("commit", "-q", "-am", "markers");
     git("switch", "-q", here);
-    const marked = await mergeIn("marked");
+    await page.evaluate(`window.__asked = []`);
+    await mergeIn("marked");
+    // Said as a warning: those are answered (and kept) by the stand-in above.
+    const marked = (await page.evaluate(`window.__asked`)).join(" | ");
     if (!/Check Trigger Tree found \d+ problem/.test(marked)) fail(`merging a branch that broke a trigger file says ${lit(marked)}, not what Check Trigger Tree found`);
     await until("the Problems view on the finding", () => page.evaluate(`document.body.textContent.includes("unresolved merge conflict")`), 15000).catch(() => fail("the Problems view doesn't show the trigger tree's finding after the merge"));
     writeFileSync(trigFile, trigWas);
@@ -3879,7 +3882,8 @@ async function codePageOtherEditors(page, found) {
       await page.evaluate(`void w3.editors.open("w3:diff:map/war3map.wts")`);
       const diffLines = () => page.evaluate(`[...document.querySelectorAll(".diff-pane .cm-line")].map((l) => l.textContent)`);
       const has = async (...texts) => { const l = await diffLines(); return texts.every((t) => l.includes(t)); };
-      if (!(await soon(() => has("步兵", "测试", "测试 ok"), 20000))) fail(`with GBK the diff of war3map.wts shows ${lit((await diffLines()).slice(-14))}, not its texts readable`);
+      // The unchanged string 901 is folded away; the changed one shows on both sides.
+      if (!(await soon(() => has("测试", "测试 ok"), 20000))) fail(`with GBK the diff of war3map.wts shows ${lit((await diffLines()).slice(-14))}, not its texts readable`);
       const head = await page.evaluate(`document.querySelector(".diff-pane .diff-head")?.textContent ?? ""`);
       if (!/\b1 change\b/.test(head)) fail(`the diff of war3map.wts says ${lit(head)}, not one change`);
     }
@@ -3894,10 +3898,12 @@ async function codePageOtherEditors(page, found) {
     await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${lit(camp)}`), 20000);
     const campFile = join(camp, "map", "war3campaign.w3f.json"), campWtsFile = join(camp, "map", "war3campaign.wts");
     const campWts = block(1, NAME);
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "TRIGSTR_001", difficulty: "Normal", author: raw(UNIT), description: "",
+      flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
     await page.evaluate(`(async () => {
       const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
-      const info = { ...JSON.parse(await w3.workspace.readText(path)), name: "TRIGSTR_001", author: ${lit(raw(UNIT))} };
-      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: JSON.stringify(info) }));
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${lit(JSON.stringify(campInfo))} }));
       await w3.workspace.writeBytes("map/war3campaign.wts", new Uint8Array(${lit([...campWts])}));
       await w3.workspace.refresh();
     })()`);
@@ -17623,6 +17629,12 @@ async function aiDocTools(page, found) {
       if (!made.created || sounds().map((x) => `${x.name}:${x.volume}`).join() !== "gg_snd_SmokeTool:80") fail(`set_sound wrote ${lit(sounds().map((x) => [x.name, x.volume]))}`);
       await until("the sound in the Sound Editor", () => page.evaluate(`document.querySelector(".tab-content:not([hidden]), .editor-area")?.textContent.includes("SmokeTool") || document.body.textContent.includes("gg_snd_SmokeTool")`), 10000)
         .catch(() => fail("the open Sound Editor doesn't show the sound set_sound added"));
+      // A sound that plays a game label shows the label's values in its empty fields (the pitch here, left unset).
+      if (sounds()[0]?.assetLabel) {
+        await page.evaluate(`document.querySelector("tr.snd-row")?.click()`);
+        const hints = await until("the sound's fields", () => page.evaluate(`(() => { const i = [...document.querySelectorAll("input.snd-num")]; return i.length ? i.map((x) => x.placeholder) : null; })()`), 10000).catch(() => []);
+        if (!hints.some((t) => /^label: -?[0-9.]+$/.test(t))) fail(`a sound of the label ${sounds()[0].assetLabel} shows the hints ${lit(hints)} in its fields, none with the label's value`);
+      }
       const loud = await refused("set_sound", { name: "SmokeTool", volume: 300 });
       if (!loud || !/Volume must be a whole number from 0 to 127/.test(loud)) fail(`a volume of 300 wasn't refused: ${lit(loud)}`);
       await k.tool("remove_sound", { name: "gg_snd_SmokeTool" });
