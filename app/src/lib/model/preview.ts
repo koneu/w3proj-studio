@@ -1,5 +1,6 @@
 // A small live model view (object editor, the Problems view's model picker): a model's Stand
-// animation, turning slowly; drag to turn it. The map's imported file wins (in Reforged its
+// animation; drag to turn it (it doesn't turn by itself: a model that stands still is drawn only when
+// something changes, see modelMoves). The map's imported file wins (in Reforged its
 // `_HD.w3mod\` version first), else the game's: through the graphics mode, or (`prefer`) the
 // Classic or the Reforged (DE, then HD) files first, whatever the graphics mode is.
 
@@ -9,7 +10,8 @@ import { importedPath, ownNames, previewMode } from "../imports";
 import { decodeImage } from "../image/index.ts";
 import { parseModel } from "./mdl";
 import { neverStoredLast, textureCandidates } from "./texpath";
-import { ModelRenderer, standClock, type Clock } from "./renderer";
+import { ModelRenderer, poseStill, standClock, type Clock } from "./renderer";
+import type { Model } from "./mdx";
 import { parseAnimProps } from "./stand";
 
 /** Models a preview keeps on its WebGL context at most, and the bytes of them (vertices and texture files, about
@@ -36,6 +38,11 @@ export class ModelPreview {
   private raf = 0;
   private started = performance.now();
   private drag: number | null = null;
+  /** The picture is due: something it shows changed (see `tick`). */
+  private due = true;
+  /** The canvas's size at the last picture, and the model whose stand `moves` is about. */
+  private drawn = { width: 0, height: 0 };
+  private moves: { model: Model; look: string; moves: boolean } | null = null;
   /** Bumped by every show and setPrefer: a load that finishes under an older number is dropped. */
   private token = 0;
   /** The player colour of the team colour / glow textures (TEAM_COLORS index), and the type's replaceable textures. */
@@ -78,6 +85,7 @@ export class ModelPreview {
   setTeamColor(index: number) {
     this.team = index;
     this.renderer?.setTeamColor(index);
+    this.due = true;
     this.publish();
   }
 
@@ -117,6 +125,7 @@ export class ModelPreview {
   private onMove = (e: MouseEvent) => {
     if (this.drag === null || !this.renderer) return;
     this.renderer.yaw -= (e.clientX - this.drag) * 0.01;
+    this.due = true;
     this.drag = e.clientX;
   };
   private onUp = () => { this.drag = null; };
@@ -205,6 +214,7 @@ export class ModelPreview {
     kept.renderer.setTeamColor(this.team);
     this.renderer = kept.renderer;
     this.started = performance.now();
+    this.due = true;
     this.note.textContent = "";
   }
 
@@ -220,7 +230,8 @@ export class ModelPreview {
         if (this.kept.get(this.keyOf(kept)) !== kept || kept.round !== round) return;
         kept.bytes += buf.byteLength;
         r.setTexture(i, decodeImage(buf, p));
-      }).catch(() => { if (this.kept.get(this.keyOf(kept)) === kept && kept.round === round) r.textureUnavailable(i); });
+        this.due = true;
+      }).catch(() => { if (this.kept.get(this.keyOf(kept)) === kept && kept.round === round) { r.textureUnavailable(i); this.due = true; } });
     });
   }
   private keyOf(kept: Kept): string {
@@ -233,8 +244,15 @@ export class ModelPreview {
     const r = this.renderer;
     // Only while shown (a hidden tab or a closed pane has no size).
     if (!r || !this.canvas.isConnected || this.canvas.clientWidth === 0) return;
-    if (this.drag === null) r.yaw += 0.004;
     const stand = standClock(r.model, this.props);
+    // A model that stands still is drawn when something it shows changed (another model, a texture that arrived, the
+    // player colour, a drag, the pane's size), not 60 times a second.
+    const look = this.props.join(",");
+    if (this.moves?.model !== r.model || this.moves.look !== look) this.moves = { model: r.model, look, moves: modelMoves(r.model, stand) };
+    const { clientWidth: width, clientHeight: height } = this.canvas;
+    if (!this.moves.moves && !this.due && width === this.drawn.width && height === this.drawn.height) return;
+    this.due = false;
+    this.drawn = { width, height };
     const t = now - this.started, len = Math.max(1, stand.seqEnd - stand.seqStart);
     const clock: Clock = { ...stand, frame: stand.seqStart + (t % len), time: t };
     r.render(clock);
@@ -253,4 +271,10 @@ export class ModelPreview {
     this.kept.clear();
     this.canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
   }
+}
+
+/** Whether a model's picture changes with time while it plays the sequence of `clock`: a track that moves in it, or
+ *  particles or ribbons (they live by the clock whatever the tracks do). */
+export function modelMoves(model: Model, clock: Pick<Clock, "seqStart" | "seqEnd">): boolean {
+  return model.particleEmitters2.length > 0 || model.ribbons.length > 0 || !poseStill(model, clock.seqStart, clock.seqEnd);
 }
