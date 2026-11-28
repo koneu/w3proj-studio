@@ -88,7 +88,7 @@ import { CornerUndo, MAX_CLIFF_TYPES, cliffSlot } from "../../lib/terrain/cliffs
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices, GROUND_KINDS, groundKind, groupSkipped, pocketSpots, type GroundKind, withTwin } from "./aitools";
+import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices, GROUND_KINDS, groundKind, groupSkipped, pocketSpots, type GroundKind, withTwin, boundsOf, freeShapeOf, inFreeShape } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload, importScope } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -1410,8 +1410,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("scatter_objects", async (args) => {
       const ids = args.ids;
       if (!Array.isArray(ids) || !ids.length || !ids.every((i) => typeof i === "string" && i.length === 4)) throw new Error("ids must list object types of four characters.");
-      const area = await readArea(w3, args);
-      if (!area) throw new Error("scatter_objects needs a region, or left, bottom, right and top.");
+      // A polygon or a band along a line (points, with a width for the band), else a region or rectangle.
+      const free = freeShapeOf(args.points, args.width);
+      const area = free ? boundsOf(free) : await readArea(w3, args);
+      if (!area) throw new Error("scatter_objects needs a region, left, bottom, right and top, or points.");
       // A partial load (Open Subterrains…): an area reaching outside the open subterrains is refused, nothing placed.
       const open = await openAreaTest(w3);
       for (const [x, y] of [[area.left, area.bottom], [area.right - 1, area.bottom], [area.left, area.top - 1], [area.right - 1, area.top - 1]]) {
@@ -1451,7 +1453,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // doesn't fit at a spot is left out there.
         const smallest = Math.min(...sizes.map((fp) => (fp ? Math.max(fp.width, fp.height) * 32 : 128)));
         const spacing = Math.max(64, smallest) / Math.sqrt(density);
-        for (const asked of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
+        for (const asked of scatterSpots(area, spacing, free || args.shape === "box" ? "box" : "ellipse", random)) {
+          if (free && !inFreeShape(free, asked.x, asked.y)) continue;
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
           if (isKeptClear(asked.x, asked.y, keep)) { keptClear++; continue; }
           if (grounds && !grounds.includes(groundKind(handle.terrain, asked.x, asked.y))) { wrongGround++; continue; }
@@ -6866,6 +6869,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               g.shadowColor = "#000";
               g.shadowBlur = 3;
               points.forEach((p, i) => { if (p) g.fillText(`${corners[i][0]}, ${corners[i][1]}`, p[0] + 4, p[1] + (i < 2 ? -6 : 16)); });
+            }
+            // The names over the map (regions, cameras, subterrains): HTML over the canvas, so drawn onto the copy here.
+            const per = copy.width / canvas.clientWidth;
+            g.font = `${Math.max(10, Math.round(12 * per))}px sans-serif`;
+            g.textAlign = "center";
+            g.textBaseline = "middle";
+            g.shadowColor = "#000";
+            g.shadowBlur = 3;
+            for (const { el, x, y } of [...labels, ...closedLabels, ...subterrainLabels]) {
+              const at = renderer.project([x, y, renderer.groundHeight(x, y)]);
+              if (!at || !el.textContent) continue;
+              g.fillStyle = el.style.color || getComputedStyle(el).color || "#fff";
+              g.fillText(el.textContent, at[0] * per, at[1] * per);
             }
             return copy.toDataURL("image/png").split(",")[1];
           } finally {

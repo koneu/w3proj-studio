@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import * as aitools from "./aitools";
-import { groundKind, groupSkipped, pocketSpots, twinPlace, withTwin, replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { boundsOf, freeShapeOf, inFreeShape, groundKind, groupSkipped, pocketSpots, twinPlace, withTwin, replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, parseArea, playableArea } from "../../lib/terrain/area";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
 
@@ -727,4 +727,27 @@ test("a mirrored ground change is done at the place and at its twin, as one chan
   withTwin(undefined, hillAt, (g, a) => sculptCorners(g, a, "ellipse", "raise", 100))(alone);
   assert.ok(at(alone, 2, 2) > 50 && at(alone, 14, 14) === 0);
   assert.throws(() => withTwin("yes", hillAt, () => []), /mirror must be true or false/);
+});
+
+test("a free shape is a polygon's inside or a band along a line", () => {
+  // An L of six corners.
+  const ell = freeShapeOf([[0, 0], [400, 0], [400, 100], [100, 100], [100, 400], [0, 400]], undefined)!;
+  assert.deepEqual(boundsOf(ell), { left: 0, right: 400, bottom: 0, top: 400 });
+  assert.equal(inFreeShape(ell, 50, 300), true);
+  assert.equal(inFreeShape(ell, 300, 50), true);
+  assert.equal(inFreeShape(ell, 300, 300), false, "the L's notch");
+  assert.equal(inFreeShape(ell, -10, 50), false);
+  // A band 100 wide along a bent line.
+  const band = freeShapeOf([[0, 0], [1000, 0], [1000, 500]], 100)!;
+  assert.deepEqual(boundsOf(band), { left: -50, right: 1050, bottom: -50, top: 550 });
+  assert.equal(inFreeShape(band, 500, 40), true);
+  assert.equal(inFreeShape(band, 500, 60), false);
+  assert.equal(inFreeShape(band, 1040, 300), true);
+  assert.equal(inFreeShape(band, 900, 300), false);
+  // What isn't a shape is said.
+  assert.equal(freeShapeOf(undefined, 100), null);
+  assert.throws(() => freeShapeOf([[0, 0], [1, 1]], undefined), /at least three, or a width/);
+  assert.throws(() => freeShapeOf([[0, 0]], 50), /at least two points/);
+  assert.throws(() => freeShapeOf([[0, 0], [1, 1]], 0), /width must be above 0/);
+  assert.throws(() => freeShapeOf([[0, "a"]], 5), /points must be a list of \[x, y\]/);
 });

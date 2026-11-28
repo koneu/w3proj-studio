@@ -4009,6 +4009,20 @@ async function mapShapeTools(page, found) {
     if (!(bed.placed > 0) || bed.spotsOnOtherGround !== 0) fail(`flowers on land answered ${lit(bed)}`);
     const dry = await refused("scatter_objects", { ids: ["ZPfw"], ground: "water", left: -2000, bottom: 1500, right: -1000, top: 2500, limit: 12 });
     if (!dry || !/no free water there/.test(dry)) fail(`water plants on dry land: ${lit(dry)}`);
+    // A band along a line, and a polygon: flowers only inside them.
+    const flowersNow = () => k.doodads().filter((d) => d.id === "ZPfw");
+    const had = (await k.save(), flowersNow().length);
+    const band = json(await k.tool("scatter_objects", { ids: ["ZPfw"], points: [[-2000, -1500], [-1000, -1500], [-1000, -2500]], width: 200, density: 1, seed: 4 }));
+    await k.save();
+    const along = flowersNow().slice(had);
+    const off = along.filter((d) => { const [x, y] = d.position; return !((Math.abs(y + 1500) <= 132 && x >= -2132 && x <= -868) || (Math.abs(x + 1000) <= 132 && y <= -1368 && y >= -2632)); });
+    if (!(band.placed > 5) || along.length !== band.placed || off.length) fail(`scatter_objects along a line placed ${band.placed}, ${off.length} of them off the band (${lit(off.slice(0, 3).map((d) => d.position))})`);
+    const tri = json(await k.tool("scatter_objects", { ids: ["ZPfw"], points: [[1500, 1500], [2500, 1500], [1500, 2500]], density: 1, seed: 4 }));
+    await k.save();
+    const inTri = flowersNow().slice(had + along.length);
+    if (!(tri.placed > 5) || inTri.some((d) => d.position[0] + d.position[1] > 4000 + 64 || d.position[0] < 1500 - 32 || d.position[1] < 1500 - 32)) fail(`scatter_objects in a triangle placed ${tri.placed}, some outside it`);
+    const twoPoints = await refused("scatter_objects", { ids: ["ZPfw"], points: [[0, 0], [100, 100]] });
+    if (!twoPoints || !/at least three, or a width/.test(twoPoints)) fail(`a polygon of two points: ${lit(twoPoints)}`);
     const odd = await refused("scatter_objects", { ids: ["ZPfw"], ground: "swamp", left: -2000, bottom: 1500, right: -1000, top: 2500 });
     if (!odd || !/ground must be land, shore or water/.test(odd)) fail(`ground swamp: ${lit(odd)}`);
     // The tileset's creeps with their levels, weakest first: what camps are put together from.
