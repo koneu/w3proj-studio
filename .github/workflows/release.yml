@@ -2,6 +2,7 @@
 # (NSIS, MSI) and Linux (AppImage, deb), each with the `w3proj` CLI next to the app (the MCP bridge looks for it
 # there), plus the bare CLI binaries. Everything is uploaded as workflow artifacts; with "draft release" set,
 # they are also attached to a new draft release, which stays unpublished until someone publishes it.
+# The job `sbom` adds two SPDX 2.3 lists of what the packages are built from: the Rust crates and the npm packages.
 # Nothing is signed. The same build locally: README "Build & run".
 name: Release
 
@@ -102,9 +103,39 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  # Software bills of materials (SPDX 2.3, JSON), made from the two lock files: every crate of the workspace's
+  # dependency tree, on any platform, and the app's npm packages without the development-only ones.
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      # Version comes from rust-toolchain.toml.
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - name: cargo-sbom
+        run: cargo install cargo-sbom --locked --version 0.10.0
+      - name: SPDX files
+        run: |
+          mkdir -p out
+          cargo sbom --output-format spdx_json_2_3 > out/w3proj-studio-rust.spdx.json
+          (cd app && npm sbom --package-lock-only --omit dev --sbom-format spdx) > out/w3proj-studio-npm.spdx.json
+          for f in out/*.spdx.json; do
+            node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (j.spdxVersion !== "SPDX-2.3" || !(j.packages.length > 1)) { console.error(process.argv[1] + ": not an SPDX 2.3 list with packages"); process.exit(1); } console.log(process.argv[1], j.packages.length, "packages");' "$f"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: w3proj-studio-sbom
+          path: out/*
+          if-no-files-found: error
+
   draft-release:
     if: inputs.draft_release
-    needs: build
+    needs: [build, sbom]
     runs-on: ubuntu-latest
     permissions:
       contents: write

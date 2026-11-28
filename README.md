@@ -498,8 +498,9 @@ npx tauri build                            # installer in target/release/bundle
 
 **Release packages** come from the *Release* workflow (`.github/workflows/release.yml`, started by hand in
 GitHub Actions): NSIS and MSI installers for Windows, AppImage and deb for Linux, each with the `w3proj` CLI
-next to the app (the MCP bridge needs it there), and the bare CLI binaries, as workflow artifacts and, if asked
-for, on a draft release. The same build locally (Linux shown; on Windows the CLI is `w3proj.exe` and the bundles
+next to the app (the MCP bridge needs it there), the bare CLI binaries, and two SPDX 2.3 lists of what they
+are built from (`w3proj-studio-rust.spdx.json`, `w3proj-studio-npm.spdx.json`), as workflow artifacts and, if
+asked for, on a draft release. The same build locally (Linux shown; on Windows the CLI is `w3proj.exe` and the bundles
 `nsis,msi`):
 
 ```sh
