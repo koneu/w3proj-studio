@@ -4021,6 +4021,17 @@ async function mapShapeTools(page, found) {
     if (!(report.features?.openGround >= 0) || !(report.features?.walkable > 0) || typeof report.features?.treesPlayable !== "number") fail(`check_melee's features: ${lit(report.features)}`);
     if (typeof report.measures?.treesPlayable !== "number" || !Array.isArray(report.measures?.campRings)) fail(`check_melee's measures lack the playable trees or the camps' rings: ${lit(Object.keys(report.measures ?? {}))}`);
 
+    // melee_motif: what camp pockets, naturals and shop clearings measure, as spans; numbers only.
+    const motifs = json(await k.tool("melee_motif"));
+    for (const kind of ["camp pocket", "natural", "shop clearing"]) {
+      const m = motifs[kind], spans = ["ringClosed", "waysIn", "widestGap", "roomAtMiddle"];
+      if (!(m?.places >= 20) || spans.some((key) => !(m[key]?.low <= m[key]?.usual && m[key]?.usual <= m[key]?.high))) fail(`melee_motif's ${kind}: ${lit(m)}`);
+    }
+    const pocketOnly = json(await k.tool("melee_motif", { kind: "camp pocket" }));
+    if (!pocketOnly["camp pocket"] || pocketOnly.natural || typeof pocketOnly.measures?.widestGap !== "string") fail(`melee_motif of one kind answered ${lit(Object.keys(pocketOnly))}`);
+    const noKind = await refused("melee_motif", { kind: "castle" });
+    if (!noKind || !/kind must be one of: camp pocket, natural, shop clearing/.test(noKind)) fail(`melee_motif of a castle: ${lit(noKind)}`);
+
     // map_layout: a picture and what it shows.
     const layout = JSON.parse(await page.evaluate(`w3.mcp.handle(${lit(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "map_layout", arguments: { maxSize: 512 } } }))})`, { timeout: 300000 }));
     const [image, words] = layout.result?.content ?? [];

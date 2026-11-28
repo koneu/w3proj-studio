@@ -74,6 +74,8 @@ import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } 
 import { CAMP_SIGHT, campsOf } from "./meleecheck";
 import { forestPlan } from "./forestfill";
 import { LAYOUT_LEGEND, layoutPicture } from "./layoutpicture";
+import { MOTIF_KINDS, MOTIF_NOTES, type MotifKind, type Motifs } from "./meleemotifs";
+import motifs from "./meleemotifs.json";
 import { encodePng } from "../../lib/image/png";
 import { meleeFacts as meleeFactsOf, meleeReport, pathReport, walkGrid as gridOf, withNeighbour as neighbourOf, type WalkSource } from "./meleefacts";
 import { hasTabKey, lateCancel, SELECT_TOGGLE_COMMAND, TAB_COMMANDS, tabTarget } from "./tabkeys";
@@ -1034,6 +1036,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (args.dryRun === true) { await fill(null); return { wouldPlant: placed, byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, ...report(), seed }; }
       await editPlaced(`Fill the land with forest (${(ids as string[]).join(", ")})`, "doodads", fill);
       return { planted: placed, byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, ...report(), seed, next: "check_melee measures the open ground and each camp's shelter now; map_layout shows the result as a plan." };
+    }),
+    w3.mcp.registerTool("melee_motif", async ({ kind }) => {
+      if (kind !== undefined && !MOTIF_KINDS.includes(kind as MotifKind)) throw new Error(`kind must be one of: ${MOTIF_KINDS.join(", ")}.`);
+      const all = motifs as Motifs;
+      return {
+        ...(kind === undefined ? all : { [kind as MotifKind]: all[kind as MotifKind] }),
+        measures: MOTIF_NOTES,
+        note: "Each number is given as low, usual and high: the median, and the span the middle eight in ten of the game's two-player melee maps' places lie in. Build a place inside its spans (make_pocket takes a clearing's radius and a mouth's width; set_cliff_level and fill_forest make the walls), then check_melee measures the result.",
+      };
     }),
     w3.mcp.registerTool("map_layout", async (args) => {
       await refusePartial("map_layout");
