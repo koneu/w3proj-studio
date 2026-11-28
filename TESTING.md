@@ -25,6 +25,13 @@ Gate options: `--serial`, `--jobs=<n>`, `--update-floor`, `--only=<step ids>` (t
 their memory estimates fit a budget (80% of free memory or of a cgroup limit such as `systemd-run -p MemoryMax=`,
 printed at the start); `W3_GATE_MEM_MB=<MB>` sets it ([details](docs/testing/gate-and-smoke.md)).
 
+**While the game runs (Linux).** JassHelper runs through Proton in the user's game prefix, and dies there when Warcraft III or Battle.net runs in it
+(X BadWindow, "Fontconfig out of memory"). A gate with the app smoke test looks at the process list when its steps start
+(`gamePrefixBusy` in `tests/gate-lib.mjs`: a command line naming `Warcraft III.exe` or `Battle.net.exe`; the World Editor's own prefix under
+`target/we` doesn't count). If one runs, the parts start with `--skip=vjassCheck,scriptGenerated` (the two checks that run JassHelper), the gate prints
+`SKIPPED (game running)` and the table has a `SKIP` row for each. Following the rule above, a skipped check is **not a pass**: the gate exits 1 and
+says to close the game and run again; the rest of the smoke test ran. Commit-tier gates don't run these checks and are not affected.
+
 **Where the maps and the game go.** The corpus is `smoketest_maps/` at the root of the *main* checkout (git-ignored,
 third-party maps aren't in the repository; worktrees find it through the main checkout), or any folder named by
 `W3PROJ_CORPUS=<folder>`: put `.w3x`, `.w3m` and `.w3n` files there, sub-folders are fine. The game's install folder is

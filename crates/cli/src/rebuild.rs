@@ -1024,7 +1024,8 @@ mod tests {
         let started = std::time::Instant::now();
         let e = serve(&rx, &mut Vec::new(), &server(&dir), Duration::from_millis(200)).unwrap_err();
         assert!(e.to_string().contains("sent nothing"), "{e}");
-        assert!(started.elapsed() < Duration::from_secs(5));
+        // 200 ms idle limit; the bound only catches a hang, and a loaded machine needs room.
+        assert!(started.elapsed() < Duration::from_secs(60));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

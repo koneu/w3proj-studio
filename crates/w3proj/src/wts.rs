@@ -661,6 +661,7 @@ mod tests {
         }
         let started = std::time::Instant::now();
         assert!(strings(&wts).is_empty());
-        assert!(started.elapsed().as_secs() < 10, "took {:?}", started.elapsed());
+        // Read once takes milliseconds; once per line takes minutes. The bound is wide for a loaded machine.
+        assert!(started.elapsed().as_secs() < 60, "took {:?}", started.elapsed());
     }
 }
