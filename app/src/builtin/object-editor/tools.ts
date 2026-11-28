@@ -176,13 +176,13 @@ export function registerObjectTools(w3: W3Api, ctx: ExtensionContext, deps: Obje
   const inCampaign = (kind: string, id: string, what: string) =>
     `${id} is ${what} of the campaign (war3campaign.${kind}), which every chapter map has. It's changed in the campaign project: open that in W3Proj Studio.`;
   ctx.subscriptions.push(
-    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category, trees }) => {
+    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category, trees, creeps }) => {
       const { data, file, resolve, campaign } = await toolKind(kind);
       const text = typeof filter === "string" ? filter.toLowerCase() : "";
       const hit = (o: { id: string; name: string; base?: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text) || data.searchText(o.base ?? o.id).includes(text);
       const wantTileset = tileset === "map" ? (await terrainFacts(w3))?.tileset : typeof tileset === "string" ? tileset : undefined;
       const stored = scope === "game" ? modelPacks(await w3.game.list()) : null;
-      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined, trees === true);
+      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined, trees === true, creeps === true);
       const theirs = () => (campaign ? mapObjectList(campaignListed(file, campaign), data, campaign.resolve).map((o) => ({ ...o, campaign: true })) : []);
       return capped<{ id: string; name: string }>((scope === "game" ? game() : [...mapObjectList(file, data, resolve), ...theirs()]).filter(hit), limit, 200);
     }),

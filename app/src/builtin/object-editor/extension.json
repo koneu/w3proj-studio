@@ -10,15 +10,16 @@
       {"name":"delete_object","description":"Removes a custom object, or what the map changes in a game object. Anything placed or using it stays and must be fixed too: the answer names what still does (the map script, custom script and GUI triggers, other objects, placed ones). Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["kind","id"],"properties":{"kind":{"type":"string","enum":["units","items","abilities","buffs","destructables","doodads","upgrades"]},"id":{"type":"string"}}}},
       {
         "name": "list_objects",
-        "description": "Object data of the open map: the objects it adds or changes (a chapter map: also its campaign's, marked campaign; a campaign project: the campaign's own), or with scope \"game\" the game's own. Gives ids for get_object. Game objects say when they have no model, or one only in some graphics modes (they'd be invisible otherwise), their size range, and whether they take up ground.",
+        "description": "Object data of the open map: the objects it adds or changes (a chapter map: also its campaign's, marked campaign; a campaign project: the campaign's own), or with scope \"game\" the game's own. Gives ids for get_object. Game objects say when they have no model, or one only in some graphics modes (they'd be invisible otherwise), their size range, and whether they take up ground; creeps their level (creepLevel).",
         "readOnly": true,
         "inputSchema": { "type": "object", "required": ["kind"], "properties": {
           "kind": { "type": "string", "enum": ["units", "items", "abilities", "buffs", "destructables", "doodads", "upgrades"] },
           "scope": { "type": "string", "enum": ["map", "game"], "description": "map (default): what the map adds or changes. game: everything in the game." },
           "filter": { "type": "string", "description": "Only ids or names containing this text (not case sensitive). Game names are in the installed language." },
-          "tileset": { "type": "string", "description": "scope game, doodads and destructables: only those made for this tileset. \"map\" means the open map's, or give its letter." },
+          "tileset": { "type": "string", "description": "scope game, doodads, destructables and units: only those made for this tileset. \"map\" means the open map's, or give its letter." },
           "category": { "type": "string", "description": "scope game: only this category, as the entries show it (not case sensitive)." },
           "trees": { "type": "boolean", "description": "scope game, destructables: only real trees, as the game targets them." },
+          "creeps": { "type": "boolean", "description": "scope game, units: only creeps (neutral hostile units, no buildings), weakest first, each with its creepLevel. With tileset \"map\" those of the map's tileset: what to build camps from, by level." },
           "limit": { "type": "integer", "description": "At most this many (default 200)." }
         } }
       },

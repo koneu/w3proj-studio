@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import * as aitools from "./aitools";
-import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { groundKind, groupSkipped, pocketSpots, replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, parseArea, playableArea } from "../../lib/terrain/area";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
 
@@ -658,4 +658,54 @@ test("set_cliff_level dries water the raised ground covers, as the cliff brush d
   for (const c of t.corners) c.hasWater = true;
   aitools.setCliffs(t, area, "box", { level: 1 }, [{ cliffID: "CLdi", groundTile: "Ldrt" }]);
   assert.equal(t.corners[2 * 9 + 2].hasWater, true);
+});
+
+test("skipped places are grouped by reason, with a few places each", () => {
+  const skipped = [
+    ...Array.from({ length: 40 }, (_, i) => ({ index: i, id: "LTlt", x: i * 128, y: 0, reason: "there's something in the way" })),
+    { index: 40, id: "LTlt", x: 10, y: 20, reason: "its twin at 120, -340 has no room: there's water there" },
+    { index: 41, id: "LTlt", x: 30, y: 40, reason: "its twin at -55.5, 900 has no room: there's water there" },
+    { index: 42, id: "LTlt", x: 1, y: 2, reason: 'it\'s on the reserved area "Base 1" (ignoreReserved: true places it there anyway)' },
+  ];
+  assert.deepEqual(groupSkipped(skipped), [
+    { reason: "there's something in the way", count: 40, at: [[0, 0], [128, 0], [256, 0]] },
+    { reason: "its twin has no room: there's water there", count: 2, at: [[10, 20], [30, 40]] },
+    { reason: 'it\'s on the reserved area "Base 1" (ignoreReserved: true places it there anyway)', count: 1, at: [[1, 2]] },
+  ]);
+  assert.deepEqual(groupSkipped([]), []);
+});
+
+test("a pocket is rings of spots round a clearing, open toward its mouth", () => {
+  const p = pocketSpots(1000, -500, 448, 320, 90, 2);
+  // Nothing in the clearing, nothing past the second ring.
+  const far = p.map((s) => Math.hypot(s.x - 1000, s.y + 500));
+  assert.ok(Math.min(...far) >= 448 && Math.max(...far) <= 448 + 2 * 128 + 1, `${Math.min(...far)} to ${Math.max(...far)}`);
+  // The mouth, to the north: no spot within half the opening of the line north from the middle.
+  assert.ok(!p.some((s) => s.y > -500 && Math.abs(s.x - 1000) < 160), "the mouth is open");
+  // The other three sides are closed: neighbours on the inner ring stand no further apart than a tree and a half.
+  const inner = p.filter((s) => Math.hypot(s.x - 1000, s.y + 500) < 448 + 128).sort((a, b) => Math.atan2(a.y + 500, a.x - 1000) - Math.atan2(b.y + 500, b.x - 1000));
+  const gaps = inner.map((s, i) => Math.hypot(s.x - inner[(i + 1) % inner.length].x, s.y - inner[(i + 1) % inner.length].y));
+  assert.equal(gaps.filter((g) => g > 192).length, 1, "one gap: the mouth");
+  assert.ok(Math.max(...gaps) >= 320, `the mouth is ${Math.max(...gaps)} wide`);
+  // Turned: the mouth to the west.
+  assert.ok(!pocketSpots(0, 0, 448, 320, 180, 1).some((s) => s.x < 0 && Math.abs(s.y) < 160));
+  // An opening wider than the ring leaves the far half only.
+  assert.ok(pocketSpots(0, 0, 300, 5000, 0, 1).every((s) => s.x < 0));
+});
+
+test("a place is land, shore or water by the water showing at its tile's corners", () => {
+  const t = field();
+  const wet = (x: number, y: number) => { const c = t.corners[y * t.width + x]; c.hasWater = true; c.water = 50; };
+  // A lake over corners 4..8 by 4..8.
+  for (let y = 4; y <= 8; y++) for (let x = 4; x <= 8; x++) wet(x, y);
+  assert.equal(groundKind(t, 6 * 128 + 10, 6 * 128 + 10), "water");
+  assert.equal(groundKind(t, 3 * 128 + 10, 6 * 128 + 10), "shore");
+  assert.equal(groundKind(t, 1 * 128 + 10, 1 * 128 + 10), "land");
+  // Water under the ground doesn't show: land.
+  const dry = t.corners[12 * t.width + 12];
+  dry.hasWater = true;
+  dry.water = -20;
+  assert.equal(groundKind(t, 12 * 128 - 10, 12 * 128 - 10), "land");
+  // Off the map: the edge tile's.
+  assert.equal(groundKind(t, -500, -500), "land");
 });

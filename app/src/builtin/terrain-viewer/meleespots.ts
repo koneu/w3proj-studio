@@ -1,6 +1,8 @@
 // Finds places for what a melee map needs, so an AI chooses among places that work instead of
 // inventing coordinates. Limits are the ladder maps', as in meleecheck.ts.
 
+import { CAMP_SHELTER } from "./meleecheck";
+import { ringAround } from "./meleeshape";
 import { clearance, widthOf, type Grid } from "./pathcheck";
 
 type Point = readonly [number, number];
@@ -41,22 +43,27 @@ const LIMITS = {
 } as const;
 
 /** Ranked places, best first, each far enough from the others to take one each. */
-export function findSpots(kind: SpotKind, f: SpotFacts, count: number, mirror: boolean) {
+export interface Spot { at: [number, number]; score: number; fromStart: number; fromRoute?: number; sheltered: number; wayIn: number; twin?: [number, number] }
+export interface Spots {
+  kind: SpotKind;
+  spots: Spot[];
+  /** Camps: open places, when pockets are too few; each marked, so none is taken for a pocket. */
+  openPlaces?: (Spot & { exposed: true })[];
+  /** Camps: what to do when there are fewer pockets than asked for. */
+  note?: string;
+  considered: number;
+  /** Camps: how many of the places considered are pockets. */
+  pockets?: number;
+}
+
+export function findSpots(kind: SpotKind, f: SpotFacts, count: number, mirror: boolean): Spots {
   const g = f.grid, c = clearance(g), l = LIMITS[kind], w = g.width, h = g.height;
   const cellOf = (x: number, y: number) => {
     const cx = Math.floor((x - g.offsetX) / 32), cy = Math.floor((y - g.offsetY) / 32);
     return cx < 0 || cy < 0 || cx >= w || cy >= h ? -1 : cy * w + cx;
   };
-  const wall = (x: number, y: number) => { const i = cellOf(x, y); return i < 0 || g.blocked[i] === 1; };
   /** How much of the ring around a place is walled off: 1 is a dead end. */
-  const shelter = (x: number, y: number) => {
-    let closed = 0;
-    for (let a = 0; a < 24; a++) {
-      const angle = (a * Math.PI) / 12;
-      for (const r of [320, 480, 640]) if (wall(x + r * Math.cos(angle), y + r * Math.sin(angle))) { closed++; break; }
-    }
-    return closed / 24;
-  };
+  const shelter = (x: number, y: number) => ringAround(g, x, y).closed;
   const check = (x: number, y: number) => {
     const i = cellOf(x, y);
     if (i < 0 || c[i] < l.room) return null;
@@ -92,11 +99,24 @@ export function findSpots(kind: SpotKind, f: SpotFacts, count: number, mirror: b
     }
   }
   found.sort((a, b) => b.score - a.score);
-  const gap = kind === "camp" ? l.camp : 1500, picked: typeof found = [];
-  for (const s of found) {
-    if (picked.length >= count) break;
-    const taken = picked.flatMap((p) => [p.at, ...(p.twin ? [p.twin] : [])]);
-    if (near(s.at, taken) >= gap && (!s.twin || near(s.twin, taken) >= gap)) picked.push(s);
-  }
-  return { kind, spots: picked, considered: found.length };
+  const gap = kind === "camp" ? l.camp : 1500;
+  const pick = (from: typeof found, most: number) => {
+    const picked: typeof found = [];
+    for (const s of from) {
+      if (picked.length >= most) break;
+      const taken = picked.flatMap((p) => [p.at, ...(p.twin ? [p.twin] : [])]);
+      if (near(s.at, taken) >= gap && (!s.twin || near(s.twin, taken) >= gap)) picked.push(s);
+    }
+    return picked;
+  };
+  if (kind !== "camp") return { kind, spots: pick(found, count), considered: found.length };
+  // A camp wants a pocket: a place less walled in than the ladder maps' camps isn't offered as one. What there is of
+  // open places is shown apart and marked, so it isn't taken for a find.
+  const pockets = found.filter((s) => s.sheltered >= CAMP_SHELTER);
+  const spots = pick(pockets, count);
+  const open = spots.length < count ? pick(found.filter((s) => s.sheltered < CAMP_SHELTER), Math.min(3, count - spots.length)).map((s) => ({ ...s, exposed: true as const })) : [];
+  const note = spots.length >= count ? undefined
+    : spots.length === 0 ? `No real pockets yet: nowhere that fits is walled in as ladder camps are (${Math.round(CAMP_SHELTER * 100)}% of the ring round them or more). Build some first (make_pocket puts a horseshoe of trees round a place; set_cliff_level and fill_rows make walls), then ask again.${open.length ? " The open places listed are the least bad of what there is, not good ones." : ""}`
+    : `Only ${spots.length} pocket${spots.length === 1 ? "" : "s"} found for ${count} asked: build more (make_pocket, set_cliff_level, fill_rows) rather than take open ground.`;
+  return { kind, spots, ...(open.length ? { openPlaces: open } : {}), ...(note ? { note } : {}), considered: found.length, pockets: pockets.length };
 }

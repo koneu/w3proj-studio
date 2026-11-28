@@ -42,7 +42,7 @@ export function labelWithSuffix(name: string, suffix: string): string {
 }
 
 /** Where a kind says which tilesets an object is made for. */
-const TILESET_FIELDS = ["btil", "dtil"];
+const TILESET_FIELDS = ["btil", "dtil", "util"];
 
 /** The tilesets a game doodad or destructable is made for, to tell apart those of one name (an "Archway" each for
  *  Ashenvale, Barrens, …): `all` their names, `short` the first two and how many more. Null for one made for every
@@ -105,8 +105,14 @@ function modelNote(path: string | undefined, variations: number, stored: Readonl
 
 /** The game's objects of a kind, with what sets them apart. `tileset`: its letter; objects for
  *  all tilesets have "*". `stored`: from modelPacks, to check models. */
-export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue"> & Partial<Pick<KindData, "fields" | "westring">>, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>, treesOnly = false) {
+export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue"> & Partial<Pick<KindData, "fields" | "westring">>, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>, treesOnly = false, creepsOnly = false) {
   const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
+  // A creep: a unit of the race "creeps" that isn't a building; its level is what camps are judged by (check_melee).
+  const creepLevel = (id: string): number | null => {
+    if (String(value(id, "urac") ?? "").toLowerCase() !== "creeps" || String(value(id, "ubdg") ?? "0") === "1") return null;
+    const level = Number(value(id, "ulev"));
+    return Number.isFinite(level) && level > 0 ? level : null;
+  };
   const fits = (id: string) => {
     if (!tileset || !field) return true;
     const list = (kind.defaultValue(id, field, 0) ?? "*").toUpperCase();
@@ -119,8 +125,12 @@ export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facet
   const room = PATH_FIELDS.find((f) => kind.fieldById.has(f));
   const variation = VARIATION_FIELDS.find((f) => kind.fieldById.has(f));
   const isTree = (id: string) => /\btree\b/.test(kind.facets(id).target ?? "");
-  return kind.baseIds.filter((id) => fits(id) && (!treesOnly || isTree(id))).map((id) => {
+  const listed = kind.baseIds.filter((id) => fits(id) && (!treesOnly || isTree(id)) && (!creepsOnly || creepLevel(id) !== null));
+  // Creeps asked for: weakest first, so a camp is put together by level.
+  if (creepsOnly) listed.sort((a, b) => creepLevel(a)! - creepLevel(b)! || (a < b ? -1 : a > b ? 1 : 0));
+  return listed.map((id) => {
     const facets = kind.facets(id);
+    const level = creepLevel(id);
     const low = scale && Number(value(id, scale[0])), high = scale && Number(value(id, scale[1]));
     const path = room && value(id, room);
     const suffix = kind.fields ? editorSuffix({ base: id }, { fields: kind.fields, defaultValue: kind.defaultValue }, (v) => kind.westring?.(v) ?? v) : "";
@@ -131,6 +141,7 @@ export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facet
       // Not known isn't the same as none.
       ...(path ? { takesRoom: path !== "_" && path.toLowerCase() !== "none" } : {}),
       ...(isTree(id) ? { tree: true } : {}),
+      ...(level !== null ? { creepLevel: level } : {}),
     };
   }).filter((o) => !wanted || o.category?.toLowerCase().includes(wanted));
 }
