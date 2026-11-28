@@ -16,6 +16,7 @@ pub mod flatview;
 pub mod mergehook;
 pub mod objectview;
 pub mod script;
+pub mod serial;
 pub mod triggers;
 
 pub type CmdResult<T> = Result<T, String>;
