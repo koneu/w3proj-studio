@@ -319,6 +319,15 @@ test("--limit takes a positive whole number", () => {
   for (const v of ["abc", "0", "-2", "1.5"]) assert.throws(() => run.parseArgs(["--limit", v]), /--limit is a positive whole number/, v);
 });
 
+test("--only picks specs by name and refuses a name no spec has", () => {
+  const specs = ["alpha", "Beta", "gamma"].map((name) => ({ name }));
+  assert.deepEqual(run.parseArgs(["--only", "alpha, gamma", "a.json"]).only, ["alpha", "gamma"]);
+  assert.throws(() => run.parseArgs(["--only", "a,,b", "a.json"]), /--only wants spec names/);
+  assert.deepEqual(core.selectSpecs(specs, ["gamma", "beta"]).map((s) => s.name), ["Beta", "gamma"]);
+  // Control: an unknown name is refused and the message lists the names there are.
+  assert.throws(() => core.selectSpecs(specs, ["alpha", "delta"]), (e) => /no spec named delta/.test(e.message) && /alpha, Beta, gamma/.test(e.message));
+});
+
 // ---------------------------------------------------------------- 12: review round of 2026-11-17
 
 test("expect differs on a JSON kind needs expectPaths, unless the spec and file are on the allowlist", () => {
