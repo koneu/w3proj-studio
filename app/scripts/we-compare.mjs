@@ -17,6 +17,7 @@
 //                   spec's we.frameCap; without it a spec's we.frameCap, else we-drive's default (10)
 //   --shard i/n     run part i of n of the spec files named (whole files, dealt out by their spec counts:
 //                   we-compare-core shardFiles); n runs with the same files and --slot auto cover them all, at once
+//   --only A[,B…]   run just the specs of that name (of the files given; a name none has is an error that lists the names)
 //   --game DIR      the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
 //   --json FILE     where the JSON report goes (default: <work>/report.json)
 //   --limit N       differences listed per file (default: the spec's "limit", else 10)
@@ -123,7 +124,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { lit } from "./jslit.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
-import { applyRoundtrip, chooseFrameCap, chooseRenderer, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, gpuMissing, isFullRun, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
+import { applyRoundtrip, selectSpecs, chooseFrameCap, chooseRenderer, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, gpuMissing, isFullRun, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
 import { parseFrameCap } from "./we-drive.mjs";
 import { currentSlot, parseSlot, takeAllSlots, takeFreeSlot, takeLock } from "./we-setup.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
@@ -144,6 +145,9 @@ export function parseArgs(argv) {
       const v = value();
       o.slots = v.split(",").map((x) => parseSlot(x.trim(), "--slots"));
       if (new Set(o.slots).size !== o.slots.length) throw new Error(`--slots names a slot twice: ${v}`);
+    } else if (a === "--only") {
+      o.only = value().split(",").map((x) => x.trim());
+      if (o.only.some((x) => !x)) throw new Error("--only wants spec names separated by commas");
     } else if (a === "--shard") o.shard = parseShard(value());
     else if (a === "--game") o.game = resolve(value());
     else if (a === "--json") o.json = resolve(value());
@@ -616,7 +620,8 @@ async function main() {
   // --shard i/n: this run's part of the files (whole files, the same split in every run given the same files).
   const files = o.shard ? shardFiles(parsed.map((p) => ({ file: p.file, specs: p.list.length })), o.shard.index, o.shard.count) : o.files;
   if (o.shard) say(`shard ${o.shard.index}/${o.shard.count}: ${files.length} of ${o.files.length} spec files`);
-  const specs = parsed.filter((p) => files.includes(p.file)).flatMap((p) => p.list);
+  if (o.only) selectSpecs(parsed.flatMap((p) => p.list), o.only); // a name no file has fails before anything runs
+  const specs = parsed.filter((p) => files.includes(p.file)).flatMap((p) => p.list).filter((s) => !o.only || o.only.some((n) => n.toLowerCase() === s.name.toLowerCase()));
   if (!specs.length) { say("no spec to run in this shard"); return 0; }
   // A full run (the whole spec folder, or a shard) takes the GPU renderer under --renderer auto.
   o.fullRun = isFullRun(o.files, readdirSync(join(repo, "tests", "we-compare")).filter((n) => n.endsWith(".json")).map((n) => join(repo, "tests", "we-compare", n)), o.shard);
