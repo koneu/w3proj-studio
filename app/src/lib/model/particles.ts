@@ -220,6 +220,16 @@ export class ParticleRenderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
   }
 
+  /** Deletes the program, buffer, vertex array and white texture made here. */
+  dispose() {
+    const gl = this.gl;
+    if (gl.isContextLost()) return;
+    gl.deleteProgram(this.prog);
+    gl.deleteVertexArray(this.vao);
+    gl.deleteBuffer(this.vbo);
+    gl.deleteTexture(this.white);
+  }
+
   /** Draws after the scene's opaque geometry (depth test on, depth writes off).
    *  `eye`: the camera position (quads face it); `textures`: the GPU textures of the emitters'
    *  model (by texture id; null: not loaded yet, drawn white). */

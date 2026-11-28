@@ -4039,6 +4039,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let pasteAt: Vec3 | null = null;
         type Ghost = NonNullable<typeof renderer.ghost>;
         let pasteModels: ({ gpu: Ghost["gpu"]; modelScale: number; scaleRange?: readonly [number, number] } | null)[] = [];
+        // What the loader must keep when it deletes the models an import change made it forget (loader.reset): all that is
+        // drawn, and the models held for pasting.
+        loader.live = () => {
+          const used = renderer.inUse();
+          return { gpus: [...used.gpus, ...pasteModels.flatMap((m) => (m ? [m.gpu] : []))], effects: used.effects };
+        };
         /** More would slow the view down, and the shape shows long before that. */
         const MAX_GHOSTS = 300;
         /** What's copied: start locations belong to their players. */

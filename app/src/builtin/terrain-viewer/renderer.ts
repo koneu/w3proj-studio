@@ -864,6 +864,14 @@ export class TerrainRenderer {
     }
   }
 
+  /** The models and effects this draws or holds now (batches, sky, ghosts): what a loader must not delete. */
+  inUse(): { gpus: ModelGpu[]; effects: (EffectSource | undefined)[] } {
+    return {
+      gpus: [...this.batches.map((b) => b.gpu), ...(this.sky ? [this.sky.gpu] : []), ...[this.ghost, ...this.ghosts].flatMap((g) => (g ? [g.gpu] : []))],
+      effects: this.batches.map((b) => b.effects),
+    };
+  }
+
   /** Per batch, a GPU buffer of the world matrices of its instances in view, filled at each frame. */
   private instanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
   /** The same for the instances that cast into the sun's shadow map (in view of the sun, not of the camera). */
