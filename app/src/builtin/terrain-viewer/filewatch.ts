@@ -12,6 +12,13 @@ export function changesImports(path: string): boolean {
   return /^map\/war3map\.imp(\.json)?$/.test(l) || (l.startsWith("map/") && /\.(mdx|mdl|blp|dds|tga)$/.test(l));
 }
 
+/** Which project and which imports (by name) are there: what the caches made from the game's files are valid for, as a
+ *  map's import under a game path is read in place of the game's file. Differs when another project is open or an import
+ *  was added, removed or renamed (one changed in place isn't kept by the caches, see lib/modecache.ts trackImports). */
+export function importScope(root: string | undefined, files: readonly { path: string }[]): string {
+  return `${root ?? ""}\n${files.map((f) => f.path.toLowerCase()).filter(changesImports).sort().join("\n")}`;
+}
+
 /** Object data the map saves: what gives a placed type its model, scale and so on. */
 export function changesObjectData(path: string): boolean {
   return /^map\/war3map(skin)?\.w3[udbt](\.json)?$/.test(path.replace(/\\/g, "/").toLowerCase());

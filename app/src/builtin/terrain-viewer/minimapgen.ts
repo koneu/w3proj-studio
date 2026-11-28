@@ -15,7 +15,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { maxPlayers } from "../../lib/terrain/startlocations";
-import { ModeCache } from "../../lib/modecache";
+import { ModeCache, trackImports } from "../../lib/modecache";
 import { drawnGroundTiles, type Terrain } from "../../lib/terrain/w3e";
 import { ownGroundTiles } from "../../lib/terrain/tilesets";
 import { applyTilesetWater } from "./wateroffset";
@@ -23,6 +23,9 @@ import { applyTilesetWater } from "./wateroffset";
 /** Colour of a ground tile's or cliff's texture (smallestMipColor), by graphics mode and tile or cliff id (textures
  *  are shared; the modes have their own). */
 const tileColors = new ModeCache<Rgb | null>();
+
+/** Forgets the tile colours read (the map's imports changed, or another project is open); w3.game.reload does it too. */
+export function clearTileColors(): void { tileColors.clear(); }
 
 /** The colour the World Editor's minimap gives a texture (lib/image/mipcolor.ts, shared with the Terrain Layout editor). */
 export { smallestMipColor };
@@ -214,12 +217,18 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   /** A texture's colour, null when there is none or it can't be read. In HD and DE the Reforged `_Diffuse` texture
    *  first, as the terrain draws: the World Editor's HD export has its colours (HillsbradCreek's grass 23, 119, 16,
    *  the classic one's 44, 108, 27; we-drive 2026-11-13). */
-  const textureColor = (key: string, path: string | null) => (path ? tileColors.get(() => graphicsMode(w3), key, () => (async () => {
-    for (const p of hdFirst(path, graphicsMode(w3))) {
-      try { return smallestMipColor(decodeImage(await readFile(p), p)); } catch { /* the next */ }
-    }
-    return null;
-  })()) : Promise.resolve(null));
+  const textureColor = (key: string, path: string | null) => {
+    if (!path) return Promise.resolve(null);
+    // A colour read from the map's own import isn't kept: another project, or this one after the import changed, has
+    // another texture under the path.
+    const t = trackImports(readFile);
+    return tileColors.get(() => graphicsMode(w3), key, () => (async () => {
+      for (const p of hdFirst(path, graphicsMode(w3))) {
+        try { return smallestMipColor(decodeImage(await t.read(p), p)); } catch { /* the next */ }
+      }
+      return null;
+    })(), () => !t.own());
+  };
   const terrainSlk = parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"));
   const tileRows = new Map(terrainSlk.map((r) => [r.tileID, r]));
   // Under "custom tilesets" 0 the slots show the tileset's own tiles, in the World Editor's saved minimap as in its view
