@@ -16,6 +16,7 @@ import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
 import { diffExtensions } from "./diffext";
+import { diffTrigger, diffVariables, triggerFileKind } from "./trigdiff";
 import { diffObjects, flatOfObjectFile, objectFileOf, type ObjectChange } from "./objdiff";
 import { errorText } from "../../lib/oserror";
 
@@ -598,7 +599,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Previous change", onclick: step(goToPreviousChunk) }, "↑"),
               h("button", { title: "Next change", onclick: step(goToNextChunk) }, "↓"),
               missing(after) ? null : h("button", { onclick: () => w3.editors.open(path).catch(failed) }, "Open File")));
-          el.replaceChildren(head, ...(OBJECT_FILE.test(path) || objectFileOf(path) ? [objectSummary(w3, path, a, b, codec.show)] : []), box);
+          el.replaceChildren(head, ...(OBJECT_FILE.test(path) || objectFileOf(path) ? [objectSummary(w3, path, a, b, codec.show)] : []), ...(triggerFileKind(path) ? [triggerSummary(path, before.text, after.text)] : []), box);
         };
         await render();
         // Saved again (here or outside the app): redraw.
@@ -614,6 +615,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
   );
   void refresh();
+}
+
+/** What changed in a trigger file, over its text diff (trigdiff.ts): a GUI trigger's events, conditions and actions,
+ *  or a folder's variables. Empty when nothing of that changed, or the file can't be read as one. */
+function triggerSummary(path: string, before: string | null, after: string | null): HTMLElement {
+  const el = h("div.diff-objects.diff-triggers");
+  const mark = { added: "+", removed: "−", changed: "✎", moved: "↕", switched: "◐" } as const;
+  const row = (what: keyof typeof mark, text: string, note = "") => h(`div.diff-object.diff-${what === "moved" || what === "switched" ? "changed" : what}`, {},
+    h("span.diff-mark", {}, mark[what]), h("span", {}, text), note ? h("small.muted", {}, ` ${note}`) : null);
+  try {
+    if (triggerFileKind(path) === "variables") {
+      const changes = diffVariables(before ?? "", after ?? "");
+      if (!changes.length) return el;
+      el.append(h("div.diff-objects-head", {}, `Variables: ${(["added", "changed", "removed"] as const).map((w) => [w, changes.filter((c) => c.what === w).length] as const).filter(([, n]) => n).map(([w, n]) => `${n} ${w}`).join(", ")}`),
+        h("div.diff-objects-list", {}, ...changes.map((c) => row(c.what, c.name, c.note))));
+      return el;
+    }
+    const d = diffTrigger(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null);
+    if (!d.header.length && !d.lines.length) return el;
+    const counts = (["event", "condition", "action"] as const).map((k) => `${d.counts[k][1]} ${k}${d.counts[k][1] === 1 ? "" : "s"}${d.counts[k][0] !== d.counts[k][1] ? ` (was ${d.counts[k][0]})` : ""}`).join(", ");
+    el.append(h("div.diff-objects-head", {}, `Trigger: ${counts}`),
+      h("div.diff-objects-list", {}, ...d.header.map((t) => row("changed", t)), ...d.lines.map((l) => row(l.what, `${l.kind} ${l.name}`, l.note ?? ""))));
+  } catch (e) {
+    el.append(h("div.muted", {}, `The trigger can't be compared: ${errorText(e)}`));
+  }
+  return el;
 }
 
 /** Object data files (map, skin and campaign); group 1 is the kind ("w3u"). */
@@ -649,8 +676,9 @@ function objectSummary(w3: W3Api, path: string, before: string, after: string, s
   const later = (map: Map<string, HTMLElement[]>, key: string, node: HTMLElement) => { map.set(key, [...(map.get(key) ?? []), node]); return node; };
   for (const c of changes.slice(0, MAX_OBJECTS)) {
     const mark = c.what === "added" ? "+" : c.what === "removed" ? "−" : "✎";
-    // A chapter map's object isn't one the Object Editor would open here.
-    const open = c.what === "removed" || /campaign/i.test(path) || /(^|\/)maps\//i.test(path) ? undefined
+    // A chapter map's object (maps/…) isn't one the Object Editor would open here; a campaign project's own
+    // (map/war3campaign.w3u.json) is: the Object Editor opens the campaign's objects there.
+    const open = c.what === "removed" || /(^|\/)maps\//i.test(path) ? undefined
       : () => void w3.commands.execute("w3.objectEditor.open", kind, c.id).catch((e) => w3.window.showError(String(e)));
     list.append(h(`div.diff-object.diff-${c.what}${open ? ".clickable" : ""}`, { onclick: open, title: open ? "Open in the Object Editor" : "" },
       h("span.diff-mark", {}, mark), h("code", {}, c.id), " ", later(names, c.id, h("span", {})),
