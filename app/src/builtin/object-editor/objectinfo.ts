@@ -42,7 +42,9 @@ export function labelWithSuffix(name: string, suffix: string): string {
 }
 
 /** Where a kind says which tilesets an object is made for. */
-const TILESET_FIELDS = ["btil", "dtil", "util"];
+const TILESET_FIELDS = ["btil", "dtil"];
+/** The same for the game object list, units too (the pickers' tileset note stays with doodads and destructables). */
+const LIST_TILESET_FIELDS = [...TILESET_FIELDS, "util"];
 
 /** The tilesets a game doodad or destructable is made for, to tell apart those of one name (an "Archway" each for
  *  Ashenvale, Barrens, …): `all` their names, `short` the first two and how many more. Null for one made for every
@@ -106,7 +108,7 @@ function modelNote(path: string | undefined, variations: number, stored: Readonl
 /** The game's objects of a kind, with what sets them apart. `tileset`: its letter; objects for
  *  all tilesets have "*". `stored`: from modelPacks, to check models. */
 export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue"> & Partial<Pick<KindData, "fields" | "westring">>, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>, treesOnly = false, creepsOnly = false) {
-  const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
+  const field = LIST_TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
   // A creep: a unit of the race "creeps" that isn't a building; its level is what camps are judged by (check_melee).
   const creepLevel = (id: string): number | null => {
     if (String(value(id, "urac") ?? "").toLowerCase() !== "creeps" || String(value(id, "ubdg") ?? "0") === "1") return null;
