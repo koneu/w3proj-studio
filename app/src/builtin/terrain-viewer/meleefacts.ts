@@ -6,7 +6,8 @@ import type { W3Api } from "../../extensions/api";
 import type { TerrainToolGroup } from "../../extensions/services";
 import { parseSlk } from "../../lib/formats/text";
 import { NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import { onBoundary, parseW3e, type Terrain } from "../../lib/terrain/w3e";
+import { mapEdgeTiles, onBoundary, parseW3e, type Terrain } from "../../lib/terrain/w3e";
+import { openness, ringAround } from "./meleeshape";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { checkMelee, unitLevels } from "./meleecheck";
 import type { Placed } from "./objects";
@@ -132,7 +133,13 @@ export async function meleeFacts(w3: W3Api, src: WalkSource, size: number) {
   for (const c of t.corners) if (!c.boundary) counts.set(c.layer, (counts.get(c.layer) ?? 0) + 1);
   const commonLevel = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
   const levelAt = (x: number, y: number) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer ?? 0;
-  return { grid, widest, units, trees, routes, levelAt, commonLevel, levels: level, sights: (id: string) => lookup(sights, id), number, game, data };
+  // Inside the playable map: not past its edge (the tiles the World Editor marks from the camera bounds), not on Boundary.
+  const edge = mapEdgeTiles(t);
+  const playable = (x: number, y: number) => {
+    const tx = Math.floor((x - t.offsetX) / 128), ty = Math.floor((y - t.offsetY) / 128);
+    return tx >= 0 && ty >= 0 && tx < t.width - 1 && ty < t.height - 1 && !edge[ty * (t.width - 1) + tx] && !onBoundary(t, x, y);
+  };
+  return { grid, widest, units, trees, routes, levelAt, commonLevel, playable, levels: level, sights: (id: string) => lookup(sights, id), number, game, data };
 }
 
 /** check_melee: the map against what ladder maps do. */
@@ -142,6 +149,7 @@ export async function meleeReport(w3: W3Api, src: WalkSource, unitSize = DEFAULT
     units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,
     callForHelp: f.number(f.game, "CreepCallForHelp", 600), shopNotify: f.number(f.data, "NeutralUseNotifyRadius", 900),
     narrow: narrowStrips(f.grid), levelAt: f.levelAt, commonLevel: f.commonLevel,
+    ringAt: (x, y) => ringAround(f.grid, x, y), openShare: openness(f.grid).share, playable: f.playable,
     widestTo: (x, y) => {
       // Creeps and what stands by a camp fill its middle: the way to the place beside it counts.
       let best = 0;

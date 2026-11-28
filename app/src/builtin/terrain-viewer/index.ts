@@ -83,7 +83,7 @@ import { CornerUndo, MAX_CLIFF_TYPES, cliffSlot } from "../../lib/terrain/cliffs
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices, GROUND_KINDS, groundKind, groupSkipped, pocketSpots, type GroundKind } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -729,6 +729,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   let placeObjects: McpToolHandler = () => undefined;
+  /** A placing tool's answer with what it skipped grouped by reason (aitools.ts groupSkipped): the tools that place
+   *  hundreds at once would otherwise answer with a line per skipped spot. */
+  const briefSkips = (report: unknown) => {
+    const r = report as { skipped?: { x: number; y: number; reason: string }[] } & Record<string, unknown>;
+    if (!Array.isArray(r?.skipped)) return r as Record<string, unknown>;
+    return { ...r, skipped: r.skipped.length, skippedByReason: groupSkipped(r.skipped) };
+  };
   const RESERVED = ".w3proj/reserved-areas.json";
   type Reserved = KeepClear & { name: string };
   const readReserved = async () => JSON.parse(await w3.workspace.readText(RESERVED).catch(() => "[]")) as Reserved[];
@@ -964,7 +971,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const seed = seedOf(args.seed), keep = await readReserved();
       const spots = rowSpots(area, spacingX, spacingY, givenNumber("jitter", jitter, { min: 0, max: Infinity, fallback: 0 }), seededRandom(seed)).filter((s) => !isKeptClear(s.x, s.y, keep));
       const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(facing !== undefined ? { facing } : {}) }));
-      return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror }, call)) as object };
+      return { seed, ...briefSkips(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror }, call)) };
+    }),
+    w3.mcp.registerTool("make_pocket", async (args, call) => {
+      const { id, x, y } = args;
+      if (typeof id !== "string" || id.length !== 4) throw new Error("id must be a tree type of four characters, like LTlt. list_objects gives the tileset's.");
+      if (typeof x !== "number" || typeof y !== "number") throw new Error("make_pocket needs x and y: the middle of the clearing.");
+      const radius = givenNumber("radius", args.radius, { min: 256, max: 1500, fallback: 448 });
+      const opening = givenNumber("opening", args.opening, { min: 192, max: 1500, fallback: 384 });
+      const rings = givenNumber("thickness", args.thickness, { min: 1, max: 6, whole: true, fallback: 2 });
+      const { handle } = await liveEditor("read");
+      const type = handle.objects.type(id);
+      if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
+      const fp = await (await handle.objects.occupancy()).footprint(type.kind, id);
+      if (!fp) throw new Error(`${id} has no pathing footprint, so it walls nothing in: take a tree (list_objects, a destructable of the tileset).`);
+      const spacing = Math.max(64, Math.max(fp.width, fp.height) * 32);
+      // The mouth: toward what was asked, else toward the middle of the map, where the players come from.
+      const whole = wholeMap(handle);
+      const direction = typeof args.direction === "number" ? args.direction
+        : (Math.atan2((whole.bottom + whole.top) / 2 - y, (whole.left + whole.right) / 2 - x) * 180) / Math.PI;
+      const seed = seedOf(args.seed);
+      const objects = pocketSpots(x, y, radius, opening, direction, rings, spacing).map((s) => ({ id, x: s.x, y: s.y }));
+      const report = briefSkips(await placeObjects({ kind: "doodads", objects, ignoreRoom: false, ignoreReserved: args.ignoreReserved, seed, mirror: args.mirror }, call));
+      return { clearing: { x, y, radius }, mouth: { direction: Math.round(((direction % 360) + 360) % 360), opening }, rings, spacing, seed, ...report };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
       const { handle } = await liveEditor("read");
@@ -1282,6 +1311,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
       const density = givenNumber("density", args.density, { min: 0.05, max: 1, fallback: 0.7 });
       const limit = givenNumber("limit", args.limit, { min: 1, max: Infinity, whole: true, fallback: 3000 });
+      if (args.nonBlocking !== undefined && typeof args.nonBlocking !== "boolean") throw new Error("nonBlocking must be true or false.");
+      const grounds = args.ground === undefined ? null : (Array.isArray(args.ground) ? args.ground : [args.ground]) as unknown[];
+      if (grounds && (!grounds.length || !grounds.every((k) => GROUND_KINDS.includes(k as GroundKind)))) throw new Error("ground must be land, shore or water, or a list of them.");
+      let wrongGround = 0;
       const range = args.scaleRange;
       if (range !== undefined && !(Array.isArray(range) && range.length === 2 && range.every((n) => typeof n === "number" && n > 0) && range[0] <= range[1])) throw new Error("scaleRange must be [smallest, biggest].");
       const scaleRange = range as [number, number] | undefined;
@@ -1303,6 +1336,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return { id, type };
         });
         const sizes = await Promise.all(types.map(({ id, type }) => room.footprint(type.kind, id)));
+        // Decoration that must not close a way: a type that blocks pathing is refused, named, before anything is placed.
+        const blocking = [...new Set(types.filter((_, i) => sizes[i]).map((t) => t.id))];
+        if (args.nonBlocking === true && blocking.length) throw new Error(`Nothing was scattered: ${blocking.join(", ")} block${blocking.length === 1 ? "s" : ""} pathing (a footprint units can't walk through), and nonBlocking asks for none that do. Take them out of ids, or leave nonBlocking off where a wall is meant.`);
         // The smallest sets the spacing: a rock among trees shouldn't thin out the trees. Whatever
         // doesn't fit at a spot is left out there.
         const smallest = Math.min(...sizes.map((fp) => (fp ? Math.max(fp.width, fp.height) * 32 : 128)));
@@ -1310,6 +1346,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         for (const asked of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
           if (isKeptClear(asked.x, asked.y, keep)) { keptClear++; continue; }
+          if (grounds && !grounds.includes(groundKind(handle.terrain, asked.x, asked.y))) { wrongGround++; continue; }
+          // One of ids by chance: an id given twice is taken twice as often.
           const { id, type } = types[Math.floor(random() * types.length)];
           const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
           // A doodad on its grid (doodadedit.ts): what's checked is where it lands. Its facing follows in settleDoodads.
@@ -1319,6 +1357,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const twin = args.mirror === true ? twinOf(spot.x, spot.y, whole) : null;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
           if (twin) {
+            if (grounds && !grounds.includes(groundKind(handle.terrain, twin[0], twin[1]))) { wrongGround++; continue; }
             if (isKeptClear(twin[0], twin[1], keep)) { keptClear++; continue; }
             if (!isBackdrop(type.kind, twin[0], twin[1], edge, whole) && !(await room.fits(type.kind, id, twin[0], twin[1], twinAngle))) { noRoom++; continue; }
           }
@@ -1335,10 +1374,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           counts.set(id, (counts.get(id) ?? 0) + (twin ? 2 : 1));
         }
-        if (!counts.size) throw new Error("There's no free ground there for these.");
+        if (!counts.size) throw new Error(grounds && wrongGround ? `There's no free ${grounds.join(" or ")} there for these (${wrongGround} spots were other ground).` : "There's no free ground there for these.");
       });
       return {
         placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, spotsKeptClear: keptClear,
+        ...(grounds ? { spotsOnOtherGround: wrongGround } : {}),
         seed, area,
       };
     }),

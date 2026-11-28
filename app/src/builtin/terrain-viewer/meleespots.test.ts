@@ -39,8 +39,15 @@ test("camp spots keep the distances, and don't sit on what's there", () => {
   const route: Point[] = [[-3000, -3000], [3000, 3000]];
   const mines: Point[] = [[-3000, -2224], [3000, 2224]];
   const camps: Point[] = [[2500, -2500]];
-  const { spots } = findSpots("camp", facts(grid(), { routes: [route], mines, camps }), 8, false);
-  assert.ok(spots.length >= 3);
+  // Open ground all over: nothing is offered as a pocket; the open places listed apart still keep the distances.
+  const found = findSpots("camp", facts(grid(), { routes: [route], mines, camps }), 8, false);
+  // The map's corners are the only pockets; the open places listed apart are marked, at most three.
+  assert.ok(found.spots.length < 8 && found.spots.every((s) => s.sheltered >= 0.41), JSON.stringify(found.spots.map((s) => s.sheltered)));
+  assert.match(found.note ?? "", /Only \d pockets? found for 8 asked: build more \(make_pocket/);
+  const open = found.openPlaces ?? [];
+  assert.equal(open.length, 3, "at most three open places");
+  assert.ok(open.every((s) => s.exposed === true && s.sheltered < 0.41));
+  const spots = [...found.spots, ...open];
   for (const s of spots) {
     for (const p of starts) assert.ok(dist(s.at, p) >= 1900);
     for (const m of mines) assert.ok(dist(s.at, m) >= 900);
@@ -55,8 +62,16 @@ test("a pocket beats open ground", () => {
     const dx = x + 2500, dy = y - 2500;
     return Math.max(Math.abs(dx), Math.abs(dy)) > 560 && Math.max(Math.abs(dx), Math.abs(dy)) < 800 && dx < 400;
   });
-  const { spots } = findSpots("camp", facts(pocket), 3, false);
-    assert.ok(spots[0].sheltered > 0.4);
+  const found = findSpots("camp", facts(pocket), 3, false);
+  const { spots } = found;
+  assert.ok(spots[0].sheltered > 0.4);
+  // One pocket for three asked: said, and what else is listed is marked as open ground.
+  assert.ok((found.pockets ?? 0) >= 1);
+  assert.ok(spots.every((x) => x.sheltered >= 0.41 && !("exposed" in x)));
+  assert.ok((found.openPlaces ?? []).every((x) => x.exposed === true));
+  // No pockets at all (the same ground walled nowhere, the corners too far from a start to count): said so.
+  const none = findSpots("camp", facts(grid(), { starts: [[0, 0]], widest: widestFrom(grid(), [0, 0]) }), 4, false);
+  if (!none.spots.length) assert.match(none.note ?? "", /No real pockets yet/);
 });
 
 test("a camp behind a crack isn't offered", () => {

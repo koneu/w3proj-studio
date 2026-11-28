@@ -3935,6 +3935,56 @@ async function codePageOtherEditors(page, found) {
   }
 }
 
+/** The map-shaping tools an AI builds camps and forests with (MCP): make_pocket plants a horseshoe of trees round a
+ *  clearing, open toward its mouth, and its twin with mirror; fill_rows answers with what it skipped grouped by reason;
+ *  scatter_objects refuses types that block pathing with nonBlocking and keeps to the ground asked for. */
+async function mapShapeTools(page, found) {
+  const fail = (what) => found.push(`map shape tools: ${what}`);
+  try {
+    const k = await heightKit(page, "MapShape");
+    const json = (r) => (typeof r === "string" ? JSON.parse(r) : r);
+    const refused = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
+    const trees = () => k.doodads().filter((d) => d.id === "LTlt");
+    // A pocket at 1024, 1024 with its mouth to the south, and its twin round the map's middle.
+    const made = json(await k.tool("make_pocket", { id: "LTlt", x: 1024, y: 1024, direction: 270, mirror: true }));
+    await k.save();
+    const near = (cx, cy) => trees().filter((d) => Math.hypot(d.position[0] - cx, d.position[1] - cy) < 900);
+    const pocket = near(1024, 1024), twin = near(-1024, -1024);
+    if (!(made.placed >= 30) || made.mouth?.direction !== 270 || made.mouth?.opening !== 384 || made.rings !== 2) fail(`make_pocket answered ${lit({ placed: made.placed, mouth: made.mouth, rings: made.rings })}`);
+    if (pocket.length < 15 || pocket.length !== twin.length) fail(`the pocket has ${pocket.length} trees, its twin ${twin.length}`);
+    if (pocket.some((d) => Math.hypot(d.position[0] - 1024, d.position[1] - 1024) < 448 - 64)) fail("trees stand in the pocket's clearing");
+    if (pocket.some((d) => d.position[1] < 1024 && Math.abs(d.position[0] - 1024) < 128)) fail("trees stand in the pocket's mouth (south)");
+    if (!pocket.some((d) => d.position[1] > 1024 + 448 && Math.abs(d.position[0] - 1024) < 128)) fail("the pocket's back (north) is open");
+    if (twin.some((d) => d.position[1] > -1024 && Math.abs(d.position[0] + 1024) < 128)) fail("trees stand in the twin's mouth (north)");
+    if (typeof made.skipped !== "number" || !Array.isArray(made.skippedByReason)) fail(`make_pocket's skips aren't counted and grouped: ${lit({ skipped: made.skipped, by: made.skippedByReason })}`);
+    const noTree = await refused("make_pocket", { id: "ZPfw", x: 0, y: 2500 });
+    if (!noTree || !/has no pathing footprint, so it walls nothing in/.test(noTree)) fail(`a pocket of flowers wasn't refused: ${lit(noTree)}`);
+    // Rows over the pocket: the trees in the way are one line with a count, not a line each.
+    const rows = json(await k.tool("fill_rows", { id: "LTlt", left: 256, bottom: 1400, right: 1792, top: 1800, spacingX: 128, spacingY: 128 }));
+    const group = rows.skippedByReason?.[0];
+    if (typeof rows.skipped !== "number" || !(rows.skipped > 3) || !group || !(group.count > 3) || typeof group.reason !== "string" || !(group.at?.length >= 1 && group.at.length <= 3)) fail(`fill_rows over standing trees answered ${lit({ placed: rows.placed, skipped: rows.skipped, by: rows.skippedByReason })}`);
+    if (rows.skippedByReason.reduce((n, g) => n + g.count, 0) !== rows.skipped) fail("fill_rows' groups don't add up to what it skipped");
+    // Decoration only: a tree is refused by name, flowers are taken; water is asked for where there is none.
+    const walled = await refused("scatter_objects", { ids: ["ZPfw", "LTlt"], nonBlocking: true, left: -2000, bottom: 1500, right: -1000, top: 2500 });
+    if (!walled || !/Nothing was scattered: LTlt blocks pathing/.test(walled)) fail(`nonBlocking with a tree among the ids: ${lit(walled)}`);
+    const bed = json(await k.tool("scatter_objects", { ids: ["ZPfw"], nonBlocking: true, ground: "land", left: -2000, bottom: 1500, right: -1000, top: 2500, limit: 12, seed: 3 }));
+    if (!(bed.placed > 0) || bed.spotsOnOtherGround !== 0) fail(`flowers on land answered ${lit(bed)}`);
+    const dry = await refused("scatter_objects", { ids: ["ZPfw"], ground: "water", left: -2000, bottom: 1500, right: -1000, top: 2500, limit: 12 });
+    if (!dry || !/no free water there/.test(dry)) fail(`water plants on dry land: ${lit(dry)}`);
+    const odd = await refused("scatter_objects", { ids: ["ZPfw"], ground: "swamp", left: -2000, bottom: 1500, right: -1000, top: 2500 });
+    if (!odd || !/ground must be land, shore or water/.test(odd)) fail(`ground swamp: ${lit(odd)}`);
+    // The tileset's creeps with their levels, weakest first: what camps are put together from.
+    const creeps = json(await k.tool("list_objects", { kind: "units", scope: "game", creeps: true, tileset: "map", limit: 400 }));
+    const levels = (creeps.items ?? creeps.objects ?? creeps.list ?? creeps).map?.((o) => o.creepLevel) ?? [];
+    if (levels.length < 10 || levels.some((n) => !(n > 0)) || levels.some((n, i) => i && n < levels[i - 1])) fail(`list_objects with creeps gave ${levels.length} with levels ${lit(levels.slice(0, 12))} (${lit(Object.keys(creeps))})`);
+    // find_spots: with starts and nothing else on a flat map, the pockets just built are what it finds, not open ground.
+    await k.tool("place_objects", { kind: "units", objects: [{ id: "sloc", x: -3000, y: 3000, player: 1 }, { id: "sloc", x: 3000, y: -3000, player: 2 }], ignoreRoom: true });
+    const spots = json(await k.tool("find_spots", { kind: "camp", count: 6 }));
+    if (!Array.isArray(spots.spots) || spots.spots.some((x) => x.sheltered < 0.41) || (spots.openPlaces ?? []).some((x) => x.exposed !== true) || (spots.spots.length < 6 && typeof spots.note !== "string")) fail(`find_spots answered ${lit({ spots: spots.spots?.map((x) => x.sheltered), open: spots.openPlaces?.length, note: spots.note })}`);
+    await k.save();
+  } catch (e) { fail(e.message); } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
  *  preview, a plain string's doesn't; the toolbar's colour lands in the value the dialog returns. */
 async function triggerParamColorTools(page, found) {
@@ -20316,6 +20366,7 @@ async function run() {
         mapInfoColorTools,
         mapInfoUndoKept,
         mapPropertiesPriorities,
+        mapShapeTools,
         mapSizeUi,
         mcpGuides,
         mcpLimits,
@@ -20595,6 +20646,7 @@ const CHECKS = [
   [codePageTextEditor, "code page text editor"],
   [codePageChoice, "map text encoding"],
   [codePageOtherEditors, "map text encoding, other editors"],
+  [mapShapeTools, "map shape tools"],
   [objectListSuffix, "object list suffix"],
   [objectPickerSuffix, "object picker suffix"],
   [triggerParamColorTools, "trigger parameter colour tools"],

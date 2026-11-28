@@ -29,7 +29,7 @@ export const GUIDES: Record<string, Guide> = { terrain: parseGuide(terrain), spe
 /** Starting points for a melee map. Left alone, an AI builds the same map every time, and each chat
  *  starts fresh, so a guide can't ask it to vary: read_guide picks one by chance. */
 export const LAYOUT_IDEAS = [
-  "Open field: hardly any terrain in the way. Camps, distances and scattered forest clumps make the game, as on Northern Isles.",
+  "Open middle: one broad field in the centre where armies meet, as on Northern Isles, the most open of the ladder maps (a quarter of its walkable ground lies in the open; no ladder map has more). Everything round it is closed in by forest and water: bases, camps and expansions still sit in pockets, and the forest is walls with ways through, not clumps standing in a field.",
   "Ring: something big fills the middle, a lake, a mesa or a deep forest, so armies go round left or right, and a player has to guess which.",
   "Raised middle: bases on ordinary ground, a broad plateau in the centre with wide ramps, holding the tavern. Whoever holds it sees the map.",
   "One long road: a single winding main way between the bases, as on Terenas Stand, with camps and expansions off to its sides. Long walks, so harassing costs time.",

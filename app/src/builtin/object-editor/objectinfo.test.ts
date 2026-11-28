@@ -162,3 +162,26 @@ test("the object lists (list_objects) carry a suffix field, a custom object's ow
   const game = gameObjectList({ ...k, baseIds: ["hfoo", "hpea"], facets: () => ({}), westring: (v: string) => v }, (s) => s);
   assert.deepEqual(game.map((o) => o.suffix), ["Std", undefined]);
 });
+
+test("creeps are listed with their level, weakest first, for the tileset asked", () => {
+  const rows: Record<string, Record<string, string>> = {
+    nogr: { urac: "creeps", ulev: "3", util: "L,F", ubdg: "0" },
+    ngno: { urac: "creeps", ulev: "1", util: "*", ubdg: "0" },
+    nfsp: { urac: "creeps", ulev: "2", util: "A", ubdg: "0" },
+    nmer: { urac: "creeps", ulev: "5", util: "*", ubdg: "1" }, // a building: a camp isn't made of it
+    hfoo: { urac: "human", ulev: "2", util: "*", ubdg: "0" },
+    nzep: { urac: "creeps", ulev: "0", util: "*", ubdg: "0" }, // no level: nothing to judge a camp by
+  };
+  const game = {
+    baseIds: Object.keys(rows), names: new Map([["nogr", "Ogre Warrior"]]), facets: () => ({}),
+    fieldById: new Map(["urac", "ulev", "util", "ubdg"].map((f) => [f, field(f, f)])),
+    defaultValue: (id: string, f: { id: string }) => rows[id][f.id],
+  };
+  const creeps = (tileset?: string) => gameObjectList(game, (s) => s, tileset, undefined, undefined, false, true).map((o) => [o.id, o.creepLevel]);
+  assert.deepEqual(creeps(), [["ngno", 1], ["nfsp", 2], ["nogr", 3]]);
+  assert.deepEqual(creeps("L"), [["ngno", 1], ["nogr", 3]]);
+  // Without the filter every unit is listed, creeps with their level, others without.
+  const all = gameObjectList(game, (s) => s);
+  assert.deepEqual(all.map((o) => o.id), Object.keys(rows));
+  assert.deepEqual([all[0].creepLevel, all[4].creepLevel, all[3].creepLevel], [3, undefined, undefined]);
+});

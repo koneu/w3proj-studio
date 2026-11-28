@@ -31,6 +31,12 @@ export interface MeleeFacts {
   commonLevel?: number;
   /** How wide the widest way from a start to a place is. */
   widestTo?(x: number, y: number): number;
+  /** How the ring round a place is closed (meleeshape.ts ringAround). */
+  ringAt?(x: number, y: number): { closed: number; ways: number; widest: number };
+  /** The share of the walkable ground more than 400 from anything in the way (meleeshape.ts openness). */
+  openShare?: number;
+  /** Whether a place is inside the playable map (not in its border). */
+  playable?(x: number, y: number): boolean;
   /** Stray narrow paths, as narrowStrips gives them. */
   narrow?: { percent: number; strips: readonly { cells: number; at: readonly [number, number] }[] };
   /** War3's own numbers (Units/MiscGame.txt, MiscData.txt). */
@@ -55,6 +61,8 @@ const FIX: Record<string, string> = {
   "camp strength": "Replace the strongest creep with a weaker one, or move the camp further out.",
   "camp mode": "set_object_properties with acquireRange camp, or normal.",
   "camp access": "Open the way with remove_objects on trees, or move the camp: find_spots checks the way in.",
+  "camp shelter": "Wall it in: make_pocket puts a horseshoe of trees round it with one opening, or move it into a pocket (find_spots with kind camp).",
+  "open ground": "Break the open ground up with forest, cliffs or water, so armies meet in ways and clearings: fill_rows and make_pocket for trees, set_cliff_level for plateaus.",
   "narrow path": "Close it with fill_rows, or widen it with remove_objects. A path should be wide enough for an army, or not exist.",
   drops: "Give its strongest creep drops, by the table in the melee guide.",
   lumber: "Trees as walls with fill_rows, then compare both starts.",
@@ -77,6 +85,14 @@ const TREE_NEAR = [500, 750] as const, TREES_1000 = [30, 60] as const;
 /** Ladder camps have at most 6 creeps, reach 364 from their middle, keep creeps 100 apart and other
  *  camps 1,047; these leave a little room. */
 const MOST_CREEPS = 6, CAMP_RADIUS = 400, CREEP_GAP = 80, CAMP_GAP = 1000;
+/** How far a camp is walled in (meleeshape.ts ringAround), measured on the six ladder maps' 92 camps that guard no
+ *  mine: 0.42 to 0.88 of the ring closed but for one (0.33, on Echo Isles), with 1 way in (86) or 2 (6). */
+export const CAMP_SHELTER = 0.41, CAMP_OPEN = 0.25, CAMP_WAYS = 2;
+/** The share of walkable ground more than 400 from anything in the way, measured on the six ladder maps: 10.8% (Last
+ *  Refuge) to 26.1% (Northern Isles). With a little room. */
+const OPEN_GROUND = [8, 30] as const;
+/** Trees in the playable area of the six ladder maps: 1,055 to 1,983 (4 to 26% more stand in the border). */
+const TREES_PLAYABLE = 900;
 /** How much walks to a mine may differ between starts. */
 const WALK_GAP = 400;
 /** Real maps are symmetric to within about this. */
@@ -207,6 +223,14 @@ export function checkMelee(f: MeleeFacts) {
       else if (way < 224) add("camp access", "warning", `The widest way to this camp is ${way}. On ladder maps it's usually 480.`, c.centre);
     }
   }
+  // Camps in the open: the ring round each, as far as it is walled in and how many ways lead in.
+  if (f.ringAt) for (const c of field) {
+    if (isGuard(c)) continue; // A mine's guards stand where the mine is: out in the clearing.
+    const r = f.ringAt(c.centre[0], c.centre[1]), closed = Math.round(r.closed * 100);
+    if (r.closed < CAMP_OPEN) add("camp shelter", "warning", `This camp stands in the open: ${closed}% of the ring round it is walled off${r.widest >= 360 ? "" : `, the widest gap ${Math.round(r.widest)}°`}. On ladder maps 42 to 88% is, so a camp is fought from one side and can't be walked round.`, c.centre);
+    else if (r.closed < CAMP_SHELTER) add("camp shelter", "warning", `This camp is exposed: ${closed}% of the ring round it is walled off. On ladder maps 42 to 88% is (one of 92 camps has less).`, c.centre);
+    else if (r.ways > CAMP_WAYS) add("camp shelter", "warning", `${r.ways} ways lead to this camp. Ladder camps have 1 or 2: a pocket with one mouth.`, c.centre);
+  }
   field.forEach((c, i) => {
     for (const o of field.slice(i + 1)) {
       const gap = dist(c.centre, o.centre);
@@ -229,7 +253,20 @@ export function checkMelee(f: MeleeFacts) {
     for (const s of f.narrow.strips.slice(0, 5)) if (wide || stray) add("narrow path", "info", `A narrow strip of ${s.cells} pathing cells starts near here.`, s.at);
   }
 
+  // Open ground: how much of the map is field instead of ways and clearings.
+  if (f.openShare !== undefined && starts.length === 2) {
+    const open = Math.round(f.openShare * 1000) / 10;
+    if (open > OPEN_GROUND[1]) add("open ground", "warning", `${open}% of the walkable ground is more than 400 from any tree, cliff or water. Ladder 1v1 maps have 10.8 to 26.1%: this map is mostly open field, with little to go round or hold.`);
+    else if (open < OPEN_GROUND[0]) add("open ground", "warning", `Only ${open}% of the walkable ground is more than 400 from anything in the way. Ladder 1v1 maps have 10.8 to 26.1%: there is little room for armies to fight.`);
+  }
+
   // Lumber.
+  const treesPlayable = f.playable ? f.trees.filter((t) => f.playable!(t[0], t[1])).length : null;
+  if (treesPlayable !== null && f.trees.length) {
+    const border = f.trees.length - treesPlayable;
+    if (starts.length === 2 && treesPlayable < TREES_PLAYABLE) add("lumber", "warning", `${treesPlayable.toLocaleString("en-US")} trees stand in the playable area${border ? ` (${border.toLocaleString("en-US")} more in the border, which no one reaches)` : ""}. Ladder 1v1 maps have 1,055 to 1,983 there.`);
+    else if (border > f.trees.length * 0.35) add("lumber", "info", `${border.toLocaleString("en-US")} of the ${f.trees.length.toLocaleString("en-US")} trees stand in the border, outside the playable area: ${treesPlayable.toLocaleString("en-US")} count. On ladder maps 4 to 26% stand there.`);
+  }
   for (const m of perStart) {
     if (m.nearestTree === null) continue;
     if (m.nearestTree < TREE_NEAR[0] || m.nearestTree > TREE_NEAR[1]) add("lumber", "warning", `The nearest tree is ${m.nearestTree} from the start. Ladder maps have 547 to 692.`, m.start);
@@ -309,6 +346,8 @@ export function checkMelee(f: MeleeFacts) {
     `One creep that wakes calls others within ${f.callForHelp} (the game's CreepCallForHelp), so a whole camp comes, even though only one saw the unit.`,
     "Routes are the shortest ways on this app's pathing grid, for one size of unit, not the paths the game picks. Players also walk elsewhere; a route passing clear says nothing about the rest of the map.",
     "Widths and narrow strips come from this app's pathing grid, in steps of 64, with every tree and doodad as it stands. A wide way can still be a long detour.",
+    "A camp's shelter is how much of the ring 320 to 640 round its middle is blocked, in 24 directions, on this app's pathing grid; a way in is a gap of 30° or more. Mine guards aren't judged by it.",
+    "Open ground is the share of walkable cells more than 400 from the nearest blocked one. The tree count for lumber leaves out the border (past the playable area or on Boundary).",
     "Camps are worked out by distance: creeps within 450 of each other count as one, and a camp within 750 of an expansion's mine counts as its guard.",
     "Levels follow the map's saved unit data. Sight ranges of map-made units come from the unit they're based on, so the map's changes to those aren't seen.",
   );
@@ -320,7 +359,11 @@ export function checkMelee(f: MeleeFacts) {
   return {
     errors: findings.filter((x) => x.severity === "error").length,
     warnings: findings.filter((x) => x.severity === "warning").length,
-    measures: { starts: perStart, camps: field.length, guards: guards.length, startGuards: camps.length - field.length, mines: mines.length, trees: f.trees.length, campedRoutePasses: camped,
+    measures: { starts: perStart, camps: field.length, guards: guards.length, startGuards: camps.length - field.length, mines: mines.length, trees: f.trees.length,
+      ...(treesPlayable !== null ? { treesPlayable } : {}),
+      ...(f.openShare !== undefined ? { openGround: Math.round(f.openShare * 1000) / 10 } : {}),
+      ...(f.ringAt ? { campRings: field.map((c) => { const r = f.ringAt!(c.centre[0], c.centre[1]); return { at: round(c.centre), guard: isGuard(c), closed: Math.round(r.closed * 100) / 100, ways: r.ways, widest: r.widest }; }) } : {}),
+      campedRoutePasses: camped,
       ...(f.narrow ? { narrow: { percent: Math.round(f.narrow.percent * 10) / 10, strips: f.narrow.strips.length } } : {}) },
     findings,
     accuracy: notes,

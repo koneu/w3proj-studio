@@ -860,3 +860,50 @@ export function viewOfArea(area: Area, ground: number, aspect: number, fov: numb
     yaw: -Math.PI / 2, pitch: PITCH[angle], distance: Math.max(400, fit / 2 / Math.tan(fov / 2)),
   };
 }
+
+/** What a placing tool skipped, by reason: one line per reason with how many and the first few places, instead of a
+ *  line per spot (a field of 400 rows mostly "no room" otherwise fills the answer). Places inside a reason's text
+ *  ("its twin at 120, -340 …") are left out of the key, so they group. */
+export function groupSkipped(skipped: readonly { x: number; y: number; reason: string }[], examples = 3) {
+  const groups = new Map<string, { reason: string; count: number; at: [number, number][] }>();
+  for (const s of skipped) {
+    const reason = s.reason.replace(/ at -?\d+(?:\.\d+)?, -?\d+(?:\.\d+)?/g, "");
+    const g = groups.get(reason) ?? { reason, count: 0, at: [] };
+    g.count++;
+    if (g.at.length < examples) g.at.push([Math.round(s.x), Math.round(s.y)]);
+    groups.set(reason, g);
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count);
+}
+
+export type GroundKind = "land" | "shore" | "water";
+export const GROUND_KINDS: readonly GroundKind[] = ["land", "shore", "water"];
+
+/** What the tile under a place is: land (no water shows on it), water (it shows at all four corners) or shore
+ *  (at some). Lily pads belong on water, rushes on the shore, bushes on land. */
+export function groundKind(t: Terrain, x: number, y: number): GroundKind {
+  const tx = Math.min(t.width - 2, Math.max(0, Math.floor((x - t.offsetX) / 128))), ty = Math.min(t.height - 2, Math.max(0, Math.floor((y - t.offsetY) / 128)));
+  const wet = [[tx, ty], [tx + 1, ty], [tx, ty + 1], [tx + 1, ty + 1]].filter(([cx, cy]) => { const c = t.corners[cy * t.width + cx]; return c.hasWater && c.water > c.height; }).length;
+  return wet === 0 ? "land" : wet === 4 ? "water" : "shore";
+}
+
+/** A horseshoe of trees round a place: rings `spacing` apart from `radius` outward, each a row of spots `spacing`
+ *  apart along it, left open where the mouth is (`opening` wide at the inner ring, toward `direction` in degrees,
+ *  0 east and 90 north). The clearing inside `radius` stays free: that is where the camp goes. */
+export function pocketSpots(x: number, y: number, radius: number, opening: number, direction: number, rings: number, spacing = 128): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const toward = (direction * Math.PI) / 180;
+  for (let k = 0; k < rings; k++) {
+    const r = radius + spacing / 2 + k * spacing;
+    const count = Math.max(6, Math.round((2 * Math.PI * r) / spacing));
+    // The mouth keeps its width outward: the gap's half angle is that of a chord `opening` long (a tree's half kept off each side).
+    const half = Math.asin(Math.min(1, (opening / 2 + spacing / 2) / r));
+    for (let i = 0; i < count; i++) {
+      const a = (i * 2 * Math.PI) / count;
+      const off = Math.abs(((a - toward + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+      if (off < half) continue;
+      out.push({ x: x + r * Math.cos(a), y: y + r * Math.sin(a) });
+    }
+  }
+  return out;
+}

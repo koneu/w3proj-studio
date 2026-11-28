@@ -278,3 +278,42 @@ test("camp access counts the creeps' ground around a building and treats unreach
   assert.ok(checkMelee({ ...map([...camp(0, 0), neutral("ngad", 1000, 1000)]), widestTo: (x, y) => (Math.hypot(x, y) < 200 ? 96 : 480) })
     .findings.some((x) => x.rule === "camp access" && x.severity === "error"), "narrow choke still errors with transport");
 });
+
+
+test("a camp in the open is said, a mine's guards aren't judged, and too many ways in are counted", () => {
+  const ring = (closed: number, ways = 1, widest = 90) => () => ({ closed, ways, widest });
+  const shelter = (f: MeleeFacts) => checkMelee(f).findings.filter((x) => x.rule === "camp shelter");
+  // Walled in as ladder camps are: nothing to say (control).
+  assert.deepEqual(shelter({ ...map(), ringAt: ring(0.67) }), []);
+  // Open all round: every camp but the two that guard a mine.
+  const open = shelter({ ...map(), ringAt: ring(0, 1, 360) });
+  assert.equal(open.length, 18);
+  assert.ok(open.every((x) => x.severity === "warning" && /stands in the open: 0% of the ring/.test(x.message) && /make_pocket/.test(x.fix ?? "")), open[0]?.message);
+  // Between: exposed, with the share.
+  assert.match(shelter({ ...map(), ringAt: ring(0.33, 2, 120) })[0].message, /exposed: 33% of the ring/);
+  // Enough wall, but three mouths.
+  assert.match(shelter({ ...map(), ringAt: ring(0.6, 3) })[0].message, /3 ways lead to this camp/);
+  // The rings are in the measures, guards marked.
+  const rings = checkMelee({ ...map(), ringAt: ring(0.5) }).measures?.campRings ?? [];
+  assert.deepEqual([rings.length, rings.filter((r) => r.guard).length, rings[0].closed], [20, 2, 0.5]);
+});
+
+test("a map of open field, or with no room to fight, is said; trees in the border don't count", () => {
+  const ground = (f: MeleeFacts) => checkMelee(f).findings.filter((x) => x.rule === "open ground").map((x) => x.message);
+  assert.deepEqual(ground({ ...map(), openShare: 0.2 }), []);
+  assert.match(ground({ ...map(), openShare: 0.48 })[0], /48% of the walkable ground .* Ladder 1v1 maps have 10\.8 to 26\.1%: this map is mostly open field/);
+  assert.match(ground({ ...map(), openShare: 0.03 })[0], /Only 3% .* little room for armies/);
+  assert.equal(checkMelee({ ...map(), openShare: 0.48 }).measures?.openGround, 48);
+  // 2,000 trees, 1,500 of them past the playable area: the 500 that count are too few, and the border's are named.
+  const trees = [...map().trees, ...Array.from({ length: 2000 }, (_, i): [number, number] => [i < 1500 ? 9000 : 0, 2000 + i])];
+  const playable = (x: number) => x < 8000;
+  const r = checkMelee({ ...map(), trees, playable });
+  assert.equal(r.measures?.treesPlayable, trees.length - 1500);
+  const lumber = r.findings.filter((x) => x.rule === "lumber").map((x) => x.message);
+  assert.match(lumber.join(" | "), /590 trees stand in the playable area \(1,500 more in the border, which no one reaches\)\. Ladder 1v1 maps have 1,055 to 1,983/);
+  // Enough in the playable area, but most in the border: told, not warned.
+  const many = [...trees, ...Array.from({ length: 800 }, (_, i): [number, number] => [100, 9000 + i])];
+  const told = checkMelee({ ...map(), trees: [...many, ...Array.from({ length: 2000 }, (): [number, number] => [9000, 0])], playable }).findings.filter((x) => x.rule === "lumber");
+  assert.deepEqual(told.map((x) => x.severity), ["info"]);
+  assert.match(told[0].message, /3,500 of the 4,890 trees stand in the border/);
+});

@@ -46,6 +46,21 @@ Goals always win over numbers: fair starts, real choices, and units that get whe
   pockets and dead ends, off the way. What wakes a camp is the creeps' real sight and whether they're on Camp
   mode, so test it: check_melee does, with routes that follow the pathing. Of the measured camps 94% are over
   800 from the straight line between the bases, typically 2,800.
+- Camps in the open. A camp stands in a pocket: on the ladder maps 42 to 88% of the ring round a camp is walled
+  off by trees, cliffs or water, and one way leads in, sometimes two. A camp on open ground can be walked round
+  and fought from every side. find_spots offers pockets only and says when there are none: then build them
+  (make_pocket puts a horseshoe of trees round a place, with a mouth of the width and direction you give), don't
+  take the open places it lists apart. check_melee's "camp shelter" finding names every camp that stands open.
+- Tree islands. Forest is walls with ways through them, not clumps on a field: scattering trees over open ground
+  leaves islands armies walk round on every side, and a map that is one field. check_melee's "open ground" finding
+  measures it: 10.8 to 26.1% of the walkable ground of the ladder maps is more than 400 from anything in the way.
+  Fill what isn't base, way, clearing or shop with forest, and reserve those first (reserve_area).
+- Creeps from memory. list_objects with kind units, scope game, creeps and tileset map gives the tileset's creeps
+  with their levels, weakest first: build camps from that list, by level.
+- Decoration that blocks. scatter_objects with nonBlocking takes only what units walk through, and ground keeps
+  lily pads to water and bushes to land; an id given twice is taken twice as often.
+- Trees in the border. Trees past the playable area count for nothing: check_melee counts the playable ones
+  (1,055 to 1,983 on the ladder maps).
 - Camps near the base. The nearest camp to a start location is 1,750 to 2,250 away, usually about
   2,150, and nothing is closer. A town hall has to be able to stand and build without a fight.
 - A flat map. Paths through trees on flat ground are dull however fair. See Terrain.
