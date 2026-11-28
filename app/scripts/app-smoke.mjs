@@ -19189,6 +19189,24 @@ async function objectOneFile(page, found) {
     const summary = () => page.evaluate(`[...document.querySelectorAll(".diff-objects")].find((d) => d.offsetParent !== null)?.textContent ?? null`);
     await until("the diff's object summary", async () => /Objects: 1 changed.*One File Renamed.*uhpm.*779/s.test((await summary()) ?? ""), 20000)
       .catch(async () => fail(`the object file's diff says ${lit(await summary())}`));
+    // A GUI trigger's diff says what happened to the trigger: its last action gone, and it starts off now.
+    const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
+    const triggerFile = existsSync(join(k.root, "map", "triggers")) ? walk(join(k.root, "map", "triggers")).find((f) => f.endsWith(".gui.json") && JSON.parse(readFileSync(f, "utf8")).ecas?.some((e) => e.kind === 2)) : undefined;
+    if (!triggerFile) fail("control: the new map has no GUI trigger with an action to change");
+    else {
+      const trigger = JSON.parse(readFileSync(triggerFile, "utf8"));
+      const gone = trigger.ecas.filter((e) => e.kind === 2).pop();
+      trigger.ecas.splice(trigger.ecas.lastIndexOf(gone), 1);
+      trigger.initiallyOff = true;
+      writeFileSync(triggerFile, `${JSON.stringify(trigger, null, 2)}\n`);
+      await page.evaluate(`w3.workspace.refresh()`);
+      const rel = relative(k.root, triggerFile).split("\\").join("/");
+      await page.evaluate(`void w3.editors.open(${lit(`w3:diff:${rel}`)})`);
+      const told = () => page.evaluate(`[...document.querySelectorAll(".diff-triggers")].find((d) => d.offsetParent !== null)?.textContent ?? null`);
+      const want = new RegExp(`Trigger: .*\\(was \\d+\\).*initially on: true → false.*action ${gone.name}`, "s");
+      await until("the diff's trigger summary", async () => want.test((await told()) ?? ""), 20000)
+        .catch(async () => fail(`the trigger file's diff says ${lit(await told())}, not that ${gone.name} is gone and the trigger starts off`));
+    }
   } catch (e) {
     fail(e.message);
   } finally {
