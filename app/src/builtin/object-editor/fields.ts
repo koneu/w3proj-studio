@@ -7,6 +7,7 @@
 import type { W3Api } from "../../extensions/api";
 import type { ObjectsService } from "../../extensions/services";
 import { parseIni, westring } from "../../lib/formats/text";
+import { loadWorldEditStrings } from "../../lib/objects/metadata";
 import { h } from "../../workbench/dom";
 
 /** Metadata types holding one object code, and the object kinds offered. */
@@ -33,12 +34,13 @@ let typesPromise: Promise<Map<string, EditorType>> | null = null;
 /** The value types of UI\UnitEditorData.txt with their labels (WorldEditStrings). */
 export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
   typesPromise ??= (async () => {
-    const strings = new Map<string, string>();
-    for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
-      for (const sec of parseIni(await w3.game.readText(f).catch(() => "")).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
-    }
+    // The three files are asked together; the strings are the ones the object data's labels use (parsed once).
+    const unitData = w3.game.readText("UI\\UnitEditorData.txt");
+    const worldData = w3.game.readText("UI\\WorldEditData.txt").catch(() => "");
+    unitData.catch(() => {});
+    const strings = await loadWorldEditStrings(w3);
     const out = new Map<string, EditorType>();
-    for (const [name, sec] of parseIni(await w3.game.readText("UI\\UnitEditorData.txt"))) {
+    for (const [name, sec] of parseIni(await unitData)) {
       const entries: EditorType["entries"] = [];
       for (const [k, v] of sec) {
         if (!/^\d+$/.test(k)) continue;
@@ -51,7 +53,7 @@ export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
       // unitClass is stored as a comma list too ("giant,undead"), though its name doesn't say so.
       out.set(name, { shape: /Flags$/.test(name) ? "flags" : /List/.test(name) || LISTS.has(name) ? "list" : "single", entries });
     }
-    for (const [name, t] of worldEditTypes(parseIni(await w3.game.readText("UI\\WorldEditData.txt").catch(() => "")), (key) => westring(strings, key), out)) out.set(name, t);
+    for (const [name, t] of worldEditTypes(parseIni(await worldData), (key) => westring(strings, key), out)) out.set(name, t);
     return out;
   })();
   typesPromise.catch(() => { typesPromise = null; });
