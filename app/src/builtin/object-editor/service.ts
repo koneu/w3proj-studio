@@ -87,15 +87,18 @@ async function customObjects(w3: W3Api, kind: string, kd: KindData): Promise<Cus
 export async function campaignObjects(w3: W3Api, kind: string, root?: string): Promise<{ campaign: string; custom: RawObject[]; original: RawObject[]; wts: string | null } | null> {
   const campaign = await findCampaign(w3, root ?? w3.workspace.project()?.root);
   if (!campaign) return null;
+  const wtsPath = joinPath(campaign, "map", "war3campaign.wts");
+  // The strings are asked with the two object files; what they say only counts when the campaign has object data.
+  const wtsRead = readWts(w3.workspace, wtsPath).then(
+    (text): { failed: false; text: string } => ({ failed: false, text }),
+    (error: unknown): { failed: true; error: unknown } => ({ failed: true, error }));
   const [main, skin] = await Promise.all([readCampaignObjects<EditFile>(w3, campaign, kind), readCampaignObjects<EditFile>(w3, campaign, kind, true)]);
   if (!main && !skin) return null;
   const base = { format: "w3proj.objects/1", version: main?.version ?? skin?.version ?? 3, original: main?.original ?? [], custom: main?.custom ?? [] } as EditFile;
   const merged = mergeSkin(base, skin && { ...skin, original: skin.original ?? [], custom: skin.custom ?? [] }, { addSkinOnly: true });
-  const wtsPath = joinPath(campaign, "map", "war3campaign.wts");
-  const wts = await readWts(w3.workspace, wtsPath).then((t) => t, (e) => {
-    if (isNotFoundError(e)) return null;
-    throw new Error(`${wtsPath} is there but can't be read (${e instanceof Error ? e.message : String(e)}).`);
-  });
+  const read = await wtsRead;
+  if (read.failed && !isNotFoundError(read.error)) throw new Error(`${wtsPath} is there but can't be read (${read.error instanceof Error ? read.error.message : String(read.error)}).`);
+  const wts = read.failed ? null : read.text;
   return { campaign, custom: (merged.custom ?? []) as RawObject[], original: (merged.original ?? []) as RawObject[], wts };
 }
 
