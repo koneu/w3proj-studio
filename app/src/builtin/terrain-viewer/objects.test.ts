@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { waitUntil } from "../../lib/testhelpers/testutil";
-import { addAnimProps, addClickHelpers, addElevationRadii, addMoveTypes, drawnTeam, loadSkins, paintOf, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addClickHelpers, addElevationRadii, addMoveTypes, drawnTeam, loadSkins, paintOf, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin, modelFailure } from "./objects";
 import { TerrainRenderer, type ObjectInstance } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -490,4 +490,13 @@ test("a unit's Tinting Color paints its model: the table's, the map's own, and n
   assert.deepEqual(paintOf(out.get("h000")!), [1, 40 / 255, 40 / 255]);
   assert.equal(paintOf(out.get("hfoo")!), undefined, "its base is untouched");
   assert.equal(paintOf({ red: 999, green: -5, blue: NaN })?.join(), "1,0,1", "out of range is clamped, not a number is none");
+});
+
+test("a model that didn't load is named once", () => {
+  // The storage's error names the path already.
+  assert.equal(modelFailure("Units\\Human\\Nope\\Nope.mdx", "not found: Units\\Human\\Nope\\Nope.mdx"), "not found: Units\\Human\\Nope\\Nope.mdx");
+  assert.equal(modelFailure("units\\human\\nope\\nope.mdx", "not found: Units\\Human\\Nope\\Nope.mdx"), "not found: Units\\Human\\Nope\\Nope.mdx");
+  // An error that doesn't: the path first.
+  assert.equal(modelFailure("a\\b.mdx", "MDX: unexpected end of data"), "a\\b.mdx: MDX: unexpected end of data");
+  assert.equal(modelFailure("a\\b.mdx", new Error("bad chunk")), "a\\b.mdx: Error: bad chunk");
 });

@@ -95,6 +95,11 @@ const FLAGS: [number, string][] = [
   [0x10000, "Enable water tinting"],
   [0x20000, "Use accurate probability for calculations"],
   [0x40000, "Use custom ability skins"],
+  // The four below as the World Editor's Map Options saves them (ticked one by one, 2026-11-28).
+  [0x80000, "Disable deny icon"],
+  [0x100000, "Force default camera zoom"],
+  [0x400000, "Force min camera zoom"],
+  [0x200000, "Force max camera zoom"],
   [0x1000000, "Alpha-tile default minimap color"],
   [0x2000000, "Dynamic minimap"],
 ];

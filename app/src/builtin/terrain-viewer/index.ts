@@ -1494,6 +1494,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const view = path ? toolGroups.viewCommands.get(path) : undefined;
       if (!view) throw new Error("Switch to a terrain editor first.");
       refuseLostView(path);
+      // From the palette there is no pointer over an object to tell what is meant: said, not silent.
+      if (id === FACE_COMMAND && !view.state().selection.length) { void w3.window.showInfo("Face the Pointer turns the selected units and doodads toward the pointer: select some on the Select tab first."); return; }
       view.keyCommand(id);
     })),
     // The held controls only work held over the map: as commands they say how.
@@ -2887,6 +2889,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onclick: () => showEntries(p.items),
             }, `${p.message} (${p.items.length})`)),
             ...(found.length > 20 ? [h("div.muted", {}, `… ${found.length - 20} more`)] : []),
+            // The fixes for a missing model (another model, the Reforged file imported) are the Problems view's.
+            ...(found.length ? [h("button.link-inline.terrain-problems-link", {
+              title: "Runs the map's checks and shows them: a missing model's fixes are offered there",
+              onclick: () => void w3.commands.execute("w3.problems.run").catch((e) => w3.window.showError(String((e as Error).message ?? e))),
+            }, "Fixes in Problems…")] : []),
             ...(broken.length && editable ? [h("button.terrain-cleanup", {
               title: "Deletes every placed object whose model doesn't load or whose id is unknown (one undo step)",
               onclick: async () => {

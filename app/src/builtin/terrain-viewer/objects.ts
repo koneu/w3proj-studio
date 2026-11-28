@@ -531,6 +531,13 @@ export interface LoadProblem { message: string; items: Placed[] }
 
 /** Loads models for the terrain view. `readFile` reads map-imported files
  *  first; textures are shared between models. */
+/** What the view says about a model that didn't load: its path and why, the path once (the storage's "not found: X"
+ *  names it already). */
+export function modelFailure(path: string, why: unknown): string {
+  const text = String(why);
+  return text.toLowerCase().includes(path.toLowerCase()) ? text : `${path}: ${text}`;
+}
+
 export class ObjectLoader {
   private textures = new Map<string, Promise<WebGLTexture | null>>();
   /** Textures that couldn't be read or decoded, with the reason. */
@@ -702,7 +709,7 @@ export class ObjectLoader {
         }
         loaded[index] = { group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined, ...(req.paint ? { paint: req.paint } : {}) };
       } catch (e) {
-        failed.push({ index, error: `${req.path}: ${(e as Error).message ?? e}` });
+        failed.push({ index, error: modelFailure(req.path, (e as Error).message ?? e) });
       }
     }));
     failed.sort((a, b) => a.index - b.index);

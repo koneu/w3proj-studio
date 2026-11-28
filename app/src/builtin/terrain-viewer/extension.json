@@ -163,7 +163,7 @@
       { "id": "w3.terrain.selection.mirrorY", "hidden": true, "title": "Selection or Paste - Mirror Vertically", "category": "Terrain" },
       { "id": "w3.terrain.selection.rotate90cw", "hidden": true, "title": "Selection or Paste - Rotate 90 Clockwise", "category": "Terrain" },
       { "id": "w3.terrain.selection.rotate90ccw", "hidden": true, "title": "Selection or Paste - Rotate 90 Counterclockwise", "category": "Terrain" },
-      { "id": "w3.terrain.selection.facePointer", "hidden": true, "title": "Selection - Face the Pointer", "category": "Terrain" },
+      { "id": "w3.terrain.selection.facePointer", "when": "terrain", "title": "Selection - Face the Pointer", "category": "Terrain" },
       { "id": "w3.terrain.selection.delete", "hidden": true, "title": "Selection - Delete", "category": "Terrain" },
       { "id": "w3.terrain.selection.recall", "when": "terrain", "title": "Select the Last Selection, or None", "category": "Terrain" },
       { "id": "w3.terrain.tab.terrain", "when": "terrain", "title": "Terrain Tab (the World Editor's Terrain Palette)", "category": "Terrain" },
