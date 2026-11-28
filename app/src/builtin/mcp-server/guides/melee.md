@@ -54,7 +54,13 @@ Goals always win over numbers: fair starts, real choices, and units that get whe
 - Tree islands. Forest is walls with ways through them, not clumps on a field: scattering trees over open ground
   leaves islands armies walk round on every side, and a map that is one field. check_melee's "open ground" finding
   measures it: 10.8 to 26.1% of the walkable ground of the ladder maps is more than 400 from anything in the way.
-  Fill what isn't base, way, clearing or shop with forest, and reserve those first (reserve_area).
+  Reserve what isn't forest first (reserve_area: bases, mines, roads, clearings for camps, shops), then
+  fill_forest plants everything else and leaves ways of the width you give between the reserved places.
+- Judging a layout from a 3D picture of the whole map. It is too small to read. map_layout gives the map as a
+  flat-colour plan: ground, forest, cliffs, water, camps with their sight, routes. Look at it after every big step.
+- Every terrain call made twice. The terrain tools (set_cliff_level, set_cliff_type, set_water, set_ramp,
+  paint_terrain, paint_path, sculpt_terrain) take mirror, like the placing tools: one call changes the place and
+  its twin round the map's middle.
 - Creeps from memory. list_objects with kind units, scope game, creeps and tileset map gives the tileset's creeps
   with their levels, weakest first: build camps from that list, by level.
 - Decoration that blocks. scatter_objects with nonBlocking takes only what units walk through, and ground keeps

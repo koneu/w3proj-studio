@@ -907,3 +907,18 @@ export function pocketSpots(x: number, y: number, radius: number, opening: numbe
   }
   return out;
 }
+
+/** The twin of a place for a mirrored ground change: the map turned half round its middle. */
+export function twinPlace<P extends Area | { points: readonly [number, number][]; width: number } | readonly [number, number]>(place: P, t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">): P {
+  const sx = 2 * t.offsetX + (t.width - 1) * 128, sy = 2 * t.offsetY + (t.height - 1) * 128;
+  if (Array.isArray(place)) return [sx - (place as readonly number[])[0], sy - (place as readonly number[])[1]] as unknown as P;
+  if ("points" in (place as object)) { const line = place as { points: readonly [number, number][]; width: number }; return { ...line, points: line.points.map(([x, y]) => [sx - x, sy - y] as [number, number]) } as unknown as P; }
+  const a = place as Area;
+  return { ...a, left: sx - a.right, right: sx - a.left, bottom: sy - a.top, top: sy - a.bottom, ...(a.name ? { name: `${a.name}'s twin` } : {}) } as unknown as P;
+}
+
+/** A ground change done at a place and, with `mirror`, at its twin too, as one change: the corners of both. */
+export function withTwin<P extends Parameters<typeof twinPlace>[0]>(mirror: unknown, place: P, change: (t: Terrain, place: P) => number[]): (t: Terrain) => number[] {
+  if (mirror !== undefined && typeof mirror !== "boolean") throw new Error("mirror must be true or false.");
+  return (t) => (mirror === true ? [...new Set([...change(t, place), ...change(t, twinPlace(place, t))])] : change(t, place));
+}

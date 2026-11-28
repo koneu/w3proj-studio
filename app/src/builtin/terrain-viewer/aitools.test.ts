@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import * as aitools from "./aitools";
-import { groundKind, groupSkipped, pocketSpots, replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { groundKind, groupSkipped, pocketSpots, twinPlace, withTwin, replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, parseArea, playableArea } from "../../lib/terrain/area";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
 
@@ -708,4 +708,23 @@ test("a place is land, shore or water by the water showing at its tile's corners
   assert.equal(groundKind(t, 12 * 128 - 10, 12 * 128 - 10), "land");
   // Off the map: the edge tile's.
   assert.equal(groundKind(t, -500, -500), "land");
+});
+
+test("a mirrored ground change is done at the place and at its twin, as one change", () => {
+  const t = field(); // 16 x 16 tiles from (0, 0): its middle is (1024, 1024)
+  assert.deepEqual(twinPlace([256, 512] as const, t), [1792, 1536]);
+  assert.deepEqual(twinPlace({ left: 128, bottom: 256, right: 512, top: 384, name: "hill" }, t), { left: 1536, bottom: 1664, right: 1920, top: 1792, name: "hill's twin" });
+  assert.deepEqual(twinPlace({ points: [[0, 0], [128, 256]] as [number, number][], width: 96 }, t), { points: [[2048, 2048], [1920, 1792]], width: 96 });
+  // A hill in the south-west, mirrored: the same hill in the north-east, and the corners of both are reported.
+  const hillAt = { left: 0, bottom: 0, right: 512, top: 512 };
+  const one = sculptCorners(field(), hillAt, "ellipse", "raise", 100);
+  const changed = withTwin(true, hillAt, (g, a) => sculptCorners(g, a, "ellipse", "raise", 100))(t);
+  assert.equal(changed.length, one.length * 2);
+  for (let y = 0; y <= 16; y++) for (let x = 0; x <= 16; x++) assert.equal(at(t, x, y), at(t, 16 - x, 16 - y), `corner ${x}, ${y} and its twin`);
+  assert.ok(at(t, 2, 2) > 50 && at(t, 8, 8) === 0);
+  // Without mirror only the place; a mirror that isn't true or false is refused.
+  const alone = field();
+  withTwin(undefined, hillAt, (g, a) => sculptCorners(g, a, "ellipse", "raise", 100))(alone);
+  assert.ok(at(alone, 2, 2) > 50 && at(alone, 14, 14) === 0);
+  assert.throws(() => withTwin("yes", hillAt, () => []), /mirror must be true or false/);
 });

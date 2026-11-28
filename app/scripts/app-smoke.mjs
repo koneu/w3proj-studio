@@ -3982,6 +3982,50 @@ async function mapShapeTools(page, found) {
     const spots = json(await k.tool("find_spots", { kind: "camp", count: 6 }));
     if (!Array.isArray(spots.spots) || spots.spots.some((x) => x.sheltered < 0.41) || (spots.openPlaces ?? []).some((x) => x.exposed !== true) || (spots.spots.length < 6 && typeof spots.note !== "string")) fail(`find_spots answered ${lit({ spots: spots.spots?.map((x) => x.sheltered), open: spots.openPlaces?.length, note: spots.note })}`);
     await k.save();
+
+    // A terrain tool with mirror: the plateau and its twin in one edit, one undo.
+    const levelsAt = async (left, bottom) => json(await k.tool("terrain_info", { left, bottom, right: left + 384, top: bottom + 384 })).cliffLevels;
+    await k.tool("set_cliff_level", { level: 4, left: 2432, bottom: 512, right: 2816, top: 896, shape: "box", mirror: true });
+    const raised = [await levelsAt(2432, 512), await levelsAt(-2816, -896)];
+    if (lit(raised) !== lit([[4], [4]])) fail(`set_cliff_level with mirror left the levels ${lit(raised)} at the place and its twin, not 4 at both`);
+    await k.tool("undo_last_edit");
+    const lowered = [await levelsAt(2432, 512), await levelsAt(-2816, -896)];
+    if (lowered.some((l) => l.includes(4))) fail(`one undo after a mirrored set_cliff_level left ${lit(lowered)}`);
+    // fill_forest: with nothing reserved it refuses; with the two bases reserved, forest takes the rest and a way
+    // stays free between them, the same on both halves.
+    const nothing = await refused("fill_forest", { ids: ["LTlt"] });
+    if (!nothing || !/Nothing is reserved/.test(nothing)) fail(`fill_forest with nothing reserved: ${lit(nothing)}`);
+    await k.tool("reserve_area", { name: "west base", left: -3500, bottom: 2500, right: -2500, top: 3500 });
+    await k.tool("reserve_area", { name: "east base", left: 2500, bottom: -3500, right: 3500, top: -2500 });
+    const before = trees().length;
+    const trial = json(await k.tool("fill_forest", { ids: ["LTlt"], mirror: true, dryRun: true }));
+    if (!(trial.wouldPlant > 300) || trial.ways?.length !== 1 || trial.ways[0].from !== "west base" || trial.ways[0].to !== "east base" || trees().length !== before) fail(`fill_forest's trial run answered ${lit(trial)}`);
+    const flowers = await refused("fill_forest", { ids: ["ZPfw"] });
+    if (!flowers || !/has no pathing footprint/.test(flowers)) fail(`a forest of flowers wasn't refused: ${lit(flowers)}`);
+    const forest = json(await k.tool("fill_forest", { ids: ["LTlt"], mirror: true }, { timeout: 300000 }));
+    await k.save();
+    const grown = trees();
+    if (forest.planted !== trial.wouldPlant || grown.length !== before + forest.planted) fail(`fill_forest planted ${forest.planted} (the trial run said ${trial.wouldPlant}); the map has ${grown.length - before} more trees`);
+    if (grown.some((d) => Math.abs(d.position[0] + 3000) < 436 && Math.abs(d.position[1] - 3000) < 436)) fail("trees stand in the reserved west base");
+    const walk = json(await k.tool("check_path", { from: [-3000, 3000], to: [3000, -3000] }));
+    if (!walk.walkable || !(walk.narrowest?.width >= 384)) fail(`after the forest the way between the bases is ${lit({ walkable: walk.walkable, narrowest: walk.narrowest, problem: walk.problem })}`);
+    const key = (d) => `${Math.round(d.position[0])},${Math.round(d.position[1])}`, planted = new Set(grown.map(key));
+    // A tree whose twin would stand past the playable map (its border is wider in the north) has none, by design.
+    const north = Math.max(...grown.map((d) => d.position[1])), east = Math.max(...grown.map((d) => d.position[0]));
+    const lone = grown.filter((d) => -d.position[1] <= north && -d.position[0] <= east && !planted.has(`${Math.round(-d.position[0])},${Math.round(-d.position[1])}`)).length;
+    if (lone > grown.length * 0.02) fail(`${lone} of ${grown.length} trees have no twin after a mirrored fill`);
+    // The melee check now finds a map that isn't open field.
+    const report = json(await k.tool("check_melee", {}, { timeout: 300000 }));
+    if (!(report.measures?.openGround < 30) || report.findings.some((x) => x.rule === "open ground" && /mostly open field/.test(x.message))) fail(`after the forest check_melee measures ${report.measures?.openGround}% open ground`);
+    if (typeof report.measures?.treesPlayable !== "number" || !Array.isArray(report.measures?.campRings)) fail(`check_melee's measures lack the playable trees or the camps' rings: ${lit(Object.keys(report.measures ?? {}))}`);
+
+    // map_layout: a picture and what it shows.
+    const layout = JSON.parse(await page.evaluate(`w3.mcp.handle(${lit(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "map_layout", arguments: { maxSize: 512 } } }))})`, { timeout: 300000 }));
+    const [image, words] = layout.result?.content ?? [];
+    const png = image?.type === "image" && image.mimeType === "image/png" ? Buffer.from(image.data, "base64") : null;
+    if (!png || png.toString("latin1", 1, 4) !== "PNG" || png.readUInt32BE(16) < 256 || png.readUInt32BE(16) > 512) fail(`map_layout's picture: ${lit({ type: image?.type, bytes: png?.length, width: png?.readUInt32BE(16), error: layout.error?.message ?? layout.result?.content?.[0]?.text })}`);
+    if (png) writeFileSync(join(work, "map-layout.png"), png); // to look at after a run
+    if (!/The whole map as a plan, north up/.test(words?.text ?? "") || !/\d+ starts, /.test(words.text) || !/dark green: trees/.test(words.text)) fail(`map_layout's words: ${lit(words?.text)}`);
   } catch (e) { fail(e.message); } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
