@@ -1,0 +1,71 @@
+{
+  "camp pocket": {
+    "places": 484,
+    "ringClosed": {
+      "low": 0.46,
+      "usual": 0.67,
+      "high": 0.75
+    },
+    "waysIn": {
+      "low": 1,
+      "usual": 1,
+      "high": 2
+    },
+    "widestGap": {
+      "low": 75,
+      "usual": 105,
+      "high": 180
+    },
+    "roomAtMiddle": {
+      "low": 224,
+      "usual": 320,
+      "high": 448
+    }
+  },
+  "natural": {
+    "places": 64,
+    "ringClosed": {
+      "low": 0.5,
+      "usual": 0.67,
+      "high": 0.75
+    },
+    "waysIn": {
+      "low": 1,
+      "usual": 1,
+      "high": 1
+    },
+    "widestGap": {
+      "low": 90,
+      "usual": 120,
+      "high": 180
+    },
+    "roomAtMiddle": {
+      "low": 128,
+      "usual": 160,
+      "high": 160
+    }
+  },
+  "shop clearing": {
+    "places": 170,
+    "ringClosed": {
+      "low": 0.21,
+      "usual": 0.67,
+      "high": 0.75
+    },
+    "waysIn": {
+      "low": 1,
+      "usual": 1,
+      "high": 1
+    },
+    "widestGap": {
+      "low": 75,
+      "usual": 120,
+      "high": 240
+    },
+    "roomAtMiddle": {
+      "low": 128,
+      "usual": 160,
+      "high": 160
+    }
+  }
+}

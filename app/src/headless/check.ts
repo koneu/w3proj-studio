@@ -18,7 +18,7 @@ import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
 import { MANIFEST_FILE, MELEE_SETTINGS, applySeverity, disabledIds, isDisabled, meleeMode, readChecksConfig, type MeleeSetting } from "../builtin/problems/checkconfig";
 import { DEFAULT_UNIT_SIZE } from "../builtin/terrain-viewer/pathcheck";
-import { meleeReport, pathReport, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
+import { meleePlaces, meleeReport, pathReport, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
 import { graphicsModeOf } from "../builtin/problems/mode";
 import * as problemsExtension from "../builtin/problems/index";
@@ -141,6 +141,8 @@ export async function check(job: CheckJob): Promise<CheckReport> {
       try {
         const m = await meleeReport(w3, await ground(), unitSize);
         report.melee = m;
+        // For scripts/melee-reference.mjs only: the measures of the map's camps, naturals and shops (melee_motif's source).
+        if (process.env.W3PROJ_MELEE_PLACES === "1") (report as unknown as Record<string, unknown>).meleePlaces = await meleePlaces(w3, await ground());
         for (const f of m.findings.filter((f) => !isDisabled(cfg.config, `melee/${f.rule}`))) rows.push({ severity: applySeverity(cfg.config, `melee/${f.rule}`, f.severity), check: `melee/${f.rule}`, ...(f.at ? { location: at(f.at) } : {}), message: f.fix ? `${f.message} Fix: ${f.fix}` : f.message });
         report.sections.push({ section: "melee", ran: true, ...(why ? { note: why } : {}) });
       } catch (e) {

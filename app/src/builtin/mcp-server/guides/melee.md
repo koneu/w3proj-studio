@@ -68,6 +68,9 @@ Goals always win over numbers: fair starts, real choices, and units that get whe
   lily pads to water and bushes to land; an id given twice is taken twice as often.
 - Trees in the border. Trees past the playable area count for nothing: check_melee counts the playable ones
   (1,055 to 1,983 on the ladder maps).
+- Building a pocket, a natural or a shop clearing from imagination. melee_motif gives what such places measure
+  on the game's two-player maps (how much of the ring round them is walled off, the ways in, how wide the open side is,
+  the room at the middle), each as low, usual and high. Build yours inside those spans.
 - A map unlike any other, unnoticed. check_melee's comparison sets the map's numbers (open ground, walkable
   share, camps and their shelter and levels, walks, mines, trees) beside the game's 34 two-player melee maps and
   lists where it lies outside them, or outside where most of them lie. Outside isn't wrong, but it should be meant.

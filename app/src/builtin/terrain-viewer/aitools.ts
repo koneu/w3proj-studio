@@ -922,3 +922,48 @@ export function withTwin<P extends Parameters<typeof twinPlace>[0]>(mirror: unkn
   if (mirror !== undefined && typeof mirror !== "boolean") throw new Error("mirror must be true or false.");
   return (t) => (mirror === true ? [...new Set([...change(t, place), ...change(t, twinPlace(place, t))])] : change(t, place));
 }
+
+/** A place scatter_objects fills that is neither a box nor an ellipse: the inside of a polygon (three points or
+ *  more), or a band `width` wide along a line of points (a hedge, a shore, a road's edge). */
+export type FreeShape = { polygon: [number, number][] } | { line: [number, number][]; width: number };
+
+/** `points` and `width` as a tool gave them: a band along the line with a width, a polygon without. */
+export function freeShapeOf(points: unknown, width: unknown): FreeShape | null {
+  if (points === undefined) return null;
+  if (!Array.isArray(points) || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && Number.isFinite(n)))) throw new Error("points must be a list of [x, y].");
+  const list = points as [number, number][];
+  if (width !== undefined) {
+    if (typeof width !== "number" || !(width > 0)) throw new Error("width must be above 0: how wide the band along the points is.");
+    if (list.length < 2) throw new Error("A band needs at least two points.");
+    return { line: list, width };
+  }
+  if (list.length < 3) throw new Error("points without a width are a polygon: give at least three, or a width for a band along them.");
+  return { polygon: list };
+}
+
+/** The rectangle a free shape lies in. */
+export function boundsOf(shape: FreeShape): Area {
+  const pts = "polygon" in shape ? shape.polygon : shape.line, pad = "polygon" in shape ? 0 : shape.width / 2;
+  return { left: Math.min(...pts.map((p) => p[0])) - pad, right: Math.max(...pts.map((p) => p[0])) + pad, bottom: Math.min(...pts.map((p) => p[1])) - pad, top: Math.max(...pts.map((p) => p[1])) + pad };
+}
+
+/** Whether a place lies in a free shape: inside the polygon (its edges crossed an odd number of times to the east),
+ *  or within half the width of the line. */
+export function inFreeShape(shape: FreeShape, x: number, y: number): boolean {
+  if ("line" in shape) {
+    let best = Infinity;
+    for (let i = 0; i + 1 < shape.line.length; i++) {
+      const [ax, ay] = shape.line[i], [bx, by] = shape.line[i + 1], dx = bx - ax, dy = by - ay, span = dx * dx + dy * dy;
+      const k = span ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / span)) : 0;
+      best = Math.min(best, Math.hypot(x - ax - k * dx, y - ay - k * dy));
+    }
+    return best <= shape.width / 2;
+  }
+  let inside = false;
+  const p = shape.polygon;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+    const [xi, yi] = p[i], [xj, yj] = p[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}

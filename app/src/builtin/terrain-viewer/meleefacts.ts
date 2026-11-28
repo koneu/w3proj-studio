@@ -8,13 +8,14 @@ import { parseSlk } from "../../lib/formats/text";
 import { NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { mapEdgeTiles, onBoundary, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { openness, ringAround } from "./meleeshape";
+import type { Measured, MeasuredPlaces } from "./meleemotifs";
 import type { Reference } from "./meleefeatures";
 import reference from "./meleereference.json";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
-import { checkMelee, unitLevels } from "./meleecheck";
+import { campsOf, checkMelee, unitLevels } from "./meleecheck";
 import type { Placed } from "./objects";
 import { Occupancy } from "./occupancy";
-import { DEFAULT_UNIT_SIZE, checkPath, nearestObject, narrowStrips, widestFrom, widthOf, type Grid, type PathReport } from "./pathcheck";
+import { DEFAULT_UNIT_SIZE, checkPath, clearance, nearestObject, narrowStrips, widestFrom, widthOf, type Grid, type PathReport } from "./pathcheck";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { loadPlacedFile } from "./placement";
 import { applyTilesetWater } from "./wateroffset";
@@ -142,6 +143,34 @@ export async function meleeFacts(w3: W3Api, src: WalkSource, size: number) {
     return tx >= 0 && ty >= 0 && tx < t.width - 1 && ty < t.height - 1 && !edge[ty * (t.width - 1) + tx] && !onBoundary(t, x, y);
   };
   return { grid, widest, units, trees, routes, levelAt, commonLevel, playable, levels: level, sights: (id: string) => lookup(sights, id), number, game, data };
+}
+
+/** Shops of a melee map: the neutral buildings players buy at (the marketplace, tavern, laboratory, merchant,
+ *  mercenary camps, dragon roost, shipyard). */
+const SHOP = /^(ngme|ntav|ngad|nmrk|ndrk|ndru|ndrr|ndrg|ndro|ndrz|nshp|nmer|nmr.)$/;
+
+/** A two-player map's places for melee_motif (meleemotifs.ts), each as its measures only: every camp that guards no
+ *  mine, each start's nearest other mine, and every shop. A development measure: scripts/melee-reference.mjs runs it
+ *  over the game's maps and keeps the spans. */
+export async function meleePlaces(w3: W3Api, src: WalkSource): Promise<MeasuredPlaces> {
+  const f = await meleeFacts(w3, src, DEFAULT_UNIT_SIZE);
+  const g = f.grid, room = clearance(g);
+  const starts = f.units.filter((u) => u.id === "sloc"), mines = f.units.filter((u) => u.id === "ngol"), shops = f.units.filter((u) => u.player === 27 && SHOP.test(u.id));
+  const camps = campsOf(f.units, { level: f.levels });
+  const guard = (c: { centre: [number, number] }) => mines.some((m) => Math.hypot(m.x - c.centre[0], m.y - c.centre[1]) < 750);
+  const at = (x: number, y: number): Measured => {
+    const cx = Math.floor((x - g.offsetX) / 32), cy = Math.floor((y - g.offsetY) / 32), ring = ringAround(g, x, y);
+    // The room at the middle: the widest clearance within 256 of it (a mine or a shop fills the middle itself).
+    let most = 0;
+    for (let b = -8; b <= 8; b++) for (let a = -8; a <= 8; a++) if (cx + a >= 0 && cy + b >= 0 && cx + a < g.width && cy + b < g.height) most = Math.max(most, room[(cy + b) * g.width + cx + a]);
+    return { closed: Math.round(ring.closed * 100) / 100, ways: ring.ways, widest: ring.widest, room: most * 32 };
+  };
+  const naturals = starts.flatMap((s) => mines.filter((m) => Math.hypot(m.x - s.x, m.y - s.y) > 1150).sort((a, b) => Math.hypot(a.x - s.x, a.y - s.y) - Math.hypot(b.x - s.x, b.y - s.y)).slice(0, 1));
+  return {
+    "camp pocket": camps.filter((c) => !guard(c)).map((c) => at(c.centre[0], c.centre[1])),
+    natural: [...new Set(naturals)].map((m) => at(m.x, m.y)),
+    "shop clearing": shops.map((s) => at(s.x, s.y)),
+  };
 }
 
 /** check_melee: the map against what ladder maps do. */
