@@ -40,13 +40,16 @@ export interface ViewSet {
   /** A split terrain's subterrains: their rectangles (where corner and object ownership changes) and names. Studio's
    *  own mark (the World Editor has no subterrains); game view hides it with the editor's marks. */
   subterrains: boolean;
+  /** A ring round each creep as far as it acquires targets (where it wakes up and attacks). Studio's own mark (the
+   *  World Editor has none); game view hides it with the editor's marks. */
+  acquireRanges: boolean;
 }
 
 /** The layers that are a picture laid over the ground (built per pathing cell, see refreshLayers). */
 export const GROUND_LAYERS = ["naval", "heights", "cameras", "pathing", "regions"] as const;
 export type GroundLayer = (typeof GROUND_LAYERS)[number];
 /** The layers a View command switches on and off. */
-export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info" | "effects" | "cliffs" | "subterrains";
+export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info" | "effects" | "cliffs" | "subterrains" | "acquireRanges";
 
 export interface Shown extends ViewSet {
   /** The start locations and the start buildings drawn in their rings (with Info Display). */
@@ -71,7 +74,7 @@ export function shownView(set: ViewSet, gameView: boolean): Shown {
     terrain: "textured", doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true, weather: true,
     lighting: true, fog: true,
     grid: "none", naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
-    cameraBounds: false, info: false, starts: false, subterrains: false,
+    cameraBounds: false, info: false, starts: false, subterrains: false, acquireRanges: false,
   };
 }
 
@@ -101,6 +104,34 @@ export function dropRings(units: readonly { id: string; position: readonly numbe
     const drops = (u.itemTable ?? -1) >= 0 || (u.itemSets?.length ?? 0) > 0;
     const [x, y] = u.position;
     if (drops && u.id !== "sloc" && Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y, r: DROP_RING.r, rgb: DROP_RING.rgb });
+  }
+  return out;
+}
+
+// ---- acquire ranges ----------------------------------------------------------------------------
+
+/** The colour of the acquire range rings. */
+export const ACQUIRE_RGB: [number, number, number] = [255, 96, 48];
+/** Neutral Hostile, the creeps' player (war3mapUnits.doo). */
+const CREEP_PLAYER = 24;
+
+/**
+ * Acquire ranges: a ring round each placed creep (a Neutral Hostile unit) as far as it acquires targets in the game,
+ * which is where it wakes up and attacks. A placed unit's target acquisition is -1 for its type's own range
+ * (`typeRange`, uacq; 0 when the type doesn't attack or isn't known), -2 for "camp" (`campRange`: the map script sets
+ * 200, lib/script/units.ts) or a range of its own. None for a unit that acquires nothing.
+ */
+export function acquireRings(
+  units: readonly { id: string; position: readonly number[]; player?: number; targetAcquisition?: number }[],
+  typeRange: (unit: { id: string }) => number, campRange = 200,
+): RangeRing[] {
+  const out: RangeRing[] = [];
+  for (const u of units) {
+    if (u.player !== CREEP_PLAYER || u.id === "sloc") continue;
+    const set = u.targetAcquisition ?? -1;
+    const r = set === -2 ? campRange : set > 0 ? set : typeRange(u);
+    const [x, y] = u.position;
+    if (r > 0 && Number.isFinite(r) && Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y, r, rgb: ACQUIRE_RGB });
   }
   return out;
 }

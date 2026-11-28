@@ -26,7 +26,7 @@ import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, water
 import { errorView, h } from "../../workbench/dom";
 import { flyStep, lookAround, panReach } from "./freelook";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, SUBTERRAIN_RGB, subterrainOutline, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { acquireRings, anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, SUBTERRAIN_RGB, subterrainOutline, TERRAIN_LOOKS, type RangeRing, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject, ViewClipping } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { textureCandidates } from "../../lib/model/texpath";
@@ -110,12 +110,12 @@ import { specialsAfterCliffs } from "../../lib/terrain/specialfit";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
-import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
+import { CAMP_RANGE, changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
 import { dropsBlock, randomItemEntries, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
-import { bulkDrops, itemTablesDiffer } from "./dropsview";
+import { bulkDrops, itemTablesDiffer, NEUTRAL_HOSTILE } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { withAllSubterrainsOpen } from "../../lib/terrain/openall";
 import { PendingWork } from "../../lib/settle";
@@ -219,6 +219,7 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleFogEffects", async (v) => why(await v.toggleSetting("fog"))],
   ["w3.terrain.toggleCameraBounds", (v) => why(v.toggleLayer("cameraBounds"))],
   ["w3.terrain.toggleSubterrains", (v) => why(v.toggleLayer("subterrains"))],
+  ["w3.terrain.toggleAcquireRanges", (v) => why(v.toggleLayer("acquireRanges"))],
   ["w3.terrain.toggleCliffs", (v) => why(v.toggleLayer("cliffs"))],
   ["w3.terrain.toggleEffects", (v) => why(v.toggleLayer("effects"))],
   ["w3.terrain.cycleSky", (v) => v.cycleSky()],
@@ -1884,6 +1885,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let showCameraBounds = (_again?: boolean) => {};
         /** Set with the View commands (below): the subterrain overlay again, after the choice changed or edits. */
         let showSubterrains = (_again?: boolean) => {};
+        /** Set with the View commands (below): the acquire range rings again, after the types' ranges were saved. */
+        let acquireRangesAgain = () => {};
         /** Set with the minimap panel (below): its picture again after edits, its outline after the camera moved, and
          *  the panel shown or not after its setting changed. */
         let minimapPanelSoon = (_ms?: number) => {}, minimapOutline = () => {}, minimapSetting = () => {};
@@ -2967,7 +2970,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (projectObjects && groupCycle > 0 && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void viewWork.track(readRandomGroups().then((g) => { if (g && !disposed) { randomGroups = g; return rebuildObjects(); } }));
           // The properties panel reads its lists and the types' facts anew.
           if (/(^|\/)war3map(\.w3[ir]|\.wts)(\.json)?$/i.test(p)) mapLists = null;
-          if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) factsData = null;
+          if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) { factsData = null; acquireRangesAgain(); }
           if (/(^|\/)war3(map|campaign)(Skin)?\.w3a(\.json)?$/i.test(p)) readStartGold();
           const art = changesObjectData(p);
           const imported = changesImports(p);
@@ -5792,6 +5795,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const refreshLayersSoon = () => {
           if (shown.lightRanges) showLightRanges();
           showDropRings();
+          showAcquireRings();
           showCameraBounds(true);
           showSubterrains(true);
           minimapPanelSoon();
@@ -5847,6 +5851,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setRings("drops", rings);
           redraw();
         };
+        /** Acquire ranges: a ring round every placed creep as far as it acquires targets (viewmodes.ts acquireRings),
+         *  while units are shown. Made again when the creeps, their places or their ranges change (acquireKey); the
+         *  types' ranges are read with the properties panel's facts (the map's object data over the game's). */
+        let acquireKey = "", acquireRun = 0;
+        const showAcquireRings = () => {
+          const run = ++acquireRun;
+          const set = (rings: RangeRing[]) => {
+            const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r}`).join(";");
+            if (key === acquireKey) return;
+            acquireKey = key;
+            renderer.setRings("acquire", rings);
+            redraw();
+          };
+          if (!(shown.acquireRanges && shown.units)) { set([]); return; }
+          const creeps = (unitsFile?.list ?? []).filter((p) => (p as { player?: number }).player === NEUTRAL_HOSTILE && p.id !== "sloc");
+          void factsOf(creeps).then((items) => {
+            if (run !== acquireRun || disposed) return;
+            const ranges = new Map(items.map((it) => [it.entry.id, it.facts.attacks ? it.facts.acquireRange : 0]));
+            set(acquireRings(creeps as Parameters<typeof acquireRings>[0], (u) => ranges.get(u.id) ?? 0, CAMP_RANGE));
+          }, (e) => { if (run === acquireRun && !disposed) w3.window.showError(`The acquire ranges couldn't be read: ${(e as Error)?.message ?? e}`); });
+        };
+        acquireRangesAgain = showAcquireRings;
         /** Camera Bounds (B): a line round the map's camera bounds, following the ground. Made again when the bounds
          *  were read again (a save of war3map.w3i, a map size change) or the choice changed (boundsKey), and after
          *  edits (`again`: the ground under it may have moved). */
@@ -5904,6 +5930,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (anyGroundLayer(was) || anyGroundLayer(shown)) void refreshLayers();
           showLightRanges();
           showDropRings();
+          showAcquireRings();
           showCameraBounds();
           showSubterrains();
           // A selected start location can't stay selected where it isn't shown.
@@ -6147,6 +6174,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
                 layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
                 layerToggle("Info", "Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
+                layerToggle("Acquire ranges", "How far each creep acquires targets, which is where it wakes up and attacks: a red ring round every Neutral Hostile unit (its type's range, Camp's 200 or its own)", "acquireRanges", "w3.terrain.toggleAcquireRanges"),
                 ...(openState ? [layerToggle("Subterrains", "The split terrain's subterrains: their rectangles (where the files a corner or object is saved in change) and names, closed ones too", "subterrains", "w3.terrain.toggleSubterrains")] : []),
                 layerBusy),
               ...(editable ? [toggleGroup("Behaviour", "How edits behave",

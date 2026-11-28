@@ -9185,7 +9185,7 @@ async function toggleGroups(page, found) {
     const WANT = {
       View: ["Doodads", "Units", "Water", "Blight", "Cliffs", "Effects", "Animate", "Lighting", "Fog", "Weather", "Shadows", "Boundary", "Minimap"],
       // Subterrains: every new map is split (one subterrain main).
-      Overlays: ["Height map", "Ground pathing", "Naval pathing", "Regions", "Camera objects", "Light ranges", "Camera bounds", "Info", "Subterrains"],
+      Overlays: ["Height map", "Ground pathing", "Naval pathing", "Regions", "Camera objects", "Light ranges", "Camera bounds", "Info", "Acquire ranges", "Subterrains"],
       Behaviour: ["Water limits", "Keep pasted height", "Reset fixed heights", "Enforce camera bounds"],
     };
     const SELECTS = { View: 3, Overlays: 1, Behaviour: 0 };
@@ -9217,7 +9217,7 @@ async function toggleGroups(page, found) {
       Doodads: "toggleDoodads", Units: "toggleUnits", Water: "toggleWater", Blight: "toggleBlight", Cliffs: "toggleCliffs", Effects: "toggleEffects",
       Animate: "toggleAnimate", Lighting: "toggleLighting", Fog: "toggleFogEffects", Weather: "toggleWeather", Shadows: "toggleShadows", Boundary: "toggleBoundary", Minimap: "toggleMinimap",
       "Height map": "toggleHeightMap", "Ground pathing": "toggleGroundPathing", "Naval pathing": "toggleNavalPathing", Regions: "toggleRegions", "Camera objects": "toggleCameraObjects",
-      "Light ranges": "toggleLightRanges", "Camera bounds": "toggleCameraBounds", Info: "toggleInfoDisplay", Subterrains: "toggleSubterrains",
+      "Light ranges": "toggleLightRanges", "Camera bounds": "toggleCameraBounds", Info: "toggleInfoDisplay", "Acquire ranges": "toggleAcquireRanges", Subterrains: "toggleSubterrains",
       "Water limits": "toggleEnforceWaterLimits", "Keep pasted height": "togglePreserveCopiedHeight", "Reset fixed heights": "toggleResetFixedHeights", "Enforce camera bounds": "toggleEnforceCameraBounds",
     };
     for (const [label, cmd] of Object.entries(COMMANDS)) {

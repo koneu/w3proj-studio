@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { WHEEL_ZOOM } from "./wheelzoom";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, pathingSwitch, shownView, subterrainOutline, type ViewSet } from "./viewmodes";
+import { ACQUIRE_RGB, acquireRings, anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, pathingSwitch, shownView, subterrainOutline, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand, selectionEditOf } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 import { repoPath } from "../../lib/testhelpers/testutil";
@@ -21,7 +21,7 @@ const keyOf = (command: string) => { const k = primaryKey(bindings, command); re
 const chosen: ViewSet = {
   terrain: "wireframe", doodads: false, units: true, water: false, blight: false, cliffs: false, effects: false, weather: false,
   lighting: false, fog: false, grid: "small", naval: true, heights: true, cameras: true, pathing: true, regions: true, lightRanges: true,
-  cameraBounds: true, info: true, subterrains: true,
+  cameraBounds: true, info: true, subterrains: true, acquireRanges: true,
 };
 
 test("the subterrain overlay: an outline of the corners a subterrain owns, shared with its neighbour; game view hides it", () => {
@@ -280,4 +280,24 @@ test("pathingSwitch: Ground and Naval pathing are one switch, as in the World Ed
   assert.deepEqual(pathingSwitch("naval"), { pathing: false });
   assert.deepEqual(pathingSwitch("pathing"), { naval: false });
   assert.deepEqual(pathingSwitch("regions"), {});
+});
+
+test("acquireRings: a ring round each creep as far as it acquires targets, none for other players or no range", () => {
+  const typeRange = (u: { id: string }) => ({ ngnb: 500, nshe: 0 })[u.id] ?? 0;
+  const rings = acquireRings([
+    { id: "ngnb", position: [100, 200, 0], player: 24, targetAcquisition: -1 },
+    { id: "ngnb", position: [300, 400, 0], player: 24, targetAcquisition: -2 },
+    { id: "ngnb", position: [500, 600, 0], player: 24, targetAcquisition: 750 },
+    { id: "ngnb", position: [700, 800, 0], player: 24 },
+    { id: "nshe", position: [900, 0, 0], player: 24, targetAcquisition: -1 },
+    { id: "ngnb", position: [0, 0, 0], player: 0, targetAcquisition: -1 },
+    { id: "ngnb", position: [0, 0, 0], player: 27, targetAcquisition: -2 },
+    { id: "sloc", position: [0, 0, 0], player: 24 },
+    { id: "ngnb", position: [NaN, 0, 0], player: 24, targetAcquisition: -2 },
+    { id: "ratc", position: [0, 0, 0] },
+  ], typeRange);
+  assert.deepEqual(rings.map((r) => [r.x, r.y, r.r]), [[100, 200, 500], [300, 400, 200], [500, 600, 750], [700, 800, 500]]);
+  assert.ok(rings.every((r) => r.rgb === ACQUIRE_RGB));
+  assert.equal(shownView({ ...chosen, acquireRanges: true }, true).acquireRanges, false, "an editor's mark, gone in game view");
+  assert.ok(manifest.contributes.commands.some((c) => c.id === "w3.terrain.toggleAcquireRanges"));
 });
