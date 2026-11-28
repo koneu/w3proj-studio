@@ -562,12 +562,85 @@ export class ObjectLoader {
   /** Forgets every loaded model and texture (and what was missing): files the map imports
    *  changed, so they're read again on the next load. */
   reset() {
+    // What was loaded is no longer found by the loader, but groups drawn now (cliffs, shoreline, sky, the objects until
+    // they are rebuilt) still use it: it is deleted by release() once nothing draws it.
+    this.retired.textures.push(...this.textures.values());
+    this.retired.models.push(...this.models.values());
+    this.retired.effects.push(...this.effectSources.values());
     this.textures.clear();
     if (this.missing.size) this.missingVersion++;
     this.missing.clear();
     this.textureUsers.clear();
     this.models.clear();
     this.effectSources.clear();
+    this.releaseSoon();
+  }
+
+  /** Models, textures and effects that reset() forgot and whose GL objects aren't deleted yet. */
+  private retired = { models: [] as Promise<ModelGpu>[], textures: [] as Promise<WebGLTexture | null>[], effects: [] as Promise<EffectSource | null>[] };
+  /** What is drawn or held outside the loader now (set by the view): release() deletes a retired model only if it isn't
+   *  among `gpus`, and a retired texture only if no model of `gpus` and none of `effects` has it. Without it nothing
+   *  is ever deleted. */
+  live: (() => { gpus: Iterable<ModelGpu>; effects: Iterable<EffectSource | undefined> }) | null = null;
+  /** Calls of load, loadModels and modelFor that haven't returned: what they hand back isn't drawn yet. */
+  private leases = 0;
+  private releaseTimer: ReturnType<typeof setTimeout> | undefined;
+  private releasing: Promise<void> | null = null;
+  private freed = new WeakSet<object>();
+
+  private lease<T>(call: Promise<T>): Promise<T> {
+    this.leases++;
+    const done = () => { if (--this.leases === 0) this.releaseSoon(); };
+    call.then(done, done);
+    return call;
+  }
+
+  /** release() after what the callers got back has been put in place (a later turn of the event loop). */
+  private releaseSoon() {
+    if (this.releaseTimer !== undefined || !this.live || !this.hasRetired()) return;
+    this.releaseTimer = setTimeout(() => { this.releaseTimer = undefined; void this.release().catch(() => {}); });
+  }
+  private hasRetired() { return this.retired.models.length + this.retired.textures.length + this.retired.effects.length > 0; }
+
+  /** Deletes the GL objects of what reset() forgot, as far as nothing draws it any more (`live`): models' buffers and
+   *  arrays, and their textures. What is still drawn stays retired, for the next call (the view calls it after it puts
+   *  a group in place). Waits for loads that reset() cut off; skipped while a load's result isn't placed yet. */
+  release(): Promise<void> {
+    // One at a time: a call made meanwhile finds its work done or comes after.
+    return this.releasing ??= this.releaseNow().finally(() => { this.releasing = null; this.releaseSoon(); });
+  }
+
+  private async releaseNow() {
+    const live = this.live;
+    if (!live || !this.hasRetired()) return;
+    const [models, textures, effects] = await Promise.all([
+      Promise.allSettled(this.retired.models), Promise.allSettled(this.retired.textures), Promise.allSettled(this.retired.effects)]);
+    // A load that ended this turn: its caller places it first.
+    await new Promise((done) => setTimeout(done));
+    if (this.leases > 0) return;
+    const { gpus, effects: shownEffects } = live();
+    const shown = new Set(gpus), used = new Set<WebGLTexture>();
+    for (const g of shown) for (const t of g.textures) if (t) used.add(t);
+    for (const e of shownEffects) if (e) for (const t of e.textures) if (t) used.add(t);
+    const keep = { models: [] as Promise<ModelGpu>[], textures: [] as Promise<WebGLTexture | null>[] };
+    models.forEach((r, i) => {
+      if (r.status !== "fulfilled") return;
+      if (shown.has(r.value)) keep.models.push(this.retired.models[i]); else r.value.dispose();
+    });
+    textures.forEach((r, i) => {
+      if (r.status !== "fulfilled" || !r.value || this.freed.has(r.value)) return;
+      if (used.has(r.value)) { keep.textures.push(this.retired.textures[i]); return; }
+      this.freed.add(r.value);
+      this.gl.deleteTexture(r.value);
+    });
+    // An effect's textures are loader textures too: they go with the texture list, kept while a shown effect has them.
+    // Whatever came in during the wait stays for the next round.
+    const now = this.retired;
+    this.retired = {
+      models: [...keep.models, ...now.models.slice(models.length)],
+      textures: [...keep.textures, ...now.textures.slice(textures.length)],
+      effects: now.effects.slice(effects.length),
+    };
   }
 
   /** Resolves when everything asked for so far has loaded. Models draw before their textures
@@ -690,12 +763,16 @@ export class ObjectLoader {
   /** The GPU model for a placed type (shared with the batches; for previews). */
   modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
     const replaceable = skinTextures(skin);
-    return this.model({ path: modelPath(skin, variation), plain: plainModelPath(skin), ...reforgedRequest(skin, variation), replaceable, props: skin.animProps, instances: [] });
+    return this.lease(this.model({ path: modelPath(skin, variation), plain: plainModelPath(skin), ...reforgedRequest(skin, variation), replaceable, props: skin.animProps, instances: [] }));
   }
 
   /** Loads each requested model; failed ones are reported by index. The batches keep the order of
    *  the requests, whichever model loads first: see-through layers blend in drawing order. */
-  async loadModels(group: string, requests: ModelRequest[]): Promise<{ batches: ObjectBatch[]; failed: { index: number; error: string }[] }> {
+  loadModels(group: string, requests: ModelRequest[]): Promise<{ batches: ObjectBatch[]; failed: { index: number; error: string }[] }> {
+    return this.lease(this.loadModelsNow(group, requests));
+  }
+
+  private async loadModelsNow(group: string, requests: ModelRequest[]): Promise<{ batches: ObjectBatch[]; failed: { index: number; error: string }[] }> {
     const loaded: (ObjectBatch | undefined)[] = [], failed: { index: number; error: string }[] = [];
     await Promise.all(requests.map(async (req, index) => {
       try {
@@ -736,7 +813,11 @@ export class ObjectLoader {
    *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray.
    *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim").
    *  `texturesOf`: textures a placed object takes instead of its type's (a special doodad's cliff texture). */
-  async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
+  load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number, options: LoadOptions = {}): Promise<LoadResult> {
+    return this.lease(this.loadNow(group, placed, skins, teamOf, options));
+  }
+
+  private async loadNow(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
     { baseOf = () => undefined, heightOf, placeholders = true, shownAs, looksOf, texturesOf }: LoadOptions = {}): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];

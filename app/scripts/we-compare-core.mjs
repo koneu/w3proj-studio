@@ -520,6 +520,16 @@ export function duplicateName(specs) {
   return i < 0 ? null : specs[i].name;
 }
 
+/** --only a,b: the specs of `specs` with those names (any case, as the names are folders), in their order. A name no
+ *  spec has is an error that lists the names there are. */
+export function selectSpecs(specs, names) {
+  const want = names.map((n) => n.toLowerCase());
+  const have = new Set(specs.map((s) => s.name.toLowerCase()));
+  const unknown = names.filter((n) => !have.has(n.toLowerCase()));
+  if (unknown.length) throw new Error(`--only: no spec named ${unknown.join(", ")}; the specs are: ${specs.map((s) => s.name).join(", ")}`);
+  return specs.filter((s) => want.includes(s.name.toLowerCase()));
+}
+
 // ---------------------------------------------------------------- comparing
 
 const show = (v) => {

@@ -173,7 +173,8 @@ async fn project_unpack(
     .map_err(err)?
 }
 
-/// Creates an empty project for a new map, or a new campaign with `campaign` (see `w3proj::create`).
+/// Creates an empty project for a new map, or a new campaign with `campaign` (see `w3proj::create`). Runs on the
+/// `IN_ORDER` thread, not the main one (`run`).
 #[tauri::command]
 fn project_create(dir: String, name: String, flags: u32, max_players: u32, campaign: Option<bool>, header: Option<bool>) -> CmdResult<()> {
     // Campaigns have no map header; maps saved by World Editor 3.0.1 don't either (`header: false`).
@@ -388,7 +389,7 @@ async fn terrain_whole(root: String) -> CmdResult<Value> {
 }
 
 /// Validates object-data JSON by encoding it, and returns it in canonical
-/// formatting so edits from the UI produce minimal diffs.
+/// formatting so edits from the UI produce minimal diffs. Runs on the `IN_ORDER` thread (`run`).
 #[tauri::command]
 fn objects_canonicalize(name: String, text: String) -> CmdResult<String> {
     let stem = name.strip_suffix(".json").unwrap_or(&name);
@@ -440,7 +441,7 @@ fn w3o_import(path: String) -> CmdResult<Vec<W3oPart>> {
 }
 
 /// Validates a codec-backed project file (e.g. `map/war3map.w3i.json`) by
-/// encoding it to the archive format, and returns it in canonical form.
+/// encoding it to the archive format, and returns it in canonical form. Runs on the `IN_ORDER` thread (`run`).
 #[tauri::command]
 fn codec_canonicalize(app: AppHandle, root: String, path: String, text: String) -> CmdResult<String> {
     backend::codec_canonicalize(&root, &path, &text, &user_format_dirs(&app)?)
@@ -455,7 +456,7 @@ async fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<S
 }
 
 /// Encodes JSON (as produced by `codec_decode`) back to the archive format
-/// and writes it to a raw project file (e.g. `map/war3map.doo`).
+/// and writes it to a raw project file (e.g. `map/war3map.doo`). Runs on the `IN_ORDER` thread (`run`).
 #[tauri::command]
 fn codec_write(app: AppHandle, root: String, path: String, text: String) -> CmdResult<Stamp> {
     backend::codec_write(&root, &path, &text, &user_format_dirs(&app)?)
@@ -1376,15 +1377,25 @@ fn watched_maps(watches: State<Watches>) -> Vec<String> {
         .collect()
 }
 
+/// Commands that run on one thread of their own (`backend::serial`), one at a time in the order they come, instead of
+/// on the main thread: Tauri runs a command that isn't `async` on the main thread, which held the window while these
+/// encode, and an `async` one in a pool, where two calls may run side by side and end in either order. The main thread
+/// hands them over as they come (`run`), so they still start and end in that order, as on the main thread: two writes
+/// of one file land in the order they were asked for (the page's write queue waits for each anyway,
+/// `WorkspaceService.queued`). Which answer reaches the page first was never certain: a big one takes longer to get there
+/// (app-smoke `inOrderOffMain`). Each stays a plain function, so its answer and its errors are as before.
+const IN_ORDER: [&str; 4] = ["codec_write", "codec_canonicalize", "objects_canonicalize", "project_create"];
+
+/// Whether `command` runs on the `IN_ORDER` thread.
+fn in_order(command: &str) -> bool {
+    IN_ORDER.contains(&command)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .manage(Watches::default())
-        .manage(Game::default())
-        .manage(FastGame::default())
-        .manage(mcp::Mcp::default())
-        .invoke_handler(tauri::generate_handler![
+    let in_order_thread = backend::serial::Serial::new("w3proj-in-order").expect("cannot start the commands' thread");
+    let on_exit = in_order_thread.clone();
+    let handler: Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = Arc::new(tauri::generate_handler![
             project_open,
             path_normalize,
             fs_stat,
@@ -1472,12 +1483,34 @@ pub fn run() {
             mcp::mcp_bridge_path,
             mcpclients::mcp_clients,
             mcpclients::mcp_client_setup,
-        ])
+        ]);
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(Watches::default())
+        .manage(Game::default())
+        .manage(FastGame::default())
+        .manage(mcp::Mcp::default())
+        // Called on the main thread as each command comes, so the `IN_ORDER` thread gets them in that order.
+        .invoke_handler(move |invoke| {
+            if !in_order(invoke.message.command()) {
+                return handler(invoke);
+            }
+            let resolver = invoke.resolver.clone();
+            let handler = handler.clone();
+            if !in_order_thread.run(move || {
+                handler(invoke);
+            }) {
+                resolver.reject("W3Proj Studio is closing");
+            }
+            true
+        })
         .build(tauri::generate_context!())
         .expect("error while running W3Proj Studio")
-        .run(|app, event| {
-            // The fast transfer's port closes with the app (the process ending would close it too).
+        .run(move |app, event| {
             if let tauri::RunEvent::Exit = event {
+                // A write under way (or asked for before the close) lands whole before the process ends; none starts after.
+                on_exit.close();
+                // The fast transfer's port closes with the app (the process ending would close it too).
                 if let Some(mut server) = app.state::<FastGame>().0.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     server.stop();
                 }

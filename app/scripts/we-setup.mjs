@@ -39,7 +39,15 @@ import { fileURLToPath } from "node:url";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const repo = resolve(here, "..", "..");
+// Bundled into a test run's folder (app/node_modules/.cache/..) this file isn't in app/scripts: walk up to the folder
+// that holds tests/gamepath.mjs. (A worktree outside the main checkout has only this to be "inside the repository".)
+function findRepo() {
+  for (let dir = here; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "tests", "gamepath.mjs"))) return dir;
+    if (dirname(dir) === dir) return resolve(here, "..", "..");
+  }
+}
+export const repo = findRepo();
 let cachedMain;
 const repoMain = () => (cachedMain ??= mainCheckout(repo));
 

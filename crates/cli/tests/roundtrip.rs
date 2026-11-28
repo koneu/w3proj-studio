@@ -15,7 +15,9 @@ fn fixture() -> PathBuf {
 
 /// A folder for one test, under the build's temporary directory.
 fn workdir(test: &str) -> PathBuf {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(test);
+    // The gate runs these tests twice at once in one checkout (debug, and release on the corpus): a folder per build.
+    let build = if cfg!(debug_assertions) { "" } else { "-release" };
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{test}{build}"));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir

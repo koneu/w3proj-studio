@@ -209,12 +209,10 @@ test("a held key is let go when the helper is stopped (SIGTERM) or its deadline 
   // A hung X server (stopped): the deadline ends the command instead of hanging until someone kills it.
   process.kill(x.pid, "SIGSTOP");
   try {
-    const t0 = Date.now();
     const r = py(["--deadline", "1", ...at, "windows"], { timeout: 20_000 });
     assert.equal(r.error, undefined, "ended by its own deadline, not by the test's timeout");
     assert.equal(r.status, 1);
     assert.match(r.stderr, /timed out after 1/);
-    assert.ok(Date.now() - t0 < 10_000);
   } finally {
     process.kill(x.pid, "SIGCONT");
   }

@@ -2,7 +2,8 @@ import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { outside, rangeNote } from "../../lib/objects/limits";
 import { keyOf } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { History } from "../../lib/undo";
+import { ObjectLedger, type Touched } from "./objectledger";
+import { startOpenReads } from "./openreads";
 import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits, type GameplayLimits } from "../../lib/objects/constlimits";
 import { OBJECTS_SERVICE, type LiveObjectData } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
@@ -21,7 +22,7 @@ import { PATH_KIND, pickChoice, pickFile, pickLabel, soundPlayer, type FileKind 
 import { textCodec, UnencodableError } from "../../lib/formats/codepage";
 import { readWts, StringTable, writeWts, WtsCutError } from "../../lib/formats/wts";
 import { mergeChanged, sameObjects, type ObjectConflict } from "./merge";
-import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
+import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { mdxPathOf } from "../../lib/model/mdxpath";
@@ -269,8 +270,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const exists = () => w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
         const isNew = !exists();
-        const mainRead: ObjectFile = isNew ? await emptyFile(w3) : JSON.parse(await doc.readText());
-        if (mainRead.format !== FORMAT) throw new Error(`unsupported format ${mainRead.format}`);
         const kind = doc.path.replace(/\.json$/, "").split(".").pop()!.toLowerCase();
         // The Skin file's fields (names, art, models) are shown and edited with the rest, its values winning, and a
         // save puts each field back where the World Editor keeps it (skin.ts). One that is there but can't be read
@@ -278,7 +277,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const paths = w3.workspace.files().map((f) => f.path);
         const skinPath = listedPath(paths, skinPathOf(doc.path));
         const rawSkin = rawOnlySkin(paths, kind, /war3campaign\./i.test(doc.path) ? "war3campaign" : "war3map");
-        const skinRead = skinPath === doc.path ? null : await readMapDocStrict<EditFile>(w3, skinPath);
+        // The map's string table: TRIGSTR_n values show (and edit) their text in war3map.wts (a campaign's own object
+        // data: war3campaign.wts).
+        const WTS = wtsOf(doc.path), wtsName = WTS.slice(4);
+        // A chapter map's campaign's objects of this kind: the chapter has them too, but they're edited in the campaign
+        // (as the World Editor's Campaign Editor does), so they're listed here to look at only. One that can't be read
+        // says so; its ids then aren't known to be free, and no new ids are given out.
+        const openedRoot = w3.workspace.project()?.root;
+        // The files this opens are all asked at once (openreads.ts).
+        const reads = startOpenReads<ObjectFile, EditFile, NonNullable<Awaited<ReturnType<typeof campaignObjects>>>>({
+          main: async () => (isNew ? await emptyFile(w3) : JSON.parse(await doc.readText())),
+          skin: skinPath === doc.path ? null : () => readMapDocStrict<EditFile>(w3, skinPath),
+          wts: () => readWts(w3.workspace, WTS),
+          campaign: !/war3campaign\./i.test(doc.path) && doc.path.toLowerCase().startsWith("map/") ? () => campaignObjects(w3, kind, openedRoot) : null,
+        });
+        const mainRead = await reads.main;
+        if (mainRead.format !== FORMAT) throw new Error(`unsupported format ${mainRead.format}`);
+        const skinRead = await reads.skin;
         /** The two files as they are on disk (after the last save here): a save splits against them. */
         let savedMain: EditFile | null = isNew ? null : withLists(structuredClone(mainRead) as unknown as EditFile);
         let savedSkin: EditFile | null = skinRead && withLists(skinRead);
@@ -286,10 +301,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const kindInfo = KINDS.find((k) => k.ext === kind);
         const optInts = OPT_INTS.has(kind);
 
-        // The map's string table: TRIGSTR_n values show (and edit) their text in war3map.wts (a campaign's own object
-        // data: war3campaign.wts).
-        const WTS = wtsOf(doc.path), wtsName = WTS.slice(4);
-        const wtsText = await readWts(w3.workspace, WTS).catch(() => null);
+        const wtsText = await reads.wts;
         const wts = new WtsSession(wtsText ?? "");
         const hasWts = wtsText !== null;
         const trigRef = (v: unknown) => {
@@ -317,15 +329,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The list's label: the name with the Editor Suffix (own value, else the game's). */
         const labelOf = (o: Obj, name: string, resolve: (v: string) => string | null) =>
           kd ? labelWithSuffix(name, editorSuffix(o as unknown as MapObject, kd, (v) => resolve(v) ?? kd!.westring(v))) : name;
-        // A chapter map's campaign's objects of this kind: the chapter has them too, but they're edited in the campaign
-        // (as the World Editor's Campaign Editor does), so they're listed here to look at only. One that can't be read
-        // says so; its ids then aren't known to be free, and no new ids are given out.
-        const openedRoot = w3.workspace.project()?.root;
-        let campaign: Awaited<ReturnType<typeof campaignObjects>> = null;
-        let campaignError: string | null = null;
-        if (!/war3campaign\./i.test(doc.path) && doc.path.toLowerCase().startsWith("map/")) {
-          try { campaign = await campaignObjects(w3, kind, openedRoot); } catch (e) { campaignError = e instanceof Error ? e.message : String(e); }
-        }
+        const { campaign, error: campaignError } = await reads.campaign;
         const campaignStrings = new StringTable(campaign?.wts ?? "");
         const campaignStr = (v: unknown) => { const n = typeof v === "string" ? StringTable.ref(v) : null; return n !== null && campaignStrings.has(n) ? campaignStrings.get(n)! : null; };
         /** The campaign's objects the list shows: its custom ones the map doesn't have itself (the map's own wins), and
@@ -356,7 +360,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const mine = o.id ? file.custom.find((c) => c.id === o.id) : file.original.find((c) => c.base === o.base);
           if (!mine) (o.id ? file.custom : file.original).push(copy);
           select(mine ?? copy);
-          markDirty();
+          markDirty([]);
           renderDetail();
         };
         /** The object data as it is here now, for other modules (ObjectsService.liveObjects). */
@@ -402,17 +406,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // What would be written: standard objects without modifications are
         // left out, so adding one and removing it again is not a change.
         const serialize = () => JSON.stringify({ ...file, original: file.original.filter(hasMods) });
-        let saved = "";
-        // Undo/redo: every change ends in markDirty, which records the whole file (snapshots;
-        // object data files are small). Restoring maps the selection back by id. 200 states are kept
-        // (199 undo steps and the state now). Unsaved is judged by isDirty, not by the history.
-        const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: wts.snapshot() });
-        let history = new History(snapshot, (s) => restore(s), { limit: 199 });
+        // Undo/redo: every change ends in markDirty, which records the objects it touched as one step (the ledger holds
+        // those objects' text before and after, never the whole file). Undo keeps the objects themselves and puts their
+        // content back; the selection is mapped back by id. 199 undo steps are kept. Unsaved is judged by isDirty (the
+        // objects' texts against the saved ones), not by the history.
+        const fileHead = () => JSON.stringify({ ...file, custom: undefined, original: undefined });
+        const ledger = new ObjectLedger<Obj>(file, {
+          hasMods: (o) => hasMods(o), head: fileHead, limit: 199,
+          extra: { take: () => (hasWts ? JSON.stringify(wts.snapshot()) : ""), put: (s) => { if (hasWts) wts.restore(JSON.parse(s) as WtsSnapshot); } },
+        });
         /** Other modules hear of each edit, undo and redo here (ObjectsService.onDidEdit). */
         const told = () => { if (liveData.get(doc.path)?.data === liveNow) edits.fire(kind); };
-        const record = () => { if (history.commit()) told(); };
-        /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
-        const isDirty = () => isDirtyNow(serialize(), saved, hasWts && wts.dirty);
+        const record = (touched?: Touched<Obj>) => { if (ledger.commit(touched)) told(); };
+        /** Whether anything differs from the last save: the objects' texts, or strings waiting for the wts file. */
+        const isDirty = () => ledger.differs() || (hasWts && wts.dirty);
         /** Moves standard objects that were just changed into the file. */
         const adoptStandard = () => {
           for (const [base, o] of untouched) {
@@ -421,7 +428,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!file.original.some((x) => x.base === base)) file.original.push(o);
           }
         };
-        const markDirty = () => { adoptStandard(); record(); doc.setDirty(isDirty()); };
+        /** `touched`: the objects changed in place (their text is compared with the one before); adding, removing and
+         *  replacing objects need no mention. Without it every object is looked at, which costs the whole file. */
+        const markDirty = (touched?: Touched<Obj>) => { adoptStandard(); record(touched); doc.setDirty(isDirty()); };
         /** The file's own entry of a standard object replaces the one only shown (a paste or an import brought it). */
         const dropStale = () => {
           for (const o of [...selection]) {
@@ -435,12 +444,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         };
         const objectKey = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
-        const restore = (s: string) => {
+        /** Takes one undo or redo step (the ledger puts the objects and strings back), then shows it. */
+        const restoring = (go: () => boolean) => {
           const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
-          const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: WtsSnapshot };
-          file.custom = d.custom;
-          file.original = d.original;
-          if (hasWts) wts.restore(d.wts);
+          if (!go()) return;
           reselect(keys, anchor);
           doc.setDirty(isDirty());
           renderDetail();
@@ -458,7 +465,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selected = all.find((o) => objectKey(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
           if (selected) selection.add(selected);
         };
-        const step = (dir: -1 | 1) => { if (dir < 0) history.undo(); else history.redo(); };
+        const step = (dir: -1 | 1) => restoring(() => (dir < 0 ? ledger.undo() : ledger.redo()));
 
         /** Set when this editor is closed: a paste that was asking something doesn't go on into it. */
         let closed = false;
@@ -493,13 +500,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
           Object.assign(file, merged.file);
           for (const key of [...untouched.keys()]) if (file.original.some((o) => o.base === key)) untouched.delete(key);
-          saved = JSON.stringify({ ...file, original: (theirs.original as Obj[]).filter(hasMods), custom: theirs.custom });
+          ledger.markSaved(ledger.pointOf(fileHead(), theirs.custom as Obj[], theirs.original as Obj[]));
           // Flags from an earlier change stay while their object does.
           for (const key of [...conflicts.keys()]) if (![...file.custom, ...file.original].some((o) => objectKey(o) === key)) conflicts.delete(key);
           for (const c of merged.conflicts) conflicts.set(c.key, c);
           reselect(keys, anchor);
           // The steps before would take the outside change back with them.
-          history = new History(snapshot, (s) => restore(s), { limit: 199 });
+          ledger.reset();
           doc.setDirty(isDirty());
           renderDetail();
           told();
@@ -524,7 +531,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (kept.main) {
             [savedMain, savedSkin] = [kept.main, kept.skin];
             const base = mergeSkin(kept.main, kept.skin, { addSkinOnly: true }) as unknown as ObjectFile;
-            saved = JSON.stringify({ ...base, original: base.original.filter(hasMods) });
+            ledger.markSaved(ledger.pointOf(JSON.stringify({ ...base, custom: undefined, original: undefined }), base.custom, base.original));
           }
           Object.assign(file, kept.file);
           for (const key of [...untouched.keys()]) if (file.original.some((o) => o.base === key)) untouched.delete(key);
@@ -555,7 +562,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else list.splice(at, 1);
           conflicts.delete(c.key);
           select(theirs ?? (o.id ? list[Math.min(at, list.length - 1)] ?? null : standardOf(o.base)));
-          markDirty();
+          markDirty([]);
           renderDetail();
         };
         /** The bar over an object that was changed on both sides. */
@@ -874,7 +881,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           file.original = file.original.filter((o) => !going.has(o));
           selection = new Set([...selection].filter((o) => !going.has(o)));
           select((selected && !going.has(selected) ? selected : null) ?? file.custom[0] ?? file.original[0] ?? null);
-          markDirty(); renderDetail();
+          markDirty([]); renderDetail();
         };
         listEl.tabIndex = 0;
         listEl.addEventListener("keydown", (e) => {
@@ -900,7 +907,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           file.original = keep;
           for (const o of [...selection]) if (!file.custom.includes(o) && !keep.includes(o) && !isUntouched(o)) selection.delete(o);
           if (!selected || !selection.has(selected)) select([...selection][0] ?? file.custom[0] ?? keep[0] ?? null);
-          markDirty(); renderDetail();
+          markDirty([]); renderDetail();
         };
         /** The World Editor's Reset Standard Objects To Defaults: every change to the game's objects of this kind goes, after
          *  its question, as one undo step. Custom objects stay (they keep pointing at their bases). True when done. */
@@ -915,7 +922,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           file.original = [];
           selection = new Set([...selection].filter((o) => !going.has(o)));
           select((selected && !going.has(selected) ? selected : null) ?? file.custom[0] ?? null);
-          markDirty(); renderDetail();
+          markDirty([]); renderDetail();
           return true;
         };
 
@@ -1048,7 +1055,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onchange: () => {
                 const typed = encoded(input, text);
                 if (typed === null) return;
-                wts.set(ref, typed); markDirty(); renderDetail();
+                wts.set(ref, typed); markDirty([]); renderDetail();
               },
             });
             return h("div.obj-value-cell", {}, withColorTools(input, { commit: true, defaultColor: "FFFFFF" }), h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
@@ -1155,7 +1162,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const apply = () => {
             for (const r of values()) setValue(o, f, r.level, r.value);
             close();
-            markDirty();
+            markDirty([o]);
             renderDetail();
           };
           const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(); } },
@@ -1182,9 +1189,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // A negative real is refused here as when typed (the editor has no field paste; its Paste Ability copies whole objects).
               const why = typeof value === "number" ? negativeRefused(f.valueType, value, w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true) : null;
               if (why) { void w3.window.showWarning(`${value} ${why}.`); return; }
-              setValue(o, f, level, value); markDirty(); renderDetail();
+              setValue(o, f, level, value); markDirty([o]); renderDetail();
             } },
-            { label: "Reset to default", disabled: !findMod(o, f.id, level), run: () => { resetValue(o, f, level); markDirty(); renderDetail(); } },
+            { label: "Reset to default", disabled: !findMod(o, f.id, level), run: () => { resetValue(o, f, level); markDirty([o]); renderDetail(); } },
             ...(levels > 1 ? ["-" as const, { label: "Auto Fill Levels…", run: () => openAutoFill(o, f, levels) }] : []),
           ]);
         };
@@ -1195,7 +1202,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const current = found ? found.m.value : (def ?? (f.valueType === "string" ? "" : 0));
           const commit = (v: number | string) => {
             setValue(o, f, level, v);
-            markDirty();
+            markDirty([o]);
             renderDetail();
           };
           const over = overLimit(o, f, level);
@@ -1208,7 +1215,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("td", {}, found
               ? h("button.icon-button", {
                   title: def !== undefined ? `Reset to inherited value: ${def}` : "Remove modification",
-                  onclick: () => { found.mods.splice(found.mods.indexOf(found.m), 1); markDirty(); renderDetail(); },
+                  onclick: () => { found.mods.splice(found.mods.indexOf(found.m), 1); markDirty([o]); renderDetail(); },
                 }, "↺")
               : null),
           );
@@ -1234,7 +1241,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const mod: Mod = { field: newField.value, type, value };
             if (hasLevels) { mod.level = Number(newLevel.value || 0); mod.data = 0; }
             primaryMods(o).push(mod);
-            markDirty();
+            markDirty([o]);
             renderDetail();
           };
           return h("section.obj-section", {},
@@ -1245,10 +1252,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   h("tr.modified", {},
                     h("td", {}, h("code", {}, m.field)),
                     h("td.muted", {}, `${m.type}${m.level !== undefined ? ` · lvl ${m.level}` : ""}`),
-                    h("td", {}, valueEditor(m.type, m.type, m.value, false, (v) => { m.value = v; markDirty(); })),
+                    h("td", {}, valueEditor(m.type, m.type, m.value, false, (v) => { m.value = v; markDirty([o]); })),
                     h("td", {}, h("button.icon-button", { title: "Remove modification", onclick: () => {
                       for (const l of modLists(o)) { const i = l.mods.indexOf(m); if (i >= 0) l.mods.splice(i, 1); }
-                      markDirty(); renderDetail();
+                      markDirty([o]); renderDetail();
                     } }, "×")),
                   ),
                 ),
@@ -1505,14 +1512,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (outsideOnly && !over) continue;
             const distinct = [...new Set(values)];
             const isSame = distinct.length === 1;
-            const commit = (v: number | string) => { for (const o of objs) setValue(o, f, level, v); markDirty(); renderDetail(); };
-            const each = (change: (old: string) => number | string) => { for (const o of objs) setValue(o, f, level, change(effective(o, f, level))); markDirty(); renderDetail(); };
+            const commit = (v: number | string) => { for (const o of objs) setValue(o, f, level, v); markDirty(objs); renderDetail(); };
+            const each = (change: (old: string) => number | string) => { for (const o of objs) setValue(o, f, level, change(effective(o, f, level))); markDirty(objs); renderDetail(); };
             const row = h(`tr${anyModified ? ".modified" : ""}${over ? ".obj-over" : ""}`, {},
               h("td", { title: `${f.category} · ${f.type}` }, h("span.obj-field-label", {}, f.label), h("code", {}, f.id)),
               h("td.muted", {}, level ? String(level) : ""),
               h("td", {}, withRange(valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : values, each), f, objs, level)),
               h("td", {}, anyModified
-                ? h("button.icon-button", { title: "Reset all selected to their inherited values", onclick: () => { for (const o of objs) resetValue(o, f, level); markDirty(); renderDetail(); } }, "↺")
+                ? h("button.icon-button", { title: "Reset all selected to their inherited values", onclick: () => { for (const o of objs) resetValue(o, f, level); markDirty(objs); renderDetail(); } }, "↺")
                 : null));
             const target = isSame ? same : diff;
             if (isSame) sameCount++; else diffCount++;
@@ -1656,7 +1663,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           select(o);
           filter = "";
           search.value = "";
-          markDirty(); renderDetail();
+          markDirty([]); renderDetail();
         };
 
         /** Modifies a game object in place ("Modified standard"). */
@@ -1667,7 +1674,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!o) {
             o = file.version >= 3 ? { base, mods: [] } : { base, end: base, mods: [] };
             file.original.push(o);
-            markDirty();
+            markDirty([]);
           }
           select(o);
           filter = "";
@@ -1694,7 +1701,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             detailEl,
           ),
         );
-        saved = serialize();
+        ledger.markSaved(ledger.point());
         // Undo and Redo's keys (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z) anywhere in the editor. In a text field only when nothing
         // was typed since its value was set (else the field undoes its own typing).
         addKeyContext(el, UNDO_CONTEXT);
@@ -1786,7 +1793,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const ref = trigRef(findMod(o, f.id, level)?.m.value);
             if (ref !== null) wts.set(ref, name); else setValue(o, f, level, name);
             select(o);
-            markDirty();
+            markDirty([o]);
             renderList();
             renderDetail();
           },
@@ -1870,8 +1877,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             /** What the save splits off into the Skin file: its text when that changed, and the files split. */
             let split: { main: EditFile; skin: EditFile | null; skinText: string | null } | null = null;
             const fieldsKnown = kd ?? await loadKind(w3, kind).catch(() => null);
+            // What this save writes, taken with its text: an edit made while it runs stays unsaved.
+            let written = ledger.point();
             await runSave({
-              serialize,
+              serialize: () => { written = ledger.point(); return serialize(); },
               // Both files are encoded (and so checked) before either is written.
               canonicalize: async (text) => {
                 const parts = splitSkin(JSON.parse(text) as EditFile, savedMain, savedSkin, {
@@ -1929,7 +1938,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   result = outcome.value;
                 }
               },
-              setSaved: (text) => { saved = text; doc.setDirty(isDirty()); },
+              setSaved: () => { ledger.markSaved(written); doc.setDirty(isDirty()); },
               followUps: async () => {
                 if (result?.recreated) {
                   await w3.workspace.refresh().catch(() => {});

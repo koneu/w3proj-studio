@@ -89,7 +89,7 @@ async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null, m
     const key = path.replace(/\//g, "\\");
     const full = game.files.get(key)
       ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => game.files.get(key.replace(SOUND_EXTENSIONS, e))).find(Boolean);
-    bytes = await w3.game.read(full ?? path).catch(() => null);
+    bytes = await w3.game.read(full ?? path, { shared: true }).catch(() => null);
   }
   if (!bytes) { void w3.window.showWarning(`Can't find ${path}.`); return null; }
   const ext = (/\.(\w+)$/.exec(path)?.[1] ?? "").toLowerCase();

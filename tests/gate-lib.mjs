@@ -2,7 +2,7 @@
 // a command with a timeout, ending its tree, the signal handlers, the lock between gates, the coverage floors,
 // the step table.
 
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -358,6 +358,35 @@ export function memoryBudget({ env = process.env, platform = process.platform, r
     }
   }
   return { mb: Math.floor(avail * 0.8), from: `80% of ${parts.join(", ")}` };
+}
+
+/**
+ * The user's game or Battle.net runs in their Wine prefix: a Windows program started there beside it (JassHelper)
+ * dies (X BadWindow, "Fontconfig out of memory", 2026-11-15). `lines`: the processes' command lines (`ps -eo args`);
+ * a line counts when it names `Warcraft III.exe` or `Battle.net.exe` as a whole file name (not `Warcraft III.exe.txt`),
+ * under a Windows or Unix path or alone. Returns the first such line, else null. Nothing here looks at the gate's own
+ * process: the caller leaves its own line out.
+ * @param {string[]} lines
+ * @returns {string | null}
+ */
+export function gamePrefixBusy(lines) {
+  const name = /(?:^|[\\/\s])(?:Warcraft III|Battle\.net)\.exe(?=\s|$)/i;
+  return lines.find((l) => name.test(l)) ?? null;
+}
+
+/** The command lines of all processes (Linux; elsewhere, or when `ps` fails, none), except this process's. */
+export function processLines(run = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", maxBuffer: 64 << 20 }), platform = process.platform, self = process.pid) {
+  if (platform !== "linux") return [];
+  try {
+    const lines = [];
+    for (const l of run("ps", ["-eo", "pid=,args="]).split("\n")) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(l);
+      if (m && Number(m[1]) !== self) lines.push(m[2]);
+    }
+    return lines;
+  } catch {
+    return [];
+  }
 }
 
 /** A step missing from the table would be run but left out of the result. */

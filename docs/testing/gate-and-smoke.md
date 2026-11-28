@@ -85,6 +85,19 @@ default). One that hangs fails with `page call timed out after … s: <the call>
 WebDriver gives up; a call that took more than half its limit prints `slow page call: …` on stderr. On Linux the
 session's script timeout is set to just past the call's limit, since WebDriver runs a session's commands one at a time.
 
+**Page errors and the app's end on Linux** (`webdriver.mjs`, `smoke-hook.js`): WebKitGTK reports no page errors, so a
+hook in the page collects them (`window.__w3smoke`) and every `evaluate` hands them to `page.events`, where `problems()`
+reads them as on Windows. A debug build for Linux has the hook as the first script of `index.html` (`vite.config.ts`
+`smokeHook`, on when Tauri's build command runs with `TAURI_ENV_DEBUG=true` and `TAURI_ENV_PLATFORM=linux`; a release
+build, `npm run build` and the dev server never get it: `grep __w3smoke app/dist/index.html`), so errors and unhandled
+rejections from the page's first script on are kept, and after a reload too (what a reload cut off waits in
+sessionStorage). An app without it (a prebuilt `W3_APP_BIN` from before) gets it at the first `evaluate` and sees nothing
+earlier. The Windows page (DevTools events) is unchanged. The app is WebKitWebDriver's child, so `exited()` and every
+page call report its end themselves: the app's pid is found below the driver by its executable (not by a name pattern)
+and watched every 200 ms; a call then fails with `the app ended: its process N is gone …` at once (its exit status
+goes to WebKitWebDriver, so the signal or code isn't shown). app-smoke's `earlyPageErrors` proves it on two apps of its
+own: errors from a page's first moments and from just after a reload, and an app killed from outside.
+
 Each step's output goes to `target/gate-logs/<tier>-<pid>/<step>.log` (`only-<pid>` for `--only`; the folder is
 emptied first, since process numbers come round again, and folders older than a day go); the
 gate prints it, or its end and the path, when the step finishes. Times in the table are wall time,

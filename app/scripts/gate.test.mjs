@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, memAvailableMb, memoryBudget, missingDeps, runShell, sharedBudget, withFileLock, withGateQueue, withPrerequisites } from "../../tests/gate-lib.mjs";
+import { assertInTable, cgroupHeadroomMb, cgroupPath, checkFloors, gamePrefixBusy, memAvailableMb, memoryBudget, missingDeps, processLines, runShell, sharedBudget, withFileLock, withGateQueue, withPrerequisites } from "../../tests/gate-lib.mjs";
 
 // The tests run bundled elsewhere, so the repository is found from app/, where `npm test` starts.
 const repo = join(process.cwd(), "..");
@@ -433,4 +433,42 @@ test("memoryBudget: 80% of the smaller of MemAvailable and the cgroup's room; W3
   // A bad override is ignored, not taken as 0 (that would run every step alone).
   assert.equal(memoryBudget({ env: { W3_GATE_MEM_MB: "lots" }, platform: "linux", read: fakeFiles(files), freemem }).mb, limited.mb);
   assert.equal(memoryBudget({ env: {}, platform: "win32", read: () => null, freemem }).mb, Math.floor(8 * 1024 * 0.8));
+});
+
+test("gamePrefixBusy: the user's game or Battle.net in a Wine prefix, and nothing else", () => {
+  const warcraft = String.raw`/home/u/.steam/steamapps/compatdata/1/pfx/drive_c/Program Files (x86)/Warcraft III/_retail_/x86_64/Warcraft III.exe`;
+  const battle = String.raw`C:\Program Files (x86)\Battle.net\Battle.net.exe --type=renderer --lang=en-US`;
+  assert.equal(gamePrefixBusy(["node tests/gate.mjs", `c:\\windows\\system32\\steam.exe ${warcraft}`]), `c:\\windows\\system32\\steam.exe ${warcraft}`);
+  assert.equal(gamePrefixBusy(["python3 proton waitforexitandrun " + warcraft]) !== null, true);
+  assert.equal(gamePrefixBusy([battle]), battle);
+  assert.equal(gamePrefixBusy(["Battle.net.exe 30"]), "Battle.net.exe 30");
+  assert.equal(gamePrefixBusy(["warcraft iii.exe"]) !== null, true, "file names are not case sensitive on Windows");
+  // Controls: other names, and the World Editor in its own prefix (its folder is the game's, its program another).
+  for (const other of [
+    "less Warcraft III.exe.txt", String.raw`C:\x\Warcraft III.exe.bak`, "vim notes/Battle.net.exe.log", "XWarcraft III.exe", "Battle.net.exe2",
+    "/home/u/Warcraft III/_retail_/x86_64/World Editor.exe", "wineserver -p -f", "node app/scripts/we-drive.mjs target/we/prefix", "",
+  ]) assert.equal(gamePrefixBusy([other]), null, other);
+  assert.equal(gamePrefixBusy([]), null);
+});
+
+test("processLines: ps output without this process, and nothing off Linux or when ps fails", () => {
+  const out = "    1 /sbin/init\n  123 node gate.mjs\n  456 Battle.net.exe --x\n\nbad line\n";
+  assert.deepEqual(processLines(() => out, "linux", 123), ["/sbin/init", "Battle.net.exe --x"]);
+  assert.deepEqual(processLines(() => out, "win32", 1), []);
+  assert.deepEqual(processLines(() => { throw new Error("no ps"); }, "linux", 1), []);
+});
+
+test("processLines finds a real process by the name it runs under", { skip: process.platform !== "linux" }, async () => {
+  // A harmless sleep whose argv[0] is the game's file name: never the game.
+  const fake = spawn("sleep", ["30"], { argv0: "Battle.net.exe", stdio: "ignore" });
+  try {
+    await new Promise((r) => setTimeout(r, 200));
+    // Among the lines (the user's own game, if it runs, may come first).
+    assert.deepEqual(processLines().filter((l) => gamePrefixBusy([l]) && l === "Battle.net.exe 30"), ["Battle.net.exe 30"]);
+  } finally {
+    fake.kill();
+  }
+  // Control: once it is gone the list doesn't have it.
+  await new Promise((r) => fake.once("exit", r));
+  assert.equal(processLines().includes("Battle.net.exe 30"), false);
 });

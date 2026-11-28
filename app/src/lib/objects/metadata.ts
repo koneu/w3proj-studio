@@ -164,6 +164,32 @@ class Reads {
 }
 
 let shared: { data: Promise<Shared>; reads: Reads } | null = null;
+let strings: { data: Promise<Map<string, string>>; reads: Reads } | null = null;
+
+/** WorldEditStrings.txt and WorldEditGameStrings.txt merged (keys in upper case), read and parsed once for everyone
+ *  who needs them (the object data's labels, the Object Editor's value types). A file the game lacks adds nothing. */
+function stringsOf(reads: Reads, background: boolean): Promise<Map<string, string>> {
+  if (strings) {
+    if (!background) strings.reads.waitedOn();
+    return strings.data;
+  }
+  const texts = ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"].map((file) => reads.text(file).catch(() => ""));
+  const data = (async () => {
+    const we = new Map<string, string>();
+    for (const text of texts) {
+      for (const section of parseIni(await text).values()) for (const [k, v] of section) we.set(k.toUpperCase(), v);
+    }
+    return we;
+  })();
+  const entry = { data, reads };
+  strings = entry;
+  data.catch(() => { if (strings === entry) strings = null; });
+  return data;
+}
+
+export function loadWorldEditStrings(w3: W3Api): Promise<Map<string, string>> {
+  return stringsOf(new Reads(w3, false), false);
+}
 const cache = new Map<string, { data: Promise<KindData>; reads: Reads }>();
 
 function loadShared(w3: W3Api, background: boolean): Promise<Shared> {
@@ -176,7 +202,7 @@ function loadShared(w3: W3Api, background: boolean): Promise<Shared> {
     // All asked at once (about 70 files): one after another, each waited its turn behind the reads
     // queued meanwhile (a map's models), and the last landed seconds after the terrain's picture.
     // They're merged in the order below, whichever lands first.
-    const strings = ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"].map((file) => reads.text(file).catch(() => ""));
+    const weAsked = stringsOf(reads, background);
     const editDataText = reads.text("UI/WorldEditData.txt").catch(() => "");
     // Base-layer and locale INI files under Units/ and Doodads/ hold the
     // "Profile" fields (names, tooltips, art, hotkeys, …).
@@ -186,11 +212,7 @@ function loadShared(w3: W3Api, background: boolean): Promise<Shared> {
     const texts = files.map((f) => reads.text(f));
     // One that fails fails the whole (as before); the others aren't left as unhandled rejections.
     for (const t of texts) t.catch(() => {});
-    const we = new Map<string, string>();
-    for (const text of strings) {
-      const ini = parseIni(await text);
-      for (const section of ini.values()) for (const [k, v] of section) we.set(k.toUpperCase(), v);
-    }
+    const we = await weAsked;
     const profile = new Map<string, Map<string, string>>();
     const sections: Shared["sections"] = [];
     for (const [i, text] of texts.entries()) {

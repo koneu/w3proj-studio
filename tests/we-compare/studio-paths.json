@@ -3,7 +3,8 @@
     "name": "studio-paths-rebuilt",
     "description": "test.md 'Maps from paths other than the WE's own save' (1): EchoIsles unpacked, w3proj rebuild --force, packed (make-studio-paths.mjs); the editor opens it and re-saves; Studio's side is the plain open/save/pack. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-rebuilt.w3x"
+      "map": "${REPO}/target/studio-paths/echo-rebuilt.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -111,7 +112,8 @@
     "name": "studio-paths-plain",
     "description": "control of studio-paths-rebuilt: unpack and pack only. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-plain.w3x"
+      "map": "${REPO}/target/studio-paths/echo-plain.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -219,7 +221,8 @@
     "name": "studio-paths-terrain-save",
     "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save. war3map.doo: Studio's save writes it as version 13 (dooversion.ts, branch feat/doo-v13-upgrade), so only the extras of the doodads whose model has a light are ignored (the editor's save gives them the light, Studio's doesn't); the units file's ignores as before. Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point); units 5, 13, 14, 18, 27, 32, 54, 67, 73, 75, 77, 81, 87, 88, 89, 92, 97 (measured 2026-11-17). Since the save's elevation sample points (objheights.ts unitGround, commit b1cb0a28) only two are left, the tavern ntav 13 (WE 426.89, Studio 426.84) and the mercenary camp nmer 54 (263.65 against 264.05), in two runs of branch we-compare-17 (2026-11-19); every other unit's height must match",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-plain.w3x"
+      "map": "${REPO}/target/studio-paths/echo-plain.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -322,7 +325,8 @@
     "name": "studio-paths-nowts",
     "description": "(3): war3map.wts deleted before packing; the editor opens that map (from: studio) and re-saves. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match. neither save has a war3map.wts (Studio doesn't make one from nothing, nor does the editor), so it isn't compared; the player and force names the w3i gives as TRIGSTR_001..003 have no string left: the editor writes them as \"\" and so does Studio since branch fix/nowts-plain-save",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
+      "map": "${REPO}/target/studio-paths/echo-nowts.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -433,7 +437,8 @@
     "name": "studio-paths-nolua",
     "description": "(4): war3map.lua deleted, w3proj rebuild writes it, packed; editor re-saves it. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-nolua.w3x"
+      "map": "${REPO}/target/studio-paths/echo-nolua.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -541,7 +546,8 @@
     "name": "studio-paths-nowts-text",
     "description": "(3) variant: the same map without war3map.wts, Studio's set_map_text writes a new table as the editor's Map Properties OK does (since branch fix/wts-missing-we, wts-missing.json: the name a string, the stringless names \"\"); the editor opens it and re-saves; names and strings as the editor reads them: the same w3i and war3map.wts. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match.",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
+      "map": "${REPO}/target/studio-paths/echo-nowts.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -657,7 +663,8 @@
     "name": "studio-paths-matrix-masks",
     "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them into the w3i at random: player 0 at -8960,-3968 in one run, -490,5669 in the next (2026-11-17), so the masks worked out from them are random too and are ignored (that they agree with allies.rs's rule for the editor's starts was seen by hand once); the editor counts that change as an edit (saves 1 to 2). Also ignored: scriptType, supportedModes, gameDataVersion and the enemy masks, which the editor's newer w3i version has and the map's version 25 hasn't. Checked: the starts and saves are what differs. The editor writes the player and force names as TRIGSTR_ strings of the borrowed wts, and Studio's pack does too since branch we-compare-16 (namesToStrings); force 2's Horde refers to player 9's string 9 in both since branch we-compare-17 (Studio made a string 11 of its own: a repeated text refers to the first string, plain-names-c)",
     "input": {
-      "map": "${REPO}/target/studio-paths/matrix.w3x"
+      "map": "${REPO}/target/studio-paths/matrix.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",
@@ -709,7 +716,8 @@
     "name": "studio-paths-zeromasks",
     "description": "(5) control with sane start locations: echo with its two players' ally masks (2 and 1) set to 0 (packed as is by make-studio-paths.mjs: `w3proj pack` would work them out); editor's save against Studio's pack: both write 2 and 1 again",
     "input": {
-      "map": "${REPO}/target/studio-paths/echo-zeromasks.w3x"
+      "map": "${REPO}/target/studio-paths/echo-zeromasks.w3x",
+      "make": "make-studio-paths.mjs"
     },
     "we": {
       "mode": "sd",

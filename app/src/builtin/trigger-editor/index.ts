@@ -775,7 +775,7 @@ function icon(w3: W3Api, path: string): Promise<string | null> {
   if (!path) return Promise.resolve(null);
   return iconCache.get(() => w3.settings.get<string>("game.graphicsMode") ?? "hd", path.toLowerCase(), () => (async () => {
     const file = /\.\w+$/.test(path) ? path : `${path}.blp`;
-    const mip = decodeImage(await w3.game.read(file), file).mip(0);
+    const mip = decodeImage(await w3.game.read(file, { shared: true }), file).mip(0);
     const canvas = document.createElement("canvas");
     canvas.width = mip.width;
     canvas.height = mip.height;

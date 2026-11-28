@@ -470,7 +470,7 @@ async function layoutPictureOf(w3: W3Api): Promise<LayoutPicture> {
     const row = byId.get(id);
     if (!row?.dir || !row.file) return null;
     const path = `${row.dir}\\${row.file}.blp`;
-    try { return smallestMipColor(decodeImage(await w3.game.read(path), path)); } catch { return null; }
+    try { return smallestMipColor(decodeImage(await w3.game.read(path, { shared: true }), path)); } catch { return null; }
   }));
   return { width: t.width, height: t.height, rgba: layoutPicture(t, (slot) => colors[slot] ?? slotColor(slot)) };
 }

@@ -36,7 +36,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
-import { ensureCli, smokeId } from "./appctl.mjs";
+import { ensureCli, smokeId, startApp } from "./appctl.mjs";
 import { checkFresh, sourceFingerprint, staleAllowed, writeStamp } from "../../tests/binfresh.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 import { lit } from "./jslit.mjs";
@@ -3429,6 +3429,44 @@ async function objectListSuffix(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** codec_write, codec_canonicalize, objects_canonicalize and project_create run off the main thread, one at a time in the
+ *  order they come (lib.rs `IN_ORDER`): while a big canonical text is made, a main-thread command (fs_stat) answers at
+ *  once (on the main thread it waited for the text: 1902 of 1979 ms), and of two raw writes of one file (straight to
+ *  Tauri, past the page's write queue), a slow one and a quick one, the one asked for last is what the disk keeps.
+ *  Not checked: which of two answers the page gets first. A big answer takes long to reach it, so a small one asked for
+ *  later can come first, on the main thread too (measured on dev: 1902 against 1979 ms). Controls: the big text takes
+ *  long enough to tell (else the timing proves nothing), and the two writes' bytes differ. */
+const IN_ORDER_DOODADS = 20000;
+async function inOrderOffMain(page, found) {
+  const fail = (what) => found.push(`in order off main: ${what}`);
+  const root = join(work, "in-order-off-main");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(join(root, "map"), { recursive: true });
+  const fixture = JSON.parse(readDiskFile(join(FIXTURE, "map", "war3map.doo.json"), "utf8"));
+  const r = await page.evaluate(`(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke, now = () => performance.now();
+    const fixture = ${lit(fixture)};
+    const doodads = (n) => JSON.stringify({ ...fixture, doodads: Array.from({ length: n }, (_, i) => ({ ...fixture.doodads[0], editorId: i })) });
+    const root = ${lit(root)}, path = "map/war3map.doo.json";
+    const bigText = doodads(${IN_ORDER_DOODADS});
+    const t0 = now();
+    const big = invoke("codec_canonicalize", { root, path, text: bigText }).then(() => now());
+    const stat = invoke("fs_stat", { path: root }).then(() => now());
+    const [bigAt, statAt] = await Promise.all([big, stat]);
+    const first = invoke("codec_write", { root, path: "map/war3map.doo", text: bigText });
+    const last = invoke("codec_write", { root, path: "map/war3map.doo", text: doodads(2) });
+    const [a, b] = await Promise.all([first, last]);
+    return { big: bigAt - t0, stat: statAt - t0, firstSize: a.size, lastSize: b.size };
+  })()`);
+  if (r.big < 300) return fail(`the big canonical text took ${Math.round(r.big)} ms: too quick to tell (control)`);
+  if (r.stat >= r.big / 2) fail(`fs_stat answered at ${Math.round(r.stat)} ms, the big canonical text at ${Math.round(r.big)} ms: the main thread was held`);
+  if (r.firstSize === r.lastSize) fail(`both writes are ${r.firstSize} bytes: their order can't be told (control)`);
+  const disk = statSync(join(root, "map", "war3map.doo")).size;
+  if (disk !== r.lastSize) fail(`the disk has ${disk} bytes, the write asked for last ${r.lastSize}, the first ${r.firstSize}`);
+  console.log(`in order off main: big canonical text ${Math.round(r.big)} ms, fs_stat ${Math.round(r.stat)} ms`);
+  rmSync(root, { recursive: true, force: true });
+}
+
 /** The Object Editor watches the raw Skin file it reads (war3mapSkin.w3u, when the project holds no .json one): a hooked
  *  raw write of it reopens the editor with the new name. Control: the same write that skips the hook (the Tauri invoke
  *  itself) leaves the editor, its DOM node and its name alone. */
@@ -5753,6 +5791,57 @@ async function importedBlightWaterReload(page, found) {
   }
 }
 
+/** The Linux smoke's own error catching (webdriver.mjs, smoke-hook.js), on two apps of its own: an error and a rejection
+ *  thrown from the page's very first moments (before the harness's first evaluate), and ones thrown right after a reload,
+ *  reach the page's events; and an app killed from outside is reported as ended within seconds, by the next page call and
+ *  by exited(), instead of as WebDriver errors. The throws are made by the hook itself on a note in the page's storage
+ *  (smoke-hook.js: w3smoke.throwAtStart), which the first app leaves in localStorage for the second to start with.
+ *  Controls: the page's events hold no self-test line before the notes are set; the second app's later events hold none
+ *  of the reload's (used up once); on dev, where the hook came with the first evaluate, the first-moments line is missing. */
+async function earlyPageErrors(_page, found) {
+  const fail = (what) => found.push(`early page errors: ${what}`);
+  if (!LINUX) { console.log("early page errors: skipped, the DevTools page on Windows reports from the start by itself"); return; }
+  const here = join(work, "early-errors");
+  rmSync(here, { recursive: true, force: true });
+  const lines = (page, word) => problems(page.events).filter((l) => l.includes(`smoke self-test ${word}`));
+  const note = (store, text) => `${store}.setItem("w3smoke.throwAtStart", ${lit(text)})`;
+  const first = await startApp({ id: smokeId(), work: here });
+  try {
+    // The page has the hook before anything of the app ran: not only after the first evaluate.
+    if (!(await first.page.evaluate(`(() => { const all = [...document.scripts], hook = all.findIndex((s) => !s.src && s.textContent.includes("__w3smoke")), main = all.findIndex((s) => s.type === "module"); return hook >= 0 && (main < 0 || hook < main); })()`))) fail("the error hook isn't in the page before the app's own script (is this a Linux debug build made by tauri?)");
+    if (lines(first.page, "").length) fail(`self-test lines before any note was set: ${lit(lines(first.page, ""))}`);
+    // After a reload: the note is in sessionStorage, which a reload keeps.
+    await first.page.evaluate(`${note("sessionStorage", "after reload")}; window.__beforeReload = true; setTimeout(() => location.reload(), 0); 0`);
+    await until("the page after its reload", () => first.page.evaluate(`!window.__beforeReload && !!window.w3 && document.querySelectorAll("button.activity").length > 0`).catch(() => false));
+    for (const word of ["error: after reload", "rejection: after reload"]) if (!lines(first.page, word).length) fail(`nothing from a page error thrown right after a reload (${word}): ${lit(problems(first.page.events))}`);
+    // For the next app's start. (Its own reload note is used up: nothing of it twice.)
+    await first.page.evaluate(`${note("localStorage", "first moments")}; 0`);
+    await sleep(1500);
+    // The app killed from outside: the next call says so, within seconds.
+    if (first.exited() !== null) fail(`exited() before the kill: ${lit(first.exited())}`);
+    if (!Number.isInteger(first.appPid)) { fail(`no app pid: ${lit(first.appPid)}`); } else {
+      const t0 = Date.now();
+      process.kill(first.appPid, "SIGKILL");
+      const said = await first.page.evaluate(`1 + 1`).then(() => "answered", (e) => String(e.message));
+      const took = (Date.now() - t0) / 1000;
+      if (!/^the app ended/.test(said)) fail(`a call after the app was killed said ${lit(said.slice(0, 200))}`);
+      if (took > 5) fail(`the kill was reported after ${took.toFixed(1)} s`);
+      if (!/^the app ended/.test(String(first.exited()))) fail(`exited() after the kill: ${lit(first.exited())}`);
+    }
+  } finally {
+    await first.stop().catch(() => {});
+  }
+  // The second app starts with the note left in localStorage: the error is thrown before the harness's first evaluate.
+  const second = await startApp({ id: smokeId(), work: here });
+  try {
+    await second.page.evaluate(`0`);
+    for (const word of ["error: first moments", "rejection: first moments"]) if (!lines(second.page, word).length) fail(`nothing from a page error thrown in the page's first moments (${word}): ${lit(problems(second.page.events))}`);
+    if (lines(second.page, "error: after reload").length) fail("the reload's note was still there at the second app's start (used up once, control)");
+  } finally {
+    await second.stop().catch(() => {});
+  }
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -6925,6 +7014,9 @@ async function leftOpen(page, check, found) {
   const now = Date.now();
   console.log(`  took ${((now - checkEnded) / 1000).toFixed(1)} s: ${check}`);
   checkEnded = now;
+  // A caller that wrote into game bytes it read with shared: true (the guard is turned on at the start, GameService.guardShared).
+  const changed = await page.evaluate(`w3Workbench.game.sharedChanged()`).catch(() => []);
+  for (const path of changed) found.push(`${check} changed the game file ${path} it read with shared: true`);
   const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
   for (const text of left) {
     console.log(`  left open after ${check}: ${text}`);
@@ -13534,7 +13626,7 @@ async function paletteMouse(page, found) {
  *  One more texture since HD draws the border's shade over a copy of the picture (renderer.ts drawHdBorder's
  *  copyScene, 349c45f0): one per view and size, as HD water's (measured alone 2026-11-19 by bisecting, branch
  *  fix-reads-once: 117, 143, 141). */
-const GAME_READS_RECORDED = { reads: 117, asked: 143, textures: 141 };
+const GAME_READS_RECORDED = { reads: 117, asked: 144, textures: 141 };
 const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
 async function gameReadsOnce(page, found) {
@@ -13589,6 +13681,7 @@ async function gameReadsOnce(page, found) {
   // The picture waits until every model and texture is in.
   // Nothing earlier checks read is kept: the scene's reads are the same alone as in the full run.
   await page.evaluate(`w3Workbench.game.reload()`);
+  await page.evaluate(`w3Workbench.game.requestLog = []`);
   const before = await reads(), askedBefore = await asked();
   const texturesBefore = await page.evaluate(`window.__texturesMade`);
   await tool("terrain_screenshot", { maxSize: 64 });
@@ -13596,6 +13689,7 @@ async function gameReadsOnce(page, found) {
   await readsSettled();
   const first = (await reads()) - before;
   const askedFirst = (await asked()) - askedBefore;
+  const askedNames = await page.evaluate(`(() => { const l = w3Workbench.game.requestLog ?? []; w3Workbench.game.requestLog = null; return l; })()`);
   const texturesFirst = (await page.evaluate(`window.__texturesMade`)) - texturesBefore;
   // The default state, the minimap panel on (a new view has it): it draws on a timer after the view is open, and reads the
   // game files of its icons and the tiles' colours. What it reads is bounded, not counted: it depends on the checks before.
@@ -13613,6 +13707,13 @@ async function gameReadsOnce(page, found) {
   console.log(`  game reads: the first opening of the scene read ${first} game files, asked for ${askedFirst}, made ${texturesFirst} textures (recorded: ${RECORDED.reads}, ${RECORDED.asked}, ${RECORDED.textures})`);
   if (first > RECORDED.reads) fail(`the first opening read ${first} game files, ${RECORDED.reads} when recorded`);
   if (askedFirst > RECORDED.asked) fail(`the first opening asked for ${askedFirst} game files, ${RECORDED.asked} when recorded`);
+  if (askedFirst > RECORDED.asked) {
+    // Which ones: the files asked for more than once, then every file in order.
+    const times = new Map();
+    for (const n of askedNames) times.set(n.toLowerCase(), (times.get(n.toLowerCase()) ?? 0) + 1);
+    console.log(`  game reads: asked more than once: ${[...times].filter(([, n]) => n > 1).map(([f, n]) => `${f} x${n}`).join(", ") || "none"}`);
+    console.log(`  game reads: asked for, in order: ${askedNames.join(", ")}`);
+  }
   if (texturesFirst > RECORDED.textures) fail(`the first opening made ${texturesFirst} textures, ${RECORDED.textures} when recorded`);
   // HD models name .tif textures; the game stores them as .dds only, and that is asked for first.
   const tifMissed = await page.evaluate(`w3Workbench.game.backendMisses.filter((p) => /\\.tif$/i.test(p))`);
@@ -20344,6 +20445,7 @@ async function run() {
     if (resolve(settingsAt) !== resolve(configDir)) throw new Error(`the app keeps its settings in ${settingsAt}, not in ${configDir}: build it again (run without --no-build)`);
     const found = [];
     // The window's functions as they are now, for `leftOpen` to compare each check's end against.
+    await page.evaluate(`w3Workbench.game.guardShared = true`);
     await page.evaluate(`window.__w3WindowOrig = Object.fromEntries(Object.entries(w3.window).filter(([, v]) => typeof v === "function"))`);
     // --only=<check> runs one of the checks below on its own, for working on it. Every check of the full run below is
     // named here too (`npm run check` holds the two lists against each other: scripts/check-scripts.mjs).
@@ -20387,6 +20489,7 @@ async function run() {
         doodadSnapOnLoad,
         drawCalls,
         dropChancesRefused,
+        earlyPageErrors,
         editDuringSave,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
@@ -20412,6 +20515,7 @@ async function run() {
         importSortImages,
         importWarnings,
         importWriteOrder,
+        inOrderOffMain,
         itemDrops,
         itemTablesAccess,
         keybindings,
@@ -20759,6 +20863,7 @@ const CHECKS = [
   [importListCleanup, "import list cleanup"],
   [groundTextureReload, "ground texture reload"],
   [importedBlightWaterReload, "imported blight and water reload"],
+  [earlyPageErrors, "early page errors"],
   [importWarnings, "import warnings"],
   [objectManagerLive, "object manager live"],
   [objectEditorRawSkin, "object editor raw skin"],
@@ -20835,6 +20940,7 @@ const CHECKS = [
   [textEditorOwnCommon, "text editor own common.j"],
   [textEditorTabs, "text editor Tab keys"],
   [playerSyncRefused, "player sync refused"],
+  [inOrderOffMain, "in order off main"],
 ];
 
 /** The checks of `part` of `parts` (all of them without a part), one after the other. Returns how many maps newMaps
@@ -20843,7 +20949,13 @@ async function runChecks(page, found, project, part, parts) {
   const names = CHECKS.map(([check]) => check.name);
   const mine = part === null ? CHECKS : splitParts(names, parts, SECONDS, { first: PROJECT_CHECKS_SECONDS })[part - 1].map((i) => CHECKS[i]);
   let made = null;
+  // --skip=<check functions' names>: left out (the gate does that while the user's game runs in the prefix JassHelper uses).
+  // The cut above was made on all checks, so the others stay in their parts.
+  const skip = (process.argv.find((x) => x.startsWith("--skip="))?.slice(7) ?? "").split(",").filter(Boolean);
+  const unknown = skip.filter((n) => !names.includes(n));
+  if (unknown.length) throw new Error(`--skip: no check ${unknown.join(", ")}`);
   for (const [check, label, wants] of mine) {
+    if (skip.includes(check.name)) { console.log(`${label}: skipped (--skip)`); continue; }
     const got = await (wants === "project" ? check(page, found, project) : check(page, found)).catch((e) => { found.push(`${label}: ${e.message}`); return null; });
     if (check === newMaps) made = got;
     await leftOpen(page, check.name, found);

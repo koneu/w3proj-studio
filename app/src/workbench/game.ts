@@ -1,6 +1,7 @@
 import type { GameInfo, Settings } from "../extensions/api";
 import { invoke as backendInvoke } from "./backend";
 import { gameDataError } from "./gameerror";
+import { ModeCache } from "../lib/modecache";
 
 /** Documents with this prefix are files from the game's storage. */
 export const GAME_SCHEME = "game:";
@@ -60,6 +61,8 @@ export class GameService {
   backendReads = 0;
   /** Reads asked of this service, kept or not: an editor loading twice asks for everything twice (the app smoke's guard). */
   requests = 0;
+  /** When set (the app smoke's guard sets it), every path asked for is noted here, in order: a count that went up can be named. */
+  requestLog: string[] | null = null;
   /** Paths the backend said aren't there, in order (each once, as they're remembered; `reload` empties it, as it forgets them): for the app smoke's guard. */
   readonly backendMisses: string[] = [];
   /** Reads waiting on the backend now, and the ones queued for a place (see MAX_READS_IN_FLIGHT). */
@@ -79,6 +82,14 @@ export class GameService {
   /** Backend reads the fast transfer answered, and ones that went to `game_read` after it failed (tests, the app smoke). */
   fastReads = 0;
   fastFallbacks = 0;
+
+  /** Test and smoke builds only (off in the app): every shared read is checksummed when handed out; the next read of the
+   *  file and `sharedChanged` check the kept bytes against it, so a caller that wrote into them, or detached their buffer,
+   *  is found (a wrong `shared: true`). Costs a pass over each file read this way. */
+  guardShared = false;
+  private sharedSums = new Map<string, { path: string; bytes: Uint8Array; length: number; sum: number }>();
+  /** Paths whose shared bytes were found changed, in order found (the guard; `reload` doesn't empty it). */
+  readonly sharedChanges: string[] = [];
 
   /** Backend reads not finished yet, running or queued: the app smoke waits for none before it counts. */
   get readsPending(): number { return this.inFlight + this.queuedNow.length + this.queuedLater.length; }
@@ -101,6 +112,8 @@ export class GameService {
   /** Forgets every file read and the file list: the next reads ask the game's storage again. A fast transfer that
    *  failed is tried again too. */
   reload() {
+    // What other modules made from the files (colours, meshes by graphics mode) goes with them.
+    ModeCache.clearAll();
     this.fast = null;
     this.listCache = null;
     this.files.clear();
@@ -109,6 +122,7 @@ export class GameService {
     this.cachedBytes = 0;
     this.protectedBytes = 0;
     this.backendMisses.length = 0;
+    this.sharedSums.clear();
   }
 
   /** Bytes of game files kept at most. */
@@ -163,6 +177,7 @@ export class GameService {
    *  `shared`: the kept bytes themselves, not a copy (see GameReadOptions): the caller must never write to them. */
   async read(path: string, tileset?: string, background = false, shared = false): Promise<Uint8Array> {
     this.requests++;
+    this.requestLog?.push(path);
     const args = this.args();
     // As the backend looks paths up: either slash, any case.
     const key = [args.install ?? "", args.modeName ?? "", tileset ?? "", path.replace(/\\/g, "/").toLowerCase()].join("|");
@@ -192,7 +207,34 @@ export class GameService {
       });
     }
     const bytes = await read;
+    if (this.guardShared) this.guard(key, path, bytes, shared);
     return shared ? bytes : bytes.slice();
+  }
+
+  /** The guard (see `guardShared`) for a read of `key`: the earlier shared hand-out of these bytes must be as it was
+   *  (else it throws, naming the file), and a shared hand-out is noted. */
+  private guard(key: string, path: string, bytes: Uint8Array, shared: boolean) {
+    const noted = this.sharedSums.get(key);
+    if (noted && noted.bytes === bytes) this.checkNoted(noted);
+    if (shared && (!noted || noted.bytes !== bytes)) this.sharedSums.set(key, { path, bytes, length: bytes.byteLength, sum: checksum(bytes) });
+  }
+
+  private checkNoted(noted: { path: string; bytes: Uint8Array; length: number; sum: number }) {
+    if (noted.bytes.byteLength === noted.length && checksum(noted.bytes) === noted.sum) return;
+    this.sharedChanges.push(noted.path);
+    // Said once, then taken as the new state: one wrong caller isn't reported by every later read.
+    noted.length = noted.bytes.byteLength;
+    noted.sum = checksum(noted.bytes);
+    throw new Error(`game file ${noted.path} was changed by a caller that read it with shared: true`);
+  }
+
+  /** The guard's check of every file handed out shared so far: the paths found changed (empty: all as they were). */
+  sharedChanged(): string[] {
+    const found: string[] = [];
+    for (const noted of this.sharedSums.values()) {
+      try { this.checkNoted(noted); } catch { found.push(noted.path); }
+    }
+    return found;
   }
 
   /** One file from the backend: through the fast transfer when it's on and answers, else by `game_read`. */
@@ -351,4 +393,11 @@ export class GameService {
     // TextDecoder drops a leading byte-order mark by default.
     return new TextDecoder("utf-8").decode(await this.read(path, tileset, background));
   }
+}
+
+/** FNV-1a over the bytes (the guard of shared reads: a change of any byte or of the length shows). */
+function checksum(bytes: Uint8Array): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 0x01000193);
+  return h >>> 0;
 }
