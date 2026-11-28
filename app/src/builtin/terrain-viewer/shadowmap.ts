@@ -6,7 +6,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { mdlCandidates, parseModel, readModel } from "../../lib/model/mdl";
 import type { Model } from "../../lib/model/mdx";
 import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
-import { ModeCache } from "../../lib/modecache";
+import { ModeCache, trackImports } from "../../lib/modecache";
 import { modelPath, plainModelPath, reforgedModelPath, type loadSkins, type Placed, type Skin } from "./objects";
 import { parseSlk } from "../../lib/formats/text";
 import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, shadowCellHeights, specialCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
@@ -51,18 +51,21 @@ class Unparsable extends Error {}
 function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string, failed: Set<string>): Promise<ShadowMesh | typeof NO_FACES | null> {
   const key = `${artMode()}|${path.toLowerCase()}`;
   if (failed.has(key)) return Promise.resolve(null);
+  // A mesh made from the map's own import (the model or a texture) isn't kept: another project, or this one after the
+  // import changed, has other files under the path.
+  const t = trackImports(readFile);
   return meshes.get(artMode, path.toLowerCase(), async () => {
     // Exactly this file, either form (predictShadows asks for the .mdl names after the .mdx ones, as readModel).
-    const bytes = await readFile(path);
+    const bytes = await t.read(path);
     let model;
     try { model = parseModel(bytes); } catch (e) { throw new Unparsable(String(e)); }
     const maps = new Map<string, AlphaMap | null>();
     // Classic art: the editor casts alpha-tested geosets whole, their textures' holes included (we-drive, branch
     // we-shadow-3, SD: LRrk's ten variations and eight turns, 984 cells; whole quads 983 of them and 5 more, with the
     // alpha test 659 and 3 more).
-    if (artMode() !== "sd") for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
+    if (artMode() !== "sd") for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, t.read));
     return shadowMesh(model, (p) => maps.get(p) ?? null) ?? NO_FACES;
-  }).catch((e: unknown) => {
+  }, () => !t.own()).catch((e: unknown) => {
     failed.add(key);
     if (e instanceof Unparsable) failed.add(thereKey(artMode, path));
     return null;
@@ -117,12 +120,13 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   // The special doodads' tiles, all of their footprints', read from their models (shadows.ts specialCellHeights).
   const special = new Map<number, Float32Array>();
   for (const sp of specials) {
+    const rd = trackImports(readFile);
     const mesh = await specialMeshes.get(artMode, sp.path.toLowerCase(), async () => {
       try {
-        const m = modelTriangles(await readModel([sp.path], readFile));
+        const m = modelTriangles(await readModel([sp.path], rd.read));
         return m.faces.length ? m : null;
       } catch { return null; }
-    });
+    }, () => !rd.own());
     if (!mesh) continue;
     const { x0, y0, x1, y1 } = sp.tiles, base = specialBase(t, sp.tiles);
     for (let ty = Math.max(0, y0); ty <= Math.min(t.height - 2, y1); ty++) {
@@ -137,20 +141,24 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   const withSpecials = (cells: (tx: number, ty: number) => Float32Array | null): CliffCells =>
     Object.assign((tx: number, ty: number) => special.get(ty * tw + tx) ?? cells(tx, ty), { special: (tx: number, ty: number) => special.has(ty * tw + tx) });
   if (!tiles.length) return withSpecials(() => null);
+  const dirsRead = trackImports(readFile);
   const dirs = await cliffDirs.get(artMode, "CliffTypes", async () => {
-    const rows = parseSlk(new TextDecoder().decode(await readFile("TerrainArt\\CliffTypes.slk")));
+    const rows = parseSlk(new TextDecoder().decode(await dirsRead.read("TerrainArt\\CliffTypes.slk")));
     return new Map(rows.filter((r) => r.cliffID && r.cliffModelDir).map((r) => [r.cliffID, { cliff: r.cliffModelDir, ramp: r.rampModelDir ?? "" }]));
-  }).catch(() => null);
+  }, () => !dirsRead.own()).catch(() => null);
   if (!dirs) return special.size ? withSpecials(() => null) : undefined;
   const list = t.cliffTiles.map((id) => dirs.get(id));
   // A model that can't be read is kept as null for the mode (most are variations the cliff type doesn't have, read
   // again on every prediction otherwise): before and after of a save agree on it. clearShadowMeshes forgets it.
-  const heights = (path: string) => cliffHeights.get(artMode, path.toLowerCase(), async () => {
-    try {
-      const { positions, faces } = modelTriangles(await readModel([path], readFile));
-      return faces.length ? cliffCellHeights(positions, faces) : null;
-    } catch { return null; }
-  });
+  const heights = (path: string) => {
+    const rd = trackImports(readFile);
+    return cliffHeights.get(artMode, path.toLowerCase(), async () => {
+      try {
+        const { positions, faces } = modelTriangles(await readModel([path], rd.read));
+        return faces.length ? cliffCellHeights(positions, faces) : null;
+      } catch { return null; }
+    }, () => !rd.own());
+  };
   const byTile = new Map<number, Float32Array>();
   // Ramp sides (the tiles where a ramp meets the cliff beside it, in twos): from the ramp model shadowRampName names in
   // the cliff type's ramp folder (its bottom-left corner's type, as drawn; variation 0), where it can be read; the
@@ -159,12 +167,13 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
     const dir = (list[cliffSlot(side.outer[0].cliffTexture)] ?? list[0])?.ramp;
     if (!dir) continue;
     const path = `Doodads\\Terrain\\${dir}\\${dir}${shadowRampName(side.outer, side.base)}0.mdx`;
+    const rd = trackImports(readFile);
     const mesh = await rampMeshes.get(artMode, path.toLowerCase(), async () => {
       try {
-        const m = modelTriangles(await readModel([path], readFile));
+        const m = modelTriangles(await readModel([path], rd.read));
         return m.faces.length ? m : null;
       } catch { return null; }
-    });
+    }, () => !rd.own());
     if (!mesh) continue;
     for (const i of side.tiles) {
       const tx = i % tw, ty = (i - tx) / tw;

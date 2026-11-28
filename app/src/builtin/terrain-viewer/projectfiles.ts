@@ -5,6 +5,7 @@
 import type { EditorDocument, W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
 import { importedPath, modeNames } from "../../lib/imports";
+import { markImport } from "../../lib/modecache";
 import { campaignCandidates } from "./chapterimports";
 import { loadSkins, withObjectArt, type ObjectArt } from "./objects";
 
@@ -98,7 +99,7 @@ export async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
   const known = own.length > 0 || (listing !== null && shared.length > 0);
   let last: unknown = null;
   for (const c of [...own, ...shared]) {
-    try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }
+    try { return markImport(await w3.workspace.readBytes(c)); } catch (e) { last = e; }
   }
   throw known && last !== null ? last : new NotImported(path);
 }

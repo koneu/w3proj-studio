@@ -43,7 +43,7 @@ import { autoCycleLine, cycledId, startAutoCycle, type RandomGroup } from "../..
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
 import { MinimapPanel, viewOutline } from "./minimappanel";
-import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
+import { buildMinimap, clearTileColors, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
 import { openGroups } from "./opengroups";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
@@ -87,7 +87,7 @@ import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, ground
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, dropFallenSpecials, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices, GROUND_KINDS, groundKind, groupSkipped, pocketSpots, type GroundKind, withTwin } from "./aitools";
-import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
+import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload, importScope } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -1821,6 +1821,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.terrain.overview")),
+    // What was made from the game's files (shadow meshes, minimap colours) is valid while the same imports could
+    // replace them: another project, or an import added, removed or renamed, makes it again.
+    (() => {
+      let scope = importScope(w3.workspace.project()?.root, w3.workspace.files());
+      return w3.workspace.onDidChange(() => {
+        const now = importScope(w3.workspace.project()?.root, w3.workspace.files());
+        if (now === scope) return;
+        scope = now;
+        clearShadowMeshes();
+        clearTileColors();
+      });
+    })(),
 
     // The Item Drops tab: the drops of the objects the project's terrain editor holds (dropstab.ts).
     w3.editors.registerProvider("w3.itemDrops", {

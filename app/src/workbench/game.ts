@@ -1,6 +1,7 @@
 import type { GameInfo, Settings } from "../extensions/api";
 import { invoke as backendInvoke } from "./backend";
 import { gameDataError } from "./gameerror";
+import { ModeCache } from "../lib/modecache";
 
 /** Documents with this prefix are files from the game's storage. */
 export const GAME_SCHEME = "game:";
@@ -109,6 +110,8 @@ export class GameService {
   /** Forgets every file read and the file list: the next reads ask the game's storage again. A fast transfer that
    *  failed is tried again too. */
   reload() {
+    // What other modules made from the files (colours, meshes by graphics mode) goes with them.
+    ModeCache.clearAll();
     this.fast = null;
     this.listCache = null;
     this.files.clear();
