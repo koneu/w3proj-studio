@@ -15,6 +15,13 @@ test("Reforged cliff models' placeholder textures become the cliff type's HD set
   // Real files stay: the legacy cliff textures, and anything else.
   assert.equal(cliffRetexture("ReplaceableTextures/Cliff/Cliff1Legacy_Diffuse.dds", CITY), "ReplaceableTextures/Cliff/Cliff1Legacy_Diffuse.dds");
   assert.equal(cliffRetexture("Textures/Black32.blp", CITY), "Textures/Black32.blp");
+  // The city ramps (CityCliffTrans, HD and DE) name plain Textures\white, normal and ORM: the cliff type's set too.
+  const RUINS = { texDir: "TerrainArt\\Ruins", texFile: "Ruins_Cliff1" };
+  assert.equal(cliffRetexture("Textures/white.blp", RUINS), "TerrainArt\\Ruins\\Ruins_Cliff1_Diffuse.blp");
+  assert.equal(cliffRetexture("Textures\\normal.blp", RUINS), "TerrainArt\\Ruins\\Ruins_Cliff1_Normal.blp");
+  assert.equal(cliffRetexture("Textures/ORM.blp", RUINS), "TerrainArt\\Ruins\\Ruins_Cliff1_ORM.blp");
+  assert.equal(cliffRetexture("Textures/white.blp", RUINS, "_Normal"), "TerrainArt\\Ruins\\Ruins_Cliff1_Normal.blp", "the slot decides");
+  assert.equal(cliffRetexture("Textures/whitey.blp", RUINS), "Textures/whitey.blp");
 });
 
 test("a placeholder takes the part of the set its slot in the HD layer asks for, whatever its own name says", () => {

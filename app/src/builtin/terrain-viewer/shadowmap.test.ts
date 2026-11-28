@@ -346,7 +346,7 @@ test("the save's shadow update leaves the stored war3map.shd as it is when the m
   assert.equal(flaky.warnings.length, 1);
 });
 
-test("predictShadows in DE falls back to the HD model when the plain Classic file is missing (EW00, ET00, EMt0)", async () => {
+test("predictShadows in DE casts a doodad's HD model, which the 3.0 art draws when the entry names no DE one (EW00, ET00, EMt0)", async () => {
   const files: Record<string, string> = {
     "Doodads\\DoodadSkins.txt": [
       "[EW00]", "numVar=1", "file=Doodads\\TestDeShared\\Shared", "file:hd=Doodads\\TestDeWall\\Wall", "shadow=1",
@@ -375,7 +375,8 @@ test("predictShadows in DE falls back to the HD model when the plain Classic fil
   const stats: ShadowStats = { wanted: 0, unreadable: 0 };
   const both = await predictShadows(terrain, [placed("EW00", 3), placed("ET00", 8)], deSkins, () => undefined, read, undefined, undefined, () => "de", stats);
   assert.deepEqual(stats, { wanted: 2, unreadable: 0 });
-  assert.equal(reads.filter((p) => /TestDeShared[\\/]Shared\.mdx$/i.test(p)).length, 1, "missing Classic path is failed once");
+  // The HD model is read first: the Classic path, which the store lacks here, isn't needed.
+  assert.equal(reads.filter((p) => /TestDeShared[\\/]Shared\.mdx$/i.test(p)).length, 0, "the Classic path isn't read when the HD model is there");
   const wallOnly = shadowed(await predictShadows(terrain, [placed("EW00", 3)], deSkins, () => undefined, read, undefined, undefined, () => "de"));
   const towerOnly = shadowed(await predictShadows(terrain, [placed("ET00", 8)], deSkins, () => undefined, read, undefined, undefined, () => "de"));
   assert.ok(wallOnly > 0 && towerOnly > wallOnly, `wall=${wallOnly}, tower=${towerOnly}`);

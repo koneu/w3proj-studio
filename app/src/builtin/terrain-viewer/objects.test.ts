@@ -424,12 +424,12 @@ test("a type with only Classic and HD models has one in the 3.0 art (DE) too: th
   assert.equal((await of("sd")).get("nogm")?.file, "units\\creeps\\Ogre\\Ogre");
 });
 
-test("the 3.0 art keeps the HD model of an entry without file:de beside its plain one (EW00), only in DE", async () => {
+test("the 3.0 art draws a doodad's HD model when it names no DE one (EW00), its Classic one as the fallback, only in DE", async () => {
   const files = { ...gameTables(), "Doodads\\DoodadSkins.txt": "[EW00]\r\nnumVar=1\r\nfile=Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0\r\nfile:hd=Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall\r\n[LOwn]\r\nfile=Doodads\\A\r\nfile:hd=Doodads\\B\r\nfile:de=Doodads\\C\r\n" };
   const of = async (mode: string) => loadSkins(fakeGame(files, { "game.installDir": "/reforged-art", "game.graphicsMode": mode }));
   const de = await of("de");
-  assert.equal(de.get("EW00")?.file, "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0");
-  assert.equal(de.get("EW00")?.reforgedFile, "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall");
+  assert.equal(de.get("EW00")?.file, "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall");
+  assert.equal(de.get("EW00")?.reforgedFile, "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0");
   assert.equal(de.get("LOwn")?.reforgedFile, undefined, "its own DE art: nothing else");
   assert.equal((await of("sd")).get("EW00")?.reforgedFile, undefined);
   assert.equal((await of("hd")).get("EW00")?.reforgedFile, undefined);

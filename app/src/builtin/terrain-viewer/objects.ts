@@ -35,8 +35,8 @@ export interface Skin {
   /** Object data file the type belongs to: w3d, w3b, w3u or w3t. */
   kind: string;
   file: string;
-  /** The 3.0 art (DE) only, when the entry names no `file:de` and its HD art (`file:hd`) is another model: that model,
-   *  read when `file`'s isn't stored (reforgedArt). */
+  /** The 3.0 art (DE) only, when the entry names no `file:de` and has HD art (`file:hd`) of another model: the other
+   *  one (a unit's HD model, a doodad's or destructable's Classic one), read when `file`'s isn't stored (reforgedArt). */
   reforgedFile?: string;
   numVar: number;
   /** Replaceable texture this type swaps in (trees, cliffs). */
@@ -292,10 +292,12 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
     const sections = parseIni(tables.get(f) ?? "", { firstWins: kind === "w3d" || kind === "w3b" });
     const own = new Map<string, Skin>();
     for (const [id, sec] of sections) {
-      const get = (k: string) => artValue((key) => sec.get(key), k, mode);
+      // Doodads and destructables: the 3.0 art draws their HD art when they name no DE art (artKeys).
+      const hdFirst = kind === "w3d" || kind === "w3b";
+      const get = (k: string) => artValue((key) => sec.get(key), k, mode, hdFirst);
       const file = get("file");
       if (!file) continue;
-      const reforged = reforgedArt((key) => sec.get(key), "file", mode);
+      const reforged = reforgedArt((key) => sec.get(key), "file", mode, hdFirst);
       own.set(id, {
         kind,
         file,

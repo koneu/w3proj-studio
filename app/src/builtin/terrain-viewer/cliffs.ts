@@ -4,7 +4,7 @@
 // bottom-left, top-left, top-right, bottom-right, plus a variation number:
 // Doodads\Terrain\Cliffs\CliffsAABA0.mdx. The model's replaceable texture 11
 // is the cliff type's texture; Reforged cliff models instead name placeholder
-// textures (#ignore_Cliffs\Cliff1_Diffuse…) that stand for its HD set.
+// textures (#ignore_Cliffs\Cliff1_Diffuse…; the city ramps plain Textures\white…) that stand for its HD set.
 // Ramps: see planCliffs.
 
 import type { Mat4 } from "../../lib/model/renderer";
@@ -19,6 +19,11 @@ import { cliffSlot, rampSides } from "../../lib/terrain/cliffs";
  *  set: the placeholder's own name can be wrong (the HD cave CliffDoodadCave lists Cliff1_ORM in its diffuse slot and
  *  Cliff1_Diffuse in its ORM slot, which drew it white). */
 export function cliffRetexture(path: string, type: Pick<CliffType, "texDir" | "texFile">, slot?: string): string {
+  // The city cliffs' ramps (CityCliffTrans, all 16 of HD and of DE) name no placeholder of the set but the plain
+  // Textures\white, normal and ORM: the World Editor draws them with the cliff type's set all the same (we-drive
+  // 2026-11-28, HD and DE, Ruins CZlb ramps: stone stairs where Studio drew them white).
+  const plain = /^Textures[\\/](white|normal|orm)\.blp$/i.exec(path);
+  if (plain) return `${type.texDir}\\${type.texFile}${slot ?? { white: "_Diffuse", normal: "_Normal", orm: "_ORM" }[plain[1].toLowerCase() as "white" | "normal" | "orm"]}.blp`;
   return path.replace(/^.*(?:#ignore_Cliffs|ReplaceableTextures[\\/]Cliff)[\\/]Cliff\d+_(\w+)\.\w+$/i,
     (_m, own: string) => `${type.texDir}\\${type.texFile}${slot ?? `_${own}`}.blp`);
 }
