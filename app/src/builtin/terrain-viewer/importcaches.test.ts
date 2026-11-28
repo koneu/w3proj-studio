@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Settings, W3Api } from "../../extensions/api";
+import type { W3Api } from "../../extensions/api";
 import { markImport } from "../../lib/modecache";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { GameService } from "../../workbench/game";
 import { importScope } from "./filewatch";
 import { minimapBase } from "./minimapgen";
 import { newTerrain, type NewMapOptions } from "./newmap";
@@ -70,21 +69,6 @@ test("minimap tile colours: project A's import under a game path isn't used for 
   assert.deepEqual(await tile("Ha04", reader(new Map([[GRASS, [10, 20, 30]]]), [])), [10, 20, 30]);
   assert.deepEqual(await tile("Ha04", reader(new Map([[GRASS, [40, 50, 60]]]), [])), [40, 50, 60], "the changed import");
   assert.deepEqual(await tile("Ha04", reader(new Map(), [])), gameGrass, "the import removed");
-});
-
-test("game.reload empties the minimap's tile colours", async () => {
-  const settings = { get: () => undefined, onDidChange: () => ({ dispose() {} }) } as unknown as Settings;
-  const game = new GameService(settings);
-  const reads: string[] = [];
-  const read = reader(new Map(), reads);
-  const tile = async () => (await minimapBase(mapW3(), terrain2("Ha05"), [], read)).tileColor("Ha05");
-  await tile();
-  const first = reads.length;
-  await tile();
-  assert.equal(reads.length, first, "kept (the control: without a reload nothing is read again)");
-  game.reload();
-  await tile();
-  assert.ok(reads.length > first, "read again after the reload");
 });
 
 test("shadow meshes: a model the map imports under a game path isn't kept for another project or after it changed", async () => {

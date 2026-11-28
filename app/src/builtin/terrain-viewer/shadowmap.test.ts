@@ -4,7 +4,7 @@ import type { W3Api } from "../../extensions/api";
 import { toClassicMdx } from "../../lib/model/classic";
 import { towerModel } from "../../lib/testhelpers/tower";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
-import { parseMdx, type Model } from "../../lib/model/mdx";
+import { parseMdx } from "../../lib/model/mdx";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { loadSkins, withObjectArt, type Placed } from "./objects";
 import { doodadTypes, predictShadows, shadowVerdict, specialShadows, type ShadowStats } from "./shadowmap";
