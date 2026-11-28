@@ -3429,6 +3429,44 @@ async function objectListSuffix(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** codec_write, codec_canonicalize, objects_canonicalize and project_create run off the main thread, one at a time in the
+ *  order they come (lib.rs `IN_ORDER`): while a big canonical text is made, a main-thread command (fs_stat) answers at
+ *  once (on the main thread it waited for the text: 1902 of 1979 ms), and of two raw writes of one file (straight to
+ *  Tauri, past the page's write queue), a slow one and a quick one, the one asked for last is what the disk keeps.
+ *  Not checked: which of two answers the page gets first. A big answer takes long to reach it, so a small one asked for
+ *  later can come first, on the main thread too (measured on dev: 1902 against 1979 ms). Controls: the big text takes
+ *  long enough to tell (else the timing proves nothing), and the two writes' bytes differ. */
+const IN_ORDER_DOODADS = 20000;
+async function inOrderOffMain(page, found) {
+  const fail = (what) => found.push(`in order off main: ${what}`);
+  const root = join(work, "in-order-off-main");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(join(root, "map"), { recursive: true });
+  const fixture = JSON.parse(readDiskFile(join(FIXTURE, "map", "war3map.doo.json"), "utf8"));
+  const r = await page.evaluate(`(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke, now = () => performance.now();
+    const fixture = ${lit(fixture)};
+    const doodads = (n) => JSON.stringify({ ...fixture, doodads: Array.from({ length: n }, (_, i) => ({ ...fixture.doodads[0], editorId: i })) });
+    const root = ${lit(root)}, path = "map/war3map.doo.json";
+    const bigText = doodads(${IN_ORDER_DOODADS});
+    const t0 = now();
+    const big = invoke("codec_canonicalize", { root, path, text: bigText }).then(() => now());
+    const stat = invoke("fs_stat", { path: root }).then(() => now());
+    const [bigAt, statAt] = await Promise.all([big, stat]);
+    const first = invoke("codec_write", { root, path: "map/war3map.doo", text: bigText });
+    const last = invoke("codec_write", { root, path: "map/war3map.doo", text: doodads(2) });
+    const [a, b] = await Promise.all([first, last]);
+    return { big: bigAt - t0, stat: statAt - t0, firstSize: a.size, lastSize: b.size };
+  })()`);
+  if (r.big < 300) return fail(`the big canonical text took ${Math.round(r.big)} ms: too quick to tell (control)`);
+  if (r.stat >= r.big / 2) fail(`fs_stat answered at ${Math.round(r.stat)} ms, the big canonical text at ${Math.round(r.big)} ms: the main thread was held`);
+  if (r.firstSize === r.lastSize) fail(`both writes are ${r.firstSize} bytes: their order can't be told (control)`);
+  const disk = statSync(join(root, "map", "war3map.doo")).size;
+  if (disk !== r.lastSize) fail(`the disk has ${disk} bytes, the write asked for last ${r.lastSize}, the first ${r.firstSize}`);
+  console.log(`in order off main: big canonical text ${Math.round(r.big)} ms, fs_stat ${Math.round(r.stat)} ms`);
+  rmSync(root, { recursive: true, force: true });
+}
+
 /** The Object Editor watches the raw Skin file it reads (war3mapSkin.w3u, when the project holds no .json one): a hooked
  *  raw write of it reopens the editor with the new name. Control: the same write that skips the hook (the Tauri invoke
  *  itself) leaves the editor, its DOM node and its name alone. */
@@ -20466,6 +20504,7 @@ async function run() {
         importSortImages,
         importWarnings,
         importWriteOrder,
+        inOrderOffMain,
         itemDrops,
         itemTablesAccess,
         keybindings,
@@ -20890,6 +20929,7 @@ const CHECKS = [
   [textEditorOwnCommon, "text editor own common.j"],
   [textEditorTabs, "text editor Tab keys"],
   [playerSyncRefused, "player sync refused"],
+  [inOrderOffMain, "in order off main"],
 ];
 
 /** The checks of `part` of `parts` (all of them without a part), one after the other. Returns how many maps newMaps
