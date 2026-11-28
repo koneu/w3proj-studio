@@ -201,3 +201,15 @@ test("an _HD.w3mod import entry the game provides (its layer War3.w3mod:_HD.w3mo
   const found = (await check.run()).map((p) => p.message);
   assert.deepEqual(found, [`${none} is listed but its file is missing`]);
 });
+
+test("settings values that don't fit their declaration are problems at their file, the project's first", async () => {
+  const { settingsProblems } = await import("./checks");
+  const got = settingsProblems([{ key: "terrain.fov", message: "terrain.fov must be at most 120, not 400." }], [{ key: "map.textEncoding", message: "map.textEncoding must be one of \"gbk\", not \"latin1\"." }]);
+  assert.deepEqual(got.map((p) => [p.severity, p.location, p.about]), [
+    ["warning", ".w3proj/settings.json", "setting:project:map.textEncoding"],
+    ["warning", "settings.json (user)", "setting:user:terrain.fov"],
+  ]);
+  assert.match(got[1].message, /^terrain\.fov must be at most 120, not 400\. It is used as written\.$/);
+  assert.deepEqual(got[0].reveal, { command: "w3.settings.open", args: [] });
+  assert.deepEqual(settingsProblems([], []), []);
+});

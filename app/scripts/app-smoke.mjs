@@ -9142,6 +9142,17 @@ async function configSafety(page, found) {
     await settled(page);
   };
   try {
+    // ---- 0. A project value its declaration doesn't allow is listed in the Problems view, at the file ----
+    mkdirSync(dirname(projectFile), { recursive: true });
+    const projectHad = read(projectFile);
+    // Set by hand as a user would in the app: the project's settings file edited and saved (it is read again then).
+    await page.evaluate(`w3.settings.set("terrain.lighting.hour", 40, "project")`);
+    await until("the project's settings read again", () => page.evaluate(`w3.settings.inspect("terrain.lighting.hour").project === 40`), 20000).catch(() => {});
+    const run = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.run()).then((list) => list.filter((p) => p.message.includes("terrain.lighting.hour")).map((p) => p.location + " " + p.message))`).catch((e) => [`failed: ${e.message}`]);
+    if (run.length !== 1 || !/^\.w3proj\/settings\.json terrain\.lighting\.hour must be at most 23, not 40\. It is used as written\.$/.test(run[0])) fail(`a project hour of 40 is in the Problems view as ${lit(run)}`);
+    await page.evaluate(`w3.settings.set("terrain.lighting.hour", undefined, "project")`);
+    await until("the project's settings back", () => page.evaluate(`w3.settings.inspect("terrain.lighting.hour").project !== 40`), 20000).catch(() => fail("the project's settings didn't go back"));
+
     // ---- 1a. The user's settings.json with a comment and a trailing comma ----
     const broken = `{\n  // a comment\n  "smoke.configSafety": "theirs",\n}\n`;
     writeFileSync(userFile, broken);

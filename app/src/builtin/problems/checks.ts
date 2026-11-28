@@ -99,8 +99,29 @@ export function unreadableProblems(list: { path: string; error: string }[]): Pro
 
 /** `scope`: what the checks of the current run share (the Problems service makes one per run);
  *  without it, every check reads everything itself. */
+/** The settings files' values that don't fit their declarations, as problems: at the file, opening the Settings
+ *  editor. A project's value comes first, since it is the one in force. */
+export function settingsProblems(user: readonly { key: string; message: string }[], project: readonly { key: string; message: string }[]): Problem[] {
+  const at = (file: string) => ({ location: file, reveal: { command: "w3.settings.open", args: [] } });
+  return [
+    ...project.map((i) => ({ severity: "warning" as const, message: `${i.message} It is used as written.`, about: `setting:project:${i.key}`, ...at(".w3proj/settings.json") })),
+    ...user.map((i) => ({ severity: "warning" as const, message: `${i.message} It is used as written.`, about: `setting:user:${i.key}`, ...at("settings.json (user)") })),
+  ];
+}
+
 export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(w3, false)): ProblemCheck[] {
   return [
+    {
+      // A hand-edited settings value that doesn't fit its declaration (type, enum, range) is used as written; said
+      // here too, not only in a notice when the file is read and in the Settings editor's row.
+      id: "settings",
+      title: "Settings",
+      async run() {
+        // A host without settings files (the command line's) has nothing to say here.
+        const issues = (target: "user" | "project") => (typeof w3.settings.issues === "function" ? w3.settings.issues(target) : []);
+        return settingsProblems(issues("user"), issues("project"));
+      },
+    },
     {
       id: "unreadable",
       title: "Unreadable folders",
