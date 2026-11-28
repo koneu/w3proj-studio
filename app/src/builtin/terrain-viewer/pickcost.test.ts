@@ -35,7 +35,6 @@ test("a pick over 20000 doodads runs the triangle pass only for those the ray me
   const f = forest();
   assert.equal(f.instances.length, 20000);
   // Straight down onto one tree.
-  const t0 = performance.now();
   const hit = f.pick([50 * SPACING, 40 * SPACING, 500], [0, 0, -1]);
   assert.equal(hit, f.instances[40 * COLS + 50]);
   assert.equal(f.trianglePasses(), 1, "one tree under the ray, one triangle pass");
@@ -48,5 +47,5 @@ test("a pick over 20000 doodads runs the triangle pass only for those the ray me
   const nearest = f.pick([30 * SPACING, -500, 50], [0, 1, 0]);
   assert.equal(nearest, f.instances[30]);
   assert.equal(f.trianglePasses() - c0, ROWS, "the ROWS trees of the column, not the 20000");
-  assert.ok(performance.now() - t0 < 2000, "three picks over the forest stay far under two seconds");
+  // No time bound: the triangle pass counts above are the cost, and they don't change with the machine's load.
 });

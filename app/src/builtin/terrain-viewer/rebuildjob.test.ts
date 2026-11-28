@@ -50,9 +50,7 @@ test("a rebuild that fails in the timer does not stop the next one", async () =>
   const { s, jobs } = rig({ open: async () => { throw new Error("x"); } });
   jobs.soon(() => ({ n: 1 }));
   await assert.rejects(jobs.settle());
-  const t0 = Date.now();
-  await jobs.settle();
-  assert.ok(Date.now() - t0 < 1000);
+  await jobs.settle(); // a hang here is the step's own time limit, no clock in the test
   assert.deepEqual(s.log, ["open 1"]);
 });
 

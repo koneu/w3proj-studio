@@ -20830,7 +20830,13 @@ async function runChecks(page, found, project, part, parts) {
   const names = CHECKS.map(([check]) => check.name);
   const mine = part === null ? CHECKS : splitParts(names, parts, SECONDS, { first: PROJECT_CHECKS_SECONDS })[part - 1].map((i) => CHECKS[i]);
   let made = null;
+  // --skip=<check functions' names>: left out (the gate does that while the user's game runs in the prefix JassHelper uses).
+  // The cut above was made on all checks, so the others stay in their parts.
+  const skip = (process.argv.find((x) => x.startsWith("--skip="))?.slice(7) ?? "").split(",").filter(Boolean);
+  const unknown = skip.filter((n) => !names.includes(n));
+  if (unknown.length) throw new Error(`--skip: no check ${unknown.join(", ")}`);
   for (const [check, label, wants] of mine) {
+    if (skip.includes(check.name)) { console.log(`${label}: skipped (--skip)`); continue; }
     const got = await (wants === "project" ? check(page, found, project) : check(page, found)).catch((e) => { found.push(`${label}: ${e.message}`); return null; });
     if (check === newMaps) made = got;
     await leftOpen(page, check.name, found);
