@@ -1,0 +1,117 @@
+{
+  "maps": 34,
+  "features": {
+    "campLevel": {
+      "min": 9,
+      "low": 11,
+      "median": 12,
+      "high": 14,
+      "max": 15
+    },
+    "campLevelHighest": {
+      "min": 18,
+      "low": 19.3,
+      "median": 21,
+      "high": 25.7,
+      "max": 31
+    },
+    "campShelter": {
+      "min": 0.33,
+      "low": 0.56,
+      "median": 0.68,
+      "high": 0.74,
+      "max": 0.75
+    },
+    "campShelterLowest": {
+      "min": 0.08,
+      "low": 0.18,
+      "median": 0.46,
+      "high": 0.63,
+      "max": 0.67
+    },
+    "campWays": {
+      "min": 1,
+      "low": 1,
+      "median": 1.09,
+      "high": 1.27,
+      "max": 1.87
+    },
+    "campsPerPlayer": {
+      "min": 5,
+      "low": 6.15,
+      "median": 9,
+      "high": 11,
+      "max": 12.5
+    },
+    "mines": {
+      "min": 4,
+      "low": 4,
+      "median": 6,
+      "high": 6,
+      "max": 12
+    },
+    "narrowGround": {
+      "min": 2.32,
+      "low": 3.62,
+      "median": 4.7,
+      "high": 6.84,
+      "max": 9.08
+    },
+    "naturalWalk": {
+      "min": 3622,
+      "low": 4489.8,
+      "median": 5666.5,
+      "high": 7154.4,
+      "max": 10956
+    },
+    "nearestCamp": {
+      "min": 329,
+      "low": 1719.65,
+      "median": 2095.75,
+      "high": 2564.8,
+      "max": 4615.5
+    },
+    "nearestExpansion": {
+      "min": 2620.5,
+      "low": 3345.5,
+      "median": 4758.75,
+      "high": 5724.55,
+      "max": 6182
+    },
+    "openGround": {
+      "min": 10.02,
+      "low": 12.04,
+      "median": 20.4,
+      "high": 28.87,
+      "max": 34.96
+    },
+    "startToStart": {
+      "min": 6518,
+      "low": 9277.7,
+      "median": 11992,
+      "high": 14544.6,
+      "max": 26680
+    },
+    "treesPer100Walkable": {
+      "min": 0.89,
+      "low": 1.57,
+      "median": 2.16,
+      "high": 3.19,
+      "max": 3.85
+    },
+    "treesPlayable": {
+      "min": 809,
+      "low": 1063.7,
+      "median": 1768.5,
+      "high": 2306.4,
+      "max": 3194
+    },
+    "walkable": {
+      "min": 42.93,
+      "low": 50.57,
+      "median": 57.28,
+      "high": 63.45,
+      "max": 71.2
+    }
+  }
+}

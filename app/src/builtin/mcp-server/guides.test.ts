@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { GUIDES, guideTemplate, hasRules, isTopic, LAYOUT_IDEAS, layoutIdea, ownTopics, parseGuide, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
+import { GUIDES, guideTemplate, hasRules, isTopic, LAYOUT_GRAPHS, LAYOUT_IDEAS, layoutIdea, ownTopics, parseGuide, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 
 /** The app's src folder, found from where the tests run (app/ or the repository). */
 const appSrc = (() => {
@@ -77,6 +77,15 @@ test("layout ideas differ by chance, and every one can come up", () => {
   assert.equal(seen.size, LAYOUT_IDEAS.length);
   assert.ok(layoutIdea(() => 0.999999).includes(LAYOUT_IDEAS[LAYOUT_IDEAS.length - 1]));
   assert.ok(!LAYOUT_IDEAS.some((idea) => /main base on|plateau for the base/i.test(idea)), "not the habit it's meant to break");
+  // Each idea comes with its graph: the same one, with a base, a natural, camps and a shop joined by ways of a width.
+  assert.equal(LAYOUT_GRAPHS.length, LAYOUT_IDEAS.length);
+  LAYOUT_IDEAS.forEach((idea, i) => {
+    const text = layoutIdea(() => i / LAYOUT_IDEAS.length);
+    assert.ok(text.includes(idea) && text.includes(LAYOUT_GRAPHS[i]), `idea ${i} with its graph`);
+    assert.match(LAYOUT_GRAPHS[i], /^base\b/);
+    for (const part of [/natural \[mine, guard level 9-11/, /camp A \[level \d+-\d+\]/, /shop/, /second expansion/, /-\([^)]*\d{3}[^)]*\)-|ramp, width 4/]) assert.match(LAYOUT_GRAPHS[i], part, `graph ${i}`);
+  });
+  assert.match(layoutIdea(() => 0), /reserve_area[\s\S]*fill_forest[\s\S]*check_melee's comparison/);
 });
 
 test("the guides a client is pointed at exist", () => {
