@@ -21217,7 +21217,8 @@ async function campaignFieldFocus(page, found) {
     await page.evaluate(`w3.editors.closeAll()`);
     await page.evaluate(`(() => { window.__cfKept = { folder: w3.window.pickFolder, input: w3.window.inputBox }; w3.window.pickFolder = async () => ${lit(work)}; w3.window.inputBox = async () => "campaign-focus-real"; })()`);
     try {
-      const imported = await page.evaluate(`w3.commands.execute("w3.project.importMap", ${lit(w3n)}).then(() => null, (e) => String(e))`);
+      // A real campaign's import: about 50 s beside the gate's other steps, and past the usual 60 s once (2026-11-28).
+      const imported = await page.evaluate(`w3.commands.execute("w3.project.importMap", ${lit(w3n)}).then(() => null, (e) => String(e))`, { timeout: 180000 });
       if (imported) return fail(`importing the .w3n: ${imported}`);
     } finally {
       await page.evaluate(`(() => { const k = window.__cfKept; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`);
