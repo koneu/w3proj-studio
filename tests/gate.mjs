@@ -200,8 +200,20 @@ const bin = join(repo, "target", "release", `w3proj${exe}`);
 const smokeId = process.env.W3_SMOKE_ID ?? `dev.w3proj.studio.smoke.${basename(repo).replace(/[^A-Za-z0-9-]+/g, "-")}`;
 const smokeEnv = { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId };
 const hasGame = join(game, ".build.info");
-/** One of the app smoke test's three parts, on the build of `appbuild`. */
-const smokePart = (n) => shell(`node scripts/app-smoke.mjs --part=${n}/3 --no-build`, { cwd: app, env: smokeEnv });
+// How many apps the app smoke test's checks are dealt to (app-smoke.mjs --part=k/n, cut by app/scripts/smoke-parts.mjs
+// into runs of the same length). W3_SMOKE_PARTS: another number for this run. Three, because more didn't end the batch
+// gate sooner on 8 cores (16 threads) and 64 GB (2026-11-28): an app's page works on one core, but beside the gate's
+// other steps its checks take longer the more apps there are (all checks together: about 2100 s in five apps with
+// nothing beside them, 2900 to 3500 s in a batch gate), so five parts took 730 and 773 s against 773 s for three, with
+// 8 GB more in use and a check timing out once. Alone (--only=appsmoke1,...) five parts end in 506 s.
+const SMOKE_PARTS = Math.min(16, Math.max(1, Math.floor(Number(process.env.W3_SMOKE_PARTS)) || 3));
+// A part's memory: measured as PSS of its process tree, up to 5800 MB in five parts (they grow with every check).
+const SMOKE_PART_MEM = 6500;
+/** The app smoke test's parts, on the build of `appbuild`: the gate's longest chain, so `priority`. */
+const smokeParts = Array.from({ length: SMOKE_PARTS }, (_, i) => ({
+  id: `appsmoke${i + 1}`, name: `the real app on a scratch project (part ${i + 1}/${SMOKE_PARTS})`, tier: "corpus", weight: 2, mem: SMOKE_PART_MEM, priority: 1, after: ["cli", "appbuild"],
+  run: shell(`node scripts/app-smoke.mjs --part=${i + 1}/${SMOKE_PARTS} --no-build`, { cwd: app, env: smokeEnv }),
+}));
 const update = args.includes("--update-floor") ? " --update-floor" : "";
 
 // Steps, in the order they are started when they can be. `weight`: about how many cores it keeps
@@ -210,13 +222,11 @@ const update = args.includes("--update-floor") ? " --update-floor" : "";
 // `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
 const steps = [
   { id: "cli", name: "release CLI", tier: "corpus", weight: 6, mem: 1000, priority: 1, locks: [["cargo-release", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
-  // The real app's smoke test: one build (the debug profile, so it runs beside the release CLI's), then three apps of
-  // it side by side (app-smoke.mjs --part), each a third of the checks. The longest chain of the gate: `priority`.
+  // The real app's smoke test: one build (the debug profile, so it runs beside the release CLI's), then SMOKE_PARTS
+  // apps of it side by side, each with its share of the checks.
   // appbuild's mem: not measured alone (the old part 1, build and app together, peaked at 5000).
   { id: "appbuild", name: "the real app's build", tier: "corpus", weight: 6, mem: 5000, priority: 1, locks: [["cargo-debug", "w"], ["dist", "w"]], run: shell("node scripts/app-smoke.mjs --build-only", { cwd: app, env: smokeEnv }) },
-  { id: "appsmoke1", name: "the real app on a scratch project (part 1/3)", tier: "corpus", weight: 4, mem: 5000, priority: 1, after: ["cli", "appbuild"], run: smokePart(1) },
-  { id: "appsmoke2", name: "the real app on a scratch project (part 2/3)", tier: "corpus", weight: 4, mem: 6500, priority: 1, after: ["cli", "appbuild"], run: smokePart(2) },
-  { id: "appsmoke3", name: "the real app on a scratch project (part 3/3)", tier: "corpus", weight: 4, mem: 6500, priority: 1, after: ["cli", "appbuild"], run: smokePart(3) },
+  ...smokeParts,
   // `w3proj verify` checks the maps on all cores, so its memory grows with them: alone under a 20 GB limit.
   { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, mem: 17000, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
   { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, mem: 1500, run: hostileRounds },
@@ -246,7 +256,7 @@ const steps = [
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, mem: 4000, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "wts", "twin", "appbuild", "appsmoke1", "appsmoke2", "appsmoke3", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "rustcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "wts", "twin", "appbuild", ...smokeParts.map((s) => s.id), "script"];
 
 const tiers = {
   commit: ["commit"],

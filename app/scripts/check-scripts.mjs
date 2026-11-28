@@ -78,23 +78,19 @@ function topLevel(text) {
 
 /**
  * app-smoke.mjs's checks: the names in its `--only` map (`const onlyChecks = { a, b: (p, f) => b(p, f, x) };`), the
- * checks its full run calls after it (`await name(page, found…` and `for (const check of [a, b]) await check(page,
- * found…`; not its pieces projectChecks, checksA, checksB and checksC), and the functions it declares.
+ * checks of its full run (the list `const CHECKS = [ [a, "a's name"], [b, "b's name", "project"] ];`, null when it isn't
+ * found), and the functions it declares.
  */
 export function smokeChecks(source) {
   const map = /const onlyChecks = \{([\s\S]*?)\};/.exec(source);
   if (!map) return null;
   const only = topLevel(map[1]).map((p) => /^(\w+)/.exec(p)?.[1]).filter(Boolean);
-  const after = source.slice(map.index + map[0].length);
-  const run = new Set();
-  // The full run's own pieces (the project checks, and the parts the gate runs as three apps: --part) hold the checks.
-  const pieces = new Set(["check", "projectChecks", "checksA", "checksB", "checksC"]);
-  for (const m of after.matchAll(/await (\w+)\(page, found\b/g)) if (!pieces.has(m[1])) run.add(m[1]);
-  for (const m of after.matchAll(/for \(const check of \[([^\]]*)\]\) await check\(page, found\b/g)) for (const n of topLevel(m[1])) run.add(n);
+  const list = /^const CHECKS = \[\n([\s\S]*?)\n\];/m.exec(source);
+  const run = list ? [...list[1].matchAll(/^\s*\[(\w+),/gm)].map((m) => m[1]) : null;
   const declared = new Set([...source.matchAll(/^(?:async )?function (\w+)\s*\(/gm)].map((m) => m[1]));
   // Two names on one line of the map (`a, b,`): it's kept one per line so parallel branches don't conflict on it.
   const crowded = map[1].split("\n").filter((l) => /^\s*\w+\s*,\s*\w+/.test(l)).map((l) => l.trim());
-  return { only, run: [...run], declared, crowded };
+  return { only, run, declared, crowded };
 }
 
 /** Where app-smoke.mjs's `--only` map and its full run disagree, as messages. */
@@ -102,7 +98,10 @@ export function smokeListProblems(source) {
   const checks = smokeChecks(source);
   if (!checks) return ["app-smoke.mjs: its --only map (`const onlyChecks = { … };`) wasn't found; update check-scripts.mjs with it"];
   const { only, run, declared, crowded } = checks;
+  if (!run) return ["app-smoke.mjs: its full run's list (`const CHECKS = [ … ];`) wasn't found; update check-scripts.mjs with it"];
   const problems = [];
+  const ranTwice = run.filter((n, i) => run.indexOf(n) !== i);
+  if (ranTwice.length) problems.push(`app-smoke.mjs: named twice in the full run's list: ${[...new Set(ranTwice)].join(", ")}`);
   if (crowded.length) problems.push(`app-smoke.mjs: the --only map has one check per line; split: ${crowded.join(" | ")}`);
   const unsorted = only.findIndex((n, i) => i > 0 && only[i - 1].localeCompare(n, "en", { sensitivity: "base" }) > 0);
   if (unsorted > 0) problems.push(`app-smoke.mjs: the --only map is in alphabetical order; ${only[unsorted]} comes before ${only[unsorted - 1]}`);

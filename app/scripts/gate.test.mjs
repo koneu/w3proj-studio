@@ -151,7 +151,11 @@ test("a step missing from the table throws", () => {
 test("the gate's own steps are all in its table (gate.mjs refuses to start otherwise)", () => {
   const src = readFileSync(join(repo, "tests", "gate.mjs"), "utf8");
   const ids = [...src.matchAll(/^\s*\{ id: "([a-z0-9]+)"/gm)].map((m) => m[1]);
-  const table = JSON.parse(/const table = (\[.*?\]);/s.exec(src)[1]);
+  // The app smoke test's parts are made from their number (SMOKE_PARTS) and put into the table as they are.
+  const text = /const table = (\[.*?\]);/s.exec(src)[1];
+  assert.match(text, /, \.\.\.smokeParts\.map\(\(s\) => s\.id\),/);
+  assert.match(src, /^  \.\.\.smokeParts,$/m);
+  const table = JSON.parse(text.replace(" ...smokeParts.map((s) => s.id),", ""));
   assert.ok(ids.length > 10);
   assert.doesNotThrow(() => assertInTable(ids.map((id) => ({ id })), table));
   assert.match(src, /assertInTable\(steps, table\)/);

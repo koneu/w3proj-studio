@@ -1,6 +1,6 @@
 # The gate and the smoke tests: details
 
-How the gate schedules its steps, the queue between gates, how the real-app smoke test splits into three apps, time limits, logs, coverage folders, the watchdog. Part of the [testing guide](../../TESTING.md); index in [README](README.md).
+How the gate schedules its steps, the queue between gates, how the real-app smoke test splits into several apps, time limits, logs, coverage folders, the watchdog. Part of the [testing guide](../../TESTING.md); index in [README](README.md).
 
 **Steps run side by side.** Steps that don't need each other run together (about twice the cores' worth;
 `--jobs=<n>` changes that, `--serial` goes one at a time in the table's order). What one needs
@@ -53,23 +53,31 @@ tightest from its own cgroup up, so `systemd-run --user --scope -p MemoryMax=20G
 `W3_GATE_MEM_MB=<MB>` sets it instead. A step bigger than the budget still runs, alone. A step whose need grew a
 lot gets its new estimate in `tests/gate.mjs`.
 
-**The real-app smoke test runs as three apps at once** in the corpus tier, on one build: `app-smoke.mjs --build-only`
+**The real-app smoke test runs as several apps at once** in the corpus tier, on one build: `app-smoke.mjs --build-only`
 builds the app (the gate's step `appbuild`), then `--part=1/3 --no-build` runs the project checks and the first third
-of the full run's checks (`checksA`, newMaps to viewCommands), `--part=2/3 --no-build` the second (`checksB`,
-itemTablesAccess to niceToHaves) and `--part=3/3 --no-build` the last (`checksC`, byHand to the end). The checks take
-about as long in three apps as in two (2026-11-27, an idle machine: 1654 s in all against 1736 s), so the third app
-ends the run sooner: 523, 460 and 671 s side by side, against 714 and 1022 s. Each part has its own folder
-(`target/app-smoke-part<n>`, or `W3_SMOKE_DIR` with `-part<n>`), its settings in it (the app reads
-`W3PROJ_CONFIG_DIR`, since both have the build's identifier; app-smoke stops when the app doesn't say it listened),
-and its own Xvfb display and WebDriver ports (Linux; a driver that loses the race for a display starts again) or
-DevTools port and WebView2 folder (Windows). The parts keep the full run's order, so a check that relies on what an
-earlier one left stays behind it (testMapWithoutGame on the map objectsWhileOpening left open); every check from
-itemTablesAccess on also runs alone (`--only`), so the cut between `checksB` and `checksC` can move. The parts are
-balanced by the times each check prints (`took X s: <check>`): move the cut when one grows much longer than the others. The
-copy of the release CLI next to the app (for the AI client setup check) is made once: a part that finds it there with
-the same bytes leaves it, and a new one arrives under its name in one step, since another part may be running it. To
-run one part by hand: `node scripts/app-smoke.mjs --part=2/3` (in `app/`; it builds unless `--no-build`: not while
-another part or the gate builds). A plain `node scripts/app-smoke.mjs` still runs everything in one app.
+of the full run's checks, `--part=2/3 --no-build` the second and `--part=3/3 --no-build` the last. The checks are one
+list (`CHECKS` in app-smoke.mjs), each makes what it needs (a new map, mostly) and runs alone too (`--only`), so the
+list can be cut anywhere: `--part=<k>/<n>` takes any n up to 16, and `app/scripts/smoke-parts.mjs` cuts the list, in
+its order, into n runs that take about as long, by the seconds in `app/scripts/app-smoke-times.json` (a check it
+doesn't know counts as 15 s, so a new check needs no entry). When the parts' times in the gate's summary drift apart,
+write the table again from a run's logs: `node scripts/smoke-times.mjs ../target/gate-logs/batch-<pid>/appsmoke*.log`
+(in `app/`). Each part has its own folder (`target/app-smoke-part<k>`, or `W3_SMOKE_DIR` with `-part<k>`), its
+settings in it (the app reads `W3PROJ_CONFIG_DIR`, since all have the build's identifier; app-smoke stops when the app
+doesn't say it listened), and its own Xvfb display and WebDriver ports (Linux; a driver that loses the race for a
+display starts again) or DevTools port and WebView2 folder (Windows). The copy of the release CLI next to the app (for
+the AI client setup check) is made once: a part that finds it there with the same bytes leaves it, and a new one
+arrives under its name in one step, since another part may be running it. To run one part by hand:
+`node scripts/app-smoke.mjs --part=2/3` (in `app/`; it builds unless `--no-build`: not while another part or the gate
+builds). A plain `node scripts/app-smoke.mjs` still runs everything in one app.
+
+**How many parts** is one number, `SMOKE_PARTS` in `tests/gate.mjs` (`W3_SMOKE_PARTS=<n>` for one run). An app's page
+works on one core, and the gate takes as long as its longest part, but more apps didn't end the batch gate sooner
+(2026-11-28, 8 cores with 16 threads, 64 GB): beside the gate's other steps the checks take longer the more apps run.
+All checks together took about 2100 s in five apps with nothing beside them (506 s for the run, `--only=appsmoke1,...`)
+and 2900 to 3500 s in five apps inside a batch gate, which took 730 and 773 s against 773 s with three parts, used
+about 8 GB more (30 GB at its peak) and had a check time out once. Six parts in a cold worktree took 1015 s. So it
+stays at three; on a machine with more cores it is worth measuring again. Lower CPU priority for the other steps and
+memory kept for the parts during the build were tried and changed nothing that could be measured.
 
 **A page call has a time limit of its own** (app-smoke: `page.evaluate`, `mcpTool`): 60 s unless it gives one
 (`page.evaluate(expr, { timeout })`, `tool(name, args, { timeout })`; `W3_SMOKE_CALL_TIMEOUT` in ms changes the
