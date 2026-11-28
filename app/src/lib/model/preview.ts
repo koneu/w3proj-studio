@@ -180,11 +180,17 @@ export class ModelPreview {
   private async load(mdx: string, token: number) {
     const model = parseModel(await this.read(mdx));
     if (this.token !== token) return;
-    // Nothing is freed one by one: past KEEP_MODELS (or their bytes) the context goes with all that is on it.
+    // Past KEEP_MODELS (or their bytes) the model shown longest ago is freed, object by object. Only if that fails
+    // does the context go with all that is on it (what renewContext always did).
     const own = model.geosets.reduce((n, g) => n + g.positions.byteLength * 4, 0);
-    let bytes = own;
-    for (const k of this.kept.values()) bytes += k.bytes;
-    if (this.kept.size >= KEEP_MODELS || (this.kept.size && bytes > KEEP_BYTES)) this.renewContext();
+    const total = () => own + [...this.kept.values()].reduce((n, k) => n + k.bytes, 0);
+    try {
+      while (this.kept.size >= KEEP_MODELS || (this.kept.size && total() > KEEP_BYTES)) {
+        const [oldest] = this.kept;
+        this.kept.delete(oldest[0]);
+        oldest[1].renderer.free();
+      }
+    } catch { this.renewContext(); }
     const r = new ModelRenderer(this.canvas, model);
     r.showGrid = false;
     const kept: Kept = { renderer: r, replaceable: "", bytes: own, round: 0 };

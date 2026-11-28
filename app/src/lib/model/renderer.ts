@@ -491,15 +491,31 @@ export function compile(gl: WebGL2RenderingContext, vs: string, fs: string): Web
     const s = gl.createShader(type)!;
     gl.shaderSource(s, src);
     gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader error");
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(s);
+      gl.deleteShader(s);
+      throw new Error(log ?? "shader error");
+    }
     return s;
   };
   const p = gl.createProgram()!;
-  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
-  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? "link error");
-  return p;
+  const shaders: WebGLShader[] = [];
+  try {
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]] as const) {
+      const s = shader(type, src);
+      shaders.push(s);
+      gl.attachShader(p, s);
+    }
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? "link error");
+    return p;
+  } catch (e) {
+    gl.deleteProgram(p);
+    throw e;
+  } finally {
+    // A shader that is attached lives as long as its program; the program is what's kept (and deleted).
+    for (const s of shaders) gl.deleteShader(s);
+  }
 }
 
 // ------------------------------------------------------------------ GPU model
@@ -516,6 +532,8 @@ interface GpuGeoset {
   indexCount: number;
   /** The wireframe's vertex array and index count: made at the first wireframe draw (few views ever show one). */
   wire: () => { vao: InstancedVao; count: number };
+  /** Deletes what upload made: the vertex array, its buffers, and the wireframe's array and indices if wire() made them. */
+  free: () => void;
   materialId: number;
   geosetId: number;
 }
@@ -887,6 +905,7 @@ export class ModelGpu {
 
     // Wireframe: same vertex buffers, line indices.
     let made: { vao: InstancedVao; count: number } | null = null;
+    let wireIndices: WebGLBuffer | null = null;
     const wire = () => {
       if (made) return made;
       const lines = new Uint16Array(g.faces.length * 2);
@@ -897,17 +916,40 @@ export class ModelGpu {
       const wireVao = gl.createVertexArray()!;
       gl.bindVertexArray(wireVao);
       attributes();
-      const lb = gl.createBuffer();
+      const lb = wireIndices = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lb);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lines, gl.STATIC_DRAW);
       gl.bindVertexArray(null);
       return (made = { vao: { vao: wireVao, buffer: null, first: -1 }, count: lines.length });
     };
-    return { vao: { vao, buffer: null, first: -1 }, indexCount: g.faces.length, wire, materialId: g.materialId, geosetId };
+    const free = () => {
+      gl.deleteVertexArray(vao);
+      for (const b of buffers.values()) gl.deleteBuffer(b);
+      gl.deleteBuffer(ib);
+      if (made) gl.deleteVertexArray(made.vao.vao);
+      if (wireIndices) gl.deleteBuffer(wireIndices);
+    };
+    return { vao: { vao, buffer: null, first: -1 }, indexCount: g.faces.length, wire, free, materialId: g.materialId, geosetId };
+  }
+
+  private freed = false;
+  /** Whether dispose() ran: a disposed model poses and draws nothing. */
+  get disposed() { return this.freed; }
+
+  /** Deletes the bone texture and every vertex array and buffer this made (the wireframe's only if a wireframe was
+   *  drawn). Not the textures in `textures`: whoever made them owns them (the terrain's ObjectLoader shares them
+   *  between models). Safe to call twice, and after the context was lost (what was on it is gone already). */
+  dispose() {
+    if (this.freed) return;
+    this.freed = true;
+    if (this.gl.isContextLost()) return;
+    this.gl.deleteTexture(this.boneTex);
+    for (const g of this.geosets) g.free();
   }
 
   /** Bone matrices and geoset animation state for a moment of an animation. */
   pose(clock: Clock) {
+    if (this.freed) return;
     const m = this.model;
     this.clock = clock;
     // A sequence in which nothing moves gives the same pose at every moment: posed once, it stays
@@ -982,6 +1024,7 @@ export class ModelGpu {
   /** Draws the posed model with a world transform. */
   draw(viewProj: Mat4, world: Mat4, opts: DrawOptions = {}) {
     const gl = this.gl, sh = this.sh;
+    if (this.freed) return;
     gl.bindBuffer(gl.ARRAY_BUFFER, sh.one);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, world, 0, 16);
     this.drawInstances(viewProj, { buffer: sh.one, runs: [{ team: opts.team ?? 0, first: 0, count: 1 }] }, opts);
@@ -990,6 +1033,7 @@ export class ModelGpu {
   /** Draws the posed model once for each instance in `instances`: one draw call per layer, or per layer
    *  and run of one player colour for the layers that show it. `opts.team` is not used: each run has its own. */
   drawInstances(viewProj: Mat4, instances: InstanceRuns, opts: DrawOptions = {}) {
+    if (this.freed) return;
     const runs = instances.runs;
     let total = 0;
     for (const r of runs) total += r.count;
@@ -1146,7 +1190,7 @@ export class ModelRenderer {
   readonly gl: WebGL2RenderingContext;
   readonly gpu: ModelGpu;
   private lineProg: WebGLProgram;
-  private grid: { vao: WebGLVertexArrayObject; count: number };
+  private grid: { vao: WebGLVertexArrayObject; buffer: WebGLBuffer; count: number };
   private team = 0;
   /** Particle emitters (none: null). */
   private particles: ParticleInstance | null;
@@ -1197,6 +1241,7 @@ export class ModelRenderer {
   }
 
   setTexture(i: number, img: DecodedImage) {
+    if (this.freed) return;
     const { flags } = this.model.textures[i];
     const old = this.gpu.textures[i];
     this.gpu.textures[i] = createTexture(this.gl, img, { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
@@ -1215,10 +1260,11 @@ export class ModelRenderer {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
-    return { vao, count: lines.length / 3 };
+    return { vao, buffer: b, count: lines.length / 3 };
   }
 
   render(clock: Clock) {
+    if (this.freed) return;
     const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
@@ -1281,6 +1327,7 @@ export class ModelRenderer {
   }
 
   setEffectTexture(i: number, img: DecodedImage) {
+    if (this.freed) return;
     if (!this.effectModel) return;
     const { flags } = this.effectModel.textures[i];
     this.effectTextures[i] = createTexture(this.gl, img, { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
@@ -1292,5 +1339,23 @@ export class ModelRenderer {
 
   dispose() {
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+
+  private freed = false;
+
+  /** Deletes what this renderer made on its context, one object at a time, so the context stays good for other
+   *  models on it (dispose() takes the whole context). The shared shader and team textures of the context stay.
+   *  Safe to call twice and after the context was lost; the renderer draws nothing afterwards. */
+  free() {
+    if (this.freed) return;
+    this.freed = true;
+    this.gpu.dispose();
+    const gl = this.gl;
+    if (gl.isContextLost()) return;
+    for (const t of [...this.gpu.textures, ...this.effectTextures]) if (t) gl.deleteTexture(t);
+    gl.deleteVertexArray(this.grid.vao);
+    gl.deleteBuffer(this.grid.buffer);
+    gl.deleteProgram(this.lineProg);
+    this.particleRenderer?.dispose();
   }
 }
