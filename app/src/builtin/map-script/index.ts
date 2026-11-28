@@ -321,7 +321,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // The map's own under its name on disk, whatever the case the sound names (as the game finds it).
       const buf = await first(variants, (v) => readImported(w3, v))
         ?? (campaign === undefined ? null : await first(variants, (v) => w3.workspace.readBytes(joinPath(campaign, rel(v)))))
-        ?? await first(variants, (v) => w3.game.read(v));
+        ?? await first(variants, (v) => w3.game.read(v, { shared: true }));
       const ms = buf ? soundDurationMs(buf) : null;
       if (ms !== null) measured.set(f, ms);
     }

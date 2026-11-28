@@ -109,7 +109,7 @@ export const LIST_ICON_SIZE = 64;
 export function imageLoader(w3: W3Api, maxSize?: number): (path: string) => Promise<string | null> {
   const cache = new Map<string, Promise<string | null>>();
   // Icons of a list fill in as they come: the reads someone waits on (a map opening) go first.
-  const background = { background: true };
+  const background = { background: true, shared: true };
   return (path: string) => {
     const key = path.toLowerCase();
     let p = cache.get(key);

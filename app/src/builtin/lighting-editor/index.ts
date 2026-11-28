@@ -72,7 +72,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Copies the game model at `gamePath` (an .mdl path as WorldEditData names it) into the map. */
   const customize = async (kind: Kind, gamePath: string) => {
     const mdx = `War3.w3mod:${gamePath.replace(/\\/g, "/").replace(/\.mdl$/i, ".mdx")}`;
-    const model = readLightMdx(await w3.game.read(mdx));
+    const model = readLightMdx(await w3.game.read(mdx, { shared: true }));
     const file = `${crypto.randomUUID()}.mdl`;
     await w3.workspace.writeText(`map/${file}`, writeLightMdl(model));
     const lights = (await readMapDoc<Lights>(w3, "war3map.w3l")) ?? { doc: emptyLights(), json: true };

@@ -33,7 +33,7 @@ export async function findSoundFile(w3: W3Api, path: string, gameFiles: Map<stri
     if (bytes) return { bytes, path: variant, source: "map" };
   }
   for (const variant of soundVariants(path)) {
-    const bytes = await w3.game.read(gameFiles?.get(variant.replace(/\//g, "\\")) ?? variant).catch(() => null);
+    const bytes = await w3.game.read(gameFiles?.get(variant.replace(/\//g, "\\")) ?? variant, { shared: true }).catch(() => null);
     if (bytes) return { bytes, path: variant, source: "game" };
   }
   return null;

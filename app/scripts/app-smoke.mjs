@@ -6914,6 +6914,9 @@ async function leftOpen(page, check, found) {
   const now = Date.now();
   console.log(`  took ${((now - checkEnded) / 1000).toFixed(1)} s: ${check}`);
   checkEnded = now;
+  // A caller that wrote into game bytes it read with shared: true (the guard is turned on at the start, GameService.guardShared).
+  const changed = await page.evaluate(`w3Workbench.game.sharedChanged()`).catch(() => []);
+  for (const path of changed) found.push(`${check} changed the game file ${path} it read with shared: true`);
   const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
   for (const text of left) {
     console.log(`  left open after ${check}: ${text}`);
@@ -20333,6 +20336,7 @@ async function run() {
     if (resolve(settingsAt) !== resolve(configDir)) throw new Error(`the app keeps its settings in ${settingsAt}, not in ${configDir}: build it again (run without --no-build)`);
     const found = [];
     // The window's functions as they are now, for `leftOpen` to compare each check's end against.
+    await page.evaluate(`w3Workbench.game.guardShared = true`);
     await page.evaluate(`window.__w3WindowOrig = Object.fromEntries(Object.entries(w3.window).filter(([, v]) => typeof v === "function"))`);
     // --only=<check> runs one of the checks below on its own, for working on it. Every check of the full run below is
     // named here too (`npm run check` holds the two lists against each other: scripts/check-scripts.mjs).
