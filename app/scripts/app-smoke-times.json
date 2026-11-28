@@ -32,6 +32,7 @@
   "doodadSnapOnLoad": 20,
   "drawCalls": 3,
   "dropChancesRefused": 7,
+  "earlyPageErrors": 28,
   "editDuringSave": 21,
   "editorExtras": 26,
   "editorTabRaces": 1,

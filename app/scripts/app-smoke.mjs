@@ -36,7 +36,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
-import { ensureCli, smokeId } from "./appctl.mjs";
+import { ensureCli, smokeId, startApp } from "./appctl.mjs";
 import { checkFresh, sourceFingerprint, staleAllowed, writeStamp } from "../../tests/binfresh.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 import { lit } from "./jslit.mjs";
@@ -5739,6 +5739,57 @@ async function importedBlightWaterReload(page, found) {
   }
   } finally {
     await restoreWindow(page);
+  }
+}
+
+/** The Linux smoke's own error catching (webdriver.mjs, smoke-hook.js), on two apps of its own: an error and a rejection
+ *  thrown from the page's very first moments (before the harness's first evaluate), and ones thrown right after a reload,
+ *  reach the page's events; and an app killed from outside is reported as ended within seconds, by the next page call and
+ *  by exited(), instead of as WebDriver errors. The throws are made by the hook itself on a note in the page's storage
+ *  (smoke-hook.js: w3smoke.throwAtStart), which the first app leaves in localStorage for the second to start with.
+ *  Controls: the page's events hold no self-test line before the notes are set; the second app's later events hold none
+ *  of the reload's (used up once); on dev, where the hook came with the first evaluate, the first-moments line is missing. */
+async function earlyPageErrors(_page, found) {
+  const fail = (what) => found.push(`early page errors: ${what}`);
+  if (!LINUX) { console.log("early page errors: skipped, the DevTools page on Windows reports from the start by itself"); return; }
+  const here = join(work, "early-errors");
+  rmSync(here, { recursive: true, force: true });
+  const lines = (page, word) => problems(page.events).filter((l) => l.includes(`smoke self-test ${word}`));
+  const note = (store, text) => `${store}.setItem("w3smoke.throwAtStart", ${lit(text)})`;
+  const first = await startApp({ id: smokeId(), work: here });
+  try {
+    // The page has the hook before anything of the app ran: not only after the first evaluate.
+    if (!(await first.page.evaluate(`(() => { const all = [...document.scripts], hook = all.findIndex((s) => !s.src && s.textContent.includes("__w3smoke")), main = all.findIndex((s) => s.type === "module"); return hook >= 0 && (main < 0 || hook < main); })()`))) fail("the error hook isn't in the page before the app's own script (is this a Linux debug build made by tauri?)");
+    if (lines(first.page, "").length) fail(`self-test lines before any note was set: ${lit(lines(first.page, ""))}`);
+    // After a reload: the note is in sessionStorage, which a reload keeps.
+    await first.page.evaluate(`${note("sessionStorage", "after reload")}; window.__beforeReload = true; setTimeout(() => location.reload(), 0); 0`);
+    await until("the page after its reload", () => first.page.evaluate(`!window.__beforeReload && !!window.w3 && document.querySelectorAll("button.activity").length > 0`).catch(() => false));
+    for (const word of ["error: after reload", "rejection: after reload"]) if (!lines(first.page, word).length) fail(`nothing from a page error thrown right after a reload (${word}): ${lit(problems(first.page.events))}`);
+    // For the next app's start. (Its own reload note is used up: nothing of it twice.)
+    await first.page.evaluate(`${note("localStorage", "first moments")}; 0`);
+    await sleep(1500);
+    // The app killed from outside: the next call says so, within seconds.
+    if (first.exited() !== null) fail(`exited() before the kill: ${lit(first.exited())}`);
+    if (!Number.isInteger(first.appPid)) { fail(`no app pid: ${lit(first.appPid)}`); } else {
+      const t0 = Date.now();
+      process.kill(first.appPid, "SIGKILL");
+      const said = await first.page.evaluate(`1 + 1`).then(() => "answered", (e) => String(e.message));
+      const took = (Date.now() - t0) / 1000;
+      if (!/^the app ended/.test(said)) fail(`a call after the app was killed said ${lit(said.slice(0, 200))}`);
+      if (took > 5) fail(`the kill was reported after ${took.toFixed(1)} s`);
+      if (!/^the app ended/.test(String(first.exited()))) fail(`exited() after the kill: ${lit(first.exited())}`);
+    }
+  } finally {
+    await first.stop().catch(() => {});
+  }
+  // The second app starts with the note left in localStorage: the error is thrown before the harness's first evaluate.
+  const second = await startApp({ id: smokeId(), work: here });
+  try {
+    await second.page.evaluate(`0`);
+    for (const word of ["error: first moments", "rejection: first moments"]) if (!lines(second.page, word).length) fail(`nothing from a page error thrown in the page's first moments (${word}): ${lit(problems(second.page.events))}`);
+    if (lines(second.page, "error: after reload").length) fail("the reload's note was still there at the second app's start (used up once, control)");
+  } finally {
+    await second.stop().catch(() => {});
   }
 }
 
@@ -20389,6 +20440,7 @@ async function run() {
         doodadSnapOnLoad,
         drawCalls,
         dropChancesRefused,
+        earlyPageErrors,
         editDuringSave,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
@@ -20761,6 +20813,7 @@ const CHECKS = [
   [importListCleanup, "import list cleanup"],
   [groundTextureReload, "ground texture reload"],
   [importedBlightWaterReload, "imported blight and water reload"],
+  [earlyPageErrors, "early page errors"],
   [importWarnings, "import warnings"],
   [objectManagerLive, "object manager live"],
   [objectEditorRawSkin, "object editor raw skin"],

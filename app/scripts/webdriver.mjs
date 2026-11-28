@@ -5,15 +5,21 @@
 // translated here. So `Hands`, `problems` and the checks themselves run unchanged on both systems.
 //
 // What differs from the DevTools page:
-//   - Errors are caught by a hook installed in the page, not reported by the browser. It's put in on the
-//     first `evaluate`, so an error thrown before that (during the app's first moments) isn't seen, and
-//     browser-level messages (a failed network load) aren't seen at all.
+//   - Errors are caught by a hook in the page (smoke-hook.js), not reported by the browser. A debug build has it as
+//     the page's first script (vite.config.ts), so errors from the first moments on, and after every reload, are
+//     kept (what a reload cut off goes over in sessionStorage). An app built without it (W3_APP_BIN from before)
+//     gets it at the first `evaluate`, and sees nothing earlier. Browser-level messages (a failed network load)
+//     aren't seen at all.
 //   - Text typing (`Input.insertText`) uses the page's own `insertText` editing command: no key events,
 //     like DevTools.
-//   - The app process is WebKitWebDriver's child, so its exit shows as a lost session.
+//   - The app process is WebKitWebDriver's child, not ours: its end is found by watching its pid (found below the
+//     driver's process tree, by its executable), and `evaluate` then fails at once with "the app ended".
 
 import { spawn, spawnSync } from "node:child_process";
+import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { sleep, timedCall, until } from "./cdp.mjs";
 
 /** WebDriver's script timeout when a call has no limit of its own: DevTools' evaluate has none, and some checks wait
@@ -30,6 +36,44 @@ function freePort() {
     const s = createServer();
     s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
   });
+}
+
+/** The state letter and start time of a process from /proc/<pid>/stat ("pid (name) S ppid ... starttime ..."), or null
+ *  when it's gone. The start time tells a pid reused later from the process first seen. */
+function procStat(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const f = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return { state: f[0], ppid: Number(f[1]), start: f[19] };
+  } catch { return null; }
+}
+
+/** The app's pid: the process below `root` (the xvfb-run that started tauri-driver, which started WebKitWebDriver, which
+ *  started the app) whose executable is `exe`. Found by the process tree and the executable, never by a name pattern.
+ *  Returns { pid, start } or null. */
+export function findApp(root, exe) {
+  const want = realpathSync(exe);
+  const children = new Map();
+  for (const name of readdirSync("/proc")) {
+    if (!/^[0-9]+$/.test(name)) continue;
+    const s = procStat(name);
+    if (s) children.set(Number(name), s.ppid);
+  }
+  const todo = [root], below = [];
+  while (todo.length) {
+    const p = todo.pop();
+    for (const [pid, ppid] of children) if (ppid === p) { below.push(pid); todo.push(pid); }
+  }
+  for (const pid of below) {
+    try { if (readlinkSync(`/proc/${pid}/exe`) === want) return { pid, start: procStat(pid)?.start }; } catch { /* gone, or not ours to read */ }
+  }
+  return null;
+}
+
+/** Is the process `app` ({ pid, start } from findApp) still there? A zombie (ended, not yet collected) is gone. */
+export function appAlive(app) {
+  const s = procStat(app.pid);
+  return s !== null && s.start === app.start && s.state !== "Z";
 }
 
 // WebDriver's key codes (W3C WebDriver, "Keyboard actions").
@@ -61,20 +105,16 @@ function keyValue(key, code) {
   throw new Error(`webdriver.mjs doesn't know the key "${key}": add it to KEYS`);
 }
 
-// Collects what the page reports as wrong, in the shape of DevTools' events, so cdp.mjs's `problems` reads it.
-const HOOK = `if (!window.__w3smoke) {
-  const log = window.__w3smoke = [];
-  const text = (x) => x instanceof Error ? (x.stack ?? String(x)) : typeof x === "object" && x !== null ? (() => { try { return JSON.stringify(x); } catch { return String(x); } })() : String(x);
-  const error = console.error.bind(console);
-  console.error = (...args) => { log.push({ method: "Runtime.consoleAPICalled", params: { type: "error", args: args.map((a) => ({ value: text(a) })) } }); error(...args); };
-  window.addEventListener("error", (e) => log.push({ method: "Runtime.exceptionThrown", params: { exceptionDetails: { text: e.message, exception: { description: e.error ? text(e.error) : e.message } } } }));
-  window.addEventListener("unhandledrejection", (e) => log.push({ method: "Runtime.exceptionThrown", params: { exceptionDetails: { text: "Uncaught (in promise)", exception: { description: "Uncaught (in promise) " + text(e.reason) } } } }));
-}`;
+// Collects what the page reports as wrong, in the shape of DevTools' events, so cdp.mjs's `problems` reads it. The
+// same text is the first script of a Linux debug build's page (vite.config.ts), where it sees the page from its start.
+// Read when first needed: the unit tests bundle this file into a folder that has no smoke-hook.js beside it.
+let hookText = null;
+const hook = () => hookText ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), "smoke-hook.js"), "utf8");
 
 // Runs an expression (or statements, as DevTools' Runtime.evaluate takes them), awaits a promise it gives,
 // and answers with JSON text, plus what the hook collected since the last call.
-const EVALUATE = `const [expression, done] = arguments;
-${HOOK}
+const evaluateScript = () => `const [expression, done] = arguments;
+${hook()}
 const drain = () => window.__w3smoke.splice(0);
 Promise.resolve().then(() => (0, eval)(expression)).then(
   (v) => { let json; try { json = JSON.stringify({ v }); } catch { json = "{}"; } done({ json, log: drain() }); },
@@ -93,15 +133,29 @@ export class WebDriverPage {
     this.session = session;
     // app-smoke closes the DevTools socket when it's done; here that ends the session.
     this.ws = { close: () => { this.close().catch(() => {}); } };
+    this.gone = new Promise((resolve) => { this.markGone = (message) => { this.goneMessage ??= message; resolve(this.goneMessage); }; });
+  }
+
+  /** Set once the app is known to have ended: what to say about it. */
+  goneMessage = null;
+  /** launch's check of the app process (true once it has ended); until then a call that fails is a WebDriver failure. */
+  appCheck = null;
+
+  /** The error to give for a failed call: "the app ended" when it did, else the call's own. */
+  failure(e) {
+    if (!this.goneMessage) this.appCheck?.();
+    return this.goneMessage ? new Error(this.goneMessage) : e;
   }
 
   async request(method, path, body) {
-    const r = await fetch(`${this.base}/session/${this.session}${path}`, {
-      method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const { value } = await r.json();
-    if (!r.ok || value?.error) throw new Error(`WebDriver ${path}: ${value?.message ?? value?.error ?? r.status}`);
-    return value;
+    try {
+      const r = await fetch(`${this.base}/session/${this.session}${path}`, {
+        method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const { value } = await r.json();
+      if (!r.ok || value?.error) throw new Error(`WebDriver ${path}: ${value?.message ?? value?.error ?? r.status}`);
+      return value;
+    } catch (e) { throw this.failure(e); }
   }
 
   /** WebDriver runs a session's commands one after another: a call given up on here would hold up every later one
@@ -115,9 +169,12 @@ export class WebDriverPage {
   /** `timeout` (ms, 0: none) overrides `callTimeout` for this call. One timed out goes on in the page; its answer is dropped. */
   async evaluate(expression, { timeout = this.callTimeout } = {}) {
     await this.setScriptTimeout(timeout ? timeout + 5000 : NO_LIMIT_SCRIPT_TIMEOUT);
-    const call = this.request("POST", "/execute/async", { script: EVALUATE, args: [expression] });
-    const r = await timedCall(call, timeout, expression).catch((e) => {
+    const call = this.request("POST", "/execute/async", { script: evaluateScript(), args: [expression] });
+    // The app ending while a call waits ends the wait too (WebDriver may answer late, or never).
+    const ended = this.gone.then((m) => { throw new Error(m); });
+    const r = await Promise.race([timedCall(call, timeout, expression), ended]).catch((e) => {
       if (e.message.startsWith("page call timed out")) { call.catch(() => {}); throw e; }
+      if (e.message === this.goneMessage) { call.catch(() => {}); throw e; }
       // A WebDriver-level failure doesn't say which call it was; the start of the expression does.
       throw new Error(`${e.message}, evaluating: ${expression.replace(/\s+/g, " ").slice(0, 160)}`);
     });
@@ -224,7 +281,9 @@ export async function launch(exe, env = {}, attempt = 1) {
   const interrupted = (signal) => { killGroup("SIGKILL"); process.exit(signal === "SIGINT" ? 130 : 143); };
   process.once("SIGINT", interrupted);
   process.once("SIGTERM", interrupted);
+  let watcher = null;
   const stop = async (page) => {
+    clearInterval(watcher);
     process.off("SIGINT", interrupted);
     process.off("SIGTERM", interrupted);
     await page?.close();
@@ -247,7 +306,19 @@ export async function launch(exe, env = {}, attempt = 1) {
     if (!r.ok || value?.error) throw new Error(`no WebDriver session: ${value?.message ?? r.status} ${stderr.trim()}`);
     const page = new WebDriverPage(base, value.sessionId);
     await page.setScriptTimeout(NO_LIMIT_SCRIPT_TIMEOUT);
-    return { page, stop: () => stop(page), exited: () => exited };
+    // The app's own end: it is WebKitWebDriver's child, so xvfb-run outlives it and its exit code says nothing about it,
+    // and its exit status goes to its parent. Its pid is watched; a call in flight then fails with this at once.
+    const app = findApp(driver.pid, exe);
+    if (!app) throw new Error(`no app process of ${exe} below the driver (pid ${driver.pid}) after the session started`);
+    const t0 = Date.now();
+    page.appCheck = () => {
+      if (page.goneMessage || appAlive(app)) return Boolean(page.goneMessage);
+      page.markGone(`the app ended: its process ${app.pid} is gone (${((Date.now() - t0) / 1000).toFixed(0)} s after its start; killed by a signal or crashed: the exit status isn't ours to read, it is WebKitWebDriver's child)`);
+      return true;
+    };
+    watcher = setInterval(page.appCheck, 200);
+    watcher.unref();
+    return { page, stop: () => stop(page), exited: () => { page.appCheck(); return page.goneMessage ?? exited; }, appPid: app.pid };
   } catch (e) {
     const gone = exited !== null;
     await stop();

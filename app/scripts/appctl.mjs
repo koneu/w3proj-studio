@@ -78,7 +78,9 @@ function freePort() {
  * files that don't exist so nothing can start the game or the World Editor, no game-folder question).
  * With a `game` folder the app reads the game's TriggerData.txt, as a release build does; `fixtureTriggers` (and a
  * start without a game) gives it the made-up one instead (triggerDataEnv).
- * Returns { page, stop, exited }; `stop` ends the app and removes its settings folder.
+ * Returns { page, stop, exited, appPid }; `stop` ends the app and removes its settings folder. `exited()` is null while the
+ * app runs, then what ended it (on Linux "the app ended: …", seen as soon as its process is gone; calls on the page fail
+ * with the same text). `appPid` is the app's process on Linux (null on Windows).
  */
 export async function startApp({ id, work, game, fixtureTriggers = false, settings = {}, env = {} }) {
   const exe = appExe();
@@ -101,11 +103,11 @@ export async function startApp({ id, work, game, fixtureTriggers = false, settin
     ...triggerDataEnv(game, fixtureTriggers), W3PROJ_CONFIG_DIR: dir,
     ...(LINUX ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}), ...env,
   };
-  let page, stop, exited;
+  let page, stop, exited, appPid = null;
   const removeConfig = () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   if (LINUX) {
     try {
-      ({ page, stop, exited } = await launch(exe, appEnv));
+      ({ page, stop, exited, appPid } = await launch(exe, appEnv));
     } catch (e) {
       removeConfig();
       throw e;
@@ -142,7 +144,7 @@ export async function startApp({ id, work, game, fixtureTriggers = false, settin
     await end();
     throw e;
   }
-  return { page, stop: end, exited };
+  return { page, stop: end, exited, appPid };
 }
 
 /** The environment that picks the app's TriggerData.txt (debug builds read W3PROJ_TRIGGERDATA): nothing when there is a
