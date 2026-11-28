@@ -2,6 +2,7 @@
 // Limits come from the same six 1v1 maps as the melee guide, with some room around what was measured.
 
 import { campGroups } from "./clusters";
+import { compareFeatures, median, type Features, type Outlier, type Reference } from "./meleefeatures";
 
 type Point = readonly [number, number];
 
@@ -37,6 +38,11 @@ export interface MeleeFacts {
   openShare?: number;
   /** Whether a place is inside the playable map (not in its border). */
   playable?(x: number, y: number): boolean;
+  /** Pathing cells units walk on, and those of the playable map. */
+  walkableCells?: number;
+  playableCells?: number;
+  /** The reference maps' features (meleefeatures.ts): the map is compared with them. */
+  reference?: Reference;
   /** Stray narrow paths, as narrowStrips gives them. */
   narrow?: { percent: number; strips: readonly { cells: number; at: readonly [number, number] }[] };
   /** War3's own numbers (Units/MiscGame.txt, MiscData.txt). */
@@ -88,11 +94,13 @@ const MOST_CREEPS = 6, CAMP_RADIUS = 400, CREEP_GAP = 80, CAMP_GAP = 1000;
 /** How far a camp is walled in (meleeshape.ts ringAround), measured on the six ladder maps' 92 camps that guard no
  *  mine: 0.42 to 0.88 of the ring closed but for one (0.33, on Echo Isles), with 1 way in (86) or 2 (6). */
 export const CAMP_SHELTER = 0.41, CAMP_OPEN = 0.25, CAMP_WAYS = 2;
-/** The share of walkable ground more than 400 from anything in the way, measured on the six ladder maps: 10.8% (Last
- *  Refuge) to 26.1% (Northern Isles). With a little room. */
-const OPEN_GROUND = [8, 30] as const;
-/** Trees in the playable area of the six ladder maps: 1,055 to 1,983 (4 to 26% more stand in the border). */
-const TREES_PLAYABLE = 900;
+/** The share of walkable ground more than 400 from anything in the way: 10.8% (Last Refuge) to 26.1% (Northern Isles)
+ *  on the six ladder maps, 10.0 to 35.0% over the game's 34 two-player maps (meleereference.json). The warning goes by
+ *  the wider span, with a little room; the comparison says where a map lies in it. */
+const OPEN_GROUND = [8, 36] as const;
+/** Trees in the playable area: 1,055 to 1,983 on the six ladder maps (4 to 26% more stand in the border), 809 to 3,194
+ *  over the game's 34 two-player maps. */
+const TREES_PLAYABLE = 800;
 /** How much walks to a mine may differ between starts. */
 const WALK_GAP = 400;
 /** Real maps are symmetric to within about this. */
@@ -163,7 +171,7 @@ export function checkMelee(f: MeleeFacts) {
   ];
   if (starts.length < 2) {
     add("starts", "error", `A melee map needs at least 2 start locations (${START}); this one has ${starts.length}.`);
-    return { errors: findings.length, warnings: 0, findings, measures: null, accuracy: notes };
+    return { errors: findings.length, warnings: 0, findings, measures: null, features: {} as Features, ...({} as { comparison?: { referenceMaps: number; outside: Outlier[] } }), accuracy: notes };
   }
 
   // A start's camps. On maps for more players, creeps standing on a start guard it while it's empty,
@@ -256,15 +264,15 @@ export function checkMelee(f: MeleeFacts) {
   // Open ground: how much of the map is field instead of ways and clearings.
   if (f.openShare !== undefined && starts.length === 2) {
     const open = Math.round(f.openShare * 1000) / 10;
-    if (open > OPEN_GROUND[1]) add("open ground", "warning", `${open}% of the walkable ground is more than 400 from any tree, cliff or water. Ladder 1v1 maps have 10.8 to 26.1%: this map is mostly open field, with little to go round or hold.`);
-    else if (open < OPEN_GROUND[0]) add("open ground", "warning", `Only ${open}% of the walkable ground is more than 400 from anything in the way. Ladder 1v1 maps have 10.8 to 26.1%: there is little room for armies to fight.`);
+    if (open > OPEN_GROUND[1]) add("open ground", "warning", `${open}% of the walkable ground is more than 400 from any tree, cliff or water. The game's two-player maps have 10 to 35% (the six ladder maps 10.8 to 26.1%): this map is mostly open field, with little to go round or hold.`);
+    else if (open < OPEN_GROUND[0]) add("open ground", "warning", `Only ${open}% of the walkable ground is more than 400 from anything in the way. The game's two-player maps have 10 to 35%: there is little room for armies to fight.`);
   }
 
   // Lumber.
   const treesPlayable = f.playable ? f.trees.filter((t) => f.playable!(t[0], t[1])).length : null;
   if (treesPlayable !== null && f.trees.length) {
     const border = f.trees.length - treesPlayable;
-    if (starts.length === 2 && treesPlayable < TREES_PLAYABLE) add("lumber", "warning", `${treesPlayable.toLocaleString("en-US")} trees stand in the playable area${border ? ` (${border.toLocaleString("en-US")} more in the border, which no one reaches)` : ""}. Ladder 1v1 maps have 1,055 to 1,983 there.`);
+    if (starts.length === 2 && treesPlayable < TREES_PLAYABLE) add("lumber", "warning", `${treesPlayable.toLocaleString("en-US")} trees stand in the playable area${border ? ` (${border.toLocaleString("en-US")} more in the border, which no one reaches)` : ""}. The game's two-player maps have 809 to 3,194 there (the six ladder maps 1,055 to 1,983).`);
     else if (border > f.trees.length * 0.35) add("lumber", "info", `${border.toLocaleString("en-US")} of the ${f.trees.length.toLocaleString("en-US")} trees stand in the border, outside the playable area: ${treesPlayable.toLocaleString("en-US")} count. On ladder maps 4 to 26% stand there.`);
   }
   for (const m of perStart) {
@@ -354,6 +362,30 @@ export function checkMelee(f: MeleeFacts) {
   if (unknown.length) notes.push(`These types' levels weren't found, so they count as 0: ${unknown.join(", ")}.`);
   if (unknownSight.length) notes.push(`These types' sight wasn't found, so they count as 600: ${unknownSight.join(", ")}.`);
 
+  // The map as numbers, and where they fall outside the reference maps' (two-player maps: that is what those are).
+  const mean = (v: (number | null)[]) => { const n = v.filter((x): x is number => x !== null); return n.length ? n.reduce((a, b) => a + b, 0) / n.length : NaN; };
+  const rings = f.ringAt ? field.filter((c) => !isGuard(c)).map((c) => f.ringAt!(c.centre[0], c.centre[1])) : [];
+  const naturals = starts.map((_, i) => f.routes.filter((r) => r.from === i && r.length !== undefined).map((r) => r.length as number).sort((a, b) => a - b)[0] ?? null);
+  const between = f.routes.find((r) => r.from === undefined && r.length !== undefined && /^Start 1 to start 2$/.test(r.name))?.length;
+  const all: Features = {
+    ...(f.openShare !== undefined ? { openGround: f.openShare * 100 } : {}),
+    ...(f.walkableCells !== undefined && f.playableCells ? { walkable: (f.walkableCells / f.playableCells) * 100 } : {}),
+    ...(f.narrow ? { narrowGround: f.narrow.percent } : {}),
+    campsPerPlayer: field.length / starts.length,
+    ...(rings.length ? { campShelter: median(rings.map((r) => r.closed)), campShelterLowest: Math.min(...rings.map((r) => r.closed)), campWays: mean(rings.map((r) => r.ways)) } : {}),
+    ...(field.length ? { campLevel: median(field.map((c) => c.level)), campLevelHighest: Math.max(...field.map((c) => c.level)) } : {}),
+    nearestCamp: mean(perStart.map((m) => m.nearestCamp)),
+    nearestExpansion: mean(perStart.map((m) => m.nearestExpansion)),
+    naturalWalk: mean(naturals),
+    ...(between !== undefined ? { startToStart: between } : {}),
+    mines: mines.length,
+    ...(treesPlayable !== null ? { treesPlayable } : {}),
+    ...(treesPlayable !== null && f.walkableCells ? { treesPer100Walkable: (treesPlayable / f.walkableCells) * 100 } : {}),
+  };
+  const features: Features = Object.fromEntries(Object.entries(all).filter(([, v]) => Number.isFinite(v)).map(([k, v]) => [k, Math.round(v * 100) / 100]));
+  const comparison = f.reference && starts.length === 2 ? { referenceMaps: f.reference.maps, outside: compareFeatures(features, f.reference) } : null;
+  if (comparison) notes.push(`The comparison sets this map's numbers beside ${f.reference!.maps} two-player melee maps of the game: "usual" is the span the middle eight in ten lie in, "range" all of them. Outside isn't wrong: it says where this map is unlike them, and asks whether that is meant.`);
+
   const order = { error: 0, warning: 1, info: 2 };
   findings.sort((a, b) => order[a.severity] - order[b.severity]);
   return {
@@ -365,6 +397,8 @@ export function checkMelee(f: MeleeFacts) {
       ...(f.ringAt ? { campRings: field.map((c) => { const r = f.ringAt!(c.centre[0], c.centre[1]); return { at: round(c.centre), guard: isGuard(c), closed: Math.round(r.closed * 100) / 100, ways: r.ways, widest: r.widest }; }) } : {}),
       campedRoutePasses: camped,
       ...(f.narrow ? { narrow: { percent: Math.round(f.narrow.percent * 10) / 10, strips: f.narrow.strips.length } } : {}) },
+    features,
+    ...(comparison ? { comparison } : {}),
     findings,
     accuracy: notes,
   };

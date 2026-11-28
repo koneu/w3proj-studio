@@ -4017,6 +4017,8 @@ async function mapShapeTools(page, found) {
     // The melee check now finds a map that isn't open field.
     const report = json(await k.tool("check_melee", {}, { timeout: 300000 }));
     if (!(report.measures?.openGround < 30) || report.findings.some((x) => x.rule === "open ground" && /mostly open field/.test(x.message))) fail(`after the forest check_melee measures ${report.measures?.openGround}% open ground`);
+    // The map as numbers (three starts here: no comparison, which is for two-player maps).
+    if (!(report.features?.openGround >= 0) || !(report.features?.walkable > 0) || typeof report.features?.treesPlayable !== "number") fail(`check_melee's features: ${lit(report.features)}`);
     if (typeof report.measures?.treesPlayable !== "number" || !Array.isArray(report.measures?.campRings)) fail(`check_melee's measures lack the playable trees or the camps' rings: ${lit(Object.keys(report.measures ?? {}))}`);
 
     // map_layout: a picture and what it shows.

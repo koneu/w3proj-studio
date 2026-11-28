@@ -53,7 +53,8 @@ Goals always win over numbers: fair starts, real choices, and units that get whe
   take the open places it lists apart. check_melee's "camp shelter" finding names every camp that stands open.
 - Tree islands. Forest is walls with ways through them, not clumps on a field: scattering trees over open ground
   leaves islands armies walk round on every side, and a map that is one field. check_melee's "open ground" finding
-  measures it: 10.8 to 26.1% of the walkable ground of the ladder maps is more than 400 from anything in the way.
+  measures it: 10.8 to 26.1% of the walkable ground of the ladder maps is more than 400 from anything in the way
+  (10 to 35% over the game's 34 two-player maps).
   Reserve what isn't forest first (reserve_area: bases, mines, roads, clearings for camps, shops), then
   fill_forest plants everything else and leaves ways of the width you give between the reserved places.
 - Judging a layout from a 3D picture of the whole map. It is too small to read. map_layout gives the map as a
@@ -67,6 +68,9 @@ Goals always win over numbers: fair starts, real choices, and units that get whe
   lily pads to water and bushes to land; an id given twice is taken twice as often.
 - Trees in the border. Trees past the playable area count for nothing: check_melee counts the playable ones
   (1,055 to 1,983 on the ladder maps).
+- A map unlike any other, unnoticed. check_melee's comparison sets the map's numbers (open ground, walkable
+  share, camps and their shelter and levels, walks, mines, trees) beside the game's 34 two-player melee maps and
+  lists where it lies outside them, or outside where most of them lie. Outside isn't wrong, but it should be meant.
 - Camps near the base. The nearest camp to a start location is 1,750 to 2,250 away, usually about
   2,150, and nothing is closer. A town hall has to be able to stand and build without a fight.
 - A flat map. Paths through trees on flat ground are dull however fair. See Terrain.

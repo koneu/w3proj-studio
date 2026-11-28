@@ -301,7 +301,7 @@ test("a camp in the open is said, a mine's guards aren't judged, and too many wa
 test("a map of open field, or with no room to fight, is said; trees in the border don't count", () => {
   const ground = (f: MeleeFacts) => checkMelee(f).findings.filter((x) => x.rule === "open ground").map((x) => x.message);
   assert.deepEqual(ground({ ...map(), openShare: 0.2 }), []);
-  assert.match(ground({ ...map(), openShare: 0.48 })[0], /48% of the walkable ground .* Ladder 1v1 maps have 10\.8 to 26\.1%: this map is mostly open field/);
+  assert.match(ground({ ...map(), openShare: 0.48 })[0], /48% of the walkable ground .* two-player maps have 10 to 35% \(the six ladder maps 10\.8 to 26\.1%\): this map is mostly open field/);
   assert.match(ground({ ...map(), openShare: 0.03 })[0], /Only 3% .* little room for armies/);
   assert.equal(checkMelee({ ...map(), openShare: 0.48 }).measures?.openGround, 48);
   // 2,000 trees, 1,500 of them past the playable area: the 500 that count are too few, and the border's are named.
@@ -310,10 +310,22 @@ test("a map of open field, or with no room to fight, is said; trees in the borde
   const r = checkMelee({ ...map(), trees, playable });
   assert.equal(r.measures?.treesPlayable, trees.length - 1500);
   const lumber = r.findings.filter((x) => x.rule === "lumber").map((x) => x.message);
-  assert.match(lumber.join(" | "), /590 trees stand in the playable area \(1,500 more in the border, which no one reaches\)\. Ladder 1v1 maps have 1,055 to 1,983/);
+  assert.match(lumber.join(" | "), /590 trees stand in the playable area \(1,500 more in the border, which no one reaches\)\. The game's two-player maps have 809 to 3,194 there/);
   // Enough in the playable area, but most in the border: told, not warned.
   const many = [...trees, ...Array.from({ length: 800 }, (_, i): [number, number] => [100, 9000 + i])];
   const told = checkMelee({ ...map(), trees: [...many, ...Array.from({ length: 2000 }, (): [number, number] => [9000, 0])], playable }).findings.filter((x) => x.rule === "lumber");
   assert.deepEqual(told.map((x) => x.severity), ["info"]);
   assert.match(told[0].message, /3,500 of the 4,890 trees stand in the border/);
+});
+
+test("the map as numbers, and where they lie outside the reference maps", () => {
+  const reference = { maps: 34, features: { campsPerPlayer: { min: 5, low: 6, median: 9, high: 11, max: 12.5 }, openGround: { min: 10, low: 12, median: 20, high: 29, max: 35 }, mines: { min: 4, low: 4, median: 6, high: 6, max: 12 } } };
+  const r = checkMelee({ ...map(), openShare: 0.48, walkableCells: 5000, playableCells: 10000, ringAt: () => ({ closed: 0.5, ways: 1, widest: 90 }), reference });
+  assert.deepEqual([r.features.campsPerPlayer, r.features.openGround, r.features.walkable, r.features.mines, r.features.campShelter, r.features.campWays], [10, 48, 50, 4, 0.5, 1]);
+  assert.equal(r.comparison?.referenceMaps, 34);
+  assert.deepEqual(r.comparison?.outside.map((o) => [o.feature, o.verdict]), [["openGround", "above all 34 reference maps"]]);
+  assert.ok(r.accuracy.some((n) => /34 two-player melee maps/.test(n)));
+  // No reference, or a map that isn't for two: the numbers, no comparison.
+  assert.equal("comparison" in checkMelee(map()), false);
+  assert.ok(checkMelee(map()).features.campsPerPlayer === 10);
 });

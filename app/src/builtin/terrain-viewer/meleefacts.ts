@@ -8,6 +8,8 @@ import { parseSlk } from "../../lib/formats/text";
 import { NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { mapEdgeTiles, onBoundary, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { openness, ringAround } from "./meleeshape";
+import type { Reference } from "./meleefeatures";
+import reference from "./meleereference.json";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { checkMelee, unitLevels } from "./meleecheck";
 import type { Placed } from "./objects";
@@ -119,7 +121,7 @@ export async function meleeFacts(w3: W3Api, src: WalkSource, size: number) {
     let report = checkPath(grid, from, to, size, 200);
     // A mine or a building at the end stands in its own way.
     if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
-    routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route, ...(owner === undefined ? {} : { from: owner, length: report.length }) } : { name, problem: report.problem ?? "no way through" });
+    routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route, ...(owner === undefined ? { length: report.length } : { from: owner, length: report.length }) } : { name, problem: report.problem ?? "no way through" });
   };
   for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
   for (const [i, s] of starts.entries()) {
@@ -145,11 +147,18 @@ export async function meleeFacts(w3: W3Api, src: WalkSource, size: number) {
 /** check_melee: the map against what ladder maps do. */
 export async function meleeReport(w3: W3Api, src: WalkSource, unitSize = DEFAULT_UNIT_SIZE): Promise<ReturnType<typeof checkMelee>> {
   const f = await meleeFacts(w3, src, unitSize);
+  const open = openness(f.grid);
+  // The pathing cells of the playable map, for how much of it is walkable.
+  let playableCells = 0;
+  for (let i = 0; i < f.grid.blocked.length; i++) {
+    if (f.playable(f.grid.offsetX + ((i % f.grid.width) + 0.5) * 32, f.grid.offsetY + (Math.floor(i / f.grid.width) + 0.5) * 32)) playableCells++;
+  }
   return checkMelee({
     units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,
     callForHelp: f.number(f.game, "CreepCallForHelp", 600), shopNotify: f.number(f.data, "NeutralUseNotifyRadius", 900),
     narrow: narrowStrips(f.grid), levelAt: f.levelAt, commonLevel: f.commonLevel,
-    ringAt: (x, y) => ringAround(f.grid, x, y), openShare: openness(f.grid).share, playable: f.playable,
+    ringAt: (x, y) => ringAround(f.grid, x, y), openShare: open.share, playable: f.playable,
+    walkableCells: open.walkable, playableCells, reference: reference as Reference,
     widestTo: (x, y) => {
       // Creeps and what stands by a camp fill its middle: the way to the place beside it counts.
       let best = 0;
